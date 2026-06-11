@@ -347,6 +347,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "evidence_refs", "summary", "text")
     _ensure_column(conn, "evidence_refs", "created_at", "text not null default ''")
     conn.execute("update evidence_refs set source_ref = source_id where source_ref = ''")
+    conn.execute("create unique index if not exists idx_evidence_refs_source_ref on evidence_refs(source_type, source_ref)")
     _ensure_column(conn, "memory_cards", "source_type", "text not null default 'confirmed_generated'")
     _ensure_column(conn, "memory_cards", "current_version", "integer not null default 1")
     _ensure_column(conn, "memory_cards", "owner_id", "text not null default ''")

@@ -60,6 +60,38 @@ def test_initialize_evidence_refs_schema_includes_design_columns(tmp_path) -> No
     assert column_by_name["created_at"]["notnull"] == 1
 
 
+def test_initialize_evidence_refs_enforces_unique_source_ref(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into evidence_refs (
+              evidence_id, source_type, source_ref, source_id, quote, created_at
+            ) values (?, ?, ?, ?, ?, ?)
+            """,
+            ("ev_unique_1", "transcript_segment", "seg_unique", "seg_unique", "quote 1", "2087-05-10T00:00:00Z"),
+        )
+
+        try:
+            conn.execute(
+                """
+                insert into evidence_refs (
+                  evidence_id, source_type, source_ref, source_id, quote, created_at
+                ) values (?, ?, ?, ?, ?, ?)
+                """,
+                ("ev_unique_2", "transcript_segment", "seg_unique", "seg_unique", "quote 2", "2087-05-10T00:01:00Z"),
+            )
+        except Exception as exc:
+            error = exc
+        else:
+            error = None
+    finally:
+        conn.close()
+
+    assert type(error).__name__ == "IntegrityError"
+
+
 def test_initialize_memory_cards_schema_includes_current_version(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:
