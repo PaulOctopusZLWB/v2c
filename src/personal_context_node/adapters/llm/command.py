@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import get_args
 
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
-from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft
+from personal_context_node.core.ports.llm import ClaimType, DailyContext, MemoryCandidateDraft
+
+
+ALLOWED_CLAIM_TYPES = set(get_args(ClaimType))
 
 
 class CommandLLMAdapter:
@@ -35,13 +39,29 @@ class CommandLLMAdapter:
             todos=[str(item) for item in payload.get("todos", [])],
             facts=[str(item) for item in payload.get("facts", [])],
             inferences=[str(item) for item in payload.get("inferences", [])],
-            memory_candidates=[
-                MemoryCandidateDraft(
-                    candidate_claim=str(item["candidate_claim"]),
-                    claim_type=item["claim_type"],
-                    confidence=float(item["confidence"]),
-                    evidence_source_ids=[str(source_id) for source_id in item["evidence_source_ids"]],
-                )
-                for item in payload.get("memory_candidates", [])
-            ],
+            memory_candidates=[_memory_candidate(item) for item in payload.get("memory_candidates", [])],
         )
+
+
+def _memory_candidate(item: object) -> MemoryCandidateDraft:
+    if not isinstance(item, dict):
+        raise TerminalPortError("LLM memory_candidate must be an object")
+    for field in ["candidate_claim", "claim_type", "confidence", "evidence_source_ids"]:
+        if field not in item:
+            raise TerminalPortError(f"LLM memory_candidate missing required field: {field}")
+    claim_type = str(item["claim_type"])
+    if claim_type not in ALLOWED_CLAIM_TYPES:
+        raise TerminalPortError(f"LLM memory_candidate has invalid claim_type: {claim_type}")
+    evidence_source_ids = item["evidence_source_ids"]
+    if not isinstance(evidence_source_ids, list):
+        raise TerminalPortError("LLM memory_candidate evidence_source_ids must be a list")
+    try:
+        confidence = float(item["confidence"])
+    except (TypeError, ValueError) as exc:
+        raise TerminalPortError("LLM memory_candidate confidence must be numeric") from exc
+    return MemoryCandidateDraft(
+        candidate_claim=str(item["candidate_claim"]),
+        claim_type=claim_type,
+        confidence=confidence,
+        evidence_source_ids=[str(source_id) for source_id in evidence_source_ids],
+    )

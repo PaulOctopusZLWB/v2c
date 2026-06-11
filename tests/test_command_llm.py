@@ -83,3 +83,58 @@ def test_command_llm_adapter_reports_command_failure_as_retryable(tmp_path: Path
         assert "rate limited" in str(exc)
     else:
         raise AssertionError("CommandLLMAdapter accepted a failed command")
+
+
+def test_command_llm_adapter_rejects_missing_candidate_fields(tmp_path: Path) -> None:
+    script = tmp_path / "missing_candidate_field.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "bad",
+  "todos": [],
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": [{"candidate_claim": "缺字段", "claim_type": "requirement"}]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "confidence" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted an incomplete memory candidate")
+
+
+def test_command_llm_adapter_rejects_invalid_claim_type(tmp_path: Path) -> None:
+    script = tmp_path / "invalid_claim_type.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "bad",
+  "todos": [],
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": [{
+    "candidate_claim": "非法类型",
+    "claim_type": "secret",
+    "confidence": 0.9,
+    "evidence_source_ids": []
+  }]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "claim_type" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted an invalid claim_type")
