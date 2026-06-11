@@ -15,8 +15,10 @@ from personal_context_node.core.ports.vad import VADPort
 from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_publish import publish_obsidian_day
+from personal_context_node.obsidian_review import confirm_checked_candidates
 from personal_context_node.session_summaries import summarize_session
 from personal_context_node.sessions import derive_sessions_for_day
+from personal_context_node.speaker_review import sync_speaker_review
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import claim_next_task, enqueue_task_in_conn, fail_task, reclaim_expired_tasks, start_task
 from personal_context_node.transcription import transcribe_pending_chunks
@@ -84,6 +86,8 @@ def process_once(
             _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
             return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
         elif task.task_type == "daily_generate":
+            confirm_checked_candidates(config=config, day=task.target_id)
+            sync_speaker_review(config=config, day=task.target_id)
             set_daily_report_status(config=config, day=task.target_id, status="generating")
             generate_daily_context(config=config, day=task.target_id, llm=llm_adapter)
         elif task.task_type == "obsidian_publish":

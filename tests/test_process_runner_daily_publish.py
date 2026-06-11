@@ -47,6 +47,14 @@ class TerminalLLM:
         raise AssertionError("daily_generate should not request a session summary")
 
 
+class UnexpectedDailyLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
+        raise AssertionError("daily_generate should sync review exclusions before prompting LLM")
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        raise AssertionError("daily_generate should not request a session summary")
+
+
 def test_process_runner_generates_daily_and_publishes_obsidian(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session_and_transcript(config.database_path)
@@ -203,6 +211,48 @@ def test_process_once_marks_terminal_port_errors_terminal(tmp_path: Path) -> Non
     assert reports == [{"status": "failed", "error": "invalid LLM contract"}]
 
 
+def test_process_once_daily_generate_syncs_memory_review_before_prompting_llm(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
+    _insert_session_and_transcript(config.database_path)
+    _insert_review_candidate_for_session(config.database_path)
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "2087-05-10.md").write_text(
+        """
+# 2087-05-10 Memory Candidate Review
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_exclude_session" version="1" -->
+```yaml
+action: exclude_from_memory
+claim: "这段会话不应保留为长期记忆。"
+claim_type: requirement
+```
+<!-- pcn:review end candidate_id="cand_exclude_session" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+    enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id="2087-05-10")
+
+    result = process_once(
+        config=config,
+        run_id="run_daily_with_review_sync",
+        vad=EnergyVadAdapter(),
+        asr=MockASRAdapter(),
+        llm=UnexpectedDailyLLM(),
+    )
+
+    assert result.task_type == "daily_generate"
+    assert result.status == "succeeded"
+    conn = connect(config.database_path)
+    try:
+        sessions = fetch_all(conn, "select exclude_from_memory from sessions where session_id = 'ses_test'")
+        candidates = fetch_all(conn, "select status from memory_candidates where candidate_id = 'cand_exclude_session'")
+    finally:
+        conn.close()
+    assert sessions == [{"exclude_from_memory": 1}]
+    assert candidates == [{"status": "excluded_from_memory"}]
+
+
 def _insert_session_and_transcript(database_path: Path) -> None:
     conn = connect(database_path)
     try:
@@ -268,6 +318,34 @@ def _insert_session_and_transcript(database_path: Path) -> None:
                 "MockASRAdapter",
                 "mock-asr",
                 "test",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_review_candidate_for_session(database_path: Path) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into memory_candidates (
+              candidate_id, candidate_claim, claim_type, subject_json,
+              confidence, evidence_refs_json, status, memory_card_id, date_key
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "cand_exclude_session",
+                "这段会话不应保留为长期记忆。",
+                "requirement",
+                '{"type":"project","id":"personal_context_node","label":"Personal Context Node"}',
+                0.95,
+                '[{"evidence_id":"ev_test","source_type":"transcript_segment","source_id":"seg_test","quote":"我决定继续接入真实 ASR，需要保持音频本地处理。"}]',
+                "pending_review",
+                None,
+                "2087-05-10",
             ),
         )
         conn.commit()
