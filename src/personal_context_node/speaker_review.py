@@ -159,6 +159,24 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
         finally:
             conn.close()
         return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
+    unknown_person_ids = _unknown_person_references(parsed)
+    if unknown_person_ids:
+        conn = connect(config.database_path)
+        try:
+            initialize(conn)
+            record_sync_log(
+                config=config,
+                conn=conn,
+                day=day,
+                source="speaker_mapping_review",
+                target_id=day,
+                status="failed",
+                message=f"unknown person reference: {', '.join(unknown_person_ids)}",
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
     mappings = {speaker: person_id for speaker, person_id in parsed.mappings.items() if person_id in parsed.persons}
     overrides = {segment_id: person_id for segment_id, person_id in parsed.segment_overrides.items() if person_id in parsed.persons}
     now = datetime.now(timezone.utc).isoformat()
@@ -247,6 +265,11 @@ def _parse_mappings(text: str) -> dict[str, str]:
         if match:
             mappings[match.group(1).strip()] = match.group(2).strip()
     return mappings
+
+
+def _unknown_person_references(parsed: ParsedSpeakerReview) -> list[str]:
+    referenced = set(parsed.mappings.values()) | set(parsed.segment_overrides.values())
+    return sorted(person_id for person_id in referenced if person_id not in parsed.persons)
 
 
 def _within_edit_grace(path: Path, *, edit_grace_seconds: int) -> bool:

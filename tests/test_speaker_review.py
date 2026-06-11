@@ -278,6 +278,55 @@ persons:
     assert "yaml parse failed: 2087-05-10" in sync_log_text
 
 
+def test_speaker_review_sync_logs_unknown_person_reference_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
+    _insert_segments(config.database_path)
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    review_path.write_text(
+        """
+# 2087-05-10 Speaker Review
+
+<!-- pcn:speaker_mapping start date_key="2087-05-10" version="1" -->
+```yaml
+mappings:
+  spk_self: per_missing
+persons:
+  per_self:
+    display_name: self
+    is_self: true
+segment_overrides:
+  seg_guest: per_guest_missing
+```
+<!-- pcn:speaker_mapping end date_key="2087-05-10" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = sync_speaker_review(config=config, day="2087-05-10")
+
+    assert result.mappings_upserted == 0
+    assert result.segment_overrides_upserted == 0
+    conn = connect(config.database_path)
+    try:
+        mappings = fetch_all(conn, "select speaker from speaker_mappings")
+        overrides = fetch_all(conn, "select segment_id from segment_person_overrides")
+        logs = fetch_all(conn, "select source, target_id, status, message from sync_logs")
+    finally:
+        conn.close()
+    assert mappings == []
+    assert overrides == []
+    assert logs == [
+        {
+            "source": "speaker_mapping_review",
+            "target_id": "2087-05-10",
+            "status": "failed",
+            "message": "unknown person reference: per_guest_missing, per_missing",
+        }
+    ]
+    sync_log_note = config.obsidian_vault / "90_System" / "Sync_Log" / "2087-05-10.md"
+    assert "unknown person reference: per_guest_missing, per_missing" in sync_log_note.read_text(encoding="utf-8")
+
+
 def test_speaker_review_sync_skips_recently_modified_review_file(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=120)
     _insert_segments(config.database_path)
