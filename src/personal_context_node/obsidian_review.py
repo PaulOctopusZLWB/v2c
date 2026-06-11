@@ -32,6 +32,7 @@ class ReviewAction:
     action: str
     edited_claim: str | None = None
     visibility: str | None = None
+    parse_error: str | None = None
 
 
 def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
@@ -128,6 +129,15 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         for review_action in checked_actions:
             candidate_id = review_action.candidate_id
             action = review_action.action
+            if action == "parse_error":
+                _insert_sync_log(
+                    conn,
+                    source="memory_candidate_review",
+                    target_id=candidate_id,
+                    status="failed",
+                    message=f"yaml parse failed: {candidate_id}",
+                )
+                continue
             if action in {"confirm", "edit"} and review_action.edited_claim is not None and not review_action.edited_claim.strip():
                 empty_message = "empty edit claim" if action == "edit" else "empty claim"
                 _insert_sync_log(
@@ -291,13 +301,22 @@ def _review_block_actions(text: str) -> list[ReviewAction]:
         flags=re.DOTALL,
     )
     for match in pattern.finditer(text):
-        values = _simple_yaml_block(match.group("body"))
+        candidate_id = match.group("candidate_id")
+        try:
+            values = _simple_yaml_block(match.group("body"))
+        except ReviewYamlError as error:
+            actions.append(ReviewAction(candidate_id, "parse_error", parse_error=str(error)))
+            continue
         action = values.get("action", "pending")
         if action == "pending":
             continue
         edited_claim = values.get("claim", "") if action in {"confirm", "edit"} else None
-        actions.append(ReviewAction(match.group("candidate_id"), action, edited_claim, values.get("visibility")))
+        actions.append(ReviewAction(candidate_id, action, edited_claim, values.get("visibility")))
     return actions
+
+
+class ReviewYamlError(ValueError):
+    pass
 
 
 def _simple_yaml_block(markdown: str) -> dict[str, str]:
@@ -305,10 +324,19 @@ def _simple_yaml_block(markdown: str) -> dict[str, str]:
     body = fence.group("body") if fence else markdown
     values: dict[str, str] = {}
     for line in body.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.startswith((" ", "\t", "- ")):
+            continue
         match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$", line)
         if not match:
-            continue
+            raise ReviewYamlError(f"invalid yaml line: {line.strip()}")
         value = match.group(2).strip()
+        if not value:
+            values[match.group(1)] = value
+            continue
+        if value[0] in {"'", '"'} and (len(value) < 2 or value[-1] != value[0]):
+            raise ReviewYamlError(f"unterminated quoted scalar: {match.group(1)}")
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
         values[match.group(1)] = value

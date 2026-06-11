@@ -413,6 +413,50 @@ claim_type: requirement
     assert logs == [{"source": "memory_candidate_review", "status": "failed", "message": "empty claim: cand_test_001"}]
 
 
+def test_sync_review_logs_malformed_yaml_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path)
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / "2087-05-10.md"
+    review_path.write_text(
+        """
+# 2087-05-10 Memory Candidate Review
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_001" version="1" -->
+```yaml
+action: confirm
+claim "用户确认后的声明。"
+claim_type: requirement
+```
+<!-- pcn:review end candidate_id="cand_test_001" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 0
+    assert result.signed_events_created == 0
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select status, memory_card_id from memory_candidates")
+        events = fetch_all(conn, "select event_type from signed_events")
+        logs = fetch_all(conn, "select source, target_id, status, message from sync_logs")
+    finally:
+        conn.close()
+    assert candidates == [{"status": "pending_review", "memory_card_id": None}]
+    assert events == []
+    assert logs == [
+        {
+            "source": "memory_candidate_review",
+            "target_id": "cand_test_001",
+            "status": "failed",
+            "message": "yaml parse failed: cand_test_001",
+        }
+    ]
+
+
 def test_sync_review_skips_recently_modified_review_file(tmp_path: Path) -> None:
     config = AppConfig(
         data_dir=tmp_path / "data",
