@@ -22,6 +22,17 @@ def test_ingest_scan_cli_lists_wav_candidates(tmp_path: Path) -> None:
     assert "TX02_MIC001_20870510_173550_orig.wav" in result.output
 
 
+def test_ingest_scan_cli_lists_uppercase_wav_candidates(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "REC001.WAV")
+
+    result = CliRunner().invoke(app, ["ingest-scan", "--source-dir", str(source)])
+
+    assert result.exit_code == 0, result.output
+    assert "files_found=1" in result.output
+    assert "REC001.WAV" in result.output
+
+
 def test_ingest_import_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")

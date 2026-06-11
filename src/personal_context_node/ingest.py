@@ -33,7 +33,7 @@ class FileSnapshot:
 
 
 def scan_audio_files(*, source_dir: Path) -> IngestScanResult:
-    return IngestScanResult(files=sorted(source_dir.glob("*.wav")))
+    return IngestScanResult(files=sorted(path for path in source_dir.iterdir() if path.is_file() and path.suffix.lower() == ".wav"))
 
 
 def import_audio_files(*, config: AppConfig, source_dir: Path) -> IngestImportResult:
