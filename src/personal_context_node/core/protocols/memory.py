@@ -94,15 +94,19 @@ class MemoryCard(BaseModel):
 
 def _normalize_visibility(value: object) -> dict[str, str]:
     if isinstance(value, str):
-        return {"type": value if value in SUPPORTED_VISIBILITY_TYPES else "private"}
+        return {"type": value if value in {"private", "public"} else "private"}
     if isinstance(value, dict):
         visibility_type = value.get("type")
         if visibility_type not in SUPPORTED_VISIBILITY_TYPES:
             return {"type": "private"}
         normalized = {"type": str(visibility_type)}
-        if visibility_type == "direct" and value.get("direct_did"):
+        if visibility_type == "direct":
+            if not value.get("direct_did"):
+                return {"type": "private"}
             normalized["direct_did"] = str(value["direct_did"])
-        if visibility_type == "group" and value.get("group_id"):
+        if visibility_type == "group":
+            if not value.get("group_id"):
+                return {"type": "private"}
             normalized["group_id"] = str(value["group_id"])
         return normalized
     return {"type": "private"}

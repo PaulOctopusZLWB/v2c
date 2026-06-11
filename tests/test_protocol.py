@@ -343,6 +343,61 @@ def test_unknown_memory_card_visibility_fails_closed_to_private() -> None:
     assert object_value.visibility.model_dump(exclude_none=True) == {"type": "private"}
 
 
+def test_parameterized_visibility_requires_full_object() -> None:
+    scalar_group = MemoryCard(
+        card_id="mem_test_scalar_group",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Group visibility requires a group id.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_test_scalar_group",
+                source_type="transcript_segment",
+                source_id="seg_test_scalar_group",
+                quote="Group visibility requires a group id.",
+            )
+        ],
+        visibility="group",
+    )
+    missing_group_id = MemoryCard(
+        card_id="mem_test_missing_group",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Group visibility requires a group id.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_test_missing_group",
+                source_type="transcript_segment",
+                source_id="seg_test_missing_group",
+                quote="Group visibility requires a group id.",
+            )
+        ],
+        visibility={"type": "group"},
+    )
+    complete_group = MemoryCard(
+        card_id="mem_test_complete_group",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Group visibility with a group id is valid.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_test_complete_group",
+                source_type="transcript_segment",
+                source_id="seg_test_complete_group",
+                quote="Group visibility with a group id is valid.",
+            )
+        ],
+        visibility={"type": "group", "group_id": "grp_test"},
+    )
+
+    assert scalar_group.visibility.model_dump(exclude_none=True) == {"type": "private"}
+    assert missing_group_id.visibility.model_dump(exclude_none=True) == {"type": "private"}
+    assert complete_group.visibility.model_dump(exclude_none=True) == {"type": "group", "group_id": "grp_test"}
+
+
 def test_protocol_vector_hash_and_signature_verify() -> None:
     event = SignedEvent(
         envelope_version="signed_event.v1",
