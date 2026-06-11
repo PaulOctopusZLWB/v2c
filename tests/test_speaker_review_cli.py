@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -31,6 +33,8 @@ def test_speaker_review_cli_publishes_and_syncs(tmp_path: Path) -> None:
     review_path = config.obsidian_vault / "90_System" / "Speaker_Review" / "2087-05-10.md"
     assert str(review_path) in publish.output
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- spk_self: self", "- spk_self: Paul"), encoding="utf-8")
+    edited_at = time.time() - 121
+    os.utime(review_path, (edited_at, edited_at))
 
     sync = runner.invoke(
         app,

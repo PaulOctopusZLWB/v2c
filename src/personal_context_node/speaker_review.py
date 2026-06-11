@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import hashlib
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,6 +114,23 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
 def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResult:
     review_path = config.obsidian_vault / "90_System" / "Speaker_Review" / f"{day}.md"
     if not review_path.exists():
+        return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
+    if _within_edit_grace(review_path, edit_grace_seconds=config.edit_grace_seconds):
+        conn = connect(config.database_path)
+        try:
+            initialize(conn)
+            record_sync_log(
+                config=config,
+                conn=conn,
+                day=day,
+                source="speaker_mapping_review",
+                target_id=day,
+                status="skipped",
+                message=f"review file modified within edit grace: {day}",
+            )
+            conn.commit()
+        finally:
+            conn.close()
         return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
 
     text = review_path.read_text(encoding="utf-8")
@@ -226,6 +244,12 @@ def _parse_mappings(text: str) -> dict[str, str]:
         if match:
             mappings[match.group(1).strip()] = match.group(2).strip()
     return mappings
+
+
+def _within_edit_grace(path: Path, *, edit_grace_seconds: int) -> bool:
+    if edit_grace_seconds <= 0:
+        return False
+    return time.time() - path.stat().st_mtime < edit_grace_seconds
 
 
 def _parse_speaker_review(text: str) -> ParsedSpeakerReview:

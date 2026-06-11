@@ -12,7 +12,7 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
 def test_speaker_review_mapping_and_segment_override_are_materialized(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
     _insert_segments(config.database_path)
 
     review_path = publish_speaker_review(config=config, day="2087-05-10")
@@ -71,7 +71,7 @@ def test_speaker_review_mapping_and_segment_override_are_materialized(tmp_path: 
 
 
 def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
     _insert_segments(config.database_path)
     review_path = publish_speaker_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
@@ -125,7 +125,7 @@ def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_p
 
 
 def test_speaker_review_sync_reads_yaml_mapping_block(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
     _insert_segments(config.database_path)
     review_path = publish_speaker_review(config=config, day="2087-05-10")
     review_path.write_text(
@@ -174,7 +174,7 @@ def test_speaker_review_sync_reads_yaml_mapping_block(tmp_path: Path) -> None:
 
 
 def test_speaker_review_uses_session_date_key_for_cross_midnight_segments(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
     _insert_segments(
         config.database_path,
         recorded_at="2087-05-09T23:55:00+08:00",
@@ -191,7 +191,7 @@ def test_speaker_review_uses_session_date_key_for_cross_midnight_segments(tmp_pa
 
 
 def test_speaker_review_sync_ignores_text_outside_mapping_block(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
     _insert_segments(config.database_path)
     review_path = publish_speaker_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
@@ -231,7 +231,7 @@ def test_speaker_review_sync_ignores_text_outside_mapping_block(tmp_path: Path) 
 
 
 def test_speaker_review_sync_logs_malformed_yaml_without_side_effects(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
     _insert_segments(config.database_path)
     review_path = publish_speaker_review(config=config, day="2087-05-10")
     review_path.write_text(
@@ -276,6 +276,36 @@ persons:
     assert "note_type: sync_log" in sync_log_text
     assert "source: speaker_mapping_review" in sync_log_text
     assert "yaml parse failed: 2087-05-10" in sync_log_text
+
+
+def test_speaker_review_sync_skips_recently_modified_review_file(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=120)
+    _insert_segments(config.database_path)
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(text.replace("  spk_self: per_self", "  spk_self: per_paul"), encoding="utf-8")
+
+    result = sync_speaker_review(config=config, day="2087-05-10")
+
+    assert result.mappings_upserted == 0
+    assert result.segment_overrides_upserted == 0
+    conn = connect(config.database_path)
+    try:
+        mappings = fetch_all(conn, "select speaker from speaker_mappings")
+        logs = fetch_all(conn, "select source, target_id, status, message from sync_logs")
+    finally:
+        conn.close()
+    assert mappings == []
+    assert logs == [
+        {
+            "source": "speaker_mapping_review",
+            "target_id": "2087-05-10",
+            "status": "skipped",
+            "message": "review file modified within edit grace: 2087-05-10",
+        }
+    ]
+    sync_log_note = config.obsidian_vault / "90_System" / "Sync_Log" / "2087-05-10.md"
+    assert "review file modified within edit grace: 2087-05-10" in sync_log_note.read_text(encoding="utf-8")
 
 
 def _insert_segments(
