@@ -459,7 +459,7 @@ def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[s
     actual_rows = fetch_all(
         conn,
         """
-        select card_id, current_version, owner_did, claim_type, claim, source_type, confidence,
+        select card_id, current_version, owner_id, owner_did, claim_type, claim, source_type, confidence,
                observed_at, valid_from, valid_until, visibility_json, tags_json, status,
                source_event_hash, updated_at
         from memory_cards
@@ -528,6 +528,7 @@ def _card_projection(
     return {
         "card_id": card.card_id,
         "current_version": current_version,
+        "owner_id": card.owner_did,
         "owner_did": card.owner_did,
         "claim_type": card.claim_type,
         "claim": card.claim,
@@ -574,6 +575,7 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
         create table if not exists memory_cards (
           card_id text primary key,
           current_version integer not null default 1,
+          owner_id text not null default '',
           owner_did text not null,
           claim_type text not null,
           claim text not null,
@@ -597,6 +599,7 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
     existing_card_columns = {row["name"] for row in conn.execute("pragma table_info(memory_cards)").fetchall()}
     card_column_migrations = {
         "current_version": "alter table memory_cards add column current_version integer not null default 1",
+        "owner_id": "alter table memory_cards add column owner_id text not null default ''",
         "source_type": "alter table memory_cards add column source_type text not null default 'confirmed_generated'",
         "confidence": "alter table memory_cards add column confidence real",
         "observed_at": "alter table memory_cards add column observed_at text",

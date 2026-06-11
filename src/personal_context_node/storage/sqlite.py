@@ -90,6 +90,7 @@ create table if not exists evidence_refs (
 create table if not exists memory_cards (
   card_id text primary key,
   current_version integer not null default 1,
+  owner_id text not null default '',
   owner_did text not null,
   claim_type text not null,
   claim text not null,
@@ -339,6 +340,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "sessions", "exclude_from_memory", "integer not null default 0")
     _ensure_column(conn, "memory_cards", "source_type", "text not null default 'confirmed_generated'")
     _ensure_column(conn, "memory_cards", "current_version", "integer not null default 1")
+    _ensure_column(conn, "memory_cards", "owner_id", "text not null default ''")
     _ensure_column(conn, "memory_cards", "confidence", "real")
     _ensure_column(conn, "memory_cards", "observed_at", "text")
     _ensure_column(conn, "memory_cards", "valid_from", "text")
@@ -346,6 +348,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memory_cards", "visibility_json", "text not null default '{\"type\":\"private\"}'")
     _ensure_column(conn, "memory_cards", "tags_json", "text not null default '[]'")
     _ensure_column(conn, "memory_cards", "updated_at", "text not null default ''")
+    conn.execute("create index if not exists idx_memory_cards_owner on memory_cards(owner_id, status)")
     conn.execute(
         "insert or ignore into schema_migrations (version, name) values (?, ?)",
         (1, "base_schema"),
