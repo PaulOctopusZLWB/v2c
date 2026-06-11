@@ -96,6 +96,57 @@ def test_obsidian_sync_review_group_cli_confirms_checked_candidate(tmp_path: Pat
     assert "signed_events_created=1" in confirm_result.output
 
 
+def test_obsidian_sync_review_group_cli_syncs_speaker_review(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
+    _insert_segment(config.database_path)
+    review_dir = config.obsidian_vault / "90_System" / "Speaker_Review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / "2087-05-10.md"
+    review_path.write_text(
+        """
+# 2087-05-10 Speaker Review
+
+<!-- pcn:speaker_mapping start date_key="2087-05-10" version="1" -->
+```yaml
+mappings:
+  spk_self: per_paul
+persons:
+  per_paul:
+    display_name: Paul
+    is_self: false
+segment_overrides: {}
+```
+<!-- pcn:speaker_mapping end date_key="2087-05-10" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+    _mark_review_stable(review_path)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [
+            "obsidian",
+            "sync-review",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--date",
+            "2087-05-10",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "speaker_mappings_upserted=1" in result.output
+    conn = connect(config.database_path)
+    try:
+        mappings = fetch_all(conn, "select speaker, person_label from speaker_mappings")
+    finally:
+        conn.close()
+    assert mappings == [{"speaker": "spk_self", "person_label": "Paul"}]
+
+
 def test_memory_confirm_sync_group_cli_confirms_checked_candidate(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_candidate(config.database_path)

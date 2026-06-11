@@ -427,7 +427,7 @@ def obsidian_sync_review_group(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _sync_candidate_review(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _confirm_sync_reviews(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 def _sync_candidate_review(*, day: str, data_dir: Path, obsidian_vault: Path) -> None:
