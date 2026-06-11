@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from personal_context_node.core.protocols.memory import (
     IdentityProfile,
+    IdentityKeyRotation,
     MemoryAnnotation,
     MemoryAnnotationRevocation,
     MemoryCard,
@@ -25,6 +26,7 @@ SUPPORTED_EVENT_TYPES = {
     "memory_card.revoked",
     "memory_card.superseded",
     "identity_profile.published",
+    "identity_key.rotated",
     "memory_annotation.created",
     "memory_annotation.revoked",
 }
@@ -61,6 +63,8 @@ def create_chained_event(
 def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str) -> None:
     verified = verify_signed_event(event, public_key)
     trust_status = trust_status_for_event(event=event, verified=verified)
+    if trust_status == "trusted" and _event_after_existing_rotation(conn, event=event):
+        trust_status = "rejected"
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
@@ -116,6 +120,26 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         _revoke_memory_annotation(conn, event=event)
     if event.event_type == "identity_profile.published" and trust_status == "trusted":
         _upsert_identity_profile(conn, event=event)
+    if event.event_type == "identity_key.rotated" and trust_status == "trusted":
+        IdentityKeyRotation.model_validate(event.payload)
+
+
+def _event_after_existing_rotation(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
+    if event.event_type == "identity_key.rotated":
+        return False
+    rotation = conn.execute(
+        """
+        select owner_sequence
+        from signed_events
+        where owner_id = ?
+          and event_type = 'identity_key.rotated'
+          and trust_status = 'trusted'
+        order by owner_sequence asc
+        limit 1
+        """,
+        (event.owner_id,),
+    ).fetchone()
+    return rotation is not None and event.owner_sequence > int(rotation["owner_sequence"])
 
 
 def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:

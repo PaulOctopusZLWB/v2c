@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
+    IdentityKeyRotation,
     MemoryAnnotation,
     MemoryAnnotationRevocation,
     MemoryCard,
@@ -45,6 +46,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         trusted_events: list[SignedEvent] = []
         previous_hash_by_owner: dict[str, str] = {}
         previous_sequence_by_owner: dict[str, int] = {}
+        closed_owner_sequence: dict[str, int] = {}
         forked_event_hashes = _forked_event_hashes(rows)
         for row in rows:
             event_hash = _row_event_hash(row)
@@ -59,6 +61,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                         previous_hash_by_owner=previous_hash_by_owner,
                         previous_sequence_by_owner=previous_sequence_by_owner,
                     )
+                    and _owner_not_closed(row, closed_owner_sequence=closed_owner_sequence)
                 )
             except Exception:
                 row_valid = False
@@ -73,6 +76,9 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                     "update signed_events set verified = 1, trust_status = ? where event_hash = ?",
                     (trust_status, event_hash),
                 )
+                if trust_status == "trusted" and event.event_type == "identity_key.rotated":
+                    IdentityKeyRotation.model_validate(event.payload)
+                    closed_owner_sequence[str(row["owner_id"])] = int(row["owner_sequence"])
             else:
                 invalid += 1
                 conn.execute(
@@ -140,6 +146,13 @@ def _chain_fields_valid(
     if sequence == 1:
         return prev_event_hash is None
     return previous_sequence == sequence - 1 and prev_event_hash == previous_hash
+
+
+def _owner_not_closed(row: dict[str, object], *, closed_owner_sequence: dict[str, int]) -> bool:
+    owner_id = str(row["owner_id"])
+    sequence = int(row["owner_sequence"])
+    closed_at = closed_owner_sequence.get(owner_id)
+    return closed_at is None or sequence <= closed_at
 
 
 def _signature_from_row(row: dict[str, object]) -> dict[str, str]:
