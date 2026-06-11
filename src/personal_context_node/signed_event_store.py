@@ -84,6 +84,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         trust_status = "rejected"
     if trust_status == "trusted" and not _payload_authority_matches_event(event):
         trust_status = "rejected"
+    if trust_status == "trusted" and not _object_id_matches_payload(event):
+        trust_status = "rejected"
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
@@ -270,6 +272,30 @@ def _payload_authority_matches_event(event: SignedEvent) -> bool:
         revocation = MemoryAnnotationRevocation.model_validate(event.payload)
         return event.owner_id == revocation.revoked_by
     return True
+
+
+def _object_id_matches_payload(event: SignedEvent) -> bool:
+    expected = _payload_object_id(event)
+    return expected is None or event.object_id == expected
+
+
+def _payload_object_id(event: SignedEvent) -> str | None:
+    if event.event_type in {
+        "memory_card.created",
+        "memory_card.revoked",
+        "memory_card.metadata_updated",
+        "memory_card.superseded",
+    }:
+        return _card_successor_target_id(event) or MemoryCard.model_validate(event.payload).card_id
+    if event.event_type == "memory_annotation.created":
+        return MemoryAnnotation.model_validate(event.payload).annotation_id
+    if event.event_type == "memory_annotation.revoked":
+        return MemoryAnnotationRevocation.model_validate(event.payload).annotation_id
+    if event.event_type == "identity_profile.published":
+        return IdentityProfile.model_validate(event.payload).identity_id
+    if event.event_type == "identity_key.rotated":
+        return IdentityKeyRotation.model_validate(event.payload).old_identity_id
+    return None
 
 
 def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:

@@ -86,6 +86,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                         trusted_successor_profiles=trusted_successor_profiles,
                     )
                     and _payload_authority_matches_event(event)
+                    and _object_id_matches_payload(event)
                 )
             except Exception:
                 row_valid = False
@@ -322,6 +323,30 @@ def _payload_authority_matches_event(event: SignedEvent) -> bool:
         revocation = MemoryAnnotationRevocation.model_validate(event.payload)
         return event.owner_id == revocation.revoked_by
     return True
+
+
+def _object_id_matches_payload(event: SignedEvent) -> bool:
+    expected = _payload_object_id(event)
+    return expected is None or event.object_id == expected
+
+
+def _payload_object_id(event: SignedEvent) -> str | None:
+    if event.event_type in {
+        "memory_card.created",
+        "memory_card.revoked",
+        "memory_card.metadata_updated",
+        "memory_card.superseded",
+    }:
+        return _card_successor_target_id(event) or MemoryCard.model_validate(event.payload).card_id
+    if event.event_type == "memory_annotation.created":
+        return MemoryAnnotation.model_validate(event.payload).annotation_id
+    if event.event_type == "memory_annotation.revoked":
+        return MemoryAnnotationRevocation.model_validate(event.payload).annotation_id
+    if event.event_type == "identity_profile.published":
+        return IdentityProfile.model_validate(event.payload).identity_id
+    if event.event_type == "identity_key.rotated":
+        return IdentityKeyRotation.model_validate(event.payload).old_identity_id
+    return None
 
 
 def _is_matching_predecessor_profile(event: SignedEvent, *, rotation: IdentityRotationReference | None) -> bool:
