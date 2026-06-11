@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,7 +47,9 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
             )
             asr_run_id = f"asrrun_{uuid4().hex}"
             chunk_path = config.data_dir / chunk["local_chunk_path"]
-            for segment in asr.transcribe(chunk_path):
+            asr_result = asr.transcribe(chunk_path)
+            decode_config_json = json.dumps(asr_result.decode_config, ensure_ascii=False, sort_keys=True)
+            for segment in asr_result.segments:
                 absolute_start_ms = chunk["source_start_ms"] + segment.start_ms
                 absolute_end_ms = min(chunk["source_start_ms"] + segment.end_ms, chunk["source_end_ms"])
                 absolute_start_at = _absolute_time(str(chunk["recorded_at"]), int(absolute_start_ms))
@@ -58,8 +61,8 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                       segment_id, audio_file_id, chunk_id, start_ms, end_ms,
                       absolute_start_at, absolute_end_at, text,
                       language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend,
-                      model_name, model_version, asr_run_id, is_active, created_at
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      model_name, model_version, decode_config_json, asr_run_id, is_active, created_at
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         f"seg_{uuid4().hex}",
@@ -75,9 +78,10 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                         speaker_cluster_id,
                         f"ev_seg_{uuid4().hex}",
                         segment.confidence,
-                        asr.__class__.__name__,
-                        asr.model_name,
-                        asr.model_version,
+                        asr_result.backend,
+                        asr_result.model_name,
+                        asr_result.model_version,
+                        decode_config_json,
                         asr_run_id,
                         1,
                         datetime.now(timezone.utc).isoformat(),

@@ -31,14 +31,17 @@ print(json.dumps({
 
     adapter = CommandASRAdapter(command=["python3", str(script)])
 
-    segments = adapter.transcribe(chunk)
+    result = adapter.transcribe(chunk)
 
-    assert adapter.model_name == "sensevoice"
-    assert adapter.model_version == "local-test"
-    assert segments[0].text == "真实 ASR wrapper 输出"
-    assert segments[0].start_ms == 0
-    assert segments[0].end_ms == 1200
-    assert segments[0].confidence == 0.88
+    assert result.backend == "CommandASRAdapter"
+    assert result.model_name == "sensevoice"
+    assert result.model_version == "local-test"
+    assert result.decode_config == {"command": ["python3", str(script)]}
+    assert result.warnings == []
+    assert result.segments[0].text == "真实 ASR wrapper 输出"
+    assert result.segments[0].start_ms == 0
+    assert result.segments[0].end_ms == 1200
+    assert result.segments[0].confidence == 0.88
 
 
 def test_command_asr_adapter_reports_invalid_output(tmp_path: Path) -> None:

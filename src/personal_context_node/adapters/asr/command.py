@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from personal_context_node.core.ports.asr import ASRSegment
+from personal_context_node.core.ports.asr import ASRResult, ASRSegment
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
@@ -23,7 +23,7 @@ class CommandASRAdapter:
         self.model_name = "command-asr"
         self.model_version = "unknown"
 
-    def transcribe(self, audio_path: Path) -> list[ASRSegment]:
+    def transcribe(self, audio_path: Path) -> ASRResult:
         completed = subprocess.run(
             [*self.command, str(audio_path)],
             check=False,
@@ -38,4 +38,12 @@ class CommandASRAdapter:
             raise TerminalPortError(f"invalid ASR JSON: {exc}") from exc
         self.model_name = str(payload.get("model_name", self.model_name))
         self.model_version = str(payload.get("model_version", self.model_version))
-        return [ASRSegment(**segment) for segment in payload.get("segments", [])]
+        return ASRResult(
+            segments=[ASRSegment(**segment) for segment in payload.get("segments", [])],
+            backend=self.__class__.__name__,
+            model_name=self.model_name,
+            model_version=self.model_version,
+            language=payload.get("language"),
+            decode_config={"command": self.command},
+            warnings=[str(item) for item in payload.get("warnings", [])],
+        )
