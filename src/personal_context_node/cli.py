@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
+from personal_context_node.adapters.asr.command import CommandASRAdapter
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
@@ -90,9 +91,19 @@ def transcribe(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by the mock ASR adapter."),
+    asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
+    asr_command: str | None = typer.Option(None, help="Command ASR wrapper, e.g. 'python scripts/funasr_wrapper.py'."),
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    result = transcribe_pending_chunks(config=config, asr=MockASRAdapter(text=mock_text))
+    if asr_backend == "mock":
+        asr = MockASRAdapter(text=mock_text)
+    elif asr_backend == "command":
+        if not asr_command:
+            raise typer.BadParameter("--asr-command is required when --asr-backend command")
+        asr = CommandASRAdapter(command=asr_command.split())
+    else:
+        raise typer.BadParameter("--asr-backend must be 'mock' or 'command'")
+    result = transcribe_pending_chunks(config=config, asr=asr)
     typer.echo(
         " ".join(
             [

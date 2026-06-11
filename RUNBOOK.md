@@ -25,6 +25,7 @@ It also implements the ASR boundary before real model integration:
 2. A deterministic `MockASRAdapter` for tests and local wiring.
 3. `pcn transcribe` to process `pending_asr` chunks into transcript segments.
 4. Transcript storage now records `chunk_id`, confidence, ASR backend, model name, and model version.
+5. `CommandASRAdapter` for local commands or Docker wrapper scripts that emit normalized ASR JSON.
 
 It also implements the LLM text-processing boundary before provider integration:
 
@@ -123,6 +124,34 @@ Expected mock ASR smoke output after preprocessing:
 
 ```text
 chunks_transcribed=1 segments_created=1
+```
+
+To use a command/Docker ASR wrapper instead of mock ASR, the command must accept one chunk WAV path and print:
+
+```json
+{
+  "model_name": "sensevoice",
+  "model_version": "local-version",
+  "segments": [
+    {
+      "text": "转写文本",
+      "start_ms": 0,
+      "end_ms": 1200,
+      "confidence": 0.88,
+      "language": "zh"
+    }
+  ]
+}
+```
+
+Smoke the contract with the example wrapper:
+
+```bash
+uv run pcn transcribe \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --asr-backend command \
+  --asr-command "python3 scripts/asr_wrapper_example.py"
 ```
 
 Expected rule-based summary smoke output after mock ASR:
