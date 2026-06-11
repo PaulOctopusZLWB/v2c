@@ -80,6 +80,19 @@ create table if not exists daily_summaries (
   created_at text not null
 );
 
+create table if not exists summaries (
+  summary_id text primary key,
+  summary_type text not null,
+  target_type text not null,
+  target_id text not null,
+  prompt_version text,
+  model_name text,
+  content_json text not null,
+  created_at text not null,
+  updated_at text not null,
+  unique(summary_type, target_type, target_id, prompt_version)
+);
+
 create table if not exists daily_reports (
   day text primary key,
   status text not null,

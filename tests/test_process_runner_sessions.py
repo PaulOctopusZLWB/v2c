@@ -60,6 +60,39 @@ def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
         conn.close()
     assert sessions == [{"date_key": "2087-05-10", "segment_count": 1}]
     assert any(
+        row["task_type"] == "summarize_session"
+        and row["target_type"] == "session"
+        and row["status"] == "pending"
+        for row in process_status_rows(config=config)
+    )
+
+
+def test_summarize_session_success_fans_in_to_daily_generate(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    for run_id in ["run_vad", "run_asr", "run_session"]:
+        process_once(
+            config=config,
+            run_id=run_id,
+            vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+            asr=MockASRAdapter(text="我决定继续接入真实 ASR，需要保持音频本地处理。"),
+            max_chunk_ms=1000,
+        )
+
+    summary_result = process_once(
+        config=config,
+        run_id="run_summary",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="我决定继续接入真实 ASR，需要保持音频本地处理。"),
+        max_chunk_ms=1000,
+    )
+
+    assert summary_result.task_type == "summarize_session"
+    assert summary_result.status == "succeeded"
+    assert any(
         row["task_type"] == "daily_generate"
         and row["target_id"] == "2087-05-10"
         and row["status"] == "pending"

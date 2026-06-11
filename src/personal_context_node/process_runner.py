@@ -9,6 +9,7 @@ from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.core.ports.vad import VADPort
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_publish import publish_obsidian_day
+from personal_context_node.session_summaries import summarize_session
 from personal_context_node.sessions import derive_sessions_for_day
 from personal_context_node.storage.sqlite import connect, fetch_all
 from personal_context_node.tasks import claim_next_task, enqueue_task, fail_task, start_task, succeed_task
@@ -36,6 +37,8 @@ def process_once(
     if task is None:
         task = claim_next_task(config=config, task_type="session_derive", run_id=run_id)
     if task is None:
+        task = claim_next_task(config=config, task_type="summarize_session", run_id=run_id)
+    if task is None:
         task = claim_next_task(config=config, task_type="daily_generate", run_id=run_id)
     if task is None:
         task = claim_next_task(config=config, task_type="obsidian_publish", run_id=run_id)
@@ -54,7 +57,14 @@ def process_once(
                 enqueue_task(config=config, task_type="session_derive", target_type="date_key", target_id=date_key)
         elif task.task_type == "session_derive":
             derive_sessions_for_day(config=config, day=task.target_id)
-            enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id=task.target_id)
+            for session_id in _session_ids_for_day(config=config, day=task.target_id):
+                enqueue_task(config=config, task_type="summarize_session", target_type="session", target_id=session_id)
+        elif task.task_type == "summarize_session":
+            summarize_session(config=config, session_id=task.target_id, llm=RuleBasedLLMAdapter())
+            succeed_task(config=config, task_id=task.task_id)
+            for date_key in _ready_daily_generate_dates(config=config, session_id=task.target_id):
+                enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id=date_key)
+            return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
         elif task.task_type == "daily_generate":
             generate_daily_context(config=config, day=task.target_id, llm=RuleBasedLLMAdapter())
             enqueue_task(config=config, task_type="obsidian_publish", target_type="date_key", target_id=task.target_id)
@@ -106,5 +116,40 @@ def _ready_session_derive_dates(*, config: AppConfig, chunk_id: str) -> list[str
         if pending:
             return []
         return sorted({str(row["date_key"]) for row in rows})
+    finally:
+        conn.close()
+
+
+def _session_ids_for_day(*, config: AppConfig, day: str) -> list[str]:
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select session_id from sessions where date_key = ? order by started_at", (day,))
+        return [str(row["session_id"]) for row in rows]
+    finally:
+        conn.close()
+
+
+def _ready_daily_generate_dates(*, config: AppConfig, session_id: str) -> list[str]:
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select date_key from sessions where session_id = ?", (session_id,))
+        if not rows:
+            return []
+        date_key = str(rows[0]["date_key"])
+        pending = fetch_all(
+            conn,
+            """
+            select t.task_id
+            from tasks t
+            join sessions s on s.session_id = t.target_id
+            where t.task_type = 'summarize_session'
+              and s.date_key = ?
+              and t.status != 'succeeded'
+            """,
+            (date_key,),
+        )
+        if pending:
+            return []
+        return [date_key]
     finally:
         conn.close()

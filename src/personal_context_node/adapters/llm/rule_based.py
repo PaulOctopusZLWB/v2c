@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import re
 
-from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft
+from personal_context_node.core.ports.llm import (
+    DailyContext,
+    MemoryCandidateDraft,
+    SessionDecision,
+    SessionSummary,
+    SessionTodo,
+)
 
 
 class RuleBasedLLMAdapter:
@@ -33,9 +39,45 @@ class RuleBasedLLMAdapter:
             memory_candidates=candidates,
         )
 
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        texts = [str(segment["text"]) for segment in transcript_segments if str(segment["text"]).strip()]
+        headline = texts[0] if texts else f"Session {session_id}"
+        decisions: list[SessionDecision] = []
+        todos: list[SessionTodo] = []
+        open_questions: list[str] = []
+        for segment in transcript_segments:
+            text = str(segment["text"])
+            evidence_refs = [str(segment["evidence_id"])]
+            if "决定" in text:
+                decisions.append(SessionDecision(text=text, evidence_refs=evidence_refs))
+            todo = _todo_from_text(text)
+            if todo:
+                todos.append(SessionTodo(text=todo, owner="self", evidence_refs=evidence_refs))
+            if "是否" in text or "？" in text or "?" in text:
+                open_questions.append(text)
+        return SessionSummary(
+            session_id=session_id,
+            headline=headline,
+            summary=" ".join(texts) if texts else "",
+            topics=_topics_from_texts(texts),
+            decisions=decisions,
+            todos=todos,
+            open_questions=open_questions,
+        )
+
 
 def _todo_from_text(text: str) -> str | None:
+    if "是否" in text:
+        return None
     match = re.search(r"需要(.+?)(?:。|$)", text)
     if not match:
         return None
     return match.group(1).strip(" ，,")
+
+
+def _topics_from_texts(texts: list[str]) -> list[str]:
+    topics: list[str] = []
+    for marker, topic in [("ASR", "asr"), ("转写", "转写"), ("协议", "协议"), ("本地", "本地")]:
+        if any(marker in text for text in texts):
+            topics.append(topic)
+    return topics
