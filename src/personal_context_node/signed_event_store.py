@@ -80,6 +80,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         trust_status = "rejected"
     if trust_status == "trusted" and _invalid_successor_chain_start(conn, event=event):
         trust_status = "rejected"
+    if trust_status == "trusted" and _unauthorized_known_card_successor(conn, event=event):
+        trust_status = "rejected"
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
@@ -209,6 +211,41 @@ def _is_matching_predecessor_profile(event: SignedEvent, *, rotation: IdentityRo
         and profile.predecessor.identity_id == rotation.old_identity_id
         and profile.predecessor.rotation_event_hash == rotation.event_hash
     )
+
+
+def _unauthorized_known_card_successor(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
+    target_card_id = _card_successor_target_id(event)
+    if target_card_id is None:
+        return False
+    row = conn.execute("select owner_did from memory_cards where card_id = ?", (target_card_id,)).fetchone()
+    if row is None:
+        return False
+    return not _identity_can_modify_card(conn, actor_did=event.owner_id, card_owner_did=str(row["owner_did"]))
+
+
+def _card_successor_target_id(event: SignedEvent) -> str | None:
+    if event.event_type == "memory_card.revoked":
+        return MemoryCardRevocation.model_validate(event.payload).card_id
+    if event.event_type == "memory_card.metadata_updated":
+        return MemoryCardMetadataUpdate.model_validate(event.payload).card_id
+    if event.event_type == "memory_card.superseded":
+        return MemoryCardSupersession.model_validate(event.payload).card_id
+    return None
+
+
+def _identity_can_modify_card(conn: sqlite3.Connection, *, actor_did: str, card_owner_did: str) -> bool:
+    if actor_did == card_owner_did:
+        return True
+    row = conn.execute(
+        """
+        select 1
+        from identity_profiles
+        where identity_id = ?
+          and predecessor_identity_id = ?
+        """,
+        (actor_did, card_owner_did),
+    ).fetchone()
+    return row is not None
 
 
 def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:

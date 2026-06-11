@@ -58,6 +58,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         closed_owner_sequence: dict[str, int] = {}
         forked_event_hashes = _forked_event_hashes(rows)
         successor_rotations = _successor_rotation_index(rows)
+        card_owner_by_id = _card_owner_index(rows, forked_event_hashes=forked_event_hashes)
         trusted_successor_profiles: set[str] = set()
         for row in rows:
             event_hash = _row_event_hash(row)
@@ -75,6 +76,12 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                     and _owner_not_closed(row, closed_owner_sequence=closed_owner_sequence)
                     and _successor_chain_start_valid(
                         event,
+                        successor_rotations=successor_rotations,
+                        trusted_successor_profiles=trusted_successor_profiles,
+                    )
+                    and _card_successor_authorized(
+                        event,
+                        card_owner_by_id=card_owner_by_id,
                         successor_rotations=successor_rotations,
                         trusted_successor_profiles=trusted_successor_profiles,
                     )
@@ -225,6 +232,28 @@ def _successor_rotation_index(rows: list[dict[str, object]]) -> dict[str, Identi
     return rotations
 
 
+def _card_owner_index(rows: list[dict[str, object]], *, forked_event_hashes: set[str]) -> dict[str, str]:
+    owners: dict[str, str] = {}
+    for row in rows:
+        try:
+            if _row_event_hash(row) in forked_event_hashes:
+                continue
+            event = _event_from_row(row)
+            if event.event_type != "memory_card.created":
+                continue
+            if not verify_signed_event(event, str(row["public_key"])):
+                continue
+            if not _hash_fields_valid(row, event):
+                continue
+            if trust_status_for_event(event=event, verified=True) != "trusted":
+                continue
+            card = MemoryCard.model_validate(event.payload)
+            owners[card.card_id] = card.owner_did
+        except Exception:
+            continue
+    return owners
+
+
 def _successor_chain_start_valid(
     event: SignedEvent,
     *,
@@ -237,6 +266,39 @@ def _successor_chain_start_valid(
     if event.owner_sequence == 1:
         return _is_matching_predecessor_profile(event, rotation=rotation)
     return event.owner_id in trusted_successor_profiles
+
+
+def _card_successor_authorized(
+    event: SignedEvent,
+    *,
+    card_owner_by_id: dict[str, str],
+    successor_rotations: dict[str, IdentityRotationReference],
+    trusted_successor_profiles: set[str],
+) -> bool:
+    target_card_id = _card_successor_target_id(event)
+    if target_card_id is None:
+        return True
+    card_owner_did = card_owner_by_id.get(target_card_id)
+    if card_owner_did is None:
+        return True
+    if event.owner_id == card_owner_did:
+        return True
+    rotation = successor_rotations.get(event.owner_id)
+    return (
+        rotation is not None
+        and event.owner_id in trusted_successor_profiles
+        and rotation.old_identity_id == card_owner_did
+    )
+
+
+def _card_successor_target_id(event: SignedEvent) -> str | None:
+    if event.event_type == "memory_card.revoked":
+        return MemoryCardRevocation.model_validate(event.payload).card_id
+    if event.event_type == "memory_card.metadata_updated":
+        return MemoryCardMetadataUpdate.model_validate(event.payload).card_id
+    if event.event_type == "memory_card.superseded":
+        return MemoryCardSupersession.model_validate(event.payload).card_id
+    return None
 
 
 def _is_matching_predecessor_profile(event: SignedEvent, *, rotation: IdentityRotationReference | None) -> bool:

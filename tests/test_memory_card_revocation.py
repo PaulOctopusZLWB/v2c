@@ -60,6 +60,66 @@ def test_memory_card_revoked_event_marks_card_revoked(tmp_path: Path) -> None:
     ]
 
 
+def test_memory_card_revocation_by_unrelated_identity_is_rejected(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        owner_key = Ed25519PrivateKey.generate()
+        attacker_key = Ed25519PrivateKey.generate()
+        card = _memory_card()
+        created_event, owner_public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=card,
+            signer_did=card.owner_did,
+            private_key=owner_key,
+        )
+        insert_signed_event(conn, event=created_event, public_key=owner_public_key)
+        rejected_event, attacker_public_key = create_signed_event(
+            event_type="memory_card.revoked",
+            payload=MemoryCardRevocation(card_id=card.card_id, revoked_by="did:key:attacker"),
+            signer_did="did:key:attacker",
+            private_key=attacker_key,
+            object_version=2,
+        )
+
+        insert_signed_event(conn, event=rejected_event, public_key=attacker_public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 2
+    assert result.valid_events == 1
+    assert result.invalid_events == 1
+    conn = connect(config.database_path)
+    try:
+        events = fetch_all(conn, "select event_type, owner_id, trust_status from signed_events order by owner_id")
+        cards = fetch_all(conn, "select card_id, status, source_event_hash from memory_cards")
+    finally:
+        conn.close()
+    assert events == [
+        {
+            "event_type": "memory_card.revoked",
+            "owner_id": "did:key:attacker",
+            "trust_status": "rejected",
+        },
+        {
+            "event_type": "memory_card.created",
+            "owner_id": card.owner_did,
+            "trust_status": "trusted",
+        },
+    ]
+    assert cards == [
+        {
+            "card_id": card.card_id,
+            "status": "active",
+            "source_event_hash": created_event.event_hash,
+        }
+    ]
+
+
 def test_memory_card_revocation_materializes_when_revocation_arrives_before_card(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
