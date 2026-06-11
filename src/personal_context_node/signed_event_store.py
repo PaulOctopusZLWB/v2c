@@ -6,6 +6,7 @@ import sqlite3
 from pydantic import BaseModel
 
 from personal_context_node.core.protocols.memory import (
+    IdentityProfile,
     MemoryCard,
     SignedEvent,
     canonical_signing_body_hash,
@@ -89,6 +90,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     )
     if event.event_type == "memory_card.created" and verified:
         _upsert_memory_card(conn, event=event)
+    if event.event_type == "identity_profile.published" and verified:
+        _upsert_identity_profile(conn, event=event)
 
 
 def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
@@ -121,5 +124,39 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
             "active",
             event.event_hash,
             str(card.created_at),
+        ),
+    )
+
+
+def _upsert_identity_profile(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    profile = IdentityProfile.model_validate(event.payload)
+    predecessor_identity_id = profile.predecessor.identity_id if profile.predecessor else None
+    predecessor_rotation_event_hash = profile.predecessor.rotation_event_hash if profile.predecessor else None
+    conn.execute(
+        """
+        insert into identity_profiles (
+          identity_id, display_name, public_key_algorithm, public_key_multibase,
+          predecessor_identity_id, predecessor_rotation_event_hash,
+          source_event_hash, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(identity_id) do update set
+          display_name = excluded.display_name,
+          public_key_algorithm = excluded.public_key_algorithm,
+          public_key_multibase = excluded.public_key_multibase,
+          predecessor_identity_id = excluded.predecessor_identity_id,
+          predecessor_rotation_event_hash = excluded.predecessor_rotation_event_hash,
+          source_event_hash = excluded.source_event_hash,
+          updated_at = excluded.updated_at
+        """,
+        (
+            profile.identity_id,
+            profile.display_name,
+            profile.public_key_algorithm,
+            profile.public_key_multibase,
+            predecessor_identity_id,
+            predecessor_rotation_event_hash,
+            event.event_hash,
+            str(profile.created_at),
+            event.created_at,
         ),
     )

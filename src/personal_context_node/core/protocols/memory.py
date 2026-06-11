@@ -62,6 +62,25 @@ class MemoryCard(BaseModel):
         return value
 
 
+class IdentityPredecessor(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    identity_id: str
+    rotation_event_hash: str
+
+
+class IdentityProfile(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["identity_profile.v1"] = "identity_profile.v1"
+    identity_id: str
+    display_name: str
+    public_key_algorithm: Literal["Ed25519"] = "Ed25519"
+    public_key_multibase: str
+    predecessor: IdentityPredecessor | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class EventSignature(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -194,7 +213,7 @@ def _b64url_decode(value: str) -> bytes:
 
 
 def _payload_object_id(payload: dict[str, object]) -> str:
-    for key in ("card_id", "annotation_id", "profile_id"):
+    for key in ("card_id", "annotation_id", "identity_id", "profile_id"):
         value = payload.get(key)
         if value:
             return str(value)

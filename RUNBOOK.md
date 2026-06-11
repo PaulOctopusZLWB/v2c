@@ -57,6 +57,7 @@ It also implements the human review boundary:
 11. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
 12. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
 13. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
+14. Trusted `identity_profile.published` events materialize `identity_profile.v1` display names and predecessor references into `identity_profiles`.
 
 It also implements the speaker review boundary:
 

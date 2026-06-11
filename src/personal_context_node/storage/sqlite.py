@@ -98,6 +98,18 @@ create table if not exists memory_cards (
   created_at text not null
 );
 
+create table if not exists identity_profiles (
+  identity_id text primary key,
+  display_name text not null,
+  public_key_algorithm text not null,
+  public_key_multibase text not null,
+  predecessor_identity_id text,
+  predecessor_rotation_event_hash text,
+  source_event_hash text not null,
+  created_at text not null,
+  updated_at text not null
+);
+
 create table if not exists daily_summaries (
   day text primary key,
   summary text not null,
