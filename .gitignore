@@ -1,0 +1,7 @@
+.DS_Store
+.venv/
+.smoke-data/
+.smoke-vault/
+data/
+__pycache__/
+*.py[cod]

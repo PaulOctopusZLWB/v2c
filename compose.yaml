@@ -1,0 +1,16 @@
+services:
+  personal-context-node:
+    build: .
+    command:
+      - run-first-milestone
+      - --source-dir
+      - /input
+      - --data-dir
+      - /data
+      - --obsidian-vault
+      - /obsidian
+      - --confirm-first-candidate
+    volumes:
+      - ./sample_data:/input:ro
+      - ./data:/data
+      - /Users/paul/Documents/Obsidian/PersonalContext:/obsidian

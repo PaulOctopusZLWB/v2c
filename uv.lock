@@ -200,7 +200,7 @@ wheels = [
 [[package]]
 name = "personal-context-node"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "pydantic" },
