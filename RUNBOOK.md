@@ -74,9 +74,16 @@ It also implements the task lifecycle foundation:
 3. `claimed_by_run_id` and `claimed_at` support lease-based recovery.
 4. Import registers the first `vad` task for each new audio file in the same SQLite transaction.
 5. `pcn process-status` lists current task state.
-6. `pcn process-run` claims one pending task, runs VAD or ASR, and records success/failure.
+6. `pcn process-run` claims one pending task, runs VAD, ASR, or session derivation, and records success/failure.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, review, archive, and scheduling boundaries testable before model integration.
+It also implements session derivation:
+
+1. `sessions` groups transcript segments between ASR and daily reports.
+2. Sessions are split by deterministic time gap, defaulting to 20 minutes.
+3. Re-derivation reuses an existing `session_id` when the first segment is unchanged.
+4. ASR task fan-in registers one `session_derive` task for the affected `date_key` when all chunks for an audio file are transcribed.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, session, context-generation, review, archive, and scheduling boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -228,7 +235,7 @@ run_id=run_... job_name=memory-verify status=succeeded error=
 ```
 
 After importing the seven sample files, `pcn process-status` should show seven pending `vad` tasks.
-Repeated `pcn process-run` calls advance those tasks and enqueue/run `asr` tasks for generated chunks.
+Repeated `pcn process-run` calls advance those tasks, enqueue/run `asr` tasks for generated chunks, and then run `session_derive`.
 
 It also implements the daily report lifecycle:
 

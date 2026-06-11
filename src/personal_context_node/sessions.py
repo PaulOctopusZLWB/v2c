@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+from personal_context_node.config import AppConfig
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+
+@dataclass(frozen=True)
+class DeriveSessionsResult:
+    sessions_derived: int
+    segments_assigned: int
+
+
+def derive_sessions_for_day(
+    *,
+    config: AppConfig,
+    day: str,
+    session_gap_minutes: int = 20,
+) -> DeriveSessionsResult:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        _ensure_session_columns(conn)
+        segments = fetch_all(
+            conn,
+            """
+            select ts.segment_id, ts.audio_file_id, ts.start_ms, ts.end_ms, af.recorded_at
+            from transcript_segments ts
+            join audio_files af on af.audio_file_id = ts.audio_file_id
+            where substr(af.recorded_at, 1, 10) = ?
+            order by af.recorded_at, ts.start_ms, ts.segment_id
+            """,
+            (day,),
+        )
+        groups = _group_segments(segments, gap_ms=session_gap_minutes * 60 * 1000)
+        now = datetime.now(timezone.utc).isoformat()
+        existing_by_first_segment = {
+            str(row["first_segment_id"]): str(row["session_id"])
+            for row in fetch_all(conn, "select first_segment_id, session_id from sessions where date_key = ?", (day,))
+        }
+        conn.execute("delete from sessions where date_key = ?", (day,))
+        assigned = 0
+        for group in groups:
+            first_segment_id = str(group[0]["segment_id"])
+            session_id = existing_by_first_segment.get(first_segment_id) or f"ses_{uuid4().hex}"
+            started_at = _absolute_time(group[0])
+            ended_at = _absolute_time({**group[-1], "start_ms": group[-1]["end_ms"]})
+            active_speech_ms = sum(int(row["end_ms"]) - int(row["start_ms"]) for row in group)
+            conn.execute(
+                """
+                insert into sessions (
+                  session_id, date_key, started_at, ended_at, source,
+                  segment_count, active_speech_ms, first_segment_id, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    day,
+                    started_at,
+                    ended_at,
+                    "derived_from_segments",
+                    len(group),
+                    active_speech_ms,
+                    first_segment_id,
+                    now,
+                    now,
+                ),
+            )
+            for row in group:
+                conn.execute(
+                    "update transcript_segments set session_id = ? where segment_id = ?",
+                    (session_id, row["segment_id"]),
+                )
+                assigned += 1
+        conn.commit()
+        return DeriveSessionsResult(sessions_derived=len(groups), segments_assigned=assigned)
+    finally:
+        conn.close()
+
+
+def _group_segments(rows: list[dict[str, object]], *, gap_ms: int) -> list[list[dict[str, object]]]:
+    groups: list[list[dict[str, object]]] = []
+    current: list[dict[str, object]] = []
+    previous_end: int | None = None
+    for row in rows:
+        start_ms = int(row["start_ms"])
+        if current and previous_end is not None and start_ms - previous_end > gap_ms:
+            groups.append(current)
+            current = []
+        current.append(row)
+        previous_end = int(row["end_ms"])
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _absolute_time(row: dict[str, object]) -> str:
+    recorded_at = datetime.fromisoformat(str(row["recorded_at"]))
+    return (recorded_at + timedelta(milliseconds=int(row["start_ms"]))).isoformat()
+
+
+def _ensure_session_columns(conn) -> None:
+    existing = {row["name"] for row in conn.execute("pragma table_info(transcript_segments)").fetchall()}
+    if "session_id" not in existing:
+        conn.execute("alter table transcript_segments add column session_id text")
+        conn.commit()

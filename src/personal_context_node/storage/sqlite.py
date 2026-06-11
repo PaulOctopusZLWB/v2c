@@ -23,6 +23,7 @@ create table if not exists transcript_segments (
   segment_id text primary key,
   audio_file_id text not null references audio_files(audio_file_id),
   chunk_id text,
+  session_id text,
   start_ms integer not null,
   end_ms integer not null,
   text text not null,
@@ -81,6 +82,19 @@ create table if not exists daily_reports (
   status text not null,
   updated_at text not null,
   error text
+);
+
+create table if not exists sessions (
+  session_id text primary key,
+  date_key text not null,
+  started_at text not null,
+  ended_at text not null,
+  source text not null,
+  segment_count integer not null,
+  active_speech_ms integer not null,
+  first_segment_id text not null unique,
+  created_at text not null,
+  updated_at text not null
 );
 
 create table if not exists speaker_mappings (
