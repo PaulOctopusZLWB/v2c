@@ -165,6 +165,110 @@ def test_process_status_rows_include_asr_model_version(tmp_path) -> None:
     assert rows[0]["model_version"] == "local-2026-06"
 
 
+def test_process_status_rows_include_session_summary_model_version(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into tasks (
+              task_id, task_type, target_type, target_id, status,
+              available_at, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task_session_summary_model",
+                "summarize_session",
+                "session",
+                "ses_1",
+                "succeeded",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            """
+            insert into summaries (
+              summary_id, summary_type, target_type, target_id, prompt_version,
+              model_name, content_json, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "sum_ses_1",
+                "session",
+                "session",
+                "ses_1",
+                "llm_port.session_summary.v1",
+                "rule_based",
+                "{}",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = process_status_rows(config=config)
+
+    assert rows[0]["model_name"] == "rule_based"
+    assert rows[0]["model_version"] == "llm_port.session_summary.v1"
+
+
+def test_process_status_rows_include_daily_summary_model_version(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into tasks (
+              task_id, task_type, target_type, target_id, status,
+              available_at, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task_daily_summary_model",
+                "daily_generate",
+                "date_key",
+                "2087-05-10",
+                "succeeded",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            """
+            insert into summaries (
+              summary_id, summary_type, target_type, target_id, prompt_version,
+              model_name, content_json, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "sum_daily_20870510",
+                "daily",
+                "date_key",
+                "2087-05-10",
+                "llm_port.daily_summary.v1",
+                "llm_port",
+                "{}",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = process_status_rows(config=config)
+
+    assert rows[0]["model_name"] == "llm_port"
+    assert rows[0]["model_version"] == "llm_port.daily_summary.v1"
+
+
 def test_enqueue_task_rejects_unknown_task_type(tmp_path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 

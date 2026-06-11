@@ -281,20 +281,50 @@ def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
             """
             select task_id, task_type, target_type, target_id, status, attempt_count,
                    last_error, started_at, finished_at,
-                   (
+                   coalesce((
                      select group_concat(distinct transcript_segments.model_name)
                      from transcript_segments
                      where tasks.task_type = 'asr'
                        and tasks.target_type = 'audio_chunk'
                        and transcript_segments.chunk_id = tasks.target_id
-                   ) as model_name,
-                   (
+                   ), (
+                     select group_concat(distinct summaries.model_name)
+                     from summaries
+                     where (
+                         tasks.task_type = 'summarize_session'
+                         and tasks.target_type = 'session'
+                         and summaries.summary_type = 'session'
+                         and summaries.target_type = 'session'
+                       or
+                         tasks.task_type = 'daily_generate'
+                         and tasks.target_type = 'date_key'
+                         and summaries.summary_type = 'daily'
+                         and summaries.target_type = 'date_key'
+                     )
+                       and summaries.target_id = tasks.target_id
+                   )) as model_name,
+                   coalesce((
                      select group_concat(distinct transcript_segments.model_version)
                      from transcript_segments
                      where tasks.task_type = 'asr'
                        and tasks.target_type = 'audio_chunk'
                        and transcript_segments.chunk_id = tasks.target_id
-                   ) as model_version
+                   ), (
+                     select group_concat(distinct summaries.prompt_version)
+                     from summaries
+                     where (
+                         tasks.task_type = 'summarize_session'
+                         and tasks.target_type = 'session'
+                         and summaries.summary_type = 'session'
+                         and summaries.target_type = 'session'
+                       or
+                         tasks.task_type = 'daily_generate'
+                         and tasks.target_type = 'date_key'
+                         and summaries.summary_type = 'daily'
+                         and summaries.target_type = 'date_key'
+                     )
+                       and summaries.target_id = tasks.target_id
+                   )) as model_version
             from tasks
             order by created_at
             """,
