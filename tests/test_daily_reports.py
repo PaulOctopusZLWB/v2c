@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
@@ -43,9 +45,15 @@ def test_daily_report_status_moves_generated_to_review_synced(tmp_path: Path) ->
     assert get_daily_report_status(config=config, day="2087-05-10") == "review_pending"
 
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     assert get_daily_report_status(config=config, day="2087-05-10") == "review_synced"
+
+
+def _mark_review_stable(path: Path) -> None:
+    stable_time = time.time() - 121
+    os.utime(path, (stable_time, stable_time))
 
 
 def _insert_transcript(database_path: Path) -> None:

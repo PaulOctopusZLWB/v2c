@@ -21,6 +21,7 @@ class AppConfig(BaseModel):
     asr_backend: str = "mock"
     asr_command: str | None = None
     llm_backend: str = "rule_based"
+    edit_grace_seconds: int = 120
 
     @classmethod
     def from_toml(cls, path: Path, **overrides: Any) -> "AppConfig":
@@ -30,6 +31,7 @@ class AppConfig(BaseModel):
         vad = raw.get("vad", {})
         asr = raw.get("asr", {})
         llm = raw.get("llm", {})
+        obsidian = raw.get("obsidian", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
             "obsidian_vault": Path(paths.get("obsidian_vault", cls.model_fields["obsidian_vault"].default)),
@@ -40,6 +42,7 @@ class AppConfig(BaseModel):
             "asr_backend": asr.get("backend", cls.model_fields["asr_backend"].default),
             "asr_command": asr.get("command", cls.model_fields["asr_command"].default),
             "llm_backend": llm.get("backend", cls.model_fields["llm_backend"].default),
+            "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
         }
         values.update({key: value for key, value in overrides.items() if value is not None})
         return cls(**values)

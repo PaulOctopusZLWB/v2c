@@ -52,10 +52,11 @@ It also implements the human review boundary:
 6. Checked candidate lines ending with `| defer` are consumed without changing candidate status or creating signed events.
 7. Empty edit claims are rejected with a `sync_logs` failure row and no side effects.
 8. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
-9. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
-10. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
-11. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
-12. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
+9. Review sync skips files modified within `edit_grace_seconds` (default 120) and records a `sync_logs` skipped row to avoid reading a file while the user is still editing.
+10. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
+11. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
+12. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
+13. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
 
 It also implements the speaker review boundary:
 

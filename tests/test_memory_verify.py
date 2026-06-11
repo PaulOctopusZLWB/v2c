@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
@@ -14,6 +16,7 @@ def test_memory_verify_rechecks_stored_signed_events(tmp_path: Path) -> None:
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     result = verify_memory_events(config=config)
@@ -29,6 +32,7 @@ def test_confirmed_candidate_materializes_memory_card(tmp_path: Path) -> None:
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
 
     confirm_checked_candidates(config=config, day="2087-05-10")
 
@@ -54,6 +58,7 @@ def test_memory_verify_detects_materialized_card_mismatch(tmp_path: Path) -> Non
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     conn = connect(config.database_path)
@@ -76,6 +81,7 @@ def test_memory_verify_detects_tampered_payload(tmp_path: Path) -> None:
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     conn = connect(config.database_path)
@@ -104,6 +110,7 @@ def test_memory_verify_detects_broken_owner_hash_chain(tmp_path: Path) -> None:
     _insert_candidate(config.database_path, candidate_id="cand_test_002", claim="用户决定保留本地证据链。")
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     conn = connect(config.database_path)
@@ -168,3 +175,8 @@ def _insert_candidate(
         conn.commit()
     finally:
         conn.close()
+
+
+def _mark_review_stable(path: Path) -> None:
+    stable_time = time.time() - 121
+    os.utime(path, (stable_time, stable_time))

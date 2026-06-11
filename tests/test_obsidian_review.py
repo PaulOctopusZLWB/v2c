@@ -9,7 +9,7 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
 def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
 
     review_path = publish_candidate_review(config=config, day="2087-05-10")
@@ -37,7 +37,7 @@ def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
 
 
 def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
@@ -66,7 +66,7 @@ def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_pa
 
 
 def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
@@ -93,7 +93,7 @@ def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> N
 
 
 def test_sync_review_defers_candidate_without_side_effects(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
@@ -119,7 +119,7 @@ def test_sync_review_defers_candidate_without_side_effects(tmp_path: Path) -> No
 
 
 def test_sync_review_edits_claim_while_preserving_candidate_claim(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
@@ -147,7 +147,7 @@ def test_sync_review_edits_claim_while_preserving_candidate_claim(tmp_path: Path
 
 
 def test_sync_review_logs_empty_edit_claim_without_side_effects(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
@@ -175,8 +175,36 @@ def test_sync_review_logs_empty_edit_claim_without_side_effects(tmp_path: Path) 
     assert logs == [{"source": "memory_candidate_review", "status": "failed", "message": "empty edit claim: cand_test_001"}]
 
 
+def test_sync_review_skips_recently_modified_review_file(tmp_path: Path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        owner_did="did:key:test-owner",
+        edit_grace_seconds=120,
+    )
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 0
+    assert result.signed_events_created == 0
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select status, memory_card_id from memory_candidates")
+        events = fetch_all(conn, "select event_type from signed_events")
+        logs = fetch_all(conn, "select source, status, message from sync_logs")
+    finally:
+        conn.close()
+    assert candidates == [{"status": "pending_review", "memory_card_id": None}]
+    assert events == []
+    assert logs == [{"source": "memory_candidate_review", "status": "skipped", "message": "review file modified within edit grace: 2087-05-10"}]
+
+
 def test_confirming_multiple_candidates_creates_owner_hash_chain(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="用户要求音频本地处理。")
     _insert_candidate(config.database_path, candidate_id="cand_test_002", claim="用户决定保留本地证据链。")
     review_path = publish_candidate_review(config=config, day="2087-05-10")

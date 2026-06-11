@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -71,6 +72,16 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        if _within_edit_grace(review_path, edit_grace_seconds=config.edit_grace_seconds):
+            _insert_sync_log(
+                conn,
+                source="memory_candidate_review",
+                target_id=day,
+                status="skipped",
+                message=f"review file modified within edit grace: {day}",
+            )
+            conn.commit()
+            return ConfirmCandidatesResult(candidates_confirmed=0, signed_events_created=0)
         confirmed = 0
         events = 0
         receipts: dict[str, dict[str, str | None]] = {}
@@ -137,6 +148,12 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         return ConfirmCandidatesResult(candidates_confirmed=confirmed, signed_events_created=events)
     finally:
         conn.close()
+
+
+def _within_edit_grace(path: Path, *, edit_grace_seconds: int) -> bool:
+    if edit_grace_seconds <= 0:
+        return False
+    return time.time() - path.stat().st_mtime < edit_grace_seconds
 
 
 def _checked_candidate_actions(path: Path) -> list[ReviewAction]:

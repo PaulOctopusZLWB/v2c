@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -33,6 +35,7 @@ def test_review_cli_publishes_and_confirms_checked_candidate(tmp_path: Path) -> 
     assert str(review_path) in publish_result.output
     text = review_path.read_text(encoding="utf-8")
     review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+    _mark_review_stable(review_path)
 
     confirm_result = runner.invoke(
         app,
@@ -72,6 +75,7 @@ def test_obsidian_sync_review_group_cli_confirms_checked_candidate(tmp_path: Pat
     review_path = config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md"
     text = review_path.read_text(encoding="utf-8")
     review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+    _mark_review_stable(review_path)
 
     confirm_result = runner.invoke(
         app,
@@ -112,6 +116,7 @@ def test_memory_confirm_sync_group_cli_confirms_checked_candidate(tmp_path: Path
     review_path = config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md"
     text = review_path.read_text(encoding="utf-8")
     review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+    _mark_review_stable(review_path)
 
     confirm_result = runner.invoke(
         app,
@@ -168,3 +173,8 @@ def _insert_candidate(database_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _mark_review_stable(path: Path) -> None:
+    stable_time = time.time() - 121
+    os.utime(path, (stable_time, stable_time))

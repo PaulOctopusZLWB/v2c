@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -16,6 +18,7 @@ def test_memory_verify_cli_reports_valid_events(tmp_path: Path) -> None:
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     result = CliRunner().invoke(
@@ -40,6 +43,7 @@ def test_memory_verify_group_cli_reports_valid_events(tmp_path: Path) -> None:
     _insert_candidate(config.database_path)
     review_path = publish_candidate_review(config=config, day="2087-05-10")
     review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     result = CliRunner().invoke(
@@ -96,3 +100,8 @@ def _insert_candidate(database_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _mark_review_stable(path: Path) -> None:
+    stable_time = time.time() - 121
+    os.utime(path, (stable_time, stable_time))

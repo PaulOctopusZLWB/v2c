@@ -26,6 +26,9 @@ max_chunk_ms = 45000
 
 [llm]
 backend = "rule_based"
+
+[obsidian]
+edit_grace_seconds = 45
 """.strip(),
         encoding="utf-8",
     )
@@ -41,6 +44,7 @@ backend = "rule_based"
     assert config.vad_threshold == 0.02
     assert config.max_chunk_ms == 45000
     assert config.llm_backend == "rule_based"
+    assert config.edit_grace_seconds == 45
 
 
 def test_app_config_with_overrides_keeps_explicit_paths(tmp_path: Path) -> None:
