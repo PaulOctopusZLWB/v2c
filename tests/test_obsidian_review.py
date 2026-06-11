@@ -76,6 +76,45 @@ def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_pa
     assert events == [{"event_type": "memory_card.created"}]
 
 
+def test_sync_review_parses_review_block_and_ignores_checked_free_text(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="用户要求音频本地处理。")
+    _insert_candidate(config.database_path, candidate_id="cand_test_002", claim="自由文本不应确认。")
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / "2087-05-10.md"
+    review_path.write_text(
+        """
+# 2087-05-10 Memory Candidate Review
+
+- [x] cand_test_002 | requirement | 自由文本不应确认。
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_001" version="1" -->
+```yaml
+action: confirm
+claim: "用户要求音频本地处理。"
+claim_type: requirement
+```
+<!-- pcn:review end candidate_id="cand_test_001" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 1
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select candidate_id, status from memory_candidates order by candidate_id")
+    finally:
+        conn.close()
+
+    assert candidates == [
+        {"candidate_id": "cand_test_001", "status": "confirmed"},
+        {"candidate_id": "cand_test_002", "status": "pending_review"},
+    ]
+
+
 def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)

@@ -235,9 +235,13 @@ def _mark_evidence_sessions_excluded(conn, *, evidence_refs_json: str) -> None:
 def _checked_candidate_actions(path: Path) -> list[ReviewAction]:
     if not path.exists():
         return []
-    receipt_ids = set(re.findall(r'candidate_id="([^"]+)"', path.read_text(encoding="utf-8")))
+    text = path.read_text(encoding="utf-8")
+    block_actions = _review_block_actions(text)
+    if block_actions:
+        return block_actions
+    receipt_ids = set(re.findall(r'candidate_id="([^"]+)"', text))
     checked: list[ReviewAction] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|[^|]+\|[^|]+(?:\| *(.*))?", line)
         if not match or match.group(1) in receipt_ids:
             continue
@@ -247,6 +251,39 @@ def _checked_candidate_actions(path: Path) -> list[ReviewAction]:
         else:
             checked.append(ReviewAction(match.group(1), action_text or "confirm"))
     return checked
+
+
+def _review_block_actions(text: str) -> list[ReviewAction]:
+    actions: list[ReviewAction] = []
+    pattern = re.compile(
+        r'<!--\s*pcn:review start\b[^>]*type="memory_candidate"[^>]*candidate_id="(?P<candidate_id>[^"]+)"[^>]*-->'
+        r'(?P<body>.*?)'
+        r'<!--\s*pcn:review end\b[^>]*candidate_id="(?P=candidate_id)"[^>]*-->',
+        flags=re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        values = _simple_yaml_block(match.group("body"))
+        action = values.get("action", "pending")
+        if action == "pending":
+            continue
+        edited_claim = values.get("claim") if action == "edit" else None
+        actions.append(ReviewAction(match.group("candidate_id"), action, edited_claim))
+    return actions
+
+
+def _simple_yaml_block(markdown: str) -> dict[str, str]:
+    fence = re.search(r"```yaml\s*(?P<body>.*?)```", markdown, flags=re.DOTALL)
+    body = fence.group("body") if fence else markdown
+    values: dict[str, str] = {}
+    for line in body.splitlines():
+        match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$", line)
+        if not match:
+            continue
+        value = match.group(2).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[match.group(1)] = value
+    return values
 
 
 def _insert_sync_log(conn, *, source: str, target_id: str, status: str, message: str) -> None:
