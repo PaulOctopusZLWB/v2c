@@ -159,15 +159,38 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
         )
         conn.execute(
             """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id,
+              exclude_from_memory, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ses_test",
+                "2087-05-10",
+                "2087-05-10T00:00:00+08:00",
+                "2087-05-10T00:00:01+08:00",
+                "derived_from_segments",
+                1,
+                1000,
+                "seg_test",
+                0,
+                "2087-05-10T00:10:00+08:00",
+                "2087-05-10T00:10:00+08:00",
+            ),
+        )
+        conn.execute(
+            """
             insert into transcript_segments (
-              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
               language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "seg_test",
                 "aud_test",
                 "chk_test",
+                "ses_test",
                 0,
                 1000,
                 "我要求音频和转写处理保持本地。",
@@ -236,7 +259,7 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
     assert content["date_key"] == "2087-05-10"
     assert content["headline"] == "今天讨论了本地上下文系统。"
     assert content["todos_rollup"] == [
-        {"text": "继续接入真实 ASR", "owner": "self", "session_id": None, "evidence_refs": ["ev_test"]}
+        {"text": "继续接入真实 ASR", "owner": "self", "session_id": "ses_test", "evidence_refs": ["ev_test"]}
     ]
     assert candidates[0]["claim_type"] == "requirement"
     assert candidates[0]["source_type"] == "llm_daily_context"
@@ -304,7 +327,7 @@ def test_generate_daily_context_accepts_evidence_id_refs_in_decision_rollup(tmp_
     assert content["decisions_rollup"] == [
         {
             "text": "系统采用本地优先的音频处理边界。",
-            "session_id": None,
+            "session_id": "ses_test",
             "evidence_refs": ["ev_test"],
         }
     ]
@@ -342,6 +365,32 @@ def test_generate_daily_context_skips_sessions_excluded_from_memory(tmp_path: Pa
     assert result.summaries_created == 0
     assert result.memory_candidates_created == 0
     assert llm.received_segments == []
+
+
+def test_generate_daily_context_selects_segments_by_session_date_key(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_and_transcript(
+        config.database_path,
+        audio_file_id="aud_cross_midnight",
+        segment_id="seg_cross_midnight",
+        evidence_id="ev_cross_midnight",
+        recorded_at="2087-05-09T23:50:00+08:00",
+        text="跨午夜会话应该归入会话自己的日期。",
+        session_id="ses_cross_midnight",
+        session_date_key="2087-05-10",
+    )
+
+    result = generate_daily_context(config=config, day="2087-05-10", llm=EvidenceIdLLM())
+
+    assert result.summaries_created == 1
+    assert result.memory_candidates_created == 1
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select date_key, evidence_refs_json from memory_candidates")
+    finally:
+        conn.close()
+    assert candidates[0]["date_key"] == "2087-05-10"
+    assert json.loads(candidates[0]["evidence_refs_json"])[0]["evidence_id"] == "ev_cross_midnight"
 
 
 def test_generate_daily_context_rejects_unknown_llm_evidence_refs_without_side_effects(tmp_path: Path) -> None:
@@ -491,15 +540,38 @@ def _insert_transcript(database_path: Path) -> None:
         )
         conn.execute(
             """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id,
+              exclude_from_memory, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ses_test",
+                "2087-05-10",
+                "2087-05-10T00:00:00+08:00",
+                "2087-05-10T00:00:01+08:00",
+                "derived_from_segments",
+                1,
+                1000,
+                "seg_test",
+                0,
+                "2087-05-10T00:10:00+08:00",
+                "2087-05-10T00:10:00+08:00",
+            ),
+        )
+        conn.execute(
+            """
             insert into transcript_segments (
-              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
               language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "seg_test",
                 "aud_test",
                 "chk_test",
+                "ses_test",
                 0,
                 1000,
                 "我要求音频和转写处理保持本地。",
@@ -525,6 +597,8 @@ def _insert_audio_and_transcript(
     evidence_id: str,
     recorded_at: str,
     text: str,
+    session_id: str | None = None,
+    session_date_key: str | None = None,
 ) -> None:
     conn = connect(database_path)
     try:
@@ -550,15 +624,38 @@ def _insert_audio_and_transcript(
         )
         conn.execute(
             """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id,
+              exclude_from_memory, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id or f"ses_{segment_id}",
+                session_date_key or recorded_at[:10],
+                recorded_at,
+                recorded_at,
+                "derived_from_segments",
+                1,
+                1000,
+                segment_id,
+                0,
+                recorded_at,
+                recorded_at,
+            ),
+        )
+        conn.execute(
+            """
             insert into transcript_segments (
-              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
               language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 segment_id,
                 audio_file_id,
                 f"chk_{segment_id}",
+                session_id or f"ses_{segment_id}",
                 0,
                 1000,
                 text,
@@ -657,14 +754,15 @@ def _insert_transcript_segment(database_path: Path, *, segment_id: str, evidence
         conn.execute(
             """
             insert into transcript_segments (
-              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
               language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 segment_id,
                 "aud_test",
                 f"chk_{segment_id}",
+                "ses_test",
                 1000,
                 2000,
                 text,
