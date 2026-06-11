@@ -82,6 +82,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         trust_status = "rejected"
     if trust_status == "trusted" and _unauthorized_known_card_successor(conn, event=event):
         trust_status = "rejected"
+    if trust_status == "trusted" and not _payload_authority_matches_event(event):
+        trust_status = "rejected"
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
@@ -246,6 +248,16 @@ def _identity_can_modify_card(conn: sqlite3.Connection, *, actor_did: str, card_
         (actor_did, card_owner_did),
     ).fetchone()
     return row is not None
+
+
+def _payload_authority_matches_event(event: SignedEvent) -> bool:
+    if event.event_type == "memory_card.created":
+        card = MemoryCard.model_validate(event.payload)
+        return event.owner_id == card.owner_did
+    if event.event_type == "memory_annotation.created":
+        annotation = MemoryAnnotation.model_validate(event.payload)
+        return event.owner_id == annotation.author
+    return True
 
 
 def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:

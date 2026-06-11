@@ -85,6 +85,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                         successor_rotations=successor_rotations,
                         trusted_successor_profiles=trusted_successor_profiles,
                     )
+                    and _payload_authority_matches_event(event)
                 )
             except Exception:
                 row_valid = False
@@ -299,6 +300,16 @@ def _card_successor_target_id(event: SignedEvent) -> str | None:
     if event.event_type == "memory_card.superseded":
         return MemoryCardSupersession.model_validate(event.payload).card_id
     return None
+
+
+def _payload_authority_matches_event(event: SignedEvent) -> bool:
+    if event.event_type == "memory_card.created":
+        card = MemoryCard.model_validate(event.payload)
+        return event.owner_id == card.owner_did
+    if event.event_type == "memory_annotation.created":
+        annotation = MemoryAnnotation.model_validate(event.payload)
+        return event.owner_id == annotation.author
+    return True
 
 
 def _is_matching_predecessor_profile(event: SignedEvent, *, rotation: IdentityRotationReference | None) -> bool:
