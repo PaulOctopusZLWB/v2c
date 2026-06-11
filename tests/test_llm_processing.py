@@ -342,14 +342,7 @@ def test_generate_daily_context_accepts_llm_evidence_id_refs(tmp_path: Path) -> 
         candidates = fetch_all(conn, "select evidence_refs_json from memory_candidates")
     finally:
         conn.close()
-    assert json.loads(candidates[0]["evidence_refs_json"]) == [
-        {
-            "evidence_id": "ev_test",
-            "source_type": "transcript_segment",
-            "source_id": "seg_test",
-            "quote": "我要求音频和转写处理保持本地。",
-        }
-    ]
+    assert json.loads(candidates[0]["evidence_refs_json"]) == ["ev_test"]
 
 
 def test_generate_daily_context_accepts_evidence_id_refs_in_decision_rollup(tmp_path: Path) -> None:
@@ -438,7 +431,7 @@ def test_generate_daily_context_selects_segments_by_session_date_key(tmp_path: P
     finally:
         conn.close()
     assert candidates[0]["date_key"] == "2087-05-10"
-    assert json.loads(candidates[0]["evidence_refs_json"])[0]["evidence_id"] == "ev_cross_midnight"
+    assert json.loads(candidates[0]["evidence_refs_json"])[0] == "ev_cross_midnight"
 
 
 def test_generate_daily_context_rejects_unknown_llm_evidence_refs_without_side_effects(tmp_path: Path) -> None:
@@ -536,20 +529,7 @@ def test_generate_daily_context_merges_duplicate_candidates_within_day(tmp_path:
     assert candidates[0]["claim_type"] == "requirement"
     assert candidates[0]["confidence"] == 0.9
     assert candidates[0]["status"] == "pending_review"
-    assert json.loads(candidates[0]["evidence_refs_json"]) == [
-        {
-            "evidence_id": "ev_test",
-            "source_type": "transcript_segment",
-            "source_id": "seg_test",
-            "quote": "我要求音频和转写处理保持本地。",
-        },
-        {
-            "evidence_id": "ev_test_002",
-            "source_type": "transcript_segment",
-            "source_id": "seg_test_002",
-            "quote": "我再次要求音频和转写处理保持本地。",
-        },
-    ]
+    assert json.loads(candidates[0]["evidence_refs_json"]) == ["ev_test", "ev_test_002"]
 
 
 def test_generate_daily_context_does_not_merge_same_claim_for_different_subjects(tmp_path: Path) -> None:
@@ -584,7 +564,7 @@ def test_generate_daily_context_does_not_merge_same_claim_for_different_subjects
     ]
     assert [row["confidence"] for row in candidates] == [0.8, 0.9]
     assert [row["status"] for row in candidates] == ["pending_review", "pending_review"]
-    assert [json.loads(row["evidence_refs_json"])[0]["evidence_id"] for row in candidates] == [
+    assert [json.loads(row["evidence_refs_json"])[0] for row in candidates] == [
         "ev_test",
         "ev_test_002",
     ]

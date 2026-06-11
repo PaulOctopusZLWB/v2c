@@ -9,10 +9,10 @@ from uuid import uuid4
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
-    EvidenceRef,
     MemoryCard,
     SubjectRef,
 )
+from personal_context_node.evidence_refs import hydrate_candidate_evidence_refs
 from personal_context_node.identity_keys import load_or_create_signing_key
 from personal_context_node.ingest import import_audio_files_in_conn
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
@@ -105,7 +105,7 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
         from transcript_segments ts
         join audio_files af on af.audio_file_id = ts.audio_file_id
         where ts.evidence_id not in (
-          select json_extract(value, '$.evidence_id')
+          select coalesce(json_extract(value, '$.evidence_id'), value)
           from memory_candidates, json_each(memory_candidates.evidence_refs_json)
         )
         order by ts.segment_id
@@ -113,14 +113,6 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
     )
     for row in rows:
         now = datetime.now(timezone.utc).isoformat()
-        evidence = [
-            {
-                "evidence_id": row["evidence_id"],
-                "source_type": "transcript_segment",
-                "source_id": row["segment_id"],
-                "quote": row["text"],
-            }
-        ]
         conn.execute(
             """
             insert into evidence_refs (
@@ -160,7 +152,7 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
                     sort_keys=True,
                 ),
                 0.8,
-                json.dumps(evidence, ensure_ascii=False, sort_keys=True),
+                json.dumps([row["evidence_id"]], ensure_ascii=False, sort_keys=True),
                 "pending_review",
                 None,
                 row["date_key"],
@@ -184,7 +176,7 @@ def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> Non
     ).fetchone()
     if row is None:
         return
-    evidence_refs = [EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs_json"])]
+    evidence_refs = hydrate_candidate_evidence_refs(conn, str(row["evidence_refs_json"]))
     card = MemoryCard(
         card_id=f"mem_{uuid4().hex}",
         owner_did=config.owner_did,
@@ -230,7 +222,7 @@ def _publish_daily_notes(conn: sqlite3.Connection, config: AppConfig) -> None:
         select af.local_raw_path, af.recorded_at, ts.text, ts.speaker, mc.candidate_claim, mc.status
         from audio_files af
         join transcript_segments ts on ts.audio_file_id = af.audio_file_id
-        left join memory_candidates mc on mc.evidence_refs_json like '%' || ts.segment_id || '%'
+        left join memory_candidates mc on mc.evidence_refs_json like '%' || ts.evidence_id || '%'
         order by af.recorded_at, af.local_raw_path
         """,
     )

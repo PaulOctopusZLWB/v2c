@@ -216,14 +216,7 @@ def _persist_candidates(
             source = segment_by_llm_ref.get(source_id)
             if source is None:
                 raise ValueError(f"unknown evidence_id: {source_id}")
-            evidence_refs.append(
-                {
-                    "evidence_id": source["evidence_id"],
-                    "source_type": "transcript_segment",
-                    "source_id": source["segment_id"],
-                    "quote": source["text"],
-                }
-            )
+            evidence_refs.append(str(source["evidence_id"]))
             conn.execute(
                 """
                 insert into evidence_refs (

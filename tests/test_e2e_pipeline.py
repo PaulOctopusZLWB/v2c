@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import wave
+import json
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
@@ -58,7 +59,8 @@ def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> N
     assert candidates[0]["status"] == "confirmed"
     assert candidates[0]["date_key"] == "2025-06-10"
     assert candidates[0]["prompt_version"] == "llm_port.candidate_extraction.v1"
-    assert "seg_" in candidates[0]["evidence_refs_json"]
+    candidate_evidence_ids = json.loads(candidates[0]["evidence_refs_json"])
+    assert candidate_evidence_ids == [evidence_refs[0]["evidence_id"]]
     assert evidence_refs == [
         {
             "evidence_id": evidence_refs[0]["evidence_id"],

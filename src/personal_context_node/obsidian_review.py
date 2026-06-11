@@ -11,11 +11,11 @@ from uuid import uuid4
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
-    EvidenceRef,
     MemoryCard,
     SubjectRef,
 )
 from personal_context_node.daily_reports import set_daily_report_status
+from personal_context_node.evidence_refs import evidence_ids_from_candidate_json, hydrate_candidate_evidence_refs
 from personal_context_node.identity_keys import load_or_create_signing_key
 from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.obsidian_sync_log import record_sync_log
@@ -230,7 +230,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 claim_type=row["claim_type"],
                 claim=review_action.edited_claim or row["candidate_claim"],
                 subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
-                evidence_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs_json"])],
+                evidence_refs=hydrate_candidate_evidence_refs(conn, str(row["evidence_refs_json"])),
                 source_type="confirmed_generated",
                 candidate_claim=row["candidate_claim"],
                 confidence=float(row["confidence"]) if row["confidence"] is not None else None,
@@ -288,11 +288,28 @@ def _yaml_quote(value: str) -> str:
 
 
 def _mark_evidence_sessions_excluded(conn, *, evidence_refs_json: str) -> None:
-    source_ids = [
+    legacy_source_ids = [
         str(item["source_id"])
         for item in json.loads(evidence_refs_json)
-        if item.get("source_type") == "transcript_segment" and item.get("source_id")
+        if isinstance(item, dict) and item.get("source_type") == "transcript_segment" and item.get("source_id")
     ]
+    evidence_ids = evidence_ids_from_candidate_json(evidence_refs_json)
+    if not evidence_ids and not legacy_source_ids:
+        return
+    rows = []
+    if evidence_ids:
+        evidence_placeholders = ",".join("?" for _ in evidence_ids)
+        rows = conn.execute(
+            f"""
+            select source_id
+            from evidence_refs
+            where evidence_id in ({evidence_placeholders})
+              and source_type = 'transcript_segment'
+              and source_id is not null
+            """,
+            tuple(evidence_ids),
+        ).fetchall()
+    source_ids = legacy_source_ids + [str(row["source_id"]) for row in rows]
     if not source_ids:
         return
     placeholders = ",".join("?" for _ in source_ids)
