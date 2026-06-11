@@ -103,6 +103,11 @@ create table if not exists memory_cards (
   updated_at text not null default ''
 );
 
+create view if not exists active_memory_cards as
+select *
+from memory_cards
+where status = 'active';
+
 create table if not exists memory_annotations (
   annotation_id text primary key,
   target_card_id text not null,
