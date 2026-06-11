@@ -53,6 +53,15 @@ def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
     review_dir.mkdir(parents=True, exist_ok=True)
     review_path = review_dir / f"{day}.md"
     lines = [
+        "---",
+        "pcn_schema: markdown_note.v1",
+        "note_type: memory_candidate_review",
+        f"date_key: {day}",
+        "generated_by: personal-context-node",
+        f"generated_at: {datetime.now(timezone.utc).isoformat()}",
+        "pcn_managed: true",
+        "---",
+        "",
         f"# {day} Memory Candidate Review",
         "",
         "<!-- pcn-review-format: memory-candidates.v1 -->",

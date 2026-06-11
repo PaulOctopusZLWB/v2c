@@ -19,6 +19,14 @@ def test_speaker_review_mapping_and_segment_override_are_materialized(tmp_path: 
 
     assert review_path == config.obsidian_vault / "90_System" / "Speaker_Review" / "2087-05-10.md"
     text = review_path.read_text(encoding="utf-8")
+    assert text.startswith(
+        "---\n"
+        "pcn_schema: markdown_note.v1\n"
+        "note_type: speaker_review\n"
+        "date_key: 2087-05-10\n"
+        "generated_by: personal-context-node\n"
+    )
+    assert "\npcn_managed: true\n---\n" in text
     assert "- spk_self: self" in text
     assert "<!-- segment_id: seg_guest -->" in text
 

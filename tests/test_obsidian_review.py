@@ -17,6 +17,14 @@ def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
 
     assert review_path == config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md"
     text = review_path.read_text(encoding="utf-8")
+    assert text.startswith(
+        "---\n"
+        "pcn_schema: markdown_note.v1\n"
+        "note_type: memory_candidate_review\n"
+        "date_key: 2087-05-10\n"
+        "generated_by: personal-context-node\n"
+    )
+    assert "\npcn_managed: true\n---\n" in text
     assert "- [ ] cand_test_001 | requirement | 用户要求音频本地处理。" in text
     assert '<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_001" version="1" -->' in text
     assert "action: pending" in text

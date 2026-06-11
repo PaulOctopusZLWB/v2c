@@ -49,6 +49,15 @@ def publish_speaker_review(*, config: AppConfig, day: str) -> Path:
     review_dir.mkdir(parents=True, exist_ok=True)
     review_path = review_dir / f"{day}.md"
     lines = [
+        "---",
+        "pcn_schema: markdown_note.v1",
+        "note_type: speaker_review",
+        f"date_key: {day}",
+        "generated_by: personal-context-node",
+        f"generated_at: {datetime.now(timezone.utc).isoformat()}",
+        "pcn_managed: true",
+        "---",
+        "",
         f"# {day} Speaker Review",
         "",
         f'<!-- pcn:speaker_mapping start date_key="{day}" version="1" -->',
