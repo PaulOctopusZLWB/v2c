@@ -33,6 +33,17 @@ def test_ingest_scan_cli_lists_uppercase_wav_candidates(tmp_path: Path) -> None:
     assert "REC001.WAV" in result.output
 
 
+def test_ingest_scan_group_cli_lists_wav_candidates(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+
+    result = CliRunner().invoke(app, ["ingest", "scan", "--source-dir", str(source)])
+
+    assert result.exit_code == 0, result.output
+    assert "files_found=1" in result.output
+    assert "TX02_MIC001_20870510_173550_orig.wav" in result.output
+
+
 def test_ingest_import_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
@@ -42,6 +53,37 @@ def test_ingest_import_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> Non
         app,
         [
             "ingest-import",
+            "--source-dir",
+            str(source),
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "imported_files=1" in result.output
+    conn = connect(config.database_path)
+    try:
+        audio_files = fetch_all(conn, "select source_path, status from audio_files")
+        tasks = fetch_all(conn, "select task_type, target_type, status from tasks")
+    finally:
+        conn.close()
+    assert audio_files == [{"source_path": str(source / "TX02_MIC001_20870510_173550_orig.wav"), "status": "imported"}]
+    assert tasks == [{"task_type": "vad", "target_type": "audio_file", "status": "pending"}]
+
+
+def test_ingest_import_group_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ingest",
+            "import",
             "--source-dir",
             str(source),
             "--data-dir",

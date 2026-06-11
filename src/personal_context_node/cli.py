@@ -33,6 +33,8 @@ from personal_context_node.transcription import transcribe_pending_chunks
 
 
 app = typer.Typer(help="Personal Context Node local pipeline.")
+ingest_app = typer.Typer(help="Audio ingest commands.")
+app.add_typer(ingest_app, name="ingest")
 
 
 @app.callback()
@@ -146,6 +148,17 @@ def run_first_milestone(
 def ingest_scan(
     source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
 ) -> None:
+    _ingest_scan(source_dir=source_dir)
+
+
+@ingest_app.command(name="scan")
+def ingest_scan_group(
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+) -> None:
+    _ingest_scan(source_dir=source_dir)
+
+
+def _ingest_scan(*, source_dir: Path) -> None:
     result = scan_audio_files(source_dir=source_dir)
     typer.echo(f"files_found={len(result.files)}")
     for path in result.files:
@@ -161,6 +174,22 @@ def ingest_import(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
+    _ingest_import(source_dir=source_dir, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@ingest_app.command(name="import")
+def ingest_import_group(
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _ingest_import(source_dir=source_dir, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+def _ingest_import(*, source_dir: Path, data_dir: Path, obsidian_vault: Path) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = import_audio_files(config=config, source_dir=source_dir)
     typer.echo(f"imported_files={result.imported_files}")

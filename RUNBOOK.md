@@ -7,8 +7,8 @@ This repository currently implements the first milestone from `IMPLEMENTATION_PL
 1. `pcn init` creates local data directories, SQLite schema, Obsidian vault folders, and an optional TOML config.
 2. `pcn health` checks SQLite initialization and Obsidian vault writability.
 3. `pcn doctor` aggregates health, task, job, memory verification, source, and archive diagnostics.
-4. `pcn ingest-scan` lists WAV candidates from a source directory before import.
-5. `pcn ingest-import` imports stable WAV files from a source directory into local raw storage.
+4. `pcn ingest scan` lists WAV candidates from a source directory before import.
+5. `pcn ingest import` imports stable WAV files from a source directory into local raw storage.
 6. Register imported audio in SQLite with source size, mtime, and sha256 evidence metadata.
 7. Enqueue the first `vad` task for each newly imported audio file.
 8. Produce deterministic mock transcript segments.
@@ -133,9 +133,9 @@ uv run pcn doctor \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --source-dir sample_data
-uv run pcn ingest-scan \
+uv run pcn ingest scan \
   --source-dir sample_data
-uv run pcn ingest-import \
+uv run pcn ingest import \
   --source-dir sample_data \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
