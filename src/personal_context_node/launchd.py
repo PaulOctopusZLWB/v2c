@@ -96,9 +96,7 @@ def write_launchd_plists(
                 "uv",
                 "run",
                 "pcn",
-                "summarize",
-                "--day",
-                _date_placeholder(),
+                "process-run",
                 "--data-dir",
                 data_dir,
                 "--obsidian-vault",
@@ -176,10 +174,6 @@ def uninstall_launchd_plists(
         if path.exists():
             path.unlink()
     return LaunchdUninstallResult(removed_paths=removed_paths, commands=commands)
-
-
-def _date_placeholder() -> str:
-    return "TODAY"
 
 
 def _run_command(command: list[str]) -> None:

@@ -53,6 +53,9 @@ def test_write_launchd_plists_dry_run_writes_project_files(tmp_path) -> None:
     assert "process-run" in process["ProgramArguments"]
     assert "preprocess" not in process["ProgramArguments"]
     assert "transcribe" not in process["ProgramArguments"]
+    daily = plistlib.loads((output_dir / "com.personal-context-node.daily.plist").read_bytes())
+    assert "process-run" in daily["ProgramArguments"]
+    assert "TODAY" not in daily["ProgramArguments"]
 
 
 def test_install_launchd_plists_copies_files_and_bootstraps_with_runner(tmp_path) -> None:
