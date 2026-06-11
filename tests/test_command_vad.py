@@ -23,9 +23,13 @@ print(json.dumps({"ranges": [{"start_ms": 100, "end_ms": 900}]}))
     audio = tmp_path / "chunk.wav"
     audio.write_bytes(b"RIFFfake")
 
-    ranges = CommandVADAdapter(command=["python3", str(script)]).detect(audio)
+    result = CommandVADAdapter(command=["python3", str(script)]).detect(audio)
 
-    assert [(speech.start_ms, speech.end_ms) for speech in ranges] == [(100, 900)]
+    assert result.backend == "CommandVADAdapter"
+    assert result.backend_version is None
+    assert result.config == {"command": ["python3", str(script)]}
+    assert result.warnings == []
+    assert [(speech.start_ms, speech.end_ms) for speech in result.ranges] == [(100, 900)]
 
 
 def test_command_vad_adapter_rejects_invalid_ranges(tmp_path: Path) -> None:

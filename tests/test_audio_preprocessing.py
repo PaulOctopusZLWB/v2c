@@ -45,11 +45,15 @@ def test_energy_vad_filters_silence_and_merges_nearby_speech(tmp_path: Path) -> 
 
     adapter = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=200, min_speech_ms=200)
 
-    ranges = adapter.detect(wav_path)
+    result = adapter.detect(wav_path)
 
-    assert len(ranges) == 1
-    assert 250 <= ranges[0].start_ms <= 350
-    assert 1100 <= ranges[0].end_ms <= 1200
+    assert result.backend == "EnergyVadAdapter"
+    assert result.backend_version is None
+    assert result.config["frame_ms"] == 50
+    assert result.warnings == []
+    assert len(result.ranges) == 1
+    assert 250 <= result.ranges[0].start_ms <= 350
+    assert 1100 <= result.ranges[0].end_ms <= 1200
 
 
 def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path) -> None:
@@ -97,7 +101,7 @@ def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path)
     assert chunks[0]["absolute_start_at"] == expected_start.isoformat()
     assert chunks[-1]["absolute_end_at"]
     assert chunks[0]["vad_backend"] == "EnergyVadAdapter"
-    assert chunks[0]["vad_config_json"]
+    assert chunks[0]["vad_config_json"] == '{"frame_ms": 50, "merge_gap_ms": 100, "min_speech_ms": 150, "threshold": 0.05}'
     assert chunks[0]["created_at"]
     assert all((tmp_path / "data").joinpath(chunk["local_chunk_path"]).exists() for chunk in chunks)
 

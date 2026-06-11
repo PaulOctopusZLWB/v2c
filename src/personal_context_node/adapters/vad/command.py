@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
-from personal_context_node.core.ports.vad import SpeechRange
+from personal_context_node.core.ports.vad import SpeechRange, VADResult
 
 
 class CommandVADAdapter:
@@ -14,7 +14,7 @@ class CommandVADAdapter:
     def __init__(self, *, command: list[str]) -> None:
         self.command = command
 
-    def detect(self, audio_path: Path) -> list[SpeechRange]:
+    def detect(self, audio_path: Path) -> VADResult:
         result = subprocess.run(
             [*self.command, str(audio_path)],
             check=False,
@@ -30,7 +30,13 @@ class CommandVADAdapter:
         ranges = payload.get("ranges", payload.get("speech_ranges"))
         if not isinstance(ranges, list):
             raise TerminalPortError("VAD command output must include a ranges list")
-        return [_speech_range(item) for item in ranges]
+        return VADResult(
+            ranges=[_speech_range(item) for item in ranges],
+            backend=self.__class__.__name__,
+            backend_version=None,
+            config={"command": self.command},
+            warnings=[],
+        )
 
 
 def _speech_range(item: object) -> SpeechRange:

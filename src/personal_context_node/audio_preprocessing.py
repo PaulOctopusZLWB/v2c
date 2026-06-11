@@ -49,8 +49,8 @@ def preprocess_imported_audio(
         chunks_created = 0
         for audio_file in files:
             local_raw_path = Path(audio_file["local_raw_path"])
-            speech_ranges = vad.detect(local_raw_path)
-            for speech_range in speech_ranges:
+            vad_result = vad.detect(local_raw_path)
+            for speech_range in vad_result.ranges:
                 ranges_created += 1
                 for chunk_range in _split_range(speech_range, max_chunk_ms=max_chunk_ms):
                     created_at = datetime.now(timezone.utc).isoformat()
@@ -80,8 +80,8 @@ def preprocess_imported_audio(
                             chunk_range.end_ms,
                             absolute_start_at,
                             absolute_end_at,
-                            vad.__class__.__name__,
-                            _vad_config_json(vad),
+                            vad_result.backend,
+                            json.dumps(vad_result.config, ensure_ascii=False, sort_keys=True),
                             created_at,
                             chunk_range.start_ms,
                             chunk_range.end_ms,
@@ -130,12 +130,3 @@ def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, sta
 
 def _absolute_time(recorded_at: str, offset_ms: int) -> str:
     return (datetime.fromisoformat(recorded_at) + timedelta(milliseconds=offset_ms)).isoformat()
-
-
-def _vad_config_json(vad: VADPort) -> str:
-    config = {
-        key: value
-        for key, value in vars(vad).items()
-        if isinstance(value, str | int | float | bool | type(None))
-    }
-    return json.dumps(config, ensure_ascii=False, sort_keys=True)

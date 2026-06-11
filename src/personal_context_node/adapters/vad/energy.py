@@ -3,7 +3,7 @@ from __future__ import annotations
 import wave
 from pathlib import Path
 
-from personal_context_node.core.ports.vad import SpeechRange
+from personal_context_node.core.ports.vad import SpeechRange, VADResult
 
 
 class EnergyVadAdapter:
@@ -22,7 +22,7 @@ class EnergyVadAdapter:
         self.merge_gap_ms = merge_gap_ms
         self.min_speech_ms = min_speech_ms
 
-    def detect(self, audio_path: Path) -> list[SpeechRange]:
+    def detect(self, audio_path: Path) -> VADResult:
         with wave.open(str(audio_path), "rb") as wav:
             sample_width = wav.getsampwidth()
             sample_rate = wav.getframerate()
@@ -48,7 +48,18 @@ class EnergyVadAdapter:
                 cursor_ms += self.frame_ms
             if active_start_ms is not None and cursor_ms - active_start_ms >= self.min_speech_ms:
                 ranges.append(SpeechRange(start_ms=active_start_ms, end_ms=cursor_ms))
-        return self._merge(ranges)
+        return VADResult(
+            ranges=self._merge(ranges),
+            backend=self.__class__.__name__,
+            backend_version=None,
+            config={
+                "frame_ms": self.frame_ms,
+                "threshold": self.threshold,
+                "merge_gap_ms": self.merge_gap_ms,
+                "min_speech_ms": self.min_speech_ms,
+            },
+            warnings=[],
+        )
 
     def _merge(self, ranges: list[SpeechRange]) -> list[SpeechRange]:
         merged: list[SpeechRange] = []
