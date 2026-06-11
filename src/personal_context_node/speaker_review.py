@@ -11,6 +11,7 @@ import yaml
 
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
+from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.obsidian_sync_log import record_sync_log
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -36,6 +37,7 @@ class ParsedSpeakerReview:
 
 
 def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | None = None) -> Path:
+    assert_personal_context_vault(config)
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -112,6 +114,7 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
 
 
 def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResult:
+    assert_personal_context_vault(config)
     review_path = config.obsidian_vault / "90_System" / "Speaker_Review" / f"{day}.md"
     if not review_path.exists():
         return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)

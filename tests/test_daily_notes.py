@@ -91,6 +91,20 @@ def test_publish_daily_note_uses_protocol_block_markers(tmp_path: Path) -> None:
     assert "pcn:user start" not in text
 
 
+def test_publish_daily_note_refuses_supcon_vault(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "Supcon")
+    _insert_daily_summary(config.database_path)
+
+    try:
+        publish_daily_note(config=config, day="2087-05-10")
+    except ValueError as exc:
+        assert "Supcon" in str(exc)
+    else:
+        raise AssertionError("publish_daily_note wrote into a Supcon vault")
+
+    assert not (config.obsidian_vault / "10_Daily").exists()
+
+
 def test_publish_daily_note_counts_metrics_by_session_date_key(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_daily_summary(config.database_path, recorded_at="2087-05-09T23:55:00+08:00")

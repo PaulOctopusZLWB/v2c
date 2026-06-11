@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
+from personal_context_node.obsidian_safety import assert_personal_context_vault
 
 
 def record_sync_log(
@@ -18,6 +19,7 @@ def record_sync_log(
     status: str,
     message: str,
 ) -> None:
+    assert_personal_context_vault(config)
     created_at = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """

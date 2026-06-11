@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
+from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -16,6 +17,7 @@ class PublishDailyNoteResult:
 
 
 def publish_daily_note(*, config: AppConfig, day: str, source_run_id: str | None = None) -> PublishDailyNoteResult:
+    assert_personal_context_vault(config)
     conn = connect(config.database_path)
     try:
         initialize(conn)

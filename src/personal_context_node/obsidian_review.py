@@ -17,6 +17,7 @@ from personal_context_node.core.protocols.memory import (
 )
 from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.identity_keys import load_or_create_signing_key
+from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.obsidian_sync_log import record_sync_log
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -41,6 +42,7 @@ ALLOWED_REVIEW_ACTIONS = {"confirm", "edit", "reject", "defer", "exclude_from_me
 
 
 def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str | None = None) -> Path:
+    assert_personal_context_vault(config)
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -113,6 +115,7 @@ def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str 
 
 
 def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandidatesResult:
+    assert_personal_context_vault(config)
     review_path = config.obsidian_vault / "30_Memory_Candidates" / f"{day}.md"
     checked_actions = _checked_candidate_actions(review_path)
     if not checked_actions:
