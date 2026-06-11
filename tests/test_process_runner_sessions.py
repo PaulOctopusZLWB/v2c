@@ -59,6 +59,12 @@ def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert sessions == [{"date_key": "2087-05-10", "segment_count": 2}]
+    assert any(
+        row["task_type"] == "daily_generate"
+        and row["target_id"] == "2087-05-10"
+        and row["status"] == "pending"
+        for row in process_status_rows(config=config)
+    )
 
 
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:

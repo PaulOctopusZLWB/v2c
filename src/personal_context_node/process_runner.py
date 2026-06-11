@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.core.ports.vad import VADPort
+from personal_context_node.llm_processing import generate_daily_context
+from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.sessions import derive_sessions_for_day
 from personal_context_node.storage.sqlite import connect, fetch_all
 from personal_context_node.tasks import claim_next_task, enqueue_task, fail_task, start_task, succeed_task
@@ -33,6 +36,10 @@ def process_once(
     if task is None:
         task = claim_next_task(config=config, task_type="session_derive", run_id=run_id)
     if task is None:
+        task = claim_next_task(config=config, task_type="daily_generate", run_id=run_id)
+    if task is None:
+        task = claim_next_task(config=config, task_type="obsidian_publish", run_id=run_id)
+    if task is None:
         return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
 
     try:
@@ -47,6 +54,12 @@ def process_once(
                 enqueue_task(config=config, task_type="session_derive", target_type="date_key", target_id=date_key)
         elif task.task_type == "session_derive":
             derive_sessions_for_day(config=config, day=task.target_id)
+            enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id=task.target_id)
+        elif task.task_type == "daily_generate":
+            generate_daily_context(config=config, day=task.target_id, llm=RuleBasedLLMAdapter())
+            enqueue_task(config=config, task_type="obsidian_publish", target_type="date_key", target_id=task.target_id)
+        elif task.task_type == "obsidian_publish":
+            publish_obsidian_day(config=config, day=task.target_id)
         else:
             raise ValueError(f"unsupported task type: {task.task_type}")
         succeed_task(config=config, task_id=task.task_id)

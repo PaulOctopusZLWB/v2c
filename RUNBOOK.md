@@ -84,6 +84,13 @@ It also implements session derivation:
 4. ASR task fan-in registers one `session_derive` task for the affected `date_key` when all chunks for an audio file are transcribed.
 5. `pcn publish-session-notes` writes `20_Conversations/YYYY-MM-DD/ses_*.md` notes without embedding full transcripts.
 
+It also implements the daily/publish task DAG:
+
+1. `session_derive` success enqueues `daily_generate`.
+2. `daily_generate` creates daily context and enqueues `obsidian_publish`.
+3. `obsidian_publish` writes session notes, memory candidate review, and speaker review.
+4. Repeated `pcn process-run` calls can now advance VAD -> ASR -> session -> daily -> Obsidian publish.
+
 Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, session, context-generation, review, archive, and scheduling boundaries testable before model integration.
 
 ## Local uv Run
@@ -240,7 +247,7 @@ run_id=run_... job_name=memory-verify status=succeeded error=
 ```
 
 After importing the seven sample files, `pcn process-status` should show seven pending `vad` tasks.
-Repeated `pcn process-run` calls advance those tasks, enqueue/run `asr` tasks for generated chunks, and then run `session_derive`.
+Repeated `pcn process-run` calls advance those tasks, enqueue/run `asr` tasks for generated chunks, run `session_derive`, generate daily context, and publish Obsidian review/session notes.
 
 It also implements the daily report lifecycle:
 
