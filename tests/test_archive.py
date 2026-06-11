@@ -30,11 +30,30 @@ def test_archive_completed_audio_copies_and_hash_verifies(tmp_path: Path) -> Non
     conn = connect(config.database_path)
     try:
         audio = fetch_all(conn, "select status from audio_files")
-        records = fetch_all(conn, "select archive_path, verified from archive_records")
+        records = fetch_all(
+            conn,
+            """
+            select target_type, target_id, archive_path, status, verified, last_error, created_at, updated_at
+            from archive_records
+            """,
+        )
     finally:
         conn.close()
     assert audio == [{"status": "archived"}]
-    assert records == [{"archive_path": str(archived), "verified": 1}]
+    assert records == [
+        {
+            "target_type": "audio_file",
+            "target_id": "aud_test",
+            "archive_path": str(archived),
+            "status": "verified",
+            "verified": 1,
+            "last_error": None,
+            "created_at": records[0]["created_at"],
+            "updated_at": records[0]["updated_at"],
+        }
+    ]
+    assert records[0]["created_at"]
+    assert records[0]["updated_at"]
 
 
 def test_archive_unavailable_does_not_mark_audio_archived(tmp_path: Path) -> None:

@@ -42,21 +42,28 @@ def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> Archi
             if not result.verified:
                 pending += 1
                 continue
+            archived_at = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 """
                 insert into archive_records (
-                  archive_record_id, audio_file_id, source_path, archive_path,
-                  sha256, verified, archived_at
-                ) values (?, ?, ?, ?, ?, ?, ?)
+                  archive_record_id, target_type, target_id, audio_file_id,
+                  source_path, archive_path, sha256, status, verified, archived_at,
+                  created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     f"arc_{uuid4().hex}",
+                    "audio_file",
+                    row["audio_file_id"],
                     row["audio_file_id"],
                     str(source_path),
                     str(result.archive_path),
                     row["sha256"],
+                    "verified",
                     1,
-                    datetime.now(timezone.utc).isoformat(),
+                    archived_at,
+                    archived_at,
+                    archived_at,
                 ),
             )
             conn.execute("update audio_files set status = 'archived' where audio_file_id = ?", (row["audio_file_id"],))

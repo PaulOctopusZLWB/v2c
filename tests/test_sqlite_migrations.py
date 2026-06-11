@@ -143,6 +143,31 @@ def test_initialize_daily_reports_schema_uses_date_key_and_metrics(tmp_path) -> 
     assert column_by_name["updated_at"]["notnull"] == 1
 
 
+def test_initialize_archive_records_schema_tracks_targets_and_status(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(archive_records)")
+        indexes = fetch_all(conn, "pragma index_list(archive_records)")
+        index_columns = fetch_all(conn, "pragma index_info(idx_archive_records_target_archive)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["target_type"]["type"].lower() == "text"
+    assert column_by_name["target_type"]["notnull"] == 1
+    assert column_by_name["target_id"]["type"].lower() == "text"
+    assert column_by_name["target_id"]["notnull"] == 1
+    assert column_by_name["status"]["notnull"] == 1
+    assert column_by_name["last_error"]["type"].lower() == "text"
+    assert column_by_name["created_at"]["notnull"] == 1
+    assert column_by_name["updated_at"]["notnull"] == 1
+    index_names = {row["name"] for row in indexes}
+    assert "idx_archive_records_target_archive" in index_names
+    assert [row["name"] for row in index_columns] == ["target_type", "target_id", "archive_path"]
+
+
 def test_initialize_migrates_legacy_daily_reports_day_to_date_key(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

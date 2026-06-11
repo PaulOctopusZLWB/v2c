@@ -238,12 +238,18 @@ create table if not exists segment_person_overrides (
 
 create table if not exists archive_records (
   archive_record_id text primary key,
+  target_type text not null default '',
+  target_id text not null default '',
   audio_file_id text not null references audio_files(audio_file_id),
   source_path text not null,
   archive_path text not null,
   sha256 text not null,
+  status text not null default 'verified',
   verified integer not null,
-  archived_at text not null
+  archived_at text not null,
+  last_error text,
+  created_at text not null default '',
+  updated_at text not null default ''
 );
 
 create table if not exists job_runs (
@@ -365,6 +371,17 @@ def initialize(conn: sqlite3.Connection) -> None:
     if "day" in daily_report_columns:
         conn.execute("update daily_reports set date_key = day where date_key is null and day is not null")
     conn.execute("create unique index if not exists idx_daily_reports_date_key on daily_reports(date_key)")
+    _ensure_column(conn, "archive_records", "target_type", "text not null default ''")
+    _ensure_column(conn, "archive_records", "target_id", "text not null default ''")
+    _ensure_column(conn, "archive_records", "status", "text not null default 'verified'")
+    _ensure_column(conn, "archive_records", "last_error", "text")
+    _ensure_column(conn, "archive_records", "created_at", "text not null default ''")
+    _ensure_column(conn, "archive_records", "updated_at", "text not null default ''")
+    conn.execute("update archive_records set target_type = 'audio_file' where target_type = ''")
+    conn.execute("update archive_records set target_id = audio_file_id where target_id = ''")
+    conn.execute(
+        "create unique index if not exists idx_archive_records_target_archive on archive_records(target_type, target_id, archive_path)"
+    )
     _ensure_column(conn, "evidence_refs", "source_ref", "text not null default ''")
     _ensure_column(conn, "evidence_refs", "owner_id", "text")
     _ensure_column(conn, "evidence_refs", "summary", "text")
