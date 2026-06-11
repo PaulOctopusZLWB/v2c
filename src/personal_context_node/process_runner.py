@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.llm import LLMPort
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.core.ports.vad import VADPort
 from personal_context_node.llm_processing import generate_daily_context
@@ -29,8 +30,10 @@ def process_once(
     run_id: str,
     vad: VADPort,
     asr: ASRPort,
+    llm: LLMPort | None = None,
     max_chunk_ms: int = 30_000,
 ) -> ProcessOnceResult:
+    llm_adapter = llm or RuleBasedLLMAdapter()
     task = claim_next_task(config=config, task_type="vad", run_id=run_id)
     if task is None:
         task = claim_next_task(config=config, task_type="asr", run_id=run_id)
@@ -60,13 +63,13 @@ def process_once(
             for session_id in _session_ids_for_day(config=config, day=task.target_id):
                 enqueue_task(config=config, task_type="summarize_session", target_type="session", target_id=session_id)
         elif task.task_type == "summarize_session":
-            summarize_session(config=config, session_id=task.target_id, llm=RuleBasedLLMAdapter())
+            summarize_session(config=config, session_id=task.target_id, llm=llm_adapter)
             succeed_task(config=config, task_id=task.task_id)
             for date_key in _ready_daily_generate_dates(config=config, session_id=task.target_id):
                 enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id=date_key)
             return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
         elif task.task_type == "daily_generate":
-            generate_daily_context(config=config, day=task.target_id, llm=RuleBasedLLMAdapter())
+            generate_daily_context(config=config, day=task.target_id, llm=llm_adapter)
             enqueue_task(config=config, task_type="obsidian_publish", target_type="date_key", target_id=task.target_id)
         elif task.task_type == "obsidian_publish":
             publish_obsidian_day(config=config, day=task.target_id)

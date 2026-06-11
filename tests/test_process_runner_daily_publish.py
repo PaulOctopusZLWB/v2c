@@ -5,9 +5,36 @@ from pathlib import Path
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft, SessionSummary
 from personal_context_node.process_runner import process_once
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import enqueue_task, process_status_rows
+
+
+class RecordingLLM:
+    def __init__(self) -> None:
+        self.daily_segments: list[dict[str, object]] = []
+
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
+        self.daily_segments = transcript_segments
+        return DailyContext(
+            day=day,
+            summary="模拟 LLM 汇总：无需外部 API。",
+            todos=[],
+            facts=[],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="模拟 LLM 认为音频处理必须保持本地。",
+                    claim_type="requirement",
+                    confidence=0.88,
+                    evidence_source_ids=[str(transcript_segments[0]["evidence_id"])],
+                )
+            ],
+        )
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        raise AssertionError("daily_generate should not request a session summary")
 
 
 def test_process_runner_generates_daily_and_publishes_obsidian(tmp_path: Path) -> None:
@@ -50,6 +77,49 @@ def test_process_runner_generates_daily_and_publishes_obsidian(tmp_path: Path) -
     assert (config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md").exists()
     assert (config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md").exists()
     assert (config.obsidian_vault / "90_System" / "Speaker_Review" / "2087-05-10.md").exists()
+
+
+def test_process_once_daily_generate_uses_injected_llm_adapter(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_transcript(config.database_path)
+    enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id="2087-05-10")
+    llm = RecordingLLM()
+
+    result = process_once(
+        config=config,
+        run_id="run_daily_fake_llm",
+        vad=EnergyVadAdapter(),
+        asr=MockASRAdapter(),
+        llm=llm,
+    )
+
+    assert result.task_type == "daily_generate"
+    assert result.status == "succeeded"
+    assert llm.daily_segments == [
+        {
+            "segment_id": "seg_test",
+            "start_ms": 0,
+            "end_ms": 1000,
+            "text": "我决定继续接入真实 ASR，需要保持音频本地处理。",
+            "evidence_id": "ev_test",
+            "speaker": "self",
+        }
+    ]
+    assert "wav" not in str(llm.daily_segments).lower()
+
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select candidate_claim, source_type, status from memory_candidates")
+    finally:
+        conn.close()
+
+    assert candidates == [
+        {
+            "candidate_claim": "模拟 LLM 认为音频处理必须保持本地。",
+            "source_type": "llm_daily_context",
+            "status": "pending_review",
+        }
+    ]
 
 
 def _insert_session_and_transcript(database_path: Path) -> None:

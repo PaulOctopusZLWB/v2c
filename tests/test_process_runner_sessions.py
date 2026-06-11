@@ -7,10 +7,31 @@ from pathlib import Path
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.llm import DailyContext, SessionSummary
 from personal_context_node.pipeline import run_first_milestone
 from personal_context_node.process_runner import process_once
 from personal_context_node.storage.sqlite import connect, fetch_all
 from personal_context_node.tasks import process_status_rows
+
+
+class RecordingSessionLLM:
+    def __init__(self) -> None:
+        self.session_segments: list[dict[str, object]] = []
+
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
+        raise AssertionError("summarize_session should not request daily context")
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        self.session_segments = transcript_segments
+        return SessionSummary(
+            session_id=session_id,
+            headline="模拟 LLM session headline",
+            summary="模拟 LLM session summary",
+            topics=["本地处理"],
+            decisions=[],
+            todos=[],
+            open_questions=[],
+        )
 
 
 def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
@@ -98,6 +119,44 @@ def test_summarize_session_success_fans_in_to_daily_generate(tmp_path: Path) -> 
         and row["status"] == "pending"
         for row in process_status_rows(config=config)
     )
+
+
+def test_process_once_session_summary_uses_injected_llm_adapter(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    for run_id in ["run_vad", "run_asr", "run_session"]:
+        process_once(
+            config=config,
+            run_id=run_id,
+            vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+            asr=MockASRAdapter(text="我决定继续接入真实 ASR，需要保持音频本地处理。"),
+            max_chunk_ms=1000,
+        )
+    llm = RecordingSessionLLM()
+
+    summary_result = process_once(
+        config=config,
+        run_id="run_summary_fake_llm",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="我决定继续接入真实 ASR，需要保持音频本地处理。"),
+        llm=llm,
+        max_chunk_ms=1000,
+    )
+
+    assert summary_result.task_type == "summarize_session"
+    assert summary_result.status == "succeeded"
+    assert llm.session_segments
+    assert "wav" not in str(llm.session_segments).lower()
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(conn, "select content_json, prompt_version from summaries where summary_type = 'session'")
+    finally:
+        conn.close()
+    assert "模拟 LLM session headline" in summaries[0]["content_json"]
+    assert summaries[0]["prompt_version"] == "llm_port.session_summary.v1"
 
 
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:
