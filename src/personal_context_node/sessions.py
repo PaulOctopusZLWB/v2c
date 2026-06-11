@@ -48,6 +48,18 @@ def derive_sessions_for_day(
             str(row["first_segment_id"]): str(row["session_id"])
             for row in fetch_all(conn, "select first_segment_id, session_id from sessions where date_key = ?", (day,))
         }
+        conn.execute(
+            """
+            update transcript_segments
+            set session_id = null
+            where audio_file_id in (
+              select audio_file_id
+              from audio_files
+              where substr(recorded_at, 1, 10) = ?
+            )
+            """,
+            (day,),
+        )
         conn.execute("delete from sessions where date_key = ?", (day,))
         assigned = 0
         for group in groups:

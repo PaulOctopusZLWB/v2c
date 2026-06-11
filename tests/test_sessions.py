@@ -59,6 +59,64 @@ def test_derive_sessions_sets_primary_person_from_segment_attribution(tmp_path: 
     assert rows == [{"primary_person_id": "person_paul"}, {"primary_person_id": "person_paul"}]
 
 
+def test_derive_sessions_clears_inactive_segment_session_assignments_on_rebuild(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_and_segments(config.database_path)
+
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update transcript_segments set is_active = 0 where segment_id = 'seg_early'")
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version, is_active
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "seg_early_rerun",
+                "aud_test",
+                "chk_seg_early_rerun",
+                0,
+                10_000,
+                "重跑片段",
+                "zh",
+                "self",
+                "ev_seg_early_rerun",
+                0.99,
+                "MockASRAdapter",
+                "mock-asr",
+                "test",
+                1,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            """
+            select segment_id, is_active, session_id
+            from transcript_segments
+            where segment_id in ('seg_early', 'seg_early_rerun')
+            order by segment_id
+            """,
+        )
+    finally:
+        conn.close()
+
+    assert rows[0] == {"segment_id": "seg_early", "is_active": 0, "session_id": None}
+    assert rows[1]["segment_id"] == "seg_early_rerun"
+    assert rows[1]["is_active"] == 1
+    assert rows[1]["session_id"]
+
+
 def _insert_audio_and_segments(database_path: Path) -> None:
     conn = connect(database_path)
     try:
