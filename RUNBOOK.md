@@ -7,12 +7,13 @@ This repository currently implements the first milestone from `IMPLEMENTATION_PL
 1. `pcn init` creates local data directories, SQLite schema, Obsidian vault folders, and an optional TOML config.
 2. `pcn health` checks SQLite initialization and Obsidian vault writability.
 3. `pcn doctor` aggregates health, task, job, memory verification, source, and archive diagnostics.
-4. Import WAV files from a source directory into local raw storage.
-5. Register imported audio in SQLite.
-6. Produce deterministic mock transcript segments.
-7. Generate memory candidates with transcript evidence references.
-8. Optionally confirm the first candidate into a signed `memory_card.created` event.
-9. Publish a daily Markdown note to the configured PersonalContext Obsidian vault.
+4. `pcn ingest-scan` lists WAV candidates from a source directory before import.
+5. `pcn ingest-import` imports WAV files from a source directory into local raw storage.
+6. Register imported audio in SQLite and enqueue the first `vad` task.
+7. Produce deterministic mock transcript segments.
+8. Generate memory candidates with transcript evidence references.
+9. Optionally confirm the first candidate into a signed `memory_card.created` event.
+10. Publish a daily Markdown note to the configured PersonalContext Obsidian vault.
 
 It also implements the first audio preprocessing boundary:
 
@@ -131,6 +132,15 @@ uv run pcn doctor \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --source-dir sample_data
+uv run pcn ingest-scan \
+  --source-dir sample_data
+uv run pcn ingest-import \
+  --source-dir sample_data \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault
+uv run pcn process-status \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault
 uv run pcn run-first-milestone \
   --source-dir sample_data \
   --data-dir .smoke-data \
@@ -189,6 +199,15 @@ Expected first milestone smoke output:
 ```text
 imported_files=7 transcript_segments=7 memory_candidates=7 signed_events=1
 ```
+
+Expected ingest scan/import smoke output:
+
+```text
+files_found=7
+imported_files=7
+```
+
+After import, `pcn process-status` should show seven pending `vad` tasks. `pcn run-first-milestone` remains a compact end-to-end smoke wrapper; use a fresh `--data-dir` if you want it to report `imported_files=7` after a standalone import smoke.
 
 Expected preprocessing smoke output shape:
 

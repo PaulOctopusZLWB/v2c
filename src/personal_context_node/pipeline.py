@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import re
-import shutil
 import sqlite3
-import wave
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,9 +12,9 @@ from personal_context_node.core.protocols.memory import (
     MemoryCard,
     SubjectRef,
 )
+from personal_context_node.ingest import import_audio_files_in_conn
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
-from personal_context_node.tasks import enqueue_task_in_conn
 
 
 @dataclass(frozen=True)
@@ -39,7 +34,8 @@ def run_first_milestone(
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        imported = _import_wavs(conn, config, source_dir)
+        imported = import_audio_files_in_conn(conn, config=config, source_dir=source_dir)
+        conn.commit()
         _mock_transcribe(conn)
         _create_memory_candidates(conn)
         if confirm_first_candidate:
@@ -53,47 +49,6 @@ def run_first_milestone(
         )
     finally:
         conn.close()
-
-
-def _import_wavs(conn: sqlite3.Connection, config: AppConfig, source_dir: Path) -> int:
-    imported = 0
-    for source_path in sorted(source_dir.glob("*.wav")):
-        sha256 = _sha256(source_path)
-        existing = conn.execute(
-            "select 1 from audio_files where source_path = ? and sha256 = ?",
-            (str(source_path), sha256),
-        ).fetchone()
-        if existing:
-            continue
-        recorded_date = _recorded_date_from_name(source_path)
-        local_dir = config.raw_audio_dir / recorded_date
-        local_dir.mkdir(parents=True, exist_ok=True)
-        local_path = local_dir / source_path.name
-        shutil.copy2(source_path, local_path)
-        audio_file_id = f"aud_{uuid4().hex}"
-        conn.execute(
-            """
-            insert into audio_files (
-              audio_file_id, source_device, source_path, local_raw_path, sha256,
-              duration_ms, recorded_at, imported_at, status
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                audio_file_id,
-                config.source_device,
-                str(source_path),
-                str(local_path),
-                sha256,
-                _duration_ms(source_path),
-                f"{recorded_date}T00:00:00+08:00",
-                datetime.now(timezone.utc).isoformat(),
-                "imported",
-            ),
-        )
-        enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
-        imported += 1
-    conn.commit()
-    return imported
 
 
 def _mock_transcribe(conn: sqlite3.Connection) -> None:
@@ -248,27 +203,6 @@ def _publish_daily_notes(conn: sqlite3.Connection, config: AppConfig) -> None:
             if row["candidate_claim"]:
                 lines.append(f"- [{row['status']}] {row['candidate_claim']}")
         note.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return f"sha256:{digest.hexdigest()}"
-
-
-def _duration_ms(path: Path) -> int:
-    with wave.open(str(path), "rb") as wav:
-        return round(wav.getnframes() / wav.getframerate() * 1000)
-
-
-def _recorded_date_from_name(path: Path) -> str:
-    match = re.search(r"_(\d{8})_", path.name)
-    if not match:
-        return datetime.now().date().isoformat()
-    raw = match.group(1)
-    return f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
 
 
 def _count(conn: sqlite3.Connection, table: str) -> int:

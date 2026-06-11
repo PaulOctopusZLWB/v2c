@@ -18,6 +18,7 @@ from personal_context_node.daily_reports import get_daily_report_status
 from personal_context_node.doctor import run_doctor
 from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.init_health import check_health, initialize_workspace
+from personal_context_node.ingest import import_audio_files, scan_audio_files
 from personal_context_node.launchd import install_launchd_plists, uninstall_launchd_plists, write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_export import export_memory_events
@@ -139,6 +140,30 @@ def run_first_milestone(
             ]
         )
     )
+
+
+@app.command(name="ingest-scan")
+def ingest_scan(
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+) -> None:
+    result = scan_audio_files(source_dir=source_dir)
+    typer.echo(f"files_found={len(result.files)}")
+    for path in result.files:
+        typer.echo(str(path))
+
+
+@app.command(name="ingest-import")
+def ingest_import(
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = import_audio_files(config=config, source_dir=source_dir)
+    typer.echo(f"imported_files={result.imported_files}")
 
 
 @app.command()
