@@ -81,10 +81,10 @@ def test_process_runner_generates_daily_and_publishes_obsidian(tmp_path: Path) -
     assert daily_note.exists()
     daily_text = daily_note.read_text(encoding="utf-8")
     assert "source_run_id: run_publish\n" in daily_text
-    assert "<!-- pcn:managed start type=\"daily_headline\" date_key=\"2087-05-10\" -->" in daily_text
-    assert "<!-- pcn:managed start type=\"daily_sessions\" date_key=\"2087-05-10\" -->" in daily_text
+    assert '<!-- pcn:block start id="daily_headline" kind="managed" version="1" -->' in daily_text
+    assert '<!-- pcn:block start id="daily_sessions" kind="managed" version="1" -->' in daily_text
     assert "- [[20_Conversations/2087-05-10/ses_test|ses_test]]" in daily_text
-    assert "<!-- pcn:managed start type=\"daily_decisions\" date_key=\"2087-05-10\" -->" in daily_text
+    assert '<!-- pcn:block start id="daily_decisions" kind="managed" version="1" -->' in daily_text
     assert (config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md").exists()
     review_note = config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md"
     assert review_note.exists()

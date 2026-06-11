@@ -16,8 +16,8 @@ def test_publish_daily_note_preserves_user_notes_block(tmp_path: Path) -> None:
     text = note_path.read_text(encoding="utf-8")
     note_path.write_text(
         text.replace(
-            '<!-- pcn:user end type="user_notes" -->',
-            '用户保留的日报自由笔记。\n<!-- pcn:user end type="user_notes" -->',
+            '<!-- pcn:block end id="user_notes" -->',
+            '用户保留的日报自由笔记。\n<!-- pcn:block end id="user_notes" -->',
         ),
         encoding="utf-8",
     )
@@ -26,8 +26,38 @@ def test_publish_daily_note_preserves_user_notes_block(tmp_path: Path) -> None:
 
     republished = note_path.read_text(encoding="utf-8")
     assert "用户保留的日报自由笔记。" in republished
-    assert republished.count('<!-- pcn:user start type="user_notes" -->') == 1
-    assert republished.count('<!-- pcn:user end type="user_notes" -->') == 1
+    assert republished.count('<!-- pcn:block start id="user_notes" kind="user" version="1" -->') == 1
+    assert republished.count('<!-- pcn:block end id="user_notes" -->') == 1
+
+
+def test_publish_daily_note_migrates_legacy_user_notes_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_daily_summary(config.database_path)
+    publish_daily_note(config=config, day="2087-05-10")
+    note_path = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
+    note_path.write_text(
+        """
+---
+pcn_schema: markdown_note.v1
+note_type: daily
+date_key: 2087-05-10
+---
+
+## User Notes
+
+<!-- pcn:user start type="user_notes" -->
+旧格式自由笔记。
+<!-- pcn:user end type="user_notes" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    publish_daily_note(config=config, day="2087-05-10")
+
+    republished = note_path.read_text(encoding="utf-8")
+    assert "旧格式自由笔记。" in republished
+    assert "pcn:user start" not in republished
+    assert '<!-- pcn:block start id="user_notes" kind="user" version="1" -->' in republished
 
 
 def test_publish_daily_note_writes_markdown_frontmatter(tmp_path: Path) -> None:
@@ -42,6 +72,23 @@ def test_publish_daily_note_writes_markdown_frontmatter(tmp_path: Path) -> None:
     assert "generated_by: personal-context-node\n" in text
     assert "generated_at: " in text
     assert "\npcn_managed: true\n---\n" in text
+
+
+def test_publish_daily_note_uses_protocol_block_markers(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_daily_summary(config.database_path)
+
+    publish_daily_note(config=config, day="2087-05-10")
+
+    note_path = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
+    text = note_path.read_text(encoding="utf-8")
+    assert '<!-- pcn:block start id="daily_headline" kind="managed" version="1" -->' in text
+    assert '<!-- pcn:block end id="daily_headline" -->' in text
+    assert '<!-- pcn:block start id="daily_metrics" kind="managed" version="1" -->' in text
+    assert '<!-- pcn:block start id="user_notes" kind="user" version="1" -->' in text
+    assert '<!-- pcn:block end id="user_notes" -->' in text
+    assert "pcn:managed start" not in text
+    assert "pcn:user start" not in text
 
 
 def test_publish_daily_note_counts_metrics_by_session_date_key(tmp_path: Path) -> None:

@@ -114,49 +114,60 @@ def _daily_note_text(
             "",
             f"# {day}",
             "",
-            f'<!-- pcn:managed start type="daily_headline" date_key="{day}" -->',
+            _block_start("daily_headline", "managed"),
             f"## {summary['headline']}",
             "",
             str(summary["summary"]),
-            f'<!-- pcn:managed end type="daily_headline" date_key="{day}" -->',
+            _block_end("daily_headline"),
             "",
-            f'<!-- pcn:managed start type="daily_metrics" date_key="{day}" -->',
+            _block_start("daily_metrics", "managed"),
             f"- Total imported files: {metrics['file_count']}",
             f"- Total duration ms: {metrics['total_duration_ms']}",
             f"- Active speech ms: {metrics['active_speech_ms']}",
             f"- Sessions: {metrics['session_count']}",
-            f'<!-- pcn:managed end type="daily_metrics" date_key="{day}" -->',
+            _block_end("daily_metrics"),
             "",
-            f'<!-- pcn:managed start type="daily_sessions" date_key="{day}" -->',
+            _block_start("daily_sessions", "managed"),
             *_session_lines(day=day, sessions=sessions),
-            f'<!-- pcn:managed end type="daily_sessions" date_key="{day}" -->',
+            _block_end("daily_sessions"),
             "",
-            f'<!-- pcn:managed start type="daily_todos" date_key="{day}" -->',
+            _block_start("daily_todos", "managed"),
             *_todo_lines(summary.get("todos_rollup", [])),
-            f'<!-- pcn:managed end type="daily_todos" date_key="{day}" -->',
+            _block_end("daily_todos"),
             "",
-            f'<!-- pcn:managed start type="daily_decisions" date_key="{day}" -->',
+            _block_start("daily_decisions", "managed"),
             *_decision_lines(summary.get("decisions_rollup", [])),
-            f'<!-- pcn:managed end type="daily_decisions" date_key="{day}" -->',
+            _block_end("daily_decisions"),
             "",
             "## User Notes",
             "",
-            '<!-- pcn:user start type="user_notes" -->',
+            _block_start("user_notes", "user"),
             user_notes,
-            '<!-- pcn:user end type="user_notes" -->',
+            _block_end("user_notes"),
         ]
     )
+
+
+def _block_start(block_id: str, kind: str) -> str:
+    return f'<!-- pcn:block start id="{block_id}" kind="{kind}" version="1" -->'
+
+
+def _block_end(block_id: str) -> str:
+    return f'<!-- pcn:block end id="{block_id}" -->'
 
 
 def _existing_user_notes(existing_text: str | None) -> str:
     if not existing_text:
         return ""
-    match = re.search(
+    patterns = [
+        r'<!-- pcn:block start id="user_notes" kind="user" version="1" -->\n?(.*?)\n?<!-- pcn:block end id="user_notes" -->',
         r'<!-- pcn:user start type="user_notes" -->\n?(.*?)\n?<!-- pcn:user end type="user_notes" -->',
-        existing_text,
-        flags=re.DOTALL,
-    )
-    return match.group(1).rstrip("\n") if match else ""
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, existing_text, flags=re.DOTALL)
+        if match:
+            return match.group(1).rstrip("\n")
+    return ""
 
 
 def _session_lines(*, day: str, sessions: list[dict[str, object]]) -> list[str]:
