@@ -72,6 +72,27 @@ def test_initialize_sessions_schema_tracks_primary_person_and_date_index(tmp_pat
     assert [row["name"] for row in index_columns] == ["date_key", "started_at"]
 
 
+def test_initialize_speaker_mappings_schema_tracks_design_metadata(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(speaker_mappings)")
+        indexes = fetch_all(conn, "pragma index_list(speaker_mappings)")
+        cluster_index = fetch_all(conn, "pragma index_info(idx_speaker_mappings_cluster)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["speaker_mapping_id"]["type"].lower() == "text"
+    assert column_by_name["confidence"]["type"].lower() == "real"
+    assert column_by_name["source"]["type"].lower() == "text"
+    assert column_by_name["created_at"]["type"].lower() == "text"
+    index_names = {row["name"] for row in indexes}
+    assert "idx_speaker_mappings_cluster" in index_names
+    assert [row["name"] for row in cluster_index] == ["speaker_cluster_id"]
+
+
 def test_initialize_transcript_segments_schema_tracks_absolute_time_and_indexes(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

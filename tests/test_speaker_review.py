@@ -64,7 +64,14 @@ def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_p
     try:
         persons = fetch_all(conn, "select display_name, is_self from persons order by display_name")
         clusters = fetch_all(conn, "select speaker_cluster_id, label from speaker_clusters")
-        mappings = fetch_all(conn, "select speaker, person_label, speaker_cluster_id, person_id from speaker_mappings")
+        mappings = fetch_all(
+            conn,
+            """
+            select speaker, person_label, speaker_mapping_id, speaker_cluster_id,
+                   person_id, confidence, source, created_at
+            from speaker_mappings
+            """,
+        )
         attribution = fetch_all(conn, "select segment_id, person_id, attribution_source from v_segment_attribution order by segment_id")
     finally:
         conn.close()
@@ -73,8 +80,12 @@ def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_p
     assert clusters == [{"speaker_cluster_id": "spk_self", "label": "spk_self"}]
     assert mappings[0]["speaker"] == "spk_self"
     assert mappings[0]["person_label"] == "Paul"
+    assert mappings[0]["speaker_mapping_id"] == "spmap_spk_self"
     assert mappings[0]["speaker_cluster_id"] == "spk_self"
     assert mappings[0]["person_id"].startswith("per_")
+    assert mappings[0]["confidence"] == 1.0
+    assert mappings[0]["source"] == "speaker_review"
+    assert mappings[0]["created_at"]
     by_segment = {row["segment_id"]: row for row in attribution}
     assert by_segment["seg_self"]["attribution_source"] == "cluster_mapping"
     assert by_segment["seg_guest"]["attribution_source"] == "override"

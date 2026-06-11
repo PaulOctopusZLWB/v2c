@@ -257,10 +257,14 @@ create table if not exists speaker_clusters (
 
 create table if not exists speaker_mappings (
   speaker text primary key,
+  speaker_mapping_id text,
   person_label text not null,
-  updated_at text not null,
   speaker_cluster_id text,
-  person_id text
+  person_id text,
+  confidence real,
+  source text not null default 'speaker_review',
+  created_at text not null default '',
+  updated_at text not null
 );
 
 create table if not exists segment_person_overrides (
@@ -411,8 +415,20 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.execute("update audio_chunks set start_ms = source_start_ms where start_ms = 0")
     conn.execute("update audio_chunks set end_ms = source_end_ms where end_ms = 0")
     conn.execute("create index if not exists idx_chunks_audio_time on audio_chunks(audio_file_id, start_ms, end_ms)")
+    _ensure_column(conn, "speaker_mappings", "speaker_mapping_id", "text")
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
     _ensure_column(conn, "speaker_mappings", "person_id", "text")
+    _ensure_column(conn, "speaker_mappings", "confidence", "real")
+    _ensure_column(conn, "speaker_mappings", "source", "text not null default 'speaker_review'")
+    _ensure_column(conn, "speaker_mappings", "created_at", "text not null default ''")
+    conn.execute(
+        """
+        update speaker_mappings
+        set speaker_mapping_id = 'spmap_' || speaker
+        where speaker_mapping_id is null or speaker_mapping_id = ''
+        """
+    )
+    conn.execute("create index if not exists idx_speaker_mappings_cluster on speaker_mappings(speaker_cluster_id)")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
     _ensure_column(conn, "sessions", "primary_person_id", "text")
     conn.execute("create index if not exists idx_sessions_date on sessions(date_key, started_at)")

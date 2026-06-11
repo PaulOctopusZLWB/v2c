@@ -92,15 +92,21 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
             _upsert_speaker_cluster(conn, speaker=speaker, now=now)
             conn.execute(
                 """
-                insert into speaker_mappings (speaker, person_label, updated_at, speaker_cluster_id, person_id)
-                values (?, ?, ?, ?, ?)
+                insert into speaker_mappings (
+                  speaker, speaker_mapping_id, person_label, speaker_cluster_id, person_id,
+                  confidence, source, created_at, updated_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(speaker) do update set
+                  speaker_mapping_id = excluded.speaker_mapping_id,
                   person_label = excluded.person_label,
-                  updated_at = excluded.updated_at,
                   speaker_cluster_id = excluded.speaker_cluster_id,
-                  person_id = excluded.person_id
+                  person_id = excluded.person_id,
+                  confidence = excluded.confidence,
+                  source = excluded.source,
+                  updated_at = excluded.updated_at
                 """,
-                (speaker, person, now, speaker, person_id),
+                (speaker, f"spmap_{speaker}", person, speaker, person_id, 1.0, "speaker_review", now, now),
             )
         for segment_id, person in overrides.items():
             person_id = _person_id_for_label(person)
