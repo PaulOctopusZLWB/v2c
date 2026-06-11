@@ -122,6 +122,7 @@ obsidian_vault = "{vault}"
 
 [device.dji_mic_3]
 root_path = "../mounted_dji"
+stable_seconds = 0
 """.strip(),
         encoding="utf-8",
     )

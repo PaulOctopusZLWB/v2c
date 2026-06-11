@@ -8,6 +8,7 @@ import typer
 from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
 from personal_context_node.adapters.asr.command import CommandASRAdapter
 from personal_context_node.adapters.asr.mock import MockASRAdapter
+from personal_context_node.adapters.file_import.local_directory import LocalDirectoryFileImportAdapter
 from personal_context_node.adapters.llm.command import CommandLLMAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.command import CommandVADAdapter
@@ -21,6 +22,7 @@ from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.init_health import check_health, initialize_workspace
 from personal_context_node.ingest import (
     import_audio_files,
+    import_audio_files_from_port,
     repair_bwf_metadata_in_source_dir,
     scan_audio_files,
 )
@@ -214,10 +216,13 @@ def _ingest_import(
     obsidian_vault: Path | None,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
-    resolved_source_dir = source_dir or config.dji_mic_3.root_path
-    if resolved_source_dir is None:
+    if source_dir is not None:
+        result = import_audio_files(config=config, source_dir=source_dir)
+    elif config.dji_mic_3.root_path is not None:
+        importer = LocalDirectoryFileImportAdapter(device_roots=[config.dji_mic_3.root_path], device_label=config.source_device)
+        result = import_audio_files_from_port(config=config, importer=importer)
+    else:
         raise typer.BadParameter("--source-dir is required when [device.dji_mic_3].root_path is not configured")
-    result = import_audio_files(config=config, source_dir=resolved_source_dir)
     typer.echo(f"imported_files={result.imported_files}")
 
 
