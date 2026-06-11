@@ -105,6 +105,21 @@ def test_initialize_signed_events_trust_status_defaults_unverified(tmp_path) -> 
     assert column_by_name["trust_status"]["dflt_value"] == "'unverified'"
 
 
+def test_initialize_signed_events_indexes_object_versions(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        indexes = fetch_all(conn, "pragma index_list(signed_events)")
+        index_columns = fetch_all(conn, "pragma index_info(idx_signed_events_object)")
+    finally:
+        conn.close()
+
+    index_names = {row["name"] for row in indexes}
+    assert "idx_signed_events_object" in index_names
+    assert [row["name"] for row in index_columns] == ["object_id", "object_version"]
+
+
 def test_initialize_memory_cards_schema_includes_current_version(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

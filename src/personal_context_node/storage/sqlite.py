@@ -310,6 +310,9 @@ on signed_events(object_id, object_version) where trust_status = 'trusted';
 create index if not exists idx_signed_events_owner_seq
 on signed_events(owner_id, owner_sequence);
 
+create index if not exists idx_signed_events_object
+on signed_events(object_id, object_version);
+
 create view if not exists v_segment_attribution as
 select
   ts.segment_id,
