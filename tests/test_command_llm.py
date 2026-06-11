@@ -59,6 +59,35 @@ print(json.dumps({{
     assert ".wav" not in json.dumps(sent).lower()
 
 
+def test_command_llm_adapter_accepts_design_evidence_refs_field(tmp_path: Path) -> None:
+    script = tmp_path / "fake_llm.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "命令式 LLM 摘要",
+  "todos": [],
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": [
+    {
+      "candidate_claim": "用户要求音频本地处理。",
+      "claim_type": "requirement",
+      "confidence": 0.9,
+      "evidence_refs": ["ev_1"]
+    }
+  ]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    context = adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+
+    assert context.memory_candidates[0].evidence_source_ids == ["ev_1"]
+
+
 def test_command_llm_adapter_reports_invalid_json(tmp_path: Path) -> None:
     script = tmp_path / "bad_llm.py"
     script.write_text("print('not json')", encoding="utf-8")

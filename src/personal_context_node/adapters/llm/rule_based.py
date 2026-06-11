@@ -27,7 +27,7 @@ class RuleBasedLLMAdapter:
                     candidate_claim=text,
                     claim_type=claim_type,
                     confidence=0.6,
-                    evidence_source_ids=[str(segment["segment_id"])],
+                    evidence_source_ids=[str(segment["evidence_id"])],
                 )
             )
         return DailyContext(

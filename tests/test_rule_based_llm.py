@@ -24,4 +24,4 @@ def test_rule_based_llm_extracts_todos_facts_and_candidates() -> None:
     assert context.todos == ["保持音频本地处理"]
     assert context.facts == ["我决定下周继续接入真实 ASR，需要保持音频本地处理。"]
     assert context.memory_candidates[0].claim_type == "decision"
-    assert context.memory_candidates[0].evidence_source_ids == ["seg_1"]
+    assert context.memory_candidates[0].evidence_source_ids == ["ev_1"]

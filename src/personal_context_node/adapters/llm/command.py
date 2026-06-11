@@ -46,13 +46,15 @@ class CommandLLMAdapter:
 def _memory_candidate(item: object) -> MemoryCandidateDraft:
     if not isinstance(item, dict):
         raise TerminalPortError("LLM memory_candidate must be an object")
-    for field in ["candidate_claim", "claim_type", "confidence", "evidence_source_ids"]:
+    for field in ["candidate_claim", "claim_type", "confidence"]:
         if field not in item:
             raise TerminalPortError(f"LLM memory_candidate missing required field: {field}")
+    if "evidence_refs" not in item and "evidence_source_ids" not in item:
+        raise TerminalPortError("LLM memory_candidate missing required field: evidence_refs")
     claim_type = str(item["claim_type"])
     if claim_type not in ALLOWED_CLAIM_TYPES:
         raise TerminalPortError(f"LLM memory_candidate has invalid claim_type: {claim_type}")
-    evidence_source_ids = item["evidence_source_ids"]
+    evidence_source_ids = item.get("evidence_refs", item.get("evidence_source_ids"))
     if not isinstance(evidence_source_ids, list):
         raise TerminalPortError("LLM memory_candidate evidence_source_ids must be a list")
     try:
