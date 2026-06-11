@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import BaseModel
@@ -33,6 +34,13 @@ SUPPORTED_EVENT_PAYLOAD_TYPES = {
     "memory_annotation.created": "memory_annotation.v1",
     "memory_annotation.revoked": "memory_annotation_revocation.v1",
 }
+
+
+@dataclass(frozen=True)
+class IdentityRotationReference:
+    old_identity_id: str
+    new_identity_id: str
+    event_hash: str
 
 
 def create_chained_event(
@@ -69,6 +77,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     verified = verify_signed_event(event, public_key)
     trust_status = trust_status_for_event(event=event, verified=verified)
     if trust_status == "trusted" and _event_after_existing_rotation(conn, event=event):
+        trust_status = "rejected"
+    if trust_status == "trusted" and _invalid_successor_chain_start(conn, event=event):
         trust_status = "rejected"
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -148,6 +158,57 @@ def _event_after_existing_rotation(conn: sqlite3.Connection, *, event: SignedEve
         (event.owner_id,),
     ).fetchone()
     return rotation is not None and event.owner_sequence > int(rotation["owner_sequence"])
+
+
+def _invalid_successor_chain_start(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
+    rotation = _trusted_rotation_to_identity(conn, identity_id=event.owner_id)
+    if rotation is None:
+        return False
+    if event.owner_sequence == 1:
+        return not _is_matching_predecessor_profile(event, rotation=rotation)
+    existing_profile = conn.execute(
+        """
+        select 1
+        from identity_profiles
+        where identity_id = ?
+          and predecessor_identity_id = ?
+          and predecessor_rotation_event_hash = ?
+        """,
+        (event.owner_id, rotation.old_identity_id, rotation.event_hash),
+    ).fetchone()
+    return existing_profile is None
+
+
+def _trusted_rotation_to_identity(conn: sqlite3.Connection, *, identity_id: str) -> IdentityRotationReference | None:
+    rows = conn.execute(
+        """
+        select event_hash, payload_json
+        from signed_events
+        where event_type = 'identity_key.rotated'
+          and trust_status = 'trusted'
+        """,
+    ).fetchall()
+    for row in rows:
+        rotation = IdentityKeyRotation.model_validate_json(str(row["payload_json"]))
+        if rotation.new_identity_id == identity_id:
+            return IdentityRotationReference(
+                old_identity_id=rotation.old_identity_id,
+                new_identity_id=rotation.new_identity_id,
+                event_hash=str(row["event_hash"]),
+            )
+    return None
+
+
+def _is_matching_predecessor_profile(event: SignedEvent, *, rotation: IdentityRotationReference) -> bool:
+    if event.event_type != "identity_profile.published":
+        return False
+    profile = IdentityProfile.model_validate(event.payload)
+    return (
+        profile.identity_id == rotation.new_identity_id
+        and profile.predecessor is not None
+        and profile.predecessor.identity_id == rotation.old_identity_id
+        and profile.predecessor.rotation_event_hash == rotation.event_hash
+    )
 
 
 def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:

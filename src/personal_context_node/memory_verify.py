@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
+    IdentityProfile,
     IdentityKeyRotation,
     MemoryAnnotation,
     MemoryAnnotationRevocation,
@@ -29,6 +30,13 @@ class MemoryVerifyResult:
     materialization_mismatches: int = 0
 
 
+@dataclass(frozen=True)
+class IdentityRotationReference:
+    old_identity_id: str
+    new_identity_id: str
+    event_hash: str
+
+
 def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
     conn = connect(config.database_path)
     try:
@@ -49,6 +57,8 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         previous_sequence_by_owner: dict[str, int] = {}
         closed_owner_sequence: dict[str, int] = {}
         forked_event_hashes = _forked_event_hashes(rows)
+        successor_rotations = _successor_rotation_index(rows)
+        trusted_successor_profiles: set[str] = set()
         for row in rows:
             event_hash = _row_event_hash(row)
             try:
@@ -63,6 +73,11 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                         previous_sequence_by_owner=previous_sequence_by_owner,
                     )
                     and _owner_not_closed(row, closed_owner_sequence=closed_owner_sequence)
+                    and _successor_chain_start_valid(
+                        event,
+                        successor_rotations=successor_rotations,
+                        trusted_successor_profiles=trusted_successor_profiles,
+                    )
                 )
             except Exception:
                 row_valid = False
@@ -71,6 +86,11 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                 trust_status = trust_status_for_event(event=event, verified=True)
                 if trust_status == "trusted":
                     trusted_events.append(event)
+                    if _is_matching_predecessor_profile(
+                        event,
+                        rotation=successor_rotations.get(event.owner_id),
+                    ):
+                        trusted_successor_profiles.add(event.owner_id)
                 previous_hash_by_owner[str(row["owner_id"])] = event_hash
                 previous_sequence_by_owner[str(row["owner_id"])] = int(row["owner_sequence"])
                 conn.execute(
@@ -179,6 +199,56 @@ def _forked_event_hashes(rows: list[dict[str, object]]) -> set[str]:
         if len(hashes_by_owner_sequence[(str(row["owner_id"]), int(row["owner_sequence"]))]) > 1
         for event_hash in [_row_event_hash(row)]
     }
+
+
+def _successor_rotation_index(rows: list[dict[str, object]]) -> dict[str, IdentityRotationReference]:
+    rotations: dict[str, IdentityRotationReference] = {}
+    for row in rows:
+        try:
+            event = _event_from_row(row)
+            if event.event_type != "identity_key.rotated":
+                continue
+            if not verify_signed_event(event, str(row["public_key"])):
+                continue
+            if not _hash_fields_valid(row, event):
+                continue
+            if trust_status_for_event(event=event, verified=True) != "trusted":
+                continue
+            rotation = IdentityKeyRotation.model_validate(event.payload)
+            rotations[rotation.new_identity_id] = IdentityRotationReference(
+                old_identity_id=rotation.old_identity_id,
+                new_identity_id=rotation.new_identity_id,
+                event_hash=_row_event_hash(row),
+            )
+        except Exception:
+            continue
+    return rotations
+
+
+def _successor_chain_start_valid(
+    event: SignedEvent,
+    *,
+    successor_rotations: dict[str, IdentityRotationReference],
+    trusted_successor_profiles: set[str],
+) -> bool:
+    rotation = successor_rotations.get(event.owner_id)
+    if rotation is None:
+        return True
+    if event.owner_sequence == 1:
+        return _is_matching_predecessor_profile(event, rotation=rotation)
+    return event.owner_id in trusted_successor_profiles
+
+
+def _is_matching_predecessor_profile(event: SignedEvent, *, rotation: IdentityRotationReference | None) -> bool:
+    if rotation is None or event.event_type != "identity_profile.published":
+        return False
+    profile = IdentityProfile.model_validate(event.payload)
+    return (
+        profile.identity_id == rotation.new_identity_id
+        and profile.predecessor is not None
+        and profile.predecessor.identity_id == rotation.old_identity_id
+        and profile.predecessor.rotation_event_hash == rotation.event_hash
+    )
 
 
 def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[SignedEvent]) -> int:

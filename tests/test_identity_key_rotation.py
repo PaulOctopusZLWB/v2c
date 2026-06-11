@@ -8,6 +8,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
     EvidenceRef,
     IdentityKeyRotation,
+    IdentityProfile,
     MemoryCard,
     SubjectRef,
     create_signed_event,
@@ -81,3 +82,128 @@ def test_memory_verify_rejects_old_identity_events_after_key_rotation(tmp_path: 
         {"event_type": "memory_card.created", "trust_status": "rejected"},
     ]
     assert cards == []
+
+
+def test_rotated_new_identity_rejects_non_profile_first_event(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    old_key = Ed25519PrivateKey.generate()
+    new_key = Ed25519PrivateKey.generate()
+    rotation = IdentityKeyRotation(
+        old_identity_id="did:key:old-owner",
+        new_identity_id="did:key:new-owner",
+        new_public_key_multibase="z6MnewOwner",
+        reason="device_replaced",
+    )
+    rotation_event, old_public_key = create_signed_event(
+        event_type="identity_key.rotated",
+        payload=rotation,
+        signer_did=rotation.old_identity_id,
+        private_key=old_key,
+        owner_sequence=1,
+    )
+    first_new_card = MemoryCard(
+        card_id="mem_new_chain_without_profile",
+        owner_did=rotation.new_identity_id,
+        claim_type="decision",
+        claim="This new identity must publish predecessor profile first.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_new_chain_without_profile",
+                source_type="transcript_segment",
+                source_id="seg_new_chain_without_profile",
+                quote="This new identity must publish predecessor profile first.",
+            )
+        ],
+    )
+    bad_new_event, new_public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=first_new_card,
+        signer_did=rotation.new_identity_id,
+        private_key=new_key,
+        owner_sequence=1,
+    )
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        insert_signed_event(conn, event=rotation_event, public_key=old_public_key)
+        insert_signed_event(conn, event=bad_new_event, public_key=new_public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 2
+    assert result.valid_events == 1
+    assert result.invalid_events == 1
+    conn = connect(config.database_path)
+    try:
+        events = fetch_all(conn, "select event_type, owner_id, trust_status from signed_events order by owner_id")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert events == [
+        {
+            "event_type": "memory_card.created",
+            "owner_id": "did:key:new-owner",
+            "trust_status": "rejected",
+        },
+        {
+            "event_type": "identity_key.rotated",
+            "owner_id": "did:key:old-owner",
+            "trust_status": "trusted",
+        },
+    ]
+    assert cards == []
+
+
+def test_rotated_new_identity_accepts_predecessor_profile_as_first_event(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    old_key = Ed25519PrivateKey.generate()
+    new_key = Ed25519PrivateKey.generate()
+    rotation = IdentityKeyRotation(
+        old_identity_id="did:key:old-owner",
+        new_identity_id="did:key:new-owner",
+        new_public_key_multibase="z6MnewOwner",
+        reason="device_replaced",
+    )
+    rotation_event, old_public_key = create_signed_event(
+        event_type="identity_key.rotated",
+        payload=rotation,
+        signer_did=rotation.old_identity_id,
+        private_key=old_key,
+        owner_sequence=1,
+    )
+    profile = IdentityProfile(
+        identity_id=rotation.new_identity_id,
+        display_name="Paul",
+        public_key_multibase=rotation.new_public_key_multibase,
+        predecessor={
+            "identity_id": rotation.old_identity_id,
+            "rotation_event_hash": rotation_event.event_hash,
+        },
+    )
+    profile_event, new_public_key = create_signed_event(
+        event_type="identity_profile.published",
+        payload=profile,
+        signer_did=profile.identity_id,
+        private_key=new_key,
+        owner_sequence=1,
+    )
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        insert_signed_event(conn, event=rotation_event, public_key=old_public_key)
+        insert_signed_event(conn, event=profile_event, public_key=new_public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 2
+    assert result.valid_events == 2
+    assert result.invalid_events == 0
