@@ -218,11 +218,15 @@ def _ingest_import(
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     if source_dir is not None:
         result = import_audio_files(config=config, source_dir=source_dir)
+    elif not config.dji_mic_3.enabled:
+        importer = LocalDirectoryFileImportAdapter(device_roots=[], device_label=config.source_device)
+        result = import_audio_files_from_port(config=config, importer=importer)
     elif config.dji_mic_3.root_path is not None:
         importer = LocalDirectoryFileImportAdapter(
             device_roots=[config.dji_mic_3.root_path],
             device_label=config.source_device,
             audio_globs=config.dji_mic_3.audio_globs,
+            volume_name_patterns=config.dji_mic_3.volume_name_patterns,
         )
         result = import_audio_files_from_port(config=config, importer=importer)
     else:

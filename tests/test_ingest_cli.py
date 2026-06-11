@@ -122,6 +122,7 @@ obsidian_vault = "{vault}"
 
 [device.dji_mic_3]
 root_path = "../mounted_dji"
+volume_name_patterns = ["*"]
 stable_seconds = 0
 """.strip(),
         encoding="utf-8",
@@ -162,6 +163,7 @@ obsidian_vault = "{vault}"
 
 [device.dji_mic_3]
 root_path = "../mounted_dji"
+volume_name_patterns = ["*"]
 audio_globs = ["**/*.wav"]
 stable_seconds = 0
 """.strip(),
@@ -179,6 +181,40 @@ stable_seconds = 0
     finally:
         conn.close()
     assert audio_files == [{"source_path": str(nested_audio)}]
+
+
+def test_ingest_import_group_cli_skips_disabled_dji_device(tmp_path: Path) -> None:
+    source = tmp_path / "DJI_MIC"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    data_dir = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data_dir}"
+obsidian_vault = "{vault}"
+
+[device.dji_mic_3]
+enabled = false
+root_path = "../DJI_MIC"
+stable_seconds = 0
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["ingest", "import", "--config", str(config_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "imported_files=0" in result.output
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    conn = connect(config.database_path)
+    try:
+        audio_files = fetch_all(conn, "select audio_file_id from audio_files")
+    finally:
+        conn.close()
+    assert audio_files == []
 
 
 def test_ingest_import_records_source_file_metadata(tmp_path: Path) -> None:

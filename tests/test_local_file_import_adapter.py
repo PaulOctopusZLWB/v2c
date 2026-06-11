@@ -46,6 +46,22 @@ def test_local_directory_file_import_adapter_discovers_configured_audio_globs_re
     assert [source.source_path for source in sources] == [nested_audio, upper_audio]
 
 
+def test_local_directory_file_import_adapter_filters_devices_by_volume_name_patterns(tmp_path: Path) -> None:
+    dji_root = tmp_path / "DJI_MIC"
+    other_root = tmp_path / "USB_DRIVE"
+    dji_root.mkdir()
+    other_root.mkdir()
+    adapter = LocalDirectoryFileImportAdapter(
+        device_roots=[dji_root, other_root],
+        device_label="DJI Mic 3",
+        volume_name_patterns=["DJI*", "MIC*"],
+    )
+
+    devices = adapter.discover_devices()
+
+    assert [device.root_path for device in devices] == [dji_root]
+
+
 def _write_tiny_wav(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:

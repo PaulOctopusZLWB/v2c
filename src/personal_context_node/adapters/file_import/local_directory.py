@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,16 +22,24 @@ from personal_context_node.ingest import (
 
 
 class LocalDirectoryFileImportAdapter:
-    def __init__(self, *, device_roots: list[Path], device_label: str, audio_globs: list[str] | tuple[str, ...] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        device_roots: list[Path],
+        device_label: str,
+        audio_globs: list[str] | tuple[str, ...] | None = None,
+        volume_name_patterns: list[str] | tuple[str, ...] | None = None,
+    ) -> None:
         self.device_roots = device_roots
         self.device_label = device_label
         self.audio_globs = tuple(audio_globs or ("*.wav", "*.WAV"))
+        self.volume_name_patterns = tuple(volume_name_patterns or ())
 
     def discover_devices(self) -> list[MountedDevice]:
         return [
             MountedDevice(device_id=str(root), label=self.device_label, root_path=root)
             for root in self.device_roots
-            if root.exists() and root.is_dir()
+            if root.exists() and root.is_dir() and self._matches_volume_name(root)
         ]
 
     def discover_audio_files(self, device: MountedDevice) -> list[SourceAudioFile]:
@@ -52,6 +61,11 @@ class LocalDirectoryFileImportAdapter:
         for pattern in self.audio_globs:
             paths.update(path for path in root_path.glob(pattern) if path.is_file())
         return sorted(paths)
+
+    def _matches_volume_name(self, root: Path) -> bool:
+        if not self.volume_name_patterns:
+            return True
+        return any(fnmatch.fnmatch(root.name, pattern) for pattern in self.volume_name_patterns)
 
     def wait_until_stable(self, source: SourceAudioFile, *, stable_seconds: int) -> StableSourceAudioFile:
         if not is_file_stable(source.source_path, settle_seconds=stable_seconds):
