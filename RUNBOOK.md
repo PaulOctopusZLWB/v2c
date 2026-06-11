@@ -26,7 +26,14 @@ It also implements the ASR boundary before real model integration:
 3. `pcn transcribe` to process `pending_asr` chunks into transcript segments.
 4. Transcript storage now records `chunk_id`, confidence, ASR backend, model name, and model version.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, LLM summaries, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD and mock ASR are not the final production audio intelligence adapters; they exist to make the chunking, storage, and transcript boundaries testable before model integration.
+It also implements the LLM text-processing boundary before provider integration:
+
+1. `LLMPort` as the core-owned text-only context generation interface.
+2. A deterministic `RuleBasedLLMAdapter` for local smoke tests.
+3. `daily_summaries` storage for summary, todos, facts, and inferences.
+4. `pcn summarize` to generate daily context and memory candidates from transcript text only.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, and context-generation boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -47,6 +54,10 @@ uv run pcn transcribe \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --mock-text "真实样本的本地 mock ASR 输出"
+uv run pcn summarize \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --day 2087-05-10
 ```
 
 Expected first milestone smoke output:
@@ -67,6 +78,12 @@ Expected mock ASR smoke output after preprocessing:
 
 ```text
 chunks_transcribed=1 segments_created=1
+```
+
+Expected rule-based summary smoke output after mock ASR:
+
+```text
+summaries_created=1 memory_candidates_created=<n>
 ```
 
 ## Docker Run

@@ -66,6 +66,16 @@ create table if not exists memory_candidates (
   memory_card_id text
 );
 
+create table if not exists daily_summaries (
+  day text primary key,
+  summary text not null,
+  todos_json text not null,
+  facts_json text not null,
+  inferences_json text not null,
+  prompt_version text not null,
+  created_at text not null
+);
+
 create table if not exists signed_events (
   event_id text primary key,
   event_type text not null,

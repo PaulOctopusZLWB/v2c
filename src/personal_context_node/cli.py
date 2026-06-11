@@ -5,9 +5,11 @@ from pathlib import Path
 import typer
 
 from personal_context_node.adapters.asr.mock import MockASRAdapter
+from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.transcription import transcribe_pending_chunks
 
@@ -91,6 +93,27 @@ def transcribe(
             [
                 f"chunks_transcribed={result.chunks_transcribed}",
                 f"segments_created={result.segments_created}",
+            ]
+        )
+    )
+
+
+@app.command()
+def summarize(
+    day: str = typer.Option(..., help="Recording day in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = generate_daily_context(config=config, day=day, llm=RuleBasedLLMAdapter())
+    typer.echo(
+        " ".join(
+            [
+                f"summaries_created={result.summaries_created}",
+                f"memory_candidates_created={result.memory_candidates_created}",
             ]
         )
     )
