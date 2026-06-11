@@ -4,6 +4,7 @@ import hashlib
 import re
 import shutil
 import sqlite3
+import time
 import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +26,12 @@ class IngestImportResult:
     imported_files: int
 
 
+@dataclass(frozen=True)
+class FileSnapshot:
+    size_bytes: int
+    mtime_ns: int
+
+
 def scan_audio_files(*, source_dir: Path) -> IngestScanResult:
     return IngestScanResult(files=sorted(source_dir.glob("*.wav")))
 
@@ -43,6 +50,8 @@ def import_audio_files(*, config: AppConfig, source_dir: Path) -> IngestImportRe
 def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, source_dir: Path) -> int:
     imported = 0
     for source_path in scan_audio_files(source_dir=source_dir).files:
+        if not is_file_stable(source_path):
+            continue
         source_stat = source_path.stat()
         sha256 = _sha256(source_path)
         existing = conn.execute(
@@ -81,6 +90,17 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
         enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
         imported += 1
     return imported
+
+
+def is_file_stable(path: Path, *, settle_seconds: float = 0.1) -> bool:
+    first = _file_snapshot(path)
+    time.sleep(settle_seconds)
+    return first == _file_snapshot(path)
+
+
+def _file_snapshot(path: Path) -> FileSnapshot:
+    stat = path.stat()
+    return FileSnapshot(size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
 
 
 def _sha256(path: Path) -> str:

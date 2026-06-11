@@ -3,6 +3,7 @@ from __future__ import annotations
 import wave
 from pathlib import Path
 
+import personal_context_node.ingest as ingest_module
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
@@ -127,6 +128,37 @@ def test_ingest_import_migrates_existing_database_for_source_metadata(tmp_path: 
     finally:
         conn.close()
     assert audio_files == [{"source_size_bytes": audio_path.stat().st_size, "source_mtime_ns": audio_path.stat().st_mtime_ns}]
+
+
+def test_ingest_import_skips_unstable_audio_candidate(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    monkeypatch.setattr(ingest_module, "is_file_stable", lambda path: False, raising=False)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ingest-import",
+            "--source-dir",
+            str(source),
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "imported_files=0" in result.output
+    conn = connect(config.database_path)
+    try:
+        audio_files = fetch_all(conn, "select audio_file_id from audio_files")
+        tasks = fetch_all(conn, "select task_id from tasks")
+    finally:
+        conn.close()
+    assert audio_files == []
+    assert tasks == []
 
 
 def _write_tiny_wav(path: Path) -> None:

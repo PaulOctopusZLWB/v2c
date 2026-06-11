@@ -8,7 +8,7 @@ This repository currently implements the first milestone from `IMPLEMENTATION_PL
 2. `pcn health` checks SQLite initialization and Obsidian vault writability.
 3. `pcn doctor` aggregates health, task, job, memory verification, source, and archive diagnostics.
 4. `pcn ingest-scan` lists WAV candidates from a source directory before import.
-5. `pcn ingest-import` imports WAV files from a source directory into local raw storage.
+5. `pcn ingest-import` imports stable WAV files from a source directory into local raw storage.
 6. Register imported audio in SQLite with source size, mtime, and sha256 evidence metadata.
 7. Enqueue the first `vad` task for each newly imported audio file.
 8. Produce deterministic mock transcript segments.
