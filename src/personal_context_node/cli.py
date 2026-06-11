@@ -182,31 +182,42 @@ def _ingest_scan(*, source_dir: Path) -> None:
 
 @app.command(name="ingest-import")
 def ingest_import(
-    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
+    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
         Path("/Users/paul/Documents/Obsidian/PersonalContext"),
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _ingest_import(source_dir=source_dir, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _ingest_import(source_dir=source_dir, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 @ingest_app.command(name="import")
 def ingest_import_group(
-    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
+    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
         Path("/Users/paul/Documents/Obsidian/PersonalContext"),
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _ingest_import(source_dir=source_dir, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _ingest_import(source_dir=source_dir, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
-def _ingest_import(*, source_dir: Path, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    result = import_audio_files(config=config, source_dir=source_dir)
+def _ingest_import(
+    *,
+    source_dir: Path | None,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    resolved_source_dir = source_dir or config.dji_mic_3.root_path
+    if resolved_source_dir is None:
+        raise typer.BadParameter("--source-dir is required when [device.dji_mic_3].root_path is not configured")
+    result = import_audio_files(config=config, source_dir=resolved_source_dir)
     typer.echo(f"imported_files={result.imported_files}")
 
 

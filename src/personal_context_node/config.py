@@ -115,8 +115,8 @@ class AppConfig(BaseModel):
 def _resolve_path(base_dir: Path, value: object) -> Path:
     path = Path(str(value))
     if path.is_absolute():
-        return path
-    return base_dir / path
+        return path.resolve(strict=False)
+    return (base_dir / path).resolve(strict=False)
 
 
 def _optional_resolve_path(base_dir: Path, value: object | None) -> Path | None:
