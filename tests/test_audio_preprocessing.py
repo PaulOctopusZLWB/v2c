@@ -7,6 +7,7 @@ from pathlib import Path
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.ingest import import_audio_files
 from personal_context_node.pipeline import run_first_milestone
 from personal_context_node.storage.sqlite import connect, fetch_all
 
@@ -79,3 +80,43 @@ def test_preprocess_imported_audio_persists_ranges_and_chunks(tmp_path: Path) ->
     assert chunks[0]["source_start_ms"] == ranges[0]["start_ms"]
     assert chunks[-1]["source_end_ms"] == ranges[0]["end_ms"]
     assert all((tmp_path / "data").joinpath(chunk["local_chunk_path"]).exists() for chunk in chunks)
+
+
+def test_configured_audio_storage_paths_are_used_by_ingest_and_preprocess(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    _write_wav(wav_path, [(0.20, 0), (0.50, 10_000), (0.20, 0)])
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{tmp_path / "data"}"
+raw_audio_dir = "{tmp_path / "raw-store"}"
+work_audio_dir = "{tmp_path / "work-store"}"
+sqlite_path = "{tmp_path / "state" / "pcn.sqlite"}"
+obsidian_vault = "{tmp_path / "vault"}"
+nas_archive_root = "{tmp_path / "nas"}"
+""".strip(),
+        encoding="utf-8",
+    )
+    config = AppConfig.from_toml(config_path)
+
+    import_audio_files(config=config, source_dir=source)
+    result = preprocess_imported_audio(
+        config=config,
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        max_chunk_ms=300,
+    )
+
+    assert result.audio_chunks_created == 2
+    conn = connect(config.database_path)
+    try:
+        audio_file = fetch_all(conn, "select local_raw_path from audio_files")[0]
+        chunks = fetch_all(conn, "select local_chunk_path from audio_chunks order by source_start_ms")
+    finally:
+        conn.close()
+
+    assert Path(audio_file["local_raw_path"]).is_relative_to(config.raw_audio_dir)
+    assert all(Path(chunk["local_chunk_path"]).is_relative_to(config.work_audio_dir) for chunk in chunks)
+    assert all(Path(chunk["local_chunk_path"]).exists() for chunk in chunks)

@@ -12,8 +12,12 @@ def test_app_config_loads_local_toml(tmp_path: Path) -> None:
         """
 [paths]
 data_dir = "pcn-data"
+raw_audio_dir = "audio/inbox"
+work_audio_dir = "audio/scratch"
+sqlite_path = "state/custom.sqlite"
 obsidian_vault = "/vault"
 nas_archive_root = "/nas"
+identity_dir = "identity-store"
 
 [identity]
 owner_did = "did:key:configured-owner"
@@ -43,8 +47,12 @@ edit_grace_seconds = 45
     config = AppConfig.from_toml(config_path)
 
     assert config.data_dir == tmp_path / "config" / "pcn-data"
+    assert config.raw_audio_dir == tmp_path / "config" / "audio" / "inbox"
+    assert config.work_audio_dir == tmp_path / "config" / "audio" / "scratch"
+    assert config.database_path == tmp_path / "config" / "state" / "custom.sqlite"
     assert config.obsidian_vault == Path("/vault")
     assert config.nas_archive_root == Path("/nas")
+    assert config.identity_dir == tmp_path / "config" / "identity-store"
     assert config.owner_did == "did:key:configured-owner"
     assert config.signing_key_path == tmp_path / "config" / "keys" / "configured_ed25519.key"
     assert config.asr_backend == "command"

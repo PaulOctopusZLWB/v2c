@@ -34,6 +34,10 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert (vault / "30_Memory_Candidates").is_dir()
     assert config_path.exists()
     config_text = config_path.read_text(encoding="utf-8")
+    assert "raw_audio_dir" in config_text
+    assert "work_audio_dir" in config_text
+    assert "sqlite_path" in config_text
+    assert "identity_dir" in config_text
     assert "obsidian_vault" in config_text
     assert "send_person_names = true" in config_text
     assert "send_speaker_labels = true" in config_text

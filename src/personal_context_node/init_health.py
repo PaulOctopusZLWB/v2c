@@ -32,9 +32,9 @@ class HealthResult:
 
 def initialize_workspace(*, config: AppConfig, config_path: Path | None = None) -> InitResult:
     for directory in [
-        config.data_dir / "db",
-        config.data_dir / "audio" / "raw",
-        config.data_dir / "audio" / "work",
+        config.database_path.parent,
+        config.raw_audio_dir,
+        config.work_audio_dir,
         config.signing_key_path.parent,
         config.data_dir / "logs",
     ]:
@@ -81,8 +81,12 @@ def _config_text(config: AppConfig) -> str:
         [
             "[paths]",
             f'data_dir = "{config.data_dir}"',
+            f'raw_audio_dir = "{config.raw_audio_dir}"',
+            f'work_audio_dir = "{config.work_audio_dir}"',
+            f'sqlite_path = "{config.database_path}"',
             f'obsidian_vault = "{config.obsidian_vault}"',
             f'nas_archive_root = "{config.nas_archive_root}"',
+            f'identity_dir = "{config.identity_dir}"',
             "",
             "[identity]",
             f'owner_did = "{config.owner_did}"',

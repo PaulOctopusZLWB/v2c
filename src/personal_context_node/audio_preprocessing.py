@@ -86,7 +86,7 @@ def preprocess_imported_audio(
                             range_id,
                             chunk_range.start_ms,
                             chunk_range.end_ms,
-                            str(chunk_path.relative_to(config.data_dir)),
+                            str(chunk_path),
                             "pending_asr",
                         ),
                     )
@@ -112,7 +112,7 @@ def _split_range(speech_range: SpeechRange, *, max_chunk_ms: int) -> list[Speech
 
 
 def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, start_ms: int, end_ms: int) -> Path:
-    chunk_dir = config.data_dir / "audio" / "work" / recorded_day
+    chunk_dir = config.work_audio_dir / recorded_day
     chunk_dir.mkdir(parents=True, exist_ok=True)
     chunk_path = chunk_dir / f"{source_path.stem}_{start_ms:09d}_{end_ms:09d}.wav"
     with wave.open(str(source_path), "rb") as source:

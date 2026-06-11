@@ -11,8 +11,12 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     data_dir: Path = Path("data")
+    raw_audio_path: Path | None = None
+    work_audio_path: Path | None = None
+    database_file_path: Path | None = None
     obsidian_vault: Path = Path("/Users/paul/Documents/Obsidian/PersonalContext")
     nas_archive_root: Path = Path("/Volumes/NAS/PersonalContext")
+    identity_dir_path: Path | None = None
     source_device: str = "DJI Mic 3"
     owner_did: str = "did:key:local-owner"
     identity_key_path: Path | None = None
@@ -39,8 +43,12 @@ class AppConfig(BaseModel):
         identity = raw.get("identity", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
+            "raw_audio_path": _optional_resolve_path(base_dir, paths.get("raw_audio_dir")),
+            "work_audio_path": _optional_resolve_path(base_dir, paths.get("work_audio_dir")),
+            "database_file_path": _optional_resolve_path(base_dir, paths.get("sqlite_path")),
             "obsidian_vault": Path(paths.get("obsidian_vault", cls.model_fields["obsidian_vault"].default)),
             "nas_archive_root": Path(paths.get("nas_archive_root", cls.model_fields["nas_archive_root"].default)),
+            "identity_dir_path": _optional_resolve_path(base_dir, paths.get("identity_dir")),
             "owner_did": identity.get("owner_did", cls.model_fields["owner_did"].default),
             "identity_key_path": _optional_resolve_path(base_dir, identity.get("signing_key_path")),
             "vad_backend": vad.get("backend", cls.model_fields["vad_backend"].default),
@@ -59,11 +67,27 @@ class AppConfig(BaseModel):
 
     @property
     def database_path(self) -> Path:
+        if self.database_file_path is not None:
+            return self.database_file_path
         return self.data_dir / "db" / "personal_context.sqlite"
 
     @property
     def raw_audio_dir(self) -> Path:
+        if self.raw_audio_path is not None:
+            return self.raw_audio_path
         return self.data_dir / "audio" / "raw"
+
+    @property
+    def work_audio_dir(self) -> Path:
+        if self.work_audio_path is not None:
+            return self.work_audio_path
+        return self.data_dir / "audio" / "work"
+
+    @property
+    def identity_dir(self) -> Path:
+        if self.identity_dir_path is not None:
+            return self.identity_dir_path
+        return self.data_dir
 
     @property
     def signing_key_path(self) -> Path:
