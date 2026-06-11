@@ -43,6 +43,7 @@ It also implements the LLM text-processing boundary before provider integration:
 6. `CommandLLMAdapter` for local or cloud wrapper commands that receive transcript JSON on stdin and emit normalized daily context JSON.
 7. Memory candidate evidence references accept input `evidence_id` values, and unknown references fail generation without committing partial summaries or candidates.
 8. Duplicate memory candidates within the same daily generation are merged by claim type and normalized claim, preserving all evidence references.
+9. Cross-day duplicate memory candidates are marked `possible_duplicate` instead of being sent directly to normal review.
 
 It also implements the human review boundary:
 

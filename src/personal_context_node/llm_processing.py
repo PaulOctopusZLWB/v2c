@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -205,12 +206,20 @@ def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segm
             )
         if not evidence_refs:
             raise ValueError("LLM memory candidates require evidence refs")
+        normalized_claim_hash = _normalized_claim_hash(candidate.candidate_claim)
+        status = _candidate_status_for_daily_duplicate(
+            conn,
+            day=context.day,
+            claim_type=candidate.claim_type,
+            normalized_claim_hash=normalized_claim_hash,
+        )
         conn.execute(
             """
             insert into memory_candidates (
               candidate_id, candidate_claim, claim_type, subject_json,
-              confidence, evidence_refs_json, status, memory_card_id
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+              confidence, evidence_refs_json, status, memory_card_id,
+              date_key, normalized_claim_hash
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"cand_{uuid4().hex}",
@@ -223,8 +232,10 @@ def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segm
                 ),
                 candidate.confidence,
                 json.dumps(evidence_refs, ensure_ascii=False, sort_keys=True),
-                "pending_review",
+                status,
                 None,
+                context.day,
+                normalized_claim_hash,
             ),
         )
         created += 1
@@ -251,6 +262,32 @@ def _merge_daily_duplicate_candidates(candidates: list[MemoryCandidateDraft]) ->
 
 def _normalize_claim(value: str) -> str:
     return " ".join(value.split()).casefold()
+
+
+def _normalized_claim_hash(value: str) -> str:
+    return f"sha256:{hashlib.sha256(_normalize_claim(value).encode('utf-8')).hexdigest()}"
+
+
+def _candidate_status_for_daily_duplicate(
+    conn: sqlite3.Connection,
+    *,
+    day: str,
+    claim_type: str,
+    normalized_claim_hash: str,
+) -> str:
+    duplicate = conn.execute(
+        """
+        select 1
+        from memory_candidates
+        where claim_type = ?
+          and normalized_claim_hash = ?
+          and date_key is not null
+          and date_key <> ?
+        limit 1
+        """,
+        (claim_type, normalized_claim_hash, day),
+    ).fetchone()
+    return "possible_duplicate" if duplicate else "pending_review"
 
 
 def _unique_preserve_order(values: list[str]) -> list[str]:

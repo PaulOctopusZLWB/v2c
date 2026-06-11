@@ -294,6 +294,40 @@ def test_generate_daily_context_merges_duplicate_candidates_within_day(tmp_path:
     ]
 
 
+def test_generate_daily_context_marks_cross_day_duplicates_possible_duplicate(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+    generate_daily_context(config=config, day="2087-05-10", llm=EvidenceIdLLM())
+    _insert_audio_and_transcript(
+        config.database_path,
+        audio_file_id="aud_test_002",
+        segment_id="seg_test_002",
+        evidence_id="ev_test_002",
+        recorded_at="2087-05-11T00:00:00+08:00",
+        text="我要求音频和转写处理保持本地。",
+    )
+
+    result = generate_daily_context(config=config, day="2087-05-11", llm=EvidenceIdLLM())
+
+    assert result.memory_candidates_created == 1
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(
+            conn,
+            """
+            select date_key, candidate_claim, status
+            from memory_candidates
+            order by date_key
+            """,
+        )
+    finally:
+        conn.close()
+    assert [(row["date_key"], row["status"]) for row in candidates] == [
+        ("2087-05-10", "pending_review"),
+        ("2087-05-11", "possible_duplicate"),
+    ]
+
+
 def _insert_transcript(database_path: Path) -> None:
     conn = connect(database_path)
     try:
@@ -334,6 +368,65 @@ def _insert_transcript(database_path: Path) -> None:
                 "zh",
                 "self",
                 "ev_test",
+                0.99,
+                "MockASRAdapter",
+                "mock-asr",
+                "test",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_audio_and_transcript(
+    database_path: Path,
+    *,
+    audio_file_id: str,
+    segment_id: str,
+    evidence_id: str,
+    recorded_at: str,
+    text: str,
+) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                audio_file_id,
+                "DJI Mic 3",
+                f"/Volumes/DJI/{audio_file_id}.wav",
+                f"/private/raw/{audio_file_id}.wav",
+                f"sha256:{audio_file_id}",
+                1000,
+                recorded_at,
+                recorded_at,
+                "imported",
+            ),
+        )
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                segment_id,
+                audio_file_id,
+                f"chk_{segment_id}",
+                0,
+                1000,
+                text,
+                "zh",
+                "self",
+                evidence_id,
                 0.99,
                 "MockASRAdapter",
                 "mock-asr",

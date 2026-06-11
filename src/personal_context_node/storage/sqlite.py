@@ -75,7 +75,9 @@ create table if not exists memory_candidates (
   confidence real not null,
   evidence_refs_json text not null,
   status text not null,
-  memory_card_id text
+  memory_card_id text,
+  date_key text,
+  normalized_claim_hash text
 );
 
 create table if not exists evidence_refs (
@@ -310,6 +312,8 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
     _ensure_column(conn, "speaker_mappings", "person_id", "text")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
+    _ensure_column(conn, "memory_candidates", "date_key", "text")
+    _ensure_column(conn, "memory_candidates", "normalized_claim_hash", "text")
     conn.execute(
         "insert or ignore into schema_migrations (version, name) values (?, ?)",
         (1, "base_schema"),
