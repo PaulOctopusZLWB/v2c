@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from personal_context_node.core.protocols.memory import (
     IdentityProfile,
+    MemoryAnnotation,
     MemoryCard,
     SignedEvent,
     canonical_signing_body_hash,
@@ -90,6 +91,9 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     )
     if event.event_type == "memory_card.created" and verified:
         _upsert_memory_card(conn, event=event)
+        _activate_dangling_annotations(conn, target_card_id=event.object_id)
+    if event.event_type == "memory_annotation.created" and verified:
+        _upsert_memory_annotation(conn, event=event)
     if event.event_type == "identity_profile.published" and verified:
         _upsert_identity_profile(conn, event=event)
 
@@ -125,6 +129,50 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
             event.event_hash,
             str(card.created_at),
         ),
+    )
+
+
+def _upsert_memory_annotation(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    annotation = MemoryAnnotation.model_validate(event.payload)
+    target_exists = (
+        conn.execute(
+            "select 1 from memory_cards where card_id = ?",
+            (annotation.target_card_id,),
+        ).fetchone()
+        is not None
+    )
+    conn.execute(
+        """
+        insert into memory_annotations (
+          annotation_id, target_card_id, author_did, annotation_type, body,
+          status, source_event_hash, created_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(annotation_id) do update set
+          target_card_id = excluded.target_card_id,
+          author_did = excluded.author_did,
+          annotation_type = excluded.annotation_type,
+          body = excluded.body,
+          status = excluded.status,
+          source_event_hash = excluded.source_event_hash,
+          created_at = excluded.created_at
+        """,
+        (
+            annotation.annotation_id,
+            annotation.target_card_id,
+            annotation.author,
+            annotation.annotation_type,
+            annotation.body,
+            "active" if target_exists else "dangling",
+            event.event_hash,
+            str(annotation.created_at),
+        ),
+    )
+
+
+def _activate_dangling_annotations(conn: sqlite3.Connection, *, target_card_id: str) -> None:
+    conn.execute(
+        "update memory_annotations set status = 'active' where target_card_id = ? and status = 'dangling'",
+        (target_card_id,),
     )
 
 

@@ -22,6 +22,7 @@ ClaimType = Literal[
     "todo",
     "relationship",
 ]
+AnnotationType = Literal["confirm", "dispute", "comment", "supersede_reference"]
 
 
 class SubjectRef(BaseModel):
@@ -60,6 +61,18 @@ class MemoryCard(BaseModel):
         if not value:
             raise ValueError("generated memory cards require at least one evidence reference")
         return value
+
+
+class MemoryAnnotation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["memory_annotation.v1"] = "memory_annotation.v1"
+    annotation_id: str
+    target_card_id: str
+    author: str
+    annotation_type: AnnotationType
+    body: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class IdentityPredecessor(BaseModel):

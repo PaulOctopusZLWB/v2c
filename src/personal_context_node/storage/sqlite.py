@@ -98,6 +98,17 @@ create table if not exists memory_cards (
   created_at text not null
 );
 
+create table if not exists memory_annotations (
+  annotation_id text primary key,
+  target_card_id text not null,
+  author_did text not null,
+  annotation_type text not null,
+  body text not null,
+  status text not null,
+  source_event_hash text not null,
+  created_at text not null
+);
+
 create table if not exists identity_profiles (
   identity_id text primary key,
   display_name text not null,

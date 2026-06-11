@@ -59,6 +59,7 @@ It also implements the human review boundary:
 12. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
 13. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
 14. Trusted `identity_profile.published` events materialize `identity_profile.v1` display names and predecessor references into `identity_profiles`.
+15. Trusted `memory_annotation.created` events materialize `memory_annotation.v1` rows; annotations for unknown cards remain `dangling` until the target card arrives.
 
 It also implements the speaker review boundary:
 
