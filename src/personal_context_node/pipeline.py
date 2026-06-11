@@ -123,6 +123,26 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
         ]
         conn.execute(
             """
+            insert into evidence_refs (
+              evidence_id, source_type, source_ref, source_id, quote, created_at
+            ) values (?, ?, ?, ?, ?, ?)
+            on conflict(evidence_id) do update set
+              source_type = excluded.source_type,
+              source_ref = excluded.source_ref,
+              source_id = excluded.source_id,
+              quote = excluded.quote
+            """,
+            (
+                row["evidence_id"],
+                "transcript_segment",
+                row["segment_id"],
+                row["segment_id"],
+                row["text"],
+                now,
+            ),
+        )
+        conn.execute(
+            """
             insert into memory_candidates (
               candidate_id, source_type, candidate_claim, claim_type, subject_json,
               confidence, evidence_refs_json, status, memory_card_id, date_key, created_at, updated_at
