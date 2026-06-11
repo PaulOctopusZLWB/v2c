@@ -93,6 +93,34 @@ def test_manual_memory_card_allows_empty_evidence() -> None:
     assert verify_signed_event(event, public_key)
 
 
+def test_memory_card_confidence_is_signed_payload_field() -> None:
+    card = MemoryCard(
+        card_id="mem_confidence_test",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Generated memory cards carry confidence.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_confidence_test",
+                source_type="transcript_segment",
+                source_id="seg_confidence_test",
+                quote="Generated memory cards carry confidence.",
+            )
+        ],
+        confidence=0.91,
+    )
+
+    event, public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+    )
+
+    assert event.payload["confidence"] == 0.91
+    assert verify_signed_event(event, public_key)
+
+
 def test_memory_card_visibility_defaults_to_private_object() -> None:
     card = MemoryCard(
         card_id="mem_test_001",

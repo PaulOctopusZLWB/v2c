@@ -135,7 +135,7 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
 def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> None:
     row = conn.execute(
         """
-        select candidate_id, candidate_claim, claim_type, subject_json, evidence_refs_json
+        select candidate_id, candidate_claim, claim_type, subject_json, confidence, evidence_refs_json
         from memory_candidates
         where status = 'pending_review'
         order by candidate_id
@@ -154,6 +154,7 @@ def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> Non
         evidence_refs=evidence_refs,
         source_type="confirmed_generated",
         candidate_claim=row["candidate_claim"],
+        confidence=float(row["confidence"]) if row["confidence"] is not None else None,
     )
     event, public_key = create_chained_event(
         conn,

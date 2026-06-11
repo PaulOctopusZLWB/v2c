@@ -101,7 +101,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 continue
             row = conn.execute(
                 """
-                select candidate_id, candidate_claim, claim_type, subject_json, evidence_refs_json, status
+                select candidate_id, candidate_claim, claim_type, subject_json, confidence, evidence_refs_json, status
                 from memory_candidates
                 where candidate_id = ?
                 """,
@@ -136,6 +136,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 evidence_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs_json"])],
                 source_type="confirmed_generated",
                 candidate_claim=row["candidate_claim"],
+                confidence=float(row["confidence"]) if row["confidence"] is not None else None,
             )
             event, public_key = create_chained_event(
                 conn,
