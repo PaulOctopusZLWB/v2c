@@ -22,7 +22,7 @@ def export_memory_events(*, config: AppConfig, output_path: Path, since: str) ->
             """
             select raw_event_json
             from signed_events
-            where trust_status = 'trusted' and created_at >= ?
+            where trust_status in ('trusted', 'unsupported') and created_at >= ?
             order by created_at, event_hash
             """,
             (since,),
