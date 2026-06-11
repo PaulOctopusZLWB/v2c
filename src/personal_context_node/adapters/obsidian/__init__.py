@@ -1,0 +1,1 @@
+"""Obsidian adapter implementations."""
