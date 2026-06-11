@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import LLMPort, SessionSummary
+from personal_context_node.evidence_refs import persist_segment_evidence_refs
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -35,6 +36,7 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
         )
         if not segments:
             return SessionSummaryResult(summaries_created=0)
+        persist_segment_evidence_refs(conn, segments=segments, owner_id=config.owner_did)
         llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in segments]
         summary = _generate_session_summary_with_budget(
             llm=llm,

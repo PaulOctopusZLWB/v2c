@@ -125,6 +125,45 @@ def test_summarize_session_omits_speaker_labels_when_disabled(tmp_path: Path) ->
     ]
 
 
+def test_summarize_session_mints_evidence_refs_before_prompting(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+
+    result = summarize_session(config=config, session_id="ses_test", llm=RuleBasedLLMAdapter())
+
+    assert result.summaries_created == 1
+    conn = connect(config.database_path)
+    try:
+        evidence_refs = fetch_all(
+            conn,
+            """
+            select evidence_id, source_type, source_id, source_ref, owner_id, quote
+            from evidence_refs
+            order by evidence_id
+            """,
+        )
+    finally:
+        conn.close()
+    assert evidence_refs == [
+        {
+            "evidence_id": "ev_1",
+            "source_type": "transcript_segment",
+            "source_id": "seg_1",
+            "source_ref": "seg_1",
+            "owner_id": "did:key:local-owner",
+            "quote": "我决定继续接入真实 ASR，需要保持音频本地处理。",
+        },
+        {
+            "evidence_id": "ev_2",
+            "source_type": "transcript_segment",
+            "source_id": "seg_2",
+            "source_ref": "seg_2",
+            "owner_id": "did:key:local-owner",
+            "quote": "faster-whisper 备选是否需要提前装好",
+        },
+    ]
+
+
 def test_summarize_session_uses_chunk_summaries_when_text_exceeds_budget(tmp_path: Path) -> None:
     config = AppConfig(
         data_dir=tmp_path / "data",

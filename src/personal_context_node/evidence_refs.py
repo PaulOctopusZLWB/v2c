@@ -2,8 +2,40 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 from personal_context_node.core.protocols.memory import EvidenceRef
+
+
+def persist_segment_evidence_refs(
+    conn: sqlite3.Connection,
+    *,
+    segments: list[dict[str, object]],
+    owner_id: str,
+) -> None:
+    for source in segments:
+        conn.execute(
+            """
+            insert into evidence_refs (
+              evidence_id, source_type, source_ref, source_id, owner_id, quote, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?)
+            on conflict(evidence_id) do update set
+              source_type = excluded.source_type,
+              source_ref = excluded.source_ref,
+              source_id = excluded.source_id,
+              owner_id = excluded.owner_id,
+              quote = excluded.quote
+            """,
+            (
+                source["evidence_id"],
+                "transcript_segment",
+                source["segment_id"],
+                source["segment_id"],
+                owner_id,
+                source["text"],
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
 
 
 def evidence_ids_from_candidate_json(evidence_refs_json: str) -> list[str]:
