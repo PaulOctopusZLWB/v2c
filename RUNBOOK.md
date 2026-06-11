@@ -8,7 +8,7 @@ This repository currently implements the first milestone from `IMPLEMENTATION_PL
 2. Register imported audio in SQLite.
 3. Produce deterministic mock transcript segments.
 4. Generate memory candidates with transcript evidence references.
-5. Optionally confirm the first candidate into a signed `memory_card.confirmed.v1` event.
+5. Optionally confirm the first candidate into a signed `memory_card.created` event.
 6. Publish a daily Markdown note to the configured PersonalContext Obsidian vault.
 
 It also implements the first audio preprocessing boundary:
@@ -40,8 +40,9 @@ It also implements the human review boundary:
 
 1. `pcn publish-review` writes pending memory candidates into `30_Memory_Candidates/YYYY-MM-DD.md`.
 2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
-3. `pcn confirm-review` parses checked candidates, creates confirmed memory cards, and emits signed events.
-4. `pcn memory-verify` rechecks stored signed events and flags tampered payloads.
+3. `pcn confirm-review` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
+4. `pcn memory-verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
+5. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
 
 It also implements the speaker review boundary:
 

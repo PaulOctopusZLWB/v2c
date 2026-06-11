@@ -161,16 +161,41 @@ create table if not exists tasks (
 );
 
 create table if not exists signed_events (
-  event_id text primary key,
+  event_hash text primary key,
+  event_id text unique,
   event_type text not null,
   signer_did text not null,
+  owner_id text,
+  owner_sequence integer,
+  prev_event_hash text,
+  envelope_version text,
+  object_id text,
+  object_version integer,
+  payload_type text,
+  payload_encoding text,
   created_at text not null default '',
   payload_json text not null,
+  raw_event_json text,
+  signing_body_json text,
+  canonical_signing_body_hash text,
+  signature_algorithm text,
+  public_key_id text,
+  signature_value text,
+  trust_status text not null default 'trusted',
   event_json text not null default '{}',
   signature text not null,
   public_key text not null,
   verified integer not null
 );
+
+create unique index if not exists idx_signed_events_trusted_owner_seq
+on signed_events(owner_id, owner_sequence) where trust_status = 'trusted';
+
+create unique index if not exists idx_signed_events_trusted_object_version
+on signed_events(object_id, object_version) where trust_status = 'trusted';
+
+create index if not exists idx_signed_events_owner_seq
+on signed_events(owner_id, owner_sequence);
 """
 
 

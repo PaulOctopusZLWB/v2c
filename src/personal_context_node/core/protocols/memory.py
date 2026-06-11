@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Literal
-from uuid import uuid4
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
@@ -62,16 +62,41 @@ class MemoryCard(BaseModel):
         return value
 
 
+class EventSignature(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    algorithm: Literal["Ed25519"] = "Ed25519"
+    public_key_id: str
+    value: str
+
+
 class SignedEvent(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    schema_version: Literal["signed_event.v1"] = "signed_event.v1"
-    event_id: str
+    envelope_version: Literal["signed_event.v1"] = "signed_event.v1"
     event_type: str
-    signer_did: str
-    created_at: datetime
+    object_id: str
+    object_version: int
+    owner_id: str
+    owner_sequence: int
+    prev_event_hash: str | None
+    payload_type: str
+    payload_encoding: Literal["plain"] = "plain"
     payload: dict
-    signature: str
+    created_at: str
+    signature: EventSignature
+
+    @property
+    def event_hash(self) -> str:
+        return canonical_signing_body_hash(self)
+
+    @property
+    def event_id(self) -> str:
+        return self.event_hash
+
+    @property
+    def signer_did(self) -> str:
+        return self.owner_id
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -84,28 +109,50 @@ def canonical_json_bytes(value: object) -> bytes:
     ).encode("utf-8")
 
 
+def signing_body(event: SignedEvent) -> dict[str, object]:
+    return event.model_dump(mode="json", exclude={"signature"})
+
+
+def canonical_signing_body_hash(event: SignedEvent) -> str:
+    return f"sha256:{hashlib.sha256(canonical_json_bytes(signing_body(event))).hexdigest()}"
+
+
 def create_signed_event(
     *,
     event_type: str,
     payload: BaseModel,
     signer_did: str,
     private_key: Ed25519PrivateKey | None = None,
+    owner_sequence: int = 1,
+    prev_event_hash: str | None = None,
+    object_version: int = 1,
+    created_at: datetime | None = None,
 ) -> tuple[SignedEvent, str]:
     key = private_key or Ed25519PrivateKey.generate()
     public_key = _public_key_to_text(key.public_key())
-    event_body = {
-        "schema_version": "signed_event.v1",
-        "event_id": f"evt_{uuid4().hex}",
+    created = created_at or datetime.now(timezone.utc)
+    payload_json = payload.model_dump(mode="json")
+    event_body: dict[str, object] = {
+        "envelope_version": "signed_event.v1",
         "event_type": event_type,
-        "signer_did": signer_did,
-        "created_at": datetime.now(timezone.utc),
-        "payload": payload.model_dump(mode="json"),
+        "object_id": _payload_object_id(payload_json),
+        "object_version": object_version,
+        "owner_id": signer_did,
+        "owner_sequence": owner_sequence,
+        "prev_event_hash": prev_event_hash,
+        "payload_type": str(payload_json.get("schema_version", payload.__class__.__name__)),
+        "payload_encoding": "plain",
+        "payload": payload_json,
+        "created_at": _json_default(created),
     }
     signature = key.sign(canonical_json_bytes(event_body))
     return (
         SignedEvent(
             **event_body,
-            signature=base64.urlsafe_b64encode(signature).decode("ascii"),
+            signature=EventSignature(
+                public_key_id=signer_did,
+                value=base64.urlsafe_b64encode(signature).decode("ascii").rstrip("="),
+            ),
         ),
         public_key,
     )
@@ -113,9 +160,8 @@ def create_signed_event(
 
 def verify_signed_event(event: SignedEvent, public_key_text: str) -> bool:
     public_key = _public_key_from_text(public_key_text)
-    body = event.model_dump(mode="json", exclude={"signature"})
     try:
-        public_key.verify(base64.urlsafe_b64decode(event.signature), canonical_json_bytes(body))
+        public_key.verify(_b64url_decode(event.signature.value), canonical_json_bytes(signing_body(event)))
     except InvalidSignature:
         return False
     return True
@@ -127,7 +173,7 @@ def materialize_cards(events: list[SignedEvent], public_keys_by_did: dict[str, s
         public_key = public_keys_by_did.get(event.signer_did)
         if public_key is None or not verify_signed_event(event, public_key):
             raise ValueError(f"invalid signed event: {event.event_id}")
-        if event.event_type == "memory_card.confirmed.v1":
+        if event.event_type in {"memory_card.confirmed.v1", "memory_card.created"}:
             card = MemoryCard.model_validate(event.payload)
             cards[card.card_id] = card
     return cards
@@ -139,7 +185,20 @@ def _public_key_to_text(public_key: Ed25519PublicKey) -> str:
 
 
 def _public_key_from_text(value: str) -> Ed25519PublicKey:
-    return Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(value))
+    return Ed25519PublicKey.from_public_bytes(_b64url_decode(value))
+
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _payload_object_id(payload: dict[str, object]) -> str:
+    for key in ("card_id", "annotation_id", "profile_id"):
+        value = payload.get(key)
+        if value:
+            return str(value)
+    raise ValueError("signed event payload requires an object id")
 
 
 def _json_default(value: object) -> str:

@@ -16,9 +16,8 @@ from personal_context_node.core.protocols.memory import (
     EvidenceRef,
     MemoryCard,
     SubjectRef,
-    create_signed_event,
-    verify_signed_event,
 )
+from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import enqueue_task_in_conn
 
@@ -199,30 +198,13 @@ def _confirm_first_candidate(conn: sqlite3.Connection, owner_did: str) -> None:
         evidence_refs=evidence_refs,
         candidate_claim=row["candidate_claim"],
     )
-    event, public_key = create_signed_event(
-        event_type="memory_card.confirmed.v1",
+    event, public_key = create_chained_event(
+        conn,
+        event_type="memory_card.created",
         payload=card,
         signer_did=owner_did,
     )
-    conn.execute(
-        """
-        insert into signed_events (
-          event_id, event_type, signer_did, created_at, payload_json, event_json,
-          signature, public_key, verified
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            event.event_id,
-            event.event_type,
-            event.signer_did,
-            event.created_at.isoformat(),
-            json.dumps(event.payload, ensure_ascii=False, sort_keys=True),
-            event.model_dump_json(),
-            event.signature,
-            public_key,
-            1 if verify_signed_event(event, public_key) else 0,
-        ),
-    )
+    insert_signed_event(conn, event=event, public_key=public_key)
     conn.execute(
         "update memory_candidates set status = 'confirmed', memory_card_id = ? where candidate_id = ?",
         (card.card_id, row["candidate_id"]),

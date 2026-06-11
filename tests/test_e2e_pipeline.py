@@ -40,14 +40,14 @@ def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> N
     try:
         audio_files = fetch_all(db, "select source_device, sha256 from audio_files")
         candidates = fetch_all(db, "select status, evidence_refs_json from memory_candidates")
-        events = fetch_all(db, "select event_type, verified from signed_events")
+        events = fetch_all(db, "select event_type, owner_sequence, trust_status from signed_events")
     finally:
         db.close()
 
     assert audio_files == [{"source_device": "DJI Mic 3", "sha256": audio_files[0]["sha256"]}]
     assert candidates[0]["status"] == "confirmed"
     assert "seg_" in candidates[0]["evidence_refs_json"]
-    assert events == [{"event_type": "memory_card.confirmed.v1", "verified": 1}]
+    assert events == [{"event_type": "memory_card.created", "owner_sequence": 1, "trust_status": "trusted"}]
 
     daily_note = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
     assert daily_note.exists()
