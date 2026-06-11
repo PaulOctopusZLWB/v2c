@@ -119,6 +119,13 @@ create table if not exists memory_annotations (
   created_at text not null
 );
 
+create view if not exists active_memory_annotations as
+select memory_annotations.*
+from memory_annotations
+join active_memory_cards
+  on active_memory_cards.card_id = memory_annotations.target_card_id
+where memory_annotations.status = 'active';
+
 create table if not exists identity_profiles (
   identity_id text primary key,
   display_name text not null,
