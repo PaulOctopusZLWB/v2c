@@ -19,7 +19,11 @@ from personal_context_node.daily_reports import get_daily_report_status
 from personal_context_node.doctor import run_doctor
 from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.init_health import check_health, initialize_workspace
-from personal_context_node.ingest import import_audio_files, scan_audio_files
+from personal_context_node.ingest import (
+    import_audio_files,
+    repair_bwf_metadata_in_source_dir,
+    scan_audio_files,
+)
 from personal_context_node.launchd import install_launchd_plists, uninstall_launchd_plists, write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_export import export_memory_events
@@ -204,6 +208,24 @@ def _ingest_import(*, source_dir: Path, data_dir: Path, obsidian_vault: Path) ->
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = import_audio_files(config=config, source_dir=source_dir)
     typer.echo(f"imported_files={result.imported_files}")
+
+
+@ingest_app.command(name="fix-metadata")
+def ingest_fix_metadata(
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    recursive: bool = typer.Option(False, help="Scan nested subdirectories for WAV files."),
+    dry_run: bool = typer.Option(False, help="Report files that need fixing without writing changes."),
+) -> None:
+    result = repair_bwf_metadata_in_source_dir(source_dir=source_dir, recursive=recursive, dry_run=dry_run)
+    typer.echo(
+        " ".join(
+            [
+                f"scanned_files={result.scanned_files}",
+                f"repaired_files={result.repaired_files}",
+                f"skipped_files={result.skipped_files}",
+            ]
+        )
+    )
 
 
 @app.command()

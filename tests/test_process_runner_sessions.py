@@ -61,7 +61,7 @@ def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
     ]
     assert len(session_tasks) == 1
     assert session_tasks[0]["target_type"] == "date_key"
-    assert session_tasks[0]["target_id"] == "2087-05-10"
+    assert session_tasks[0]["target_id"] == "2025-06-10"
     assert session_tasks[0]["status"] == "pending"
 
     session_result = process_once(
@@ -79,7 +79,7 @@ def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
         sessions = fetch_all(conn, "select date_key, segment_count from sessions")
     finally:
         conn.close()
-    assert sessions == [{"date_key": "2087-05-10", "segment_count": 1}]
+    assert sessions == [{"date_key": "2025-06-10", "segment_count": 1}]
     assert any(
         row["task_type"] == "summarize_session"
         and row["target_type"] == "session"
@@ -115,7 +115,7 @@ def test_summarize_session_success_fans_in_to_daily_generate(tmp_path: Path) -> 
     assert summary_result.status == "succeeded"
     assert any(
         row["task_type"] == "daily_generate"
-        and row["target_id"] == "2087-05-10"
+        and row["target_id"] == "2025-06-10"
         and row["status"] == "pending"
         for row in process_status_rows(config=config)
     )

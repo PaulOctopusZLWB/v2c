@@ -49,9 +49,9 @@ def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> N
     assert "seg_" in candidates[0]["evidence_refs_json"]
     assert events == [{"event_type": "memory_card.created", "owner_sequence": 1, "trust_status": "trusted"}]
 
-    daily_note = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
+    daily_note = config.obsidian_vault / "10_Daily" / "2025-06-10.md"
     assert daily_note.exists()
     text = daily_note.read_text(encoding="utf-8")
-    assert "# 2087-05-10 Daily Context" in text
+    assert "# 2025-06-10 Daily Context" in text
     assert "## Memory Candidates" in text
     assert "TX02_MIC001_20870510_173550_orig.wav" in text
