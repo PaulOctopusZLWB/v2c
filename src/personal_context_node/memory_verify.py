@@ -10,6 +10,7 @@ from personal_context_node.core.protocols.memory import (
     MemoryAnnotation,
     MemoryAnnotationRevocation,
     MemoryCard,
+    MemoryCardMetadataUpdate,
     MemoryCardRevocation,
     MemoryCardSupersession,
     SignedEvent,
@@ -191,6 +192,16 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
             if revocation.card_id in expected:
                 expected[revocation.card_id]["status"] = "revoked"
                 expected[revocation.card_id]["source_event_hash"] = event.event_hash
+        if event.event_type == "memory_card.metadata_updated":
+            update = MemoryCardMetadataUpdate.model_validate(event.payload)
+            if update.card_id in expected:
+                expected[update.card_id]["visibility_json"] = json.dumps(
+                    update.visibility.model_dump(mode="json", exclude_none=True),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                expected[update.card_id]["tags_json"] = json.dumps(update.tags, ensure_ascii=False, sort_keys=True)
+                expected[update.card_id]["source_event_hash"] = event.event_hash
         if event.event_type == "memory_card.superseded":
             supersession = MemoryCardSupersession.model_validate(event.payload)
             if supersession.card_id in expected:
@@ -205,7 +216,7 @@ def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[s
     actual_rows = fetch_all(
         conn,
         """
-        select card_id, owner_did, claim_type, claim, status, source_event_hash
+        select card_id, owner_did, claim_type, claim, visibility_json, tags_json, status, source_event_hash
         from memory_cards
         order by card_id
         """,
@@ -268,6 +279,8 @@ def _card_projection(card: MemoryCard, *, source_event_hash: str, status: str) -
         "owner_did": card.owner_did,
         "claim_type": card.claim_type,
         "claim": card.claim,
+        "visibility_json": json.dumps(card.visibility.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True),
+        "tags_json": json.dumps(card.tags, ensure_ascii=False, sort_keys=True),
         "status": status,
         "source_event_hash": source_event_hash,
     }
@@ -308,10 +321,22 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
           subject_json text not null,
           evidence_refs_json text not null,
           candidate_claim text,
+          visibility_json text not null default '{"type":"private"}',
+          tags_json text not null default '[]',
           status text not null,
           source_event_hash text not null,
-          created_at text not null
+          created_at text not null,
+          updated_at text not null default ''
         )
         """
     )
+    existing_card_columns = {row["name"] for row in conn.execute("pragma table_info(memory_cards)").fetchall()}
+    card_column_migrations = {
+        "visibility_json": "alter table memory_cards add column visibility_json text not null default '{\"type\":\"private\"}'",
+        "tags_json": "alter table memory_cards add column tags_json text not null default '[]'",
+        "updated_at": "alter table memory_cards add column updated_at text not null default ''",
+    }
+    for column, sql in card_column_migrations.items():
+        if column not in existing_card_columns:
+            conn.execute(sql)
     conn.commit()

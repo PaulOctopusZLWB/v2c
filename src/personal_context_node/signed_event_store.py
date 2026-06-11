@@ -11,6 +11,7 @@ from personal_context_node.core.protocols.memory import (
     MemoryAnnotation,
     MemoryAnnotationRevocation,
     MemoryCard,
+    MemoryCardMetadataUpdate,
     MemoryCardRevocation,
     MemoryCardSupersession,
     SignedEvent,
@@ -23,6 +24,7 @@ from personal_context_node.core.protocols.memory import (
 
 SUPPORTED_EVENT_PAYLOAD_TYPES = {
     "memory_card.created": "memory_card.v1",
+    "memory_card.metadata_updated": "memory_card_metadata_update.v1",
     "memory_card.revoked": "memory_card_revocation.v1",
     "memory_card.superseded": "memory_card_supersession.v1",
     "identity_profile.published": "identity_profile.v1",
@@ -110,6 +112,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     if event.event_type == "memory_card.created" and trust_status == "trusted":
         _upsert_memory_card(conn, event=event)
         _activate_dangling_annotations(conn, target_card_id=event.object_id)
+    if event.event_type == "memory_card.metadata_updated" and trust_status == "trusted":
+        _update_memory_card_metadata(conn, event=event)
     if event.event_type == "memory_card.revoked" and trust_status == "trusted":
         _revoke_memory_card(conn, event=event)
     if event.event_type == "memory_card.superseded" and trust_status == "trusted":
@@ -158,8 +162,9 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
         """
         insert into memory_cards (
           card_id, owner_did, claim_type, claim, subject_json, evidence_refs_json,
-          candidate_claim, status, source_event_hash, created_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          candidate_claim, visibility_json, tags_json, status, source_event_hash,
+          created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(card_id) do update set
           owner_did = excluded.owner_did,
           claim_type = excluded.claim_type,
@@ -167,9 +172,12 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
           subject_json = excluded.subject_json,
           evidence_refs_json = excluded.evidence_refs_json,
           candidate_claim = excluded.candidate_claim,
+          visibility_json = excluded.visibility_json,
+          tags_json = excluded.tags_json,
           status = excluded.status,
           source_event_hash = excluded.source_event_hash,
-          created_at = excluded.created_at
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at
         """,
         (
             card.card_id,
@@ -179,9 +187,33 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
             card.subject.model_dump_json(),
             json.dumps([evidence.model_dump(mode="json") for evidence in card.evidence_refs], ensure_ascii=False, sort_keys=True),
             card.candidate_claim,
+            json.dumps(card.visibility.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True),
+            json.dumps(card.tags, ensure_ascii=False, sort_keys=True),
             "active",
             event.event_hash,
             str(card.created_at),
+            str(card.created_at),
+        ),
+    )
+
+
+def _update_memory_card_metadata(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    update = MemoryCardMetadataUpdate.model_validate(event.payload)
+    conn.execute(
+        """
+        update memory_cards
+        set visibility_json = ?,
+            tags_json = ?,
+            source_event_hash = ?,
+            updated_at = ?
+        where card_id = ?
+        """,
+        (
+            json.dumps(update.visibility.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True),
+            json.dumps(update.tags, ensure_ascii=False, sort_keys=True),
+            event.event_hash,
+            str(update.created_at),
+            update.card_id,
         ),
     )
 

@@ -73,7 +73,8 @@ It also implements the human review boundary:
 21. Trusted `memory_card.superseded` events mark the old card as `superseded` while the replacement card remains independently active.
 22. Trusted `memory_annotation.revoked` events mark annotations as `revoked`, preserving history without keeping them active.
 23. Memory card `visibility` is always serialized as an object; scalar `private`/`public` inputs are normalized, and unknown visibility types fail closed to `private`.
-24. Trusted `identity_key.rotated` events close the old owner chain; later events from that owner are rejected and not materialized.
+24. Trusted `memory_card.metadata_updated` events update materialized visibility/tags metadata without changing claim text.
+25. Trusted `identity_key.rotated` events close the old owner chain; later events from that owner are rejected and not materialized.
 
 It also implements the speaker review boundary:
 

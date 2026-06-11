@@ -63,6 +63,7 @@ class MemoryCard(BaseModel):
     evidence_refs: list[EvidenceRef]
     candidate_claim: str | None = None
     visibility: Visibility = Field(default_factory=Visibility)
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="before")
@@ -129,6 +130,27 @@ class MemoryCardRevocation(BaseModel):
     revoked_by: str
     reason: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MemoryCardMetadataUpdate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["memory_card_metadata_update.v1"] = "memory_card_metadata_update.v1"
+    card_id: str
+    updated_by: str
+    visibility: Visibility = Field(default_factory=Visibility)
+    tags: list[str] = Field(default_factory=list)
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_visibility(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        data["visibility"] = _normalize_visibility(data.get("visibility", {"type": "private"}))
+        return data
 
 
 class MemoryCardSupersession(BaseModel):

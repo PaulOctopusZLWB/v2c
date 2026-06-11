@@ -95,9 +95,12 @@ create table if not exists memory_cards (
   subject_json text not null,
   evidence_refs_json text not null,
   candidate_claim text,
+  visibility_json text not null default '{"type":"private"}',
+  tags_json text not null default '[]',
   status text not null,
   source_event_hash text not null,
-  created_at text not null
+  created_at text not null,
+  updated_at text not null default ''
 );
 
 create table if not exists memory_annotations (
@@ -316,6 +319,9 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memory_candidates", "date_key", "text")
     _ensure_column(conn, "memory_candidates", "normalized_claim_hash", "text")
     _ensure_column(conn, "sessions", "exclude_from_memory", "integer not null default 0")
+    _ensure_column(conn, "memory_cards", "visibility_json", "text not null default '{\"type\":\"private\"}'")
+    _ensure_column(conn, "memory_cards", "tags_json", "text not null default '[]'")
+    _ensure_column(conn, "memory_cards", "updated_at", "text not null default ''")
     conn.execute(
         "insert or ignore into schema_migrations (version, name) values (?, ?)",
         (1, "base_schema"),
