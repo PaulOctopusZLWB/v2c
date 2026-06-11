@@ -173,6 +173,98 @@ def test_speaker_review_sync_reads_yaml_mapping_block(tmp_path: Path) -> None:
     assert by_id["seg_guest"]["effective_person"] == "Guest"
 
 
+def test_speaker_review_sync_removes_deleted_mappings_without_deleting_segments(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
+    _insert_segments(config.database_path)
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    review_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "pcn_schema: markdown_note.v1",
+                "note_type: speaker_review",
+                "date_key: 2087-05-10",
+                "generated_by: personal-context-node",
+                "generated_at: 2087-05-10T00:00:00+00:00",
+                "pcn_managed: true",
+                "---",
+                "",
+                '<!-- pcn:speaker_mapping start date_key="2087-05-10" version="1" -->',
+                "```yaml",
+                "mappings:",
+                "  spk_self: per_paul",
+                "persons:",
+                "  per_paul:",
+                "    display_name: Paul",
+                "    is_self: false",
+                "  per_guest:",
+                "    display_name: Guest",
+                "    is_self: false",
+                "segment_overrides:",
+                "  seg_guest: per_guest",
+                "```",
+                '<!-- pcn:speaker_mapping end date_key="2087-05-10" -->',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    sync_speaker_review(config=config, day="2087-05-10")
+
+    review_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "pcn_schema: markdown_note.v1",
+                "note_type: speaker_review",
+                "date_key: 2087-05-10",
+                "generated_by: personal-context-node",
+                "generated_at: 2087-05-10T00:00:00+00:00",
+                "pcn_managed: true",
+                "---",
+                "",
+                '<!-- pcn:speaker_mapping start date_key="2087-05-10" version="1" -->',
+                "```yaml",
+                "mappings: {}",
+                "persons:",
+                "  per_paul:",
+                "    display_name: Paul",
+                "    is_self: false",
+                "  per_guest:",
+                "    display_name: Guest",
+                "    is_self: false",
+                "segment_overrides: {}",
+                "```",
+                '<!-- pcn:speaker_mapping end date_key="2087-05-10" -->',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = sync_speaker_review(config=config, day="2087-05-10")
+
+    assert result.mappings_upserted == 0
+    assert result.segment_overrides_upserted == 0
+    materialized = materialized_transcript_segments(config=config, day="2087-05-10")
+    by_id = {row["segment_id"]: row for row in materialized}
+    assert by_id["seg_self"]["effective_person"] == "spk_self"
+    assert by_id["seg_guest"]["effective_person"] == "spk_self"
+    conn = connect(config.database_path)
+    try:
+        raw_segments = fetch_all(conn, "select segment_id, speaker from transcript_segments order by segment_id")
+        mappings = fetch_all(conn, "select speaker from speaker_mappings")
+        overrides = fetch_all(conn, "select segment_id from segment_person_overrides")
+    finally:
+        conn.close()
+    assert raw_segments == [
+        {"segment_id": "seg_guest", "speaker": "spk_self"},
+        {"segment_id": "seg_self", "speaker": "spk_self"},
+    ]
+    assert mappings == []
+    assert overrides == []
+
+
 def test_speaker_review_uses_session_date_key_for_cross_midnight_segments(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
     _insert_segments(

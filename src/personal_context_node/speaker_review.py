@@ -184,6 +184,7 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        _delete_stale_attribution_for_day(conn, day=day, parsed=parsed)
         for speaker, person_id in mappings.items():
             person = parsed.persons[person_id]
             _upsert_person(conn, person=person, now=now)
@@ -227,6 +228,44 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
         mappings_upserted=len(mappings),
         segment_overrides_upserted=len(overrides),
     )
+
+
+def _delete_stale_attribution_for_day(conn, *, day: str, parsed: ParsedSpeakerReview) -> None:
+    speakers = [
+        str(row["speaker"])
+        for row in fetch_all(
+            conn,
+            """
+            select distinct ts.speaker
+            from transcript_segments ts
+            join sessions s on s.session_id = ts.session_id
+            where s.date_key = ?
+            """,
+            (day,),
+        )
+    ]
+    stale_speakers = sorted(set(speakers) - set(parsed.mappings))
+    if stale_speakers:
+        placeholders = ",".join("?" for _ in stale_speakers)
+        conn.execute(f"delete from speaker_mappings where speaker in ({placeholders})", tuple(stale_speakers))
+
+    segment_ids = [
+        str(row["segment_id"])
+        for row in fetch_all(
+            conn,
+            """
+            select ts.segment_id
+            from transcript_segments ts
+            join sessions s on s.session_id = ts.session_id
+            where s.date_key = ?
+            """,
+            (day,),
+        )
+    ]
+    stale_segments = sorted(set(segment_ids) - set(parsed.segment_overrides))
+    if stale_segments:
+        placeholders = ",".join("?" for _ in stale_segments)
+        conn.execute(f"delete from segment_person_overrides where segment_id in ({placeholders})", tuple(stale_segments))
 
 
 def materialized_transcript_segments(*, config: AppConfig, day: str) -> list[dict[str, object]]:
