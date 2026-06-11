@@ -560,6 +560,8 @@ def _archive_run(
                 f"transcripts_pending={result.transcripts_pending}",
                 f"summaries_archived={result.summaries_archived}",
                 f"summaries_pending={result.summaries_pending}",
+                f"memory_candidates_archived={result.memory_candidates_archived}",
+                f"memory_candidates_pending={result.memory_candidates_pending}",
             ]
         )
     )
