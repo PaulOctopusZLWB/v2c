@@ -70,6 +70,31 @@ class UnknownEvidenceLLM:
         )
 
 
+class DuplicateDailyCandidateLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=[],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="用户要求音频和转写处理保持本地。",
+                    claim_type="requirement",
+                    confidence=0.7,
+                    evidence_source_ids=[transcript_segments[0]["evidence_id"]],
+                ),
+                MemoryCandidateDraft(
+                    candidate_claim=" 用户要求音频和转写处理保持本地。 ",
+                    claim_type="requirement",
+                    confidence=0.9,
+                    evidence_source_ids=[transcript_segments[1]["evidence_id"]],
+                ),
+            ],
+        )
+
+
 def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
@@ -227,6 +252,48 @@ def test_generate_daily_context_rejects_unknown_llm_evidence_refs_without_side_e
     assert legacy_summaries == []
 
 
+def test_generate_daily_context_merges_duplicate_candidates_within_day(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+    _insert_transcript_segment(
+        config.database_path,
+        segment_id="seg_test_002",
+        evidence_id="ev_test_002",
+        text="我再次要求音频和转写处理保持本地。",
+    )
+
+    result = generate_daily_context(config=config, day="2087-05-10", llm=DuplicateDailyCandidateLLM())
+
+    assert result.memory_candidates_created == 1
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(
+            conn,
+            "select candidate_claim, claim_type, confidence, evidence_refs_json, status from memory_candidates",
+        )
+    finally:
+        conn.close()
+    assert len(candidates) == 1
+    assert candidates[0]["candidate_claim"] == "用户要求音频和转写处理保持本地。"
+    assert candidates[0]["claim_type"] == "requirement"
+    assert candidates[0]["confidence"] == 0.9
+    assert candidates[0]["status"] == "pending_review"
+    assert json.loads(candidates[0]["evidence_refs_json"]) == [
+        {
+            "evidence_id": "ev_test",
+            "source_type": "transcript_segment",
+            "source_id": "seg_test",
+            "quote": "我要求音频和转写处理保持本地。",
+        },
+        {
+            "evidence_id": "ev_test_002",
+            "source_type": "transcript_segment",
+            "source_id": "seg_test_002",
+            "quote": "我再次要求音频和转写处理保持本地。",
+        },
+    ]
+
+
 def _insert_transcript(database_path: Path) -> None:
     conn = connect(database_path)
     try:
@@ -268,6 +335,38 @@ def _insert_transcript(database_path: Path) -> None:
                 "self",
                 "ev_test",
                 0.99,
+                "MockASRAdapter",
+                "mock-asr",
+                "test",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_transcript_segment(database_path: Path, *, segment_id: str, evidence_id: str, text: str) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                segment_id,
+                "aud_test",
+                f"chk_{segment_id}",
+                1000,
+                2000,
+                text,
+                "zh",
+                "self",
+                evidence_id,
+                0.98,
                 "MockASRAdapter",
                 "mock-asr",
                 "test",

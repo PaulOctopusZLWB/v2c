@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from personal_context_node.config import AppConfig
-from personal_context_node.core.ports.llm import DailyContext, LLMPort
+from personal_context_node.core.ports.llm import DailyContext, LLMPort, MemoryCandidateDraft
 from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -178,7 +178,7 @@ def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segm
         for ref in (str(segment["segment_id"]), str(segment["evidence_id"]))
     }
     created = 0
-    for candidate in context.memory_candidates:
+    for candidate in _merge_daily_duplicate_candidates(context.memory_candidates):
         evidence_refs = []
         for source_id in candidate.evidence_source_ids:
             source = segment_by_llm_ref.get(source_id)
@@ -229,3 +229,36 @@ def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segm
         )
         created += 1
     return created
+
+
+def _merge_daily_duplicate_candidates(candidates: list[MemoryCandidateDraft]) -> list[MemoryCandidateDraft]:
+    merged: dict[tuple[str, str, str], MemoryCandidateDraft] = {}
+    for candidate in candidates:
+        normalized_claim = _normalize_claim(candidate.candidate_claim)
+        key = ("personal_context_node", candidate.claim_type, normalized_claim)
+        existing = merged.get(key)
+        evidence_source_ids = _unique_preserve_order(
+            (existing.evidence_source_ids if existing else []) + candidate.evidence_source_ids
+        )
+        merged[key] = MemoryCandidateDraft(
+            candidate_claim=existing.candidate_claim if existing else candidate.candidate_claim.strip(),
+            claim_type=candidate.claim_type,
+            confidence=max(existing.confidence if existing else candidate.confidence, candidate.confidence),
+            evidence_source_ids=evidence_source_ids,
+        )
+    return list(merged.values())
+
+
+def _normalize_claim(value: str) -> str:
+    return " ".join(value.split()).casefold()
+
+
+def _unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique

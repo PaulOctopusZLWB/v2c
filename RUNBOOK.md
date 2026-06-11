@@ -42,6 +42,7 @@ It also implements the LLM text-processing boundary before provider integration:
 5. LLM-generated candidates upsert internal `evidence_refs` rows keyed by `evidence_id`.
 6. `CommandLLMAdapter` for local or cloud wrapper commands that receive transcript JSON on stdin and emit normalized daily context JSON.
 7. Memory candidate evidence references accept input `evidence_id` values, and unknown references fail generation without committing partial summaries or candidates.
+8. Duplicate memory candidates within the same daily generation are merged by claim type and normalized claim, preserving all evidence references.
 
 It also implements the human review boundary:
 
