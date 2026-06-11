@@ -17,7 +17,7 @@ from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.session_summaries import summarize_session
 from personal_context_node.sessions import derive_sessions_for_day
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
-from personal_context_node.tasks import claim_next_task, enqueue_task_in_conn, fail_task, start_task
+from personal_context_node.tasks import claim_next_task, enqueue_task_in_conn, fail_task, reclaim_expired_tasks, start_task
 from personal_context_node.transcription import transcribe_pending_chunks
 
 
@@ -55,6 +55,7 @@ def process_once(
     max_chunk_ms: int = 30_000,
 ) -> ProcessOnceResult:
     llm_adapter = llm or RuleBasedLLMAdapter()
+    reclaim_expired_tasks(config=config, lease_seconds=1800)
     task = claim_next_task(config=config, task_type="vad", run_id=run_id)
     if task is None:
         task = claim_next_task(config=config, task_type="asr", run_id=run_id)
