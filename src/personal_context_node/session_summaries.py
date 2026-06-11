@@ -42,6 +42,7 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
             transcript_segments=llm_segments,
             max_chunk_tokens=config.max_chunk_tokens,
         )
+        _validate_summary_evidence_refs(summary, segments)
         _persist_session_summary(conn, summary)
         conn.commit()
         return SessionSummaryResult(summaries_created=1)
@@ -78,6 +79,18 @@ def _persist_session_summary(conn: sqlite3.Connection, summary: SessionSummary) 
             now,
         ),
     )
+
+
+def _validate_summary_evidence_refs(summary: SessionSummary, segments: list[dict[str, object]]) -> None:
+    known_refs = {str(segment["evidence_id"]) for segment in segments}
+    for decision in summary.decisions:
+        for evidence_ref in decision.evidence_refs:
+            if evidence_ref not in known_refs:
+                raise ValueError(f"unknown evidence_id: {evidence_ref}")
+    for todo in summary.todos:
+        for evidence_ref in todo.evidence_refs:
+            if evidence_ref not in known_refs:
+                raise ValueError(f"unknown evidence_id: {evidence_ref}")
 
 
 def _generate_session_summary_with_budget(

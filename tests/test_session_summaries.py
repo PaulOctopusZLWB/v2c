@@ -5,7 +5,7 @@ from pathlib import Path
 
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.config import AppConfig
-from personal_context_node.core.ports.llm import SessionSummary
+from personal_context_node.core.ports.llm import SessionDecision, SessionSummary
 from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.session_summaries import summarize_session
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -35,6 +35,19 @@ class ChunkRecordingSessionLLM:
             summary=" / ".join(str(segment["text"]) for segment in transcript_segments),
             topics=[],
             decisions=[],
+            todos=[],
+            open_questions=[],
+        )
+
+
+class UnknownEvidenceSessionLLM:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        return SessionSummary(
+            session_id=session_id,
+            headline="未知证据引用",
+            summary="未知证据引用。",
+            topics=[],
+            decisions=[SessionDecision(text="不应保存未知证据决策", evidence_refs=["ev_missing"])],
             todos=[],
             open_questions=[],
         )
@@ -164,6 +177,25 @@ def test_summarize_session_uses_chunk_summaries_when_text_exceeds_budget(tmp_pat
     assert len(summaries) == 1
     assert summaries[0]["summary_type"] == "session"
     assert summaries[0]["target_id"] == "ses_test"
+
+
+def test_summarize_session_rejects_unknown_evidence_refs_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+
+    try:
+        summarize_session(config=config, session_id="ses_test", llm=UnknownEvidenceSessionLLM())
+    except ValueError as exc:
+        assert "unknown evidence_id: ev_missing" in str(exc)
+    else:
+        raise AssertionError("summarize_session accepted an unknown evidence ref")
+
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(conn, "select summary_id from summaries")
+    finally:
+        conn.close()
+    assert summaries == []
 
 
 def _insert_session_and_segments(
