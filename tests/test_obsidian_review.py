@@ -36,6 +36,35 @@ def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
     assert events == [{"event_type": "memory_card.created", "trust_status": "trusted"}]
 
 
+def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+
+    first = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert first.candidates_confirmed == 1
+    receipt = review_path.read_text(encoding="utf-8")
+    assert "<!-- pcn:review_receipt start kind=\"managed\" candidate_id=\"cand_test_001\"" in receipt
+    assert "action=confirm" in receipt
+    assert "card_id=mem_" in receipt
+    assert "- [x] cand_test_001" not in receipt
+
+    review_path.write_text(receipt + "\n- [x] cand_test_001 | requirement | 用户要求音频本地处理。\n", encoding="utf-8")
+    second = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert second.candidates_confirmed == 0
+    assert second.signed_events_created == 0
+    conn = connect(config.database_path)
+    try:
+        events = fetch_all(conn, "select event_type from signed_events")
+    finally:
+        conn.close()
+    assert events == [{"event_type": "memory_card.created"}]
+
+
 def test_confirming_multiple_candidates_creates_owner_hash_chain(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
     _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="用户要求音频本地处理。")

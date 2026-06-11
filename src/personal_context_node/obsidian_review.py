@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -65,6 +66,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         initialize(conn)
         confirmed = 0
         events = 0
+        receipts: dict[str, str] = {}
         for candidate_id in checked_ids:
             row = conn.execute(
                 """
@@ -96,10 +98,12 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 "update memory_candidates set status = 'confirmed', memory_card_id = ? where candidate_id = ?",
                 (card.card_id, candidate_id),
             )
+            receipts[candidate_id] = card.card_id
             confirmed += 1
             events += 1
         conn.commit()
         if confirmed:
+            _rewrite_confirmed_receipts(review_path, receipts)
             set_daily_report_status(config=config, day=day, status="review_synced")
         return ConfirmCandidatesResult(candidates_confirmed=confirmed, signed_events_created=events)
     finally:
@@ -109,9 +113,31 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
 def _checked_candidate_ids(path: Path) -> list[str]:
     if not path.exists():
         return []
+    receipt_ids = set(re.findall(r'candidate_id="([^"]+)"', path.read_text(encoding="utf-8")))
     checked: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|", line)
-        if match:
+        if match and match.group(1) not in receipt_ids:
             checked.append(match.group(1))
     return checked
+
+
+def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, str]) -> None:
+    synced_at = datetime.now(timezone.utc).isoformat()
+    rewritten: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \| ([^|]+) \| (.+)", line)
+        if not match or match.group(1) not in receipts:
+            rewritten.append(line)
+            continue
+        candidate_id = match.group(1)
+        card_id = receipts[candidate_id]
+        rewritten.append(
+            f'<!-- pcn:review_receipt start kind="managed" candidate_id="{candidate_id}" '
+            f'action=confirm card_id={card_id} synced_at="{synced_at}" -->'
+        )
+        rewritten.append(
+            f"confirmed {candidate_id} -> {card_id}; original_claim={match.group(3)}"
+        )
+        rewritten.append(f'<!-- pcn:review_receipt end candidate_id="{candidate_id}" -->')
+    path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
