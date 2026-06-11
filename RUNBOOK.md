@@ -4,12 +4,14 @@
 
 This repository currently implements the first milestone from `IMPLEMENTATION_PLAN.md`:
 
-1. Import WAV files from a source directory into local raw storage.
-2. Register imported audio in SQLite.
-3. Produce deterministic mock transcript segments.
-4. Generate memory candidates with transcript evidence references.
-5. Optionally confirm the first candidate into a signed `memory_card.created` event.
-6. Publish a daily Markdown note to the configured PersonalContext Obsidian vault.
+1. `pcn init` creates local data directories, SQLite schema, Obsidian vault folders, and an optional TOML config.
+2. `pcn health` checks SQLite initialization and Obsidian vault writability.
+3. Import WAV files from a source directory into local raw storage.
+4. Register imported audio in SQLite.
+5. Produce deterministic mock transcript segments.
+6. Generate memory candidates with transcript evidence references.
+7. Optionally confirm the first candidate into a signed `memory_card.created` event.
+8. Publish a daily Markdown note to the configured PersonalContext Obsidian vault.
 
 It also implements the first audio preprocessing boundary:
 
@@ -114,6 +116,13 @@ Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provide
 ```bash
 uv sync
 uv run pytest -q
+uv run pcn init \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --config-path .smoke-config/local.toml
+uv run pcn health \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault
 uv run pcn run-first-milestone \
   --source-dir sample_data \
   --data-dir .smoke-data \

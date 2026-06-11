@@ -16,6 +16,7 @@ from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
 from personal_context_node.jobs import job_status_rows, record_job_run
+from personal_context_node.init_health import check_health, initialize_workspace
 from personal_context_node.launchd import install_launchd_plists, uninstall_launchd_plists, write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_verify import verify_memory_events
@@ -34,6 +35,50 @@ app = typer.Typer(help="Personal Context Node local pipeline.")
 @app.callback()
 def main() -> None:
     """Run local-first Personal Context Node jobs."""
+
+
+@app.command(name="init")
+def init_cmd(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    config_path: Path | None = typer.Option(None, help="Optional TOML config path to create if missing."),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = initialize_workspace(config=config, config_path=config_path)
+    typer.echo(
+        " ".join(
+            [
+                f"initialized={result.initialized}",
+                f"data_dir={config.data_dir}",
+                f"obsidian_vault={config.obsidian_vault}",
+                f"config_path={result.config_path or ''}",
+            ]
+        )
+    )
+
+
+@app.command(name="health")
+def health_cmd(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = check_health(config=config)
+    typer.echo(
+        " ".join(
+            [
+                f"status={result.status}",
+                f"database={result.database}",
+                f"obsidian_vault={result.obsidian_vault}",
+            ]
+        )
+    )
 
 
 @app.command()
