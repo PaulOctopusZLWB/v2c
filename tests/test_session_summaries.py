@@ -53,6 +53,19 @@ class UnknownEvidenceSessionLLM:
         )
 
 
+class MissingEvidenceSessionLLM:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        return SessionSummary(
+            session_id=session_id,
+            headline="缺少证据引用",
+            summary="缺少证据引用。",
+            topics=[],
+            decisions=[SessionDecision(text="不应保存无证据决策", evidence_refs=[])],
+            todos=[],
+            open_questions=[],
+        )
+
+
 def test_summarize_session_persists_schema_and_renders_note(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session_and_segments(config.database_path)
@@ -235,6 +248,27 @@ def test_summarize_session_rejects_unknown_evidence_refs_without_side_effects(tm
     finally:
         conn.close()
     assert summaries == []
+
+
+def test_summarize_session_rejects_empty_decision_evidence_refs_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+
+    try:
+        summarize_session(config=config, session_id="ses_test", llm=MissingEvidenceSessionLLM())
+    except ValueError as exc:
+        assert "missing evidence_refs" in str(exc)
+    else:
+        raise AssertionError("summarize_session accepted a decision without evidence refs")
+
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(conn, "select summary_id from summaries")
+        evidence_refs = fetch_all(conn, "select evidence_id from evidence_refs")
+    finally:
+        conn.close()
+    assert summaries == []
+    assert evidence_refs == []
 
 
 def _insert_session_and_segments(
