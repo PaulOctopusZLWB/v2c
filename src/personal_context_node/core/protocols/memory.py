@@ -9,7 +9,7 @@ from typing import Literal
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 ClaimType = Literal[
@@ -23,6 +23,7 @@ ClaimType = Literal[
     "relationship",
 ]
 AnnotationType = Literal["confirm", "dispute", "comment", "supersede_reference"]
+SUPPORTED_VISIBILITY_TYPES = {"private", "public", "direct", "group"}
 
 
 class SubjectRef(BaseModel):
@@ -42,6 +43,14 @@ class EvidenceRef(BaseModel):
     quote: str
 
 
+class Visibility(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: str = "private"
+    direct_did: str | None = None
+    group_id: str | None = None
+
+
 class MemoryCard(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -53,7 +62,18 @@ class MemoryCard(BaseModel):
     subject: SubjectRef
     evidence_refs: list[EvidenceRef]
     candidate_claim: str | None = None
+    visibility: Visibility = Field(default_factory=Visibility)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_visibility(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        raw_visibility = data.get("visibility", {"type": "private"})
+        data = dict(data)
+        data["visibility"] = _normalize_visibility(raw_visibility)
+        return data
 
     @field_validator("evidence_refs")
     @classmethod
@@ -61,6 +81,22 @@ class MemoryCard(BaseModel):
         if not value:
             raise ValueError("generated memory cards require at least one evidence reference")
         return value
+
+
+def _normalize_visibility(value: object) -> dict[str, str]:
+    if isinstance(value, str):
+        return {"type": value if value in SUPPORTED_VISIBILITY_TYPES else "private"}
+    if isinstance(value, dict):
+        visibility_type = value.get("type")
+        if visibility_type not in SUPPORTED_VISIBILITY_TYPES:
+            return {"type": "private"}
+        normalized = {"type": str(visibility_type)}
+        if visibility_type == "direct" and value.get("direct_did"):
+            normalized["direct_did"] = str(value["direct_did"])
+        if visibility_type == "group" and value.get("group_id"):
+            normalized["group_id"] = str(value["group_id"])
+        return normalized
+    return {"type": "private"}
 
 
 class MemoryAnnotation(BaseModel):
@@ -194,7 +230,7 @@ def create_signed_event(
     key = private_key or Ed25519PrivateKey.generate()
     public_key = _public_key_to_text(key.public_key())
     created = created_at or datetime.now(timezone.utc)
-    payload_json = payload.model_dump(mode="json")
+    payload_json = payload.model_dump(mode="json", exclude_none=True)
     event_body: dict[str, object] = {
         "envelope_version": "signed_event.v1",
         "event_type": event_type,

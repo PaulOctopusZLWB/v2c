@@ -70,6 +70,91 @@ def test_generated_memory_card_requires_evidence() -> None:
         raise AssertionError("MemoryCard accepted a generated claim without evidence")
 
 
+def test_memory_card_visibility_defaults_to_private_object() -> None:
+    card = MemoryCard(
+        card_id="mem_test_001",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Use signed events.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_test",
+                source_type="transcript_segment",
+                source_id="seg_test",
+                quote="Use signed events.",
+            )
+        ],
+    )
+
+    assert card.visibility.model_dump(exclude_none=True) == {"type": "private"}
+
+
+def test_memory_card_visibility_scalar_is_normalized_in_signed_payload() -> None:
+    card = MemoryCard(
+        card_id="mem_test_001",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Use signed events.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_test",
+                source_type="transcript_segment",
+                source_id="seg_test",
+                quote="Use signed events.",
+            )
+        ],
+        visibility="public",
+    )
+
+    event, _ = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+    )
+
+    assert event.payload["visibility"] == {"type": "public"}
+
+
+def test_unknown_memory_card_visibility_fails_closed_to_private() -> None:
+    scalar = MemoryCard(
+        card_id="mem_test_scalar",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Use signed events.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_test_scalar",
+                source_type="transcript_segment",
+                source_id="seg_test_scalar",
+                quote="Use signed events.",
+            )
+        ],
+        visibility="friends",
+    )
+    object_value = MemoryCard(
+        card_id="mem_test_object",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Use signed events.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_test_object",
+                source_type="transcript_segment",
+                source_id="seg_test_object",
+                quote="Use signed events.",
+            )
+        ],
+        visibility={"type": "federated"},
+    )
+
+    assert scalar.visibility.model_dump(exclude_none=True) == {"type": "private"}
+    assert object_value.visibility.model_dump(exclude_none=True) == {"type": "private"}
+
+
 def test_protocol_vector_hash_and_signature_verify() -> None:
     event = SignedEvent(
         envelope_version="signed_event.v1",
