@@ -153,6 +153,26 @@ claim_type: requirement
     assert candidates == [{"edited_claim": "用户确认后的声明。", "status": "confirmed"}]
 
 
+def test_sync_review_rewrites_review_block_as_managed_receipt(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(text.replace("action: pending", "action: confirm"), encoding="utf-8")
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 1
+    receipt = review_path.read_text(encoding="utf-8")
+    assert "<!-- pcn:review start" not in receipt
+    assert "<!-- pcn:review end" not in receipt
+    assert receipt.count("pcn:review_receipt start") == 1
+    assert '<!-- pcn:review_receipt start kind="managed" candidate_id="cand_test_001"' in receipt
+    assert "action=confirm" in receipt
+    assert "card_id=mem_" in receipt
+    assert "- [ ] cand_test_001" not in receipt
+
+
 def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)

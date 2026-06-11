@@ -315,24 +315,59 @@ def _insert_sync_log(conn, *, source: str, target_id: str, status: str, message:
 
 def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | None]]) -> None:
     synced_at = datetime.now(timezone.utc).isoformat()
+    rendered_receipts: set[str] = set()
+    text = path.read_text(encoding="utf-8")
+
+    def replace_review_block(match: re.Match[str]) -> str:
+        candidate_id = match.group("candidate_id")
+        receipt = receipts.get(candidate_id)
+        if receipt is None:
+            return match.group(0)
+        rendered_receipts.add(candidate_id)
+        values = _simple_yaml_block(match.group("body"))
+        original_claim = values.get("claim", "")
+        return "\n".join(_receipt_lines(candidate_id, receipt, original_claim=original_claim, synced_at=synced_at))
+
+    text = re.sub(
+        r'<!--\s*pcn:review start\b[^>]*type="memory_candidate"[^>]*candidate_id="(?P<candidate_id>[^"]+)"[^>]*-->'
+        r'(?P<body>.*?)'
+        r'<!--\s*pcn:review end\b[^>]*candidate_id="(?P=candidate_id)"[^>]*-->',
+        replace_review_block,
+        text,
+        flags=re.DOTALL,
+    )
+
     rewritten: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \| ([^|]+) \| ([^|]+)(?:\| *(.*))?", line)
+    for line in text.splitlines():
+        match = re.match(r"- \[[ xX]\] (cand_[^ |]+) \| ([^|]+) \| ([^|]+)(?:\| *(.*))?", line)
         if not match or match.group(1) not in receipts:
             rewritten.append(line)
             continue
         candidate_id = match.group(1)
+        if candidate_id in rendered_receipts:
+            continue
         receipt = receipts[candidate_id]
-        action = receipt["action"]
-        card_id = receipt["card_id"]
-        card_part = f" card_id={card_id}" if card_id else ""
-        rewritten.append(
-            f'<!-- pcn:review_receipt start kind="managed" candidate_id="{candidate_id}" '
-            f'action={action}{card_part} synced_at="{synced_at}" -->'
-        )
-        if card_id:
-            rewritten.append(f"confirmed {candidate_id} -> {card_id}; original_claim={match.group(3)}")
-        else:
-            rewritten.append(f"{action} {candidate_id}; original_claim={match.group(3)}")
-        rewritten.append(f'<!-- pcn:review_receipt end candidate_id="{candidate_id}" -->')
+        rewritten.extend(_receipt_lines(candidate_id, receipt, original_claim=match.group(3), synced_at=synced_at))
     path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+
+def _receipt_lines(
+    candidate_id: str,
+    receipt: dict[str, str | None],
+    *,
+    original_claim: str,
+    synced_at: str,
+) -> list[str]:
+    action = receipt["action"]
+    card_id = receipt["card_id"]
+    card_part = f" card_id={card_id}" if card_id else ""
+    lines = [
+        f'<!-- pcn:review_receipt start kind="managed" candidate_id="{candidate_id}" '
+        f'action={action}{card_part} synced_at="{synced_at}" -->'
+    ]
+    if card_id:
+        lines.append(f"confirmed {candidate_id} -> {card_id}; original_claim={original_claim}")
+    else:
+        lines.append(f"{action} {candidate_id}; original_claim={original_claim}")
+    lines.append(f'<!-- pcn:review_receipt end candidate_id="{candidate_id}" -->')
+    return lines
