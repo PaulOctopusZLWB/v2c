@@ -102,6 +102,8 @@ def _config_text(config: AppConfig) -> str:
             "",
             "[asr]",
             f'backend = "{config.asr_backend}"',
+            f'language = "{config.asr_language}"',
+            f'model_name = "{config.asr_model_name}"',
             "",
             "[llm]",
             f'backend = "{config.llm_backend}"',

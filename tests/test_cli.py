@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
+from personal_context_node.storage.sqlite import connect, fetch_all
 
 
 def _write_tiny_wav(path: Path) -> None:
@@ -268,3 +269,54 @@ def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "chunks_transcribed=" in result.output
     assert "segments_created=" in result.output
+
+
+def test_transcribe_cli_uses_asr_settings_from_config(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data}"
+obsidian_vault = "{vault}"
+
+[asr]
+backend = "mock"
+language = "yue"
+model_name = "configured-mock-asr"
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        app,
+        ["run-first-milestone", "--source-dir", str(source), "--data-dir", str(data), "--obsidian-vault", str(vault)],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "preprocess",
+            "--data-dir",
+            str(data),
+            "--obsidian-vault",
+            str(vault),
+            "--vad-threshold",
+            "0.0001",
+            "--max-chunk-ms",
+            "300",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(app, ["transcribe", "--config", str(config_path), "--mock-text", "配置 ASR 输出"])
+
+    assert result.exit_code == 0, result.output
+    conn = connect(data / "db" / "personal_context.sqlite")
+    try:
+        rows = fetch_all(conn, "select language, model_name, text from transcript_segments where is_active = 1")
+    finally:
+        conn.close()
+    assert rows == [{"language": "yue", "model_name": "configured-mock-asr", "text": "配置 ASR 输出"}]

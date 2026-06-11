@@ -57,6 +57,8 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert "target_sample_rate_hz = 16000" in config_text
     assert "target_channels = 1" in config_text
     assert 'target_sample_format = "s16"' in config_text
+    assert 'language = "zh"' in config_text
+    assert 'model_name = "sensevoice"' in config_text
 
 
 def test_health_cli_reports_ok_for_initialized_workspace(tmp_path) -> None:

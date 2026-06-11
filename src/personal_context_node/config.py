@@ -46,6 +46,8 @@ class AppConfig(BaseModel):
     chunk_overlap_ms: int = 1_000
     asr_backend: str = "mock"
     asr_command: str | None = None
+    asr_language: str = "zh"
+    asr_model_name: str = "sensevoice"
     llm_backend: str = "rule_based"
     send_person_names: bool = True
     send_speaker_labels: bool = True
@@ -85,6 +87,8 @@ class AppConfig(BaseModel):
             "chunk_overlap_ms": vad.get("chunk_overlap_ms", cls.model_fields["chunk_overlap_ms"].default),
             "asr_backend": asr.get("backend", cls.model_fields["asr_backend"].default),
             "asr_command": asr.get("command", cls.model_fields["asr_command"].default),
+            "asr_language": asr.get("language", cls.model_fields["asr_language"].default),
+            "asr_model_name": asr.get("model_name", cls.model_fields["asr_model_name"].default),
             "llm_backend": llm.get("backend", cls.model_fields["llm_backend"].default),
             "send_person_names": llm.get("send_person_names", cls.model_fields["send_person_names"].default),
             "send_speaker_labels": llm.get("send_speaker_labels", cls.model_fields["send_speaker_labels"].default),

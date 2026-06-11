@@ -65,7 +65,7 @@ def test_transcribe_pending_chunks_persists_segments_with_chunk_evidence(tmp_pat
     assert [row["speaker_cluster_id"] for row in rows] == ["self", "self", "self"]
     assert rows[0]["model_name"] == "mock-asr"
     assert rows[0]["model_version"] == "test"
-    assert rows[0]["decode_config_json"] == '{"text": "本地转写结果"}'
+    assert rows[0]["decode_config_json"] == '{"language": "zh", "text": "本地转写结果"}'
     assert rows[0]["chunk_id"] == chunks[0]["chunk_id"]
     assert rows[0]["start_ms"] == chunks[0]["source_start_ms"]
     assert rows[0]["absolute_start_at"] == audio[0]["recorded_at"]

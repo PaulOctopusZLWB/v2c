@@ -293,17 +293,24 @@ def preprocess(
 
 @app.command()
 def transcribe(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
         Path("/Users/paul/Documents/Obsidian/PersonalContext"),
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by the mock ASR adapter."),
-    asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
+    asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper, e.g. 'python scripts/funasr_sensevoice_wrapper.py'."),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    asr = _build_asr(asr_backend=asr_backend, asr_command=asr_command, mock_text=mock_text)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    asr = _build_asr(
+        asr_backend=asr_backend or config.asr_backend,
+        asr_command=asr_command or config.asr_command,
+        mock_text=mock_text,
+        language=config.asr_language,
+        model_name=config.asr_model_name,
+    )
     result = transcribe_pending_chunks(config=config, asr=asr)
     typer.echo(
         " ".join(
@@ -1057,9 +1064,16 @@ def _build_vad(
     raise typer.BadParameter("--vad-backend must be 'energy', 'command', or 'funasr'")
 
 
-def _build_asr(*, asr_backend: str, asr_command: str | None, mock_text: str):
+def _build_asr(
+    *,
+    asr_backend: str,
+    asr_command: str | None,
+    mock_text: str,
+    language: str = "zh",
+    model_name: str = "mock-asr",
+):
     if asr_backend == "mock":
-        return MockASRAdapter(text=mock_text)
+        return MockASRAdapter(text=mock_text, language=language, model_name=model_name)
     if asr_backend == "command":
         if not asr_command:
             raise typer.BadParameter("--asr-command is required when --asr-backend command")

@@ -26,6 +26,8 @@ signing_key_path = "keys/configured_ed25519.key"
 [asr]
 backend = "command"
 command = "python scripts/funasr_wrapper.py"
+language = "zh"
+model_name = "sensevoice"
 
 [vad]
 backend = "energy"
@@ -72,6 +74,8 @@ stable_seconds = 10
     assert config.signing_key_path == tmp_path / "config" / "keys" / "configured_ed25519.key"
     assert config.asr_backend == "command"
     assert config.asr_command == "python scripts/funasr_wrapper.py"
+    assert config.asr_language == "zh"
+    assert config.asr_model_name == "sensevoice"
     assert config.vad_backend == "energy"
     assert config.vad_threshold == 0.02
     assert config.min_speech_ms == 250
