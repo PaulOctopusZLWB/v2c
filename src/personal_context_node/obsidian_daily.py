@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -90,6 +91,8 @@ def _daily_note_text(
             "pcn_schema: markdown_note.v1",
             "note_type: daily",
             f"date_key: {day}",
+            "generated_by: personal-context-node",
+            f"generated_at: {datetime.now(timezone.utc).isoformat()}",
             "pcn_managed: true",
             "---",
             "",

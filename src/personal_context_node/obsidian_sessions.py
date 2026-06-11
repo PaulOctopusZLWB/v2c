@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -60,6 +61,8 @@ def _session_note_text(session: dict[str, object], *, existing_text: str | None 
             "note_type: session",
             f"date_key: {session['date_key']}",
             f"session_id: {session_id}",
+            "generated_by: personal-context-node",
+            f"generated_at: {datetime.now(timezone.utc).isoformat()}",
             "pcn_managed: true",
             "---",
             "",

@@ -20,6 +20,9 @@ def test_publish_session_notes_creates_stable_session_note(tmp_path: Path) -> No
     assert text.startswith(
         "---\npcn_schema: markdown_note.v1\nnote_type: session\ndate_key: 2087-05-10\nsession_id: ses_test\n"
     )
+    assert "generated_by: personal-context-node\n" in text
+    assert "generated_at: " in text
+    assert "\npcn_managed: true\n---\n" in text
     assert "# Session ses_test" in text
     assert "<!-- pcn:managed start type=\"session_summary\"" in text
     assert "segment_count: 2" in text

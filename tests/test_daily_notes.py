@@ -39,6 +39,9 @@ def test_publish_daily_note_writes_markdown_frontmatter(tmp_path: Path) -> None:
     note_path = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
     text = note_path.read_text(encoding="utf-8")
     assert text.startswith("---\npcn_schema: markdown_note.v1\nnote_type: daily\ndate_key: 2087-05-10\n")
+    assert "generated_by: personal-context-node\n" in text
+    assert "generated_at: " in text
+    assert "\npcn_managed: true\n---\n" in text
 
 
 def _insert_daily_summary(database_path: Path) -> None:
