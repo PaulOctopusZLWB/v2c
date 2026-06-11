@@ -73,9 +73,10 @@ def _confirmed_memory_note_text(*, day: str, rows: list[dict[str, object]], sour
     for row in rows:
         subject = json.loads(str(row["subject_json"]))
         evidence_refs = json.loads(str(row["evidence_refs_json"]))
+        block_id = f'confirmed_memory_card:{row["card_id"]}'
         lines.extend(
             [
-                f'<!-- pcn:managed start type="confirmed_memory_card" card_id="{row["card_id"]}" -->',
+                _block_start(block_id, "managed"),
                 f"- {row['claim']}",
                 f"  - card_id: {row['card_id']}",
                 f"  - claim_type: {row['claim_type']}",
@@ -88,8 +89,16 @@ def _confirmed_memory_note_text(*, day: str, rows: list[dict[str, object]], sour
             lines.append(f"  - evidence: {evidence.get('evidence_id')} -> {evidence.get('source_id')}")
         lines.extend(
             [
-                f'<!-- pcn:managed end type="confirmed_memory_card" card_id="{row["card_id"]}" -->',
+                _block_end(block_id),
                 "",
             ]
         )
     return "\n".join(lines)
+
+
+def _block_start(block_id: str, kind: str) -> str:
+    return f'<!-- pcn:block start id="{block_id}" kind="{kind}" version="1" -->'
+
+
+def _block_end(block_id: str) -> str:
+    return f'<!-- pcn:block end id="{block_id}" -->'

@@ -35,6 +35,9 @@ def test_publish_confirmed_memory_note_writes_daily_confirmed_cards(tmp_path: Pa
     assert "claim_type: requirement" in text
     assert "subject: Personal Context Node" in text
     assert "evidence: ev_test -> seg_test" in text
+    assert '<!-- pcn:block start id="confirmed_memory_card:mem_' in text
+    assert '<!-- pcn:block end id="confirmed_memory_card:mem_' in text
+    assert "pcn:managed start" not in text
 
 
 def test_publish_confirmed_memory_note_uses_candidate_date_key_without_review_path(tmp_path: Path) -> None:
