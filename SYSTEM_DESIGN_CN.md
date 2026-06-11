@@ -415,6 +415,7 @@ Obsidian 是人机审核界面，不是唯一事实库。事实库仍由 SQLite 
 6. 语义变化必须新建 card 并 supersede 旧 card。
 7. 所有可共享对象都通过 signed event log 表达。
 8. v1 只做签名，不做加密。
+9. 签名对象只包含 did，不内嵌 display name：display name 的唯一权威来源是 `identity_profile.published`，渲染时解析（按 44 节信任引导，信任任何人之前必然已持有其 profile）。
 
 ### 边界
 
@@ -593,8 +594,6 @@ archive:
   "text": "这个方案我们下周再看。",
   "language": "zh",
   "speaker_cluster_id": "spk_01J00000000000000000000000",
-  "mapped_person_id": "per_self",
-  "override_person_id": null,
   "confidence": 0.86,
   "asr_backend": "funasr_sensevoice",
   "model_name": "sensevoice",
@@ -631,10 +630,7 @@ evidence 引用形状的统一规则：内部对象（candidate、segment、summ
 {
   "schema_version": "memory_card.v1",
   "card_id": "mem_01J00000000000000000000000",
-  "owner": {
-    "id": "did:key:z6Mk...",
-    "display_name": "Paul"
-  },
+  "owner": "did:key:z6Mk...",
   "subject": {
     "type": "project",
     "id": "project_personal_context_node",
@@ -696,10 +692,7 @@ relationship
   "schema_version": "memory_annotation.v1",
   "annotation_id": "ann_01J00000000000000000000000",
   "target_card_id": "mem_01J00000000000000000000000",
-  "author": {
-    "id": "did:key:z6Mk...",
-    "display_name": "Alice"
-  },
+  "author": "did:key:z6Mk...",
   "annotation_type": "confirm",
   "body": "我确认这是当前 v1 的 ASR 选择。",
   "created_at": "2026-06-10T17:00:00+08:00"
@@ -779,6 +772,7 @@ group
 3. 共享 claim 文本中不得出现非网络成员的真实姓名；应使用 `Person A` 这类 alias label。
 4. 本地 `per_*` 与真实姓名只存在于本节点私有库，不进入共享协议。
 5. 这条规则适用于 `subject`、`claim`、`evidence_refs.summary` 和 annotation 正文。
+6. `display_hint` 仅为渲染提示，非权威；网络成员的权威名称来自其 `identity_profile.published`。
 
 ## 18. Signed Event v1 协议
 
@@ -791,7 +785,8 @@ group
 | 签名输入 | canonical JSON event signing body |
 | 编码 | base64url |
 | 加密 | v1 不做 |
-| 对象 ID | `mem_`、`ann_`、`evt_`、`ev_` + ULID |
+| 对象 ID | `mem_`、`ann_`、`ev_` + ULID |
+| 事件身份 | 无独立 event_id；事件身份就是 `event_hash` |
 
 签名输入不是单独的 `payload`，而是除 `signature` 外的 event signing body。这样 `event_type`、`object_id`、`owner_sequence`、`prev_event_hash`、`payload_encoding` 等 envelope 字段都会被签名保护。
 
@@ -800,7 +795,6 @@ group
 ```json
 {
   "envelope_version": "signed_event.v1",
-  "event_id": "evt_01J00000000000000000000000",
   "event_type": "memory_card.created",
   "object_id": "mem_01J00000000000000000000000",
   "object_version": 1,
@@ -818,6 +812,8 @@ group
   }
 }
 ```
+
+事件没有独立 ID：事件身份就是 `event_hash = sha256(canonical_json(signing_body))`，跨事件引用（如 `prev_event_hash`、`predecessor.rotation_event_hash`）一律使用 hash。
 
 ### 18.3 Event Type
 
@@ -943,6 +939,11 @@ flowchart LR
 | 14 | 密钥轮换 | 旧 key 签发轮换、封旧链、新链继承权威（见 41） |
 | 15 | 协议演化 | must-ignore 未知字段、保留 raw event、未知 event_type 不 materialize（见 42） |
 | 16 | 撤回 | revoked 是建议性撤回，不是远程删除（见 45） |
+| 17 | 身份字段 | 签名对象只含 did，不内嵌 display name；权威名称来自 identity_profile（见 11、17.6） |
+| 18 | 事件身份 | 无独立 event_id，事件身份就是 event_hash（见 18.2） |
+| 19 | 存储去冗余 | segments 纯证据 + overrides 表 + 归因 VIEW；删 archive_status、mapping 时间列、evidence visibility 列（见 27.1） |
+| 20 | 流水线拓扑 | 声明式中心 PIPELINE，handler 不知道下游；date_key 单点计算（见 25.4） |
+| 21 | 审核消费 | candidate review block 是一次性命令，消费后改写为只读回执；speaker mapping 是声明式幂等同步（见 29.4） |
 
 ## 22. 当前设计的最大风险
 
@@ -1016,7 +1017,6 @@ mock audio file
 | memory candidate | `cand_` |
 | memory card | `mem_` |
 | annotation | `ann_` |
-| signed event | `evt_` |
 | task | `task_` |
 | run | `run_` |
 | model run | `mr_` |
@@ -1140,12 +1140,14 @@ not_started
 | `obsidian_publish` | date_key | daily / session / candidate review / speaker review 笔记 | 无 |
 | `archive` | audio_file 等 | NAS 副本 + 校验（第二切片后启用） | 无 |
 
-规则：
+上表是 `PIPELINE` 常量的文档形式。规则：
 
-1. “成功后登记下游 task”与本 task 的状态更新必须在同一个 SQLite 事务内完成。
-2. fan-in（多对一）统一用“收尾检查 + 自然键去重”实现：每个上游 task 成功时检查兄弟任务是否全部完成，满足才登记下游；`UNIQUE(task_type, target_type, target_id)` 保证并发下只登记一次。
-3. mock 切片使用完全相同的 task 链，只替换 adapter，从而验证调度逻辑本身。
-4. `SpeechRange` 不单独建表：它是 S2 的内存中间对象，持久化形态是合并切分后的 `AudioChunk`；如需审计 VAD 原始输出，以 JSON 文件形式存放在工作目录，不进 SQLite。
+1. 拓扑唯一声明在一个常量结构 `PIPELINE` 中（每条边：上游 task_type、下游 task_type、fan-in 谓词、target 映射）；task handler 只产出结果，不知道下游是谁。
+2. 调度器在 task 成功的同一个 SQLite 事务内查 `PIPELINE` 登记下游。
+3. fan-in（多对一）由边上的谓词表达：上游成功时调度器评估谓词（如“该 audio_file 全部 chunk 已转写”），满足才登记下游；`UNIQUE(task_type, target_type, target_id)` 保证并发下只登记一次。
+4. `date_key` 只在 session 诞生时计算一次（按 26.2 跨午夜规则）；下游一律读 `session.date_key`，永不从时间戳重算。
+5. mock 切片使用完全相同的 `PIPELINE`，只替换 adapter，从而验证调度逻辑本身。
+6. `SpeechRange` 不单独建表：它是 S2 的内存中间对象，持久化形态是合并切分后的 `AudioChunk`；如需审计 VAD 原始输出，以 JSON 文件形式存放在工作目录，不进 SQLite。
 
 ## 26. Session 定义
 
@@ -1216,10 +1218,10 @@ CREATE TABLE audio_files (
   recorded_at TEXT,
   imported_at TEXT NOT NULL,
   status TEXT NOT NULL,
-  archive_status TEXT NOT NULL DEFAULT 'not_archived',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- 归档状态唯一活在 archive_records 表，查询时 join，不在此冗余
 
 CREATE UNIQUE INDEX idx_audio_files_source_identity
 ON audio_files(source_device, source_path, source_size_bytes, source_mtime);
@@ -1290,13 +1292,19 @@ CREATE TABLE speaker_mappings (
   person_id TEXT NOT NULL REFERENCES persons(person_id),
   confidence REAL,
   source TEXT NOT NULL,
-  valid_from TEXT,
-  valid_until TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
 CREATE INDEX idx_speaker_mappings_cluster ON speaker_mappings(speaker_cluster_id);
+
+CREATE TABLE segment_person_overrides (
+  segment_id TEXT PRIMARY KEY REFERENCES transcript_segments(segment_id),
+  person_id TEXT NOT NULL REFERENCES persons(person_id),
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 
 CREATE TABLE sessions (
   session_id TEXT PRIMARY KEY,
@@ -1325,8 +1333,6 @@ CREATE TABLE transcript_segments (
   text TEXT NOT NULL,
   language TEXT,
   speaker_cluster_id TEXT REFERENCES speaker_clusters(speaker_cluster_id),
-  mapped_person_id TEXT REFERENCES persons(person_id),
-  override_person_id TEXT REFERENCES persons(person_id),
   confidence REAL,
   asr_backend TEXT NOT NULL,
   model_name TEXT,
@@ -1337,7 +1343,20 @@ CREATE TABLE transcript_segments (
 
 CREATE INDEX idx_segments_session_time ON transcript_segments(session_id, absolute_start_at);
 CREATE INDEX idx_segments_audio_time ON transcript_segments(audio_file_id, start_ms, end_ms);
-CREATE INDEX idx_segments_person ON transcript_segments(mapped_person_id, override_person_id);
+CREATE INDEX idx_segments_cluster ON transcript_segments(speaker_cluster_id);
+
+-- 归因是读时解析的派生视图：证据表（transcript_segments）不存任何派生态
+CREATE VIEW v_segment_attribution AS
+SELECT
+  s.segment_id,
+  COALESCE(o.person_id, m.person_id) AS person_id,
+  CASE
+    WHEN o.person_id IS NOT NULL THEN 'override'
+    WHEN m.person_id IS NOT NULL THEN 'cluster_mapping'
+  END AS attribution_source
+FROM transcript_segments s
+LEFT JOIN segment_person_overrides o ON o.segment_id = s.segment_id
+LEFT JOIN speaker_mappings m ON m.speaker_cluster_id = s.speaker_cluster_id;
 
 CREATE TABLE evidence_refs (
   evidence_id TEXT PRIMARY KEY,
@@ -1346,10 +1365,10 @@ CREATE TABLE evidence_refs (
   owner_id TEXT,
   quote TEXT,
   summary TEXT,
-  visibility_json TEXT NOT NULL DEFAULT '{"type":"private"}',
   created_at TEXT NOT NULL,
   UNIQUE(source_type, source_ref)
 );
+-- 本地证据全部 private；visibility 是确认共享时对单张 card 内嵌 evidence 元数据才赋值的协议概念，不进内部表
 
 CREATE TABLE summaries (
   summary_id TEXT PRIMARY KEY,
@@ -1408,11 +1427,10 @@ CREATE INDEX idx_memory_cards_owner ON memory_cards(owner_id, status);
 CREATE INDEX idx_memory_cards_subject ON memory_cards(claim_type, status);
 
 CREATE TABLE signed_events (
-  event_id TEXT PRIMARY KEY,
+  event_hash TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL,
   owner_sequence INTEGER NOT NULL,
   prev_event_hash TEXT,
-  event_hash TEXT NOT NULL UNIQUE,
   envelope_version TEXT NOT NULL,
   event_type TEXT NOT NULL,
   object_id TEXT NOT NULL,
@@ -1483,6 +1501,7 @@ audio_chunks
 persons
 speaker_clusters
 speaker_mappings
+segment_person_overrides
 sessions
 transcript_segments
 evidence_refs
@@ -1692,6 +1711,9 @@ defer
 4. `defer`：保持候选，不生成 card。
 5. `claim` 为空或 YAML 解析失败时，读回失败并记录到 sync log。
 6. `visibility` 接受标量简写（`private`、`public`），读回时归一化为对象形态；带参数的类型（如 `group`）必须写完整对象；未知标量值 fail-closed 按 `private` 处理。协议对象中永远只存对象形态。
+7. review block 是一次性命令，不是持续状态：sync 成功后系统把 block 改写为只读回执（原 action、生成的 card_id 链接、synced_at），并标记 `kind="managed"`；此后对该 block 的任何编辑无效并记录到 sync log。审核状态唯一活在 SQLite。
+8. 已确认的候选不允许在候选块上反悔：撤回或修改已确认卡片走卡片自身操作（supersede / revoke）。
+9. 与此相对，`pcn:speaker_mapping` block 是声明式幂等同步（每次读回 upsert），不是一次性命令。
 
 ### 29.5 Speaker Mapping Review 格式
 
@@ -2332,15 +2354,15 @@ server-side 时间戳裁决
 ### 47.2 Canonical Signing Body
 
 ```json
-{"created_at":"2026-06-10T00:00:00Z","envelope_version":"signed_event.v1","event_id":"evt_01J00000000000000000000000","event_type":"memory_card.created","object_id":"mem_01J00000000000000000000000","object_version":1,"owner_id":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB","owner_sequence":1,"payload":{"candidate_claim":null,"card_id":"mem_01J00000000000000000000000","claim":"Use signed event log for memory cards.","claim_type":"decision","confidence":1,"created_at":"2026-06-10T00:00:00Z","evidence_refs":[],"observed_at":"2026-06-10T00:00:00Z","owner":{"display_name":"Test User","id":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB"},"schema_version":"memory_card.v1","source_type":"manual","subject":{"id":"project_test","label":"Protocol Test","type":"project"},"tags":["test"],"updated_at":"2026-06-10T00:00:00Z","valid_from":"2026-06-10","valid_until":null,"visibility":{"type":"private"}},"payload_encoding":"plain","payload_type":"memory_card.v1","prev_event_hash":null}
+{"created_at":"2026-06-10T00:00:00Z","envelope_version":"signed_event.v1","event_type":"memory_card.created","object_id":"mem_01J00000000000000000000000","object_version":1,"owner_id":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB","owner_sequence":1,"payload":{"candidate_claim":null,"card_id":"mem_01J00000000000000000000000","claim":"Use signed event log for memory cards.","claim_type":"decision","confidence":1,"created_at":"2026-06-10T00:00:00Z","evidence_refs":[],"observed_at":"2026-06-10T00:00:00Z","owner":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB","schema_version":"memory_card.v1","source_type":"manual","subject":{"id":"project_test","label":"Protocol Test","type":"project"},"tags":["test"],"updated_at":"2026-06-10T00:00:00Z","valid_from":"2026-06-10","valid_until":null,"visibility":{"type":"private"}},"payload_encoding":"plain","payload_type":"memory_card.v1","prev_event_hash":null}
 ```
 
 ### 47.3 Expected Hash and Signature
 
 ```json
 {
-  "canonical_signing_body_sha256": "sha256:5805912fed9ad25b6655b0c67e94fe76cb48d91de4779e23f4a007a15819336c",
-  "signature_base64url": "t0skAWV7LebrFNQ9vYRwT66MIdJHXL4ii_OSMQiV2zywlN66PBpsKAPxZmkWrVMhe-X7uBtdqrTbKG5hQ026AA"
+  "canonical_signing_body_sha256": "sha256:3ad717fd8c90f5c092c13becaf860133d829fd2f95a408c6f036e9aad4301f08",
+  "signature_base64url": "mnQdXTH9WIeeTjEVBLoQNBL3_EVt-uxcqKPx0-UzbYJv6toenF91_kFCVULMrMc9pAUlHPmmezmY8CkClZndBA"
 }
 ```
 
@@ -2357,15 +2379,15 @@ server-side 时间戳裁决
 Canonical Signing Body：
 
 ```json
-{"created_at":"2026-06-10T00:10:00Z","envelope_version":"signed_event.v1","event_id":"evt_01J00000000000000000000001","event_type":"memory_card.created","object_id":"mem_01J00000000000000000000001","object_version":1,"owner_id":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB","owner_sequence":2,"payload":{"candidate_claim":null,"card_id":"mem_01J00000000000000000000001","claim":"v1 的本地 ASR 主 backend 采用 FunASR + SenseVoice。","claim_type":"decision","confidence":0.91,"created_at":"2026-06-10T00:10:00Z","evidence_refs":[],"observed_at":"2026-06-10T00:00:00Z","owner":{"display_name":"Test User","id":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB"},"schema_version":"memory_card.v1","source_type":"manual","subject":{"id":"project_test","label":"Protocol Test","type":"project"},"tags":["test"],"updated_at":"2026-06-10T00:10:00Z","valid_from":"2026-06-10","valid_until":null,"visibility":{"type":"private"}},"payload_encoding":"plain","payload_type":"memory_card.v1","prev_event_hash":"sha256:5805912fed9ad25b6655b0c67e94fe76cb48d91de4779e23f4a007a15819336c"}
+{"created_at":"2026-06-10T00:10:00Z","envelope_version":"signed_event.v1","event_type":"memory_card.created","object_id":"mem_01J00000000000000000000001","object_version":1,"owner_id":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB","owner_sequence":2,"payload":{"candidate_claim":null,"card_id":"mem_01J00000000000000000000001","claim":"v1 的本地 ASR 主 backend 采用 FunASR + SenseVoice。","claim_type":"decision","confidence":0.91,"created_at":"2026-06-10T00:10:00Z","evidence_refs":[],"observed_at":"2026-06-10T00:00:00Z","owner":"did:key:z6MkiyHn3pefN7Awu3gtU5hgSzBtu1i71Dv3qyGZw2F3ZKpB","schema_version":"memory_card.v1","source_type":"manual","subject":{"id":"project_test","label":"Protocol Test","type":"project"},"tags":["test"],"updated_at":"2026-06-10T00:10:00Z","valid_from":"2026-06-10","valid_until":null,"visibility":{"type":"private"}},"payload_encoding":"plain","payload_type":"memory_card.v1","prev_event_hash":"sha256:3ad717fd8c90f5c092c13becaf860133d829fd2f95a408c6f036e9aad4301f08"}
 ```
 
 Expected Hash and Signature：
 
 ```json
 {
-  "canonical_signing_body_sha256": "sha256:536fa4aa4475f351d61bee73406ddbe9c1dc2266a0721a4dcdeaa8d6a7729e6a",
-  "signature_base64url": "AB56jw7OElzRb90K0VzPeWwKVxJEAEWA75nkX0WhePfQA5G1kf6MZmFoJw155Bmr9TcPuwphVOG7ERUyztreCw"
+  "canonical_signing_body_sha256": "sha256:65cf60c07fb75da68f496ea4d036d0dcf4d56f88ea50d804acce11df77e4c59f",
+  "signature_base64url": "mdx8x87KdNJmmJMiLZCNqBoKKvOlMMHKpCpaCVka0AH1B-vmfTJn70zcRGN01-t6sGQxW6Azna8Y5Lwymz7BAQ"
 }
 ```
 
