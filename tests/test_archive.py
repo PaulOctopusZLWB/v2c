@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
-from personal_context_node.archive import archive_completed_audio, cleanup_archived_audio
+from personal_context_node.archive import archive_completed_audio, cleanup_archived_audio, mark_cleanup_eligible_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef, create_signed_event
 from personal_context_node.signed_event_store import insert_signed_event
@@ -133,7 +133,7 @@ def test_cleanup_archived_audio_removes_only_verified_retained_local_files(tmp_p
     old_raw = _write_raw(config, "old.wav", b"old raw audio")
     recent_raw = _write_raw(config, "recent.wav", b"recent raw audio")
     imported_raw = _write_raw(config, "imported.wav", b"imported raw audio")
-    _insert_audio(config.database_path, old_raw, _sha256(old_raw), status="archived", audio_file_id="aud_old")
+    _insert_audio(config.database_path, old_raw, _sha256(old_raw), status="cleanup_eligible", audio_file_id="aud_old")
     _insert_audio(config.database_path, recent_raw, _sha256(recent_raw), status="archived", audio_file_id="aud_recent")
     _insert_audio(config.database_path, imported_raw, _sha256(imported_raw), status="imported", audio_file_id="aud_imported")
     old_archive = _copy_archive(archive_root, old_raw)
@@ -148,7 +148,7 @@ def test_cleanup_archived_audio_removes_only_verified_retained_local_files(tmp_p
     )
 
     assert result.files_removed == 1
-    assert result.files_pending == 1
+    assert result.files_pending == 0
     assert not old_raw.exists()
     assert recent_raw.exists()
     assert imported_raw.exists()
@@ -162,6 +162,63 @@ def test_cleanup_archived_audio_removes_only_verified_retained_local_files(tmp_p
         {"audio_file_id": "aud_old", "status": "locally_removed"},
         {"audio_file_id": "aud_recent", "status": "archived"},
     ]
+
+
+def test_mark_cleanup_eligible_audio_marks_verified_retained_files(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas" / "PersonalContext"
+    old_raw = _write_raw(config, "old.wav", b"old raw audio")
+    recent_raw = _write_raw(config, "recent.wav", b"recent raw audio")
+    _insert_audio(config.database_path, old_raw, _sha256(old_raw), status="archived", audio_file_id="aud_old")
+    _insert_audio(config.database_path, recent_raw, _sha256(recent_raw), status="archived", audio_file_id="aud_recent")
+    old_archive = _copy_archive(archive_root, old_raw)
+    recent_archive = _copy_archive(archive_root, recent_raw)
+    _insert_archive_record(config.database_path, audio_file_id="aud_old", source_path=old_raw, archive_path=old_archive, sha256=_sha256(old_archive), archived_at="2087-05-01T00:00:00+00:00")
+    _insert_archive_record(config.database_path, audio_file_id="aud_recent", source_path=recent_raw, archive_path=recent_archive, sha256=_sha256(recent_archive), archived_at="2087-05-09T00:00:00+00:00")
+
+    result = mark_cleanup_eligible_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime(2087, 5, 5, tzinfo=timezone.utc),
+    )
+
+    assert result.files_marked == 1
+    assert result.files_pending == 1
+    assert old_raw.exists()
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select audio_file_id, status from audio_files order by audio_file_id")
+    finally:
+        conn.close()
+    assert rows == [
+        {"audio_file_id": "aud_old", "status": "cleanup_eligible"},
+        {"audio_file_id": "aud_recent", "status": "archived"},
+    ]
+
+
+def test_cleanup_archived_audio_does_not_remove_archived_before_eligibility(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas" / "PersonalContext"
+    raw_path = _write_raw(config, "old.wav", b"old raw audio")
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="archived", audio_file_id="aud_old")
+    archive_path = _copy_archive(archive_root, raw_path)
+    _insert_archive_record(config.database_path, audio_file_id="aud_old", source_path=raw_path, archive_path=archive_path, sha256=_sha256(archive_path), archived_at="2087-05-01T00:00:00+00:00")
+
+    result = cleanup_archived_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime(2087, 5, 5, tzinfo=timezone.utc),
+    )
+
+    assert result.files_removed == 0
+    assert result.files_pending == 0
+    assert raw_path.exists()
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select status from audio_files where audio_file_id = 'aud_old'")
+    finally:
+        conn.close()
+    assert rows == [{"status": "archived"}]
 
 
 def test_archive_completed_audio_exports_signed_events_jsonl(tmp_path: Path) -> None:

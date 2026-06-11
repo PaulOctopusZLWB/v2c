@@ -14,7 +14,12 @@ from personal_context_node.adapters.llm.command import CommandLLMAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.command import CommandVADAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
-from personal_context_node.archive import archive_completed_audio, archive_status_rows, cleanup_archived_audio
+from personal_context_node.archive import (
+    archive_completed_audio,
+    archive_status_rows,
+    cleanup_archived_audio,
+    mark_cleanup_eligible_audio,
+)
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
@@ -535,6 +540,27 @@ def archive_cleanup_group(
         archived_before=_parse_iso_datetime(archived_before),
     )
     typer.echo(f"files_removed={result.files_removed} files_pending={result.files_pending}")
+
+
+@archive_app.command(name="mark-cleanup-eligible")
+def archive_mark_cleanup_eligible_group(
+    archived_before: str = typer.Option(..., help="Only mark audio archived before this ISO-8601 timestamp."),
+    archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    archive_target = archive_root or config.nas_archive_root
+    result = mark_cleanup_eligible_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_target),
+        archived_before=_parse_iso_datetime(archived_before),
+    )
+    typer.echo(f"files_marked={result.files_marked} files_pending={result.files_pending}")
 
 
 @app.command(name="archive-status")

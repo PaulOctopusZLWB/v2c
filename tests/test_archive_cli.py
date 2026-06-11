@@ -84,7 +84,7 @@ def test_archive_cleanup_cli_removes_verified_retained_local_audio(tmp_path: Pat
     archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav"
     archive_path.parent.mkdir(parents=True)
     archive_path.write_bytes(raw_path.read_bytes())
-    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="archived")
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="cleanup_eligible")
     _insert_archive_record(
         config.database_path,
         source_path=raw_path,
@@ -119,6 +119,52 @@ def test_archive_cleanup_cli_removes_verified_retained_local_audio(tmp_path: Pat
     finally:
         conn.close()
     assert rows == [{"status": "locally_removed"}]
+
+
+def test_archive_mark_cleanup_eligible_cli_marks_without_removing_local_audio(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(b"raw audio bytes")
+    archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(raw_path.read_bytes())
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="archived")
+    _insert_archive_record(
+        config.database_path,
+        source_path=raw_path,
+        archive_path=archive_path,
+        sha256=_sha256(archive_path),
+        archived_at="2087-05-01T00:00:00+00:00",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "archive",
+            "mark-cleanup-eligible",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--archive-root",
+            str(archive_root),
+            "--archived-before",
+            "2087-05-05T00:00:00+00:00",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "files_marked=1" in result.output
+    assert "files_pending=0" in result.output
+    assert raw_path.exists()
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select status from audio_files where audio_file_id = 'aud_test'")
+    finally:
+        conn.close()
+    assert rows == [{"status": "cleanup_eligible"}]
 
 
 def test_archive_status_cli_lists_archived_records(tmp_path: Path) -> None:
