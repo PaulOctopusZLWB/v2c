@@ -265,14 +265,18 @@ def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        return fetch_all(
+        rows = fetch_all(
             conn,
             """
-            select task_id, task_type, target_type, target_id, status, attempt_count, last_error
+            select task_id, task_type, target_type, target_id, status, attempt_count,
+                   last_error, started_at, finished_at
             from tasks
             order by created_at
             """,
         )
+        for row in rows:
+            row["duration_ms"] = _duration_ms(started_at=row.pop("started_at"), finished_at=row.pop("finished_at"))
+        return rows
     finally:
         conn.close()
 
@@ -291,6 +295,14 @@ def _update_task(*, config: AppConfig, task_id: str, **fields: object) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _duration_ms(*, started_at: object, finished_at: object) -> int | None:
+    if not started_at or not finished_at:
+        return None
+    started = datetime.fromisoformat(str(started_at))
+    finished = datetime.fromisoformat(str(finished_at))
+    return int((finished - started).total_seconds() * 1000)
 
 
 def _validate_task_type(task_type: str) -> None:

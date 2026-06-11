@@ -762,6 +762,7 @@ def _process_status(*, data_dir: Path, obsidian_vault: Path) -> None:
                     f"status={row['status']}",
                     f"attempt_count={row['attempt_count']}",
                     f"last_error={row['last_error'] or ''}",
+                    f"duration_ms={row['duration_ms'] if row['duration_ms'] is not None else ''}",
                 ]
             )
         )

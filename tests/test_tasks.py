@@ -47,8 +47,45 @@ def test_task_lifecycle_deduplicates_and_tracks_claims(tmp_path) -> None:
             "status": "succeeded",
             "attempt_count": 1,
             "last_error": None,
+            "duration_ms": rows[0]["duration_ms"],
         }
     ]
+    assert isinstance(rows[0]["duration_ms"], int)
+
+
+def test_process_status_rows_include_task_duration_ms(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into tasks (
+              task_id, task_type, target_type, target_id, status, attempt_count,
+              started_at, finished_at, available_at, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task_duration",
+                "asr",
+                "audio_chunk",
+                "chk_1",
+                "succeeded",
+                1,
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:02.500000+00:00",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:02.500000+00:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = process_status_rows(config=config)
+
+    assert rows[0]["duration_ms"] == 2500
 
 
 def test_enqueue_task_rejects_unknown_task_type(tmp_path) -> None:
