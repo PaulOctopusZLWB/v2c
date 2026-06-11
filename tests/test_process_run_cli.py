@@ -64,6 +64,34 @@ def test_process_run_group_cli_advances_vad_task(tmp_path: Path) -> None:
     assert "status=succeeded" in result.output
 
 
+def test_process_run_group_cli_accepts_explicit_mock_flag(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "process",
+            "run",
+            "--mock",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--vad-threshold",
+            "0.05",
+            "--max-chunk-ms",
+            "1000",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "task_type=vad" in result.output
+    assert "status=succeeded" in result.output
+
+
 def test_process_run_cli_uses_command_vad_backend(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")

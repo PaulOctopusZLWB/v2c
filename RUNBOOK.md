@@ -313,6 +313,7 @@ uv run pcn process status \
 uv run pcn process run \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
+  --mock \
   --vad-threshold 0.01 \
   --max-chunk-ms 30000
 ```

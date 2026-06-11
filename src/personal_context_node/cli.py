@@ -819,6 +819,7 @@ def process_run(
     asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
+    mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
 ) -> None:
     _process_run(
         data_dir=data_dir,
@@ -827,7 +828,7 @@ def process_run(
         vad_backend=vad_backend,
         vad_command=vad_command,
         max_chunk_ms=max_chunk_ms,
-        asr_backend=asr_backend,
+        asr_backend="mock" if mock else asr_backend,
         asr_command=asr_command,
         mock_text=mock_text,
     )
@@ -847,6 +848,7 @@ def process_run_group(
     asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
+    mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
 ) -> None:
     _process_run(
         data_dir=data_dir,
@@ -855,7 +857,7 @@ def process_run_group(
         vad_backend=vad_backend,
         vad_command=vad_command,
         max_chunk_ms=max_chunk_ms,
-        asr_backend=asr_backend,
+        asr_backend="mock" if mock else asr_backend,
         asr_command=asr_command,
         mock_text=mock_text,
     )
