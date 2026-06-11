@@ -48,6 +48,8 @@ def test_task_lifecycle_deduplicates_and_tracks_claims(tmp_path) -> None:
             "attempt_count": 1,
             "last_error": None,
             "duration_ms": rows[0]["duration_ms"],
+            "model_name": None,
+            "model_version": None,
         }
     ]
     assert isinstance(rows[0]["duration_ms"], int)
@@ -86,6 +88,81 @@ def test_process_status_rows_include_task_duration_ms(tmp_path) -> None:
     rows = process_status_rows(config=config)
 
     assert rows[0]["duration_ms"] == 2500
+
+
+def test_process_status_rows_include_asr_model_version(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into tasks (
+              task_id, task_type, target_type, target_id, status,
+              available_at, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task_asr_model",
+                "asr",
+                "audio_chunk",
+                "chk_1",
+                "succeeded",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_1",
+                "DJI Mic 3",
+                "/source.wav",
+                "/local.wav",
+                "sha256:test",
+                1000,
+                "2087-05-10T00:00:00+00:00",
+                "2087-05-10T00:00:00+00:00",
+                "imported",
+            ),
+        )
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "seg_1",
+                "aud_1",
+                "chk_1",
+                0,
+                1000,
+                "本地转写。",
+                "zh",
+                "self",
+                "ev_1",
+                0.99,
+                "CommandASRAdapter",
+                "sensevoice",
+                "local-2026-06",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = process_status_rows(config=config)
+
+    assert rows[0]["model_name"] == "sensevoice"
+    assert rows[0]["model_version"] == "local-2026-06"
 
 
 def test_enqueue_task_rejects_unknown_task_type(tmp_path) -> None:

@@ -269,7 +269,21 @@ def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
             conn,
             """
             select task_id, task_type, target_type, target_id, status, attempt_count,
-                   last_error, started_at, finished_at
+                   last_error, started_at, finished_at,
+                   (
+                     select group_concat(distinct transcript_segments.model_name)
+                     from transcript_segments
+                     where tasks.task_type = 'asr'
+                       and tasks.target_type = 'audio_chunk'
+                       and transcript_segments.chunk_id = tasks.target_id
+                   ) as model_name,
+                   (
+                     select group_concat(distinct transcript_segments.model_version)
+                     from transcript_segments
+                     where tasks.task_type = 'asr'
+                       and tasks.target_type = 'audio_chunk'
+                       and transcript_segments.chunk_id = tasks.target_id
+                   ) as model_version
             from tasks
             order by created_at
             """,
