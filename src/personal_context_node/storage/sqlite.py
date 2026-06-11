@@ -76,6 +76,18 @@ create table if not exists daily_summaries (
   created_at text not null
 );
 
+create table if not exists speaker_mappings (
+  speaker text primary key,
+  person_label text not null,
+  updated_at text not null
+);
+
+create table if not exists segment_person_overrides (
+  segment_id text primary key,
+  person_label text not null,
+  updated_at text not null
+);
+
 create table if not exists signed_events (
   event_id text primary key,
   event_type text not null,

@@ -39,7 +39,14 @@ It also implements the human review boundary:
 2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
 3. `pcn confirm-review` parses checked candidates, creates confirmed memory cards, and emits signed events.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, and human-confirmation boundaries testable before model integration.
+It also implements the speaker review boundary:
+
+1. `pcn publish-speaker-review` writes `90_System/Speaker_Review/YYYY-MM-DD.md`.
+2. The user edits speaker mapping lines such as `- self: Paul`.
+3. Segment-level lines can override a specific segment when changed to a concrete person label.
+4. `pcn sync-speaker-review` reads mappings and segment overrides back into SQLite without overwriting raw transcript speaker labels.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, NAS archive, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, and review boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -65,6 +72,10 @@ uv run pcn summarize \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
 uv run pcn publish-review \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --day 2087-05-10
+uv run pcn publish-speaker-review \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
@@ -109,6 +120,21 @@ Expected confirmation output:
 
 ```text
 candidates_confirmed=1 signed_events_created=1
+```
+
+After editing `.smoke-vault/90_System/Speaker_Review/2087-05-10.md`, sync speaker mappings:
+
+```bash
+uv run pcn sync-speaker-review \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --day 2087-05-10
+```
+
+Expected speaker sync output shape:
+
+```text
+mappings_upserted=<n> segment_overrides_upserted=<n>
 ```
 
 ## Docker Run

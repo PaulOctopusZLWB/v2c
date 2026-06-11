@@ -12,6 +12,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
+from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
 from personal_context_node.transcription import transcribe_pending_chunks
 
 
@@ -150,6 +151,41 @@ def confirm_review(
             [
                 f"candidates_confirmed={result.candidates_confirmed}",
                 f"signed_events_created={result.signed_events_created}",
+            ]
+        )
+    )
+
+
+@app.command(name="publish-speaker-review")
+def publish_speaker_review_cmd(
+    day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    review_path = publish_speaker_review(config=config, day=day)
+    typer.echo(f"review_path={review_path}")
+
+
+@app.command(name="sync-speaker-review")
+def sync_speaker_review_cmd(
+    day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = sync_speaker_review(config=config, day=day)
+    typer.echo(
+        " ".join(
+            [
+                f"mappings_upserted={result.mappings_upserted}",
+                f"segment_overrides_upserted={result.segment_overrides_upserted}",
             ]
         )
     )
