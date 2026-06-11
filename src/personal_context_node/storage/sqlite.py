@@ -204,11 +204,15 @@ create table if not exists sessions (
   source text not null,
   segment_count integer not null,
   active_speech_ms integer not null,
+  primary_person_id text,
   first_segment_id text not null unique,
   exclude_from_memory integer not null default 0,
   created_at text not null,
   updated_at text not null
 );
+
+create index if not exists idx_sessions_date
+on sessions(date_key, started_at);
 
 create table if not exists persons (
   person_id text primary key,
@@ -373,6 +377,8 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
     _ensure_column(conn, "speaker_mappings", "person_id", "text")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
+    _ensure_column(conn, "sessions", "primary_person_id", "text")
+    conn.execute("create index if not exists idx_sessions_date on sessions(date_key, started_at)")
     _ensure_column(conn, "memory_candidates", "source_type", "text not null default 'llm_daily_context'")
     _ensure_column(conn, "memory_candidates", "edited_claim", "text")
     _ensure_column(conn, "memory_candidates", "review_note_path", "text")

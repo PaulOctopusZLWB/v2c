@@ -27,9 +27,16 @@ def derive_sessions_for_day(
         segments = fetch_all(
             conn,
             """
-            select ts.segment_id, ts.audio_file_id, ts.start_ms, ts.end_ms, af.recorded_at
+            select
+              ts.segment_id,
+              ts.audio_file_id,
+              ts.start_ms,
+              ts.end_ms,
+              af.recorded_at,
+              attr.person_id
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
+            left join v_segment_attribution attr on attr.segment_id = ts.segment_id
             where substr(af.recorded_at, 1, 10) = ? and ts.is_active = 1
             order by af.recorded_at, ts.start_ms, ts.segment_id
             """,
@@ -49,12 +56,13 @@ def derive_sessions_for_day(
             started_at = _absolute_time(group[0])
             ended_at = _absolute_time({**group[-1], "start_ms": group[-1]["end_ms"]})
             active_speech_ms = sum(int(row["end_ms"]) - int(row["start_ms"]) for row in group)
+            primary_person_id = _primary_person_id(group)
             conn.execute(
                 """
                 insert into sessions (
                   session_id, date_key, started_at, ended_at, source,
-                  segment_count, active_speech_ms, first_segment_id, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  segment_count, active_speech_ms, primary_person_id, first_segment_id, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -64,6 +72,7 @@ def derive_sessions_for_day(
                     "derived_from_segments",
                     len(group),
                     active_speech_ms,
+                    primary_person_id,
                     first_segment_id,
                     now,
                     now,
@@ -100,6 +109,17 @@ def _group_segments(rows: list[dict[str, object]], *, gap_ms: int) -> list[list[
 def _absolute_time(row: dict[str, object]) -> str:
     recorded_at = datetime.fromisoformat(str(row["recorded_at"]))
     return (recorded_at + timedelta(milliseconds=int(row["start_ms"]))).isoformat()
+
+
+def _primary_person_id(group: list[dict[str, object]]) -> str | None:
+    counts: dict[str, int] = {}
+    for row in group:
+        person_id = row.get("person_id")
+        if person_id:
+            counts[str(person_id)] = counts.get(str(person_id), 0) + 1
+    if not counts:
+        return None
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
 
 
 def _ensure_session_columns(conn) -> None:

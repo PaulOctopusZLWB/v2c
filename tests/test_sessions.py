@@ -24,6 +24,41 @@ def test_derive_sessions_splits_by_gap_and_reuses_existing_ids(tmp_path: Path) -
     assert [row["session_id"] for row in _session_rows(config.database_path)] == first_ids
 
 
+def test_derive_sessions_sets_primary_person_from_segment_attribution(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_and_segments(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            """
+            insert into persons (person_id, display_name, person_type, created_at, updated_at)
+            values (?, ?, ?, ?, ?)
+            """,
+            ("person_paul", "Paul", "human", "2087-05-10T00:00:00Z", "2087-05-10T00:00:00Z"),
+        )
+        conn.execute(
+            """
+            insert into speaker_mappings (
+              speaker, person_label, updated_at, speaker_cluster_id, person_id
+            ) values (?, ?, ?, ?, ?)
+            """,
+            ("self", "Paul", "2087-05-10T00:00:00Z", "self", "person_paul"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select primary_person_id from sessions order by started_at")
+    finally:
+        conn.close()
+
+    assert rows == [{"primary_person_id": "person_paul"}, {"primary_person_id": "person_paul"}]
+
+
 def _insert_audio_and_segments(database_path: Path) -> None:
     conn = connect(database_path)
     try:
