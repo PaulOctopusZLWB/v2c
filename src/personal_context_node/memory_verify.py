@@ -66,15 +66,24 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
             event_hash = _row_event_hash(row)
             try:
                 event = _event_from_row(row)
+                hash_fields_valid = _hash_fields_valid(row, event)
+                signature_valid = verify_signed_event(event, str(row["public_key"]))
+                chain_fields_valid = _chain_fields_valid(
+                    row,
+                    previous_hash_by_owner=previous_hash_by_owner,
+                    previous_sequence_by_owner=previous_sequence_by_owner,
+                )
+                row_dangling = (
+                    event_hash not in forked_event_hashes
+                    and signature_valid
+                    and hash_fields_valid
+                    and not chain_fields_valid
+                )
                 row_valid = (
                     event_hash not in forked_event_hashes
-                    and verify_signed_event(event, str(row["public_key"]))
-                    and _hash_fields_valid(row, event)
-                    and _chain_fields_valid(
-                        row,
-                        previous_hash_by_owner=previous_hash_by_owner,
-                        previous_sequence_by_owner=previous_sequence_by_owner,
-                    )
+                    and signature_valid
+                    and hash_fields_valid
+                    and chain_fields_valid
                     and _owner_not_closed(row, closed_owner_sequence=closed_owner_sequence)
                     and _successor_chain_start_valid(
                         event,
@@ -96,6 +105,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                 )
             except Exception:
                 row_valid = False
+                row_dangling = False
             if row_valid:
                 valid += 1
                 trust_status = trust_status_for_event(event=event, verified=True)
@@ -115,6 +125,12 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                 if trust_status == "trusted" and event.event_type == "identity_key.rotated":
                     IdentityKeyRotation.model_validate(event.payload)
                     closed_owner_sequence[str(row["owner_id"])] = int(row["owner_sequence"])
+            elif row_dangling:
+                invalid += 1
+                conn.execute(
+                    "update signed_events set verified = 1, trust_status = 'dangling' where event_hash = ?",
+                    (event_hash,),
+                )
             else:
                 invalid += 1
                 conn.execute(

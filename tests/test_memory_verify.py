@@ -315,6 +315,39 @@ def test_memory_verify_rejects_owner_sequence_forks(tmp_path: Path) -> None:
     assert cards == []
 
 
+def test_memory_verify_keeps_broken_hash_chain_dangling(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        card = _memory_card("mem_dangling_verify", "Verify must not trust broken chains.")
+        event, public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=card,
+            signer_did=card.owner_did,
+            owner_sequence=2,
+            prev_event_hash="sha256:missing-predecessor",
+        )
+        _insert_unverified_event(conn, event=event, public_key=public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 1
+    assert result.valid_events == 0
+    assert result.invalid_events == 1
+    conn = connect(config.database_path)
+    try:
+        events = fetch_all(conn, "select trust_status, verified from signed_events")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert events == [{"trust_status": "dangling", "verified": 1}]
+    assert cards == []
+
+
 def test_memory_verify_rejects_object_version_conflicts(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
