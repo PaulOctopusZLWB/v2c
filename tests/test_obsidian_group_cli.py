@@ -33,6 +33,7 @@ def test_obsidian_publish_group_cli_writes_day_artifacts(tmp_path: Path) -> None
     assert "session_notes_written=1" in result.output
     assert "candidate_review_written=1" in result.output
     assert "speaker_review_written=1" in result.output
+    assert "confirmed_memory_written=0" in result.output
     assert (config.obsidian_vault / "10_Daily" / "2087-05-10.md").exists()
     assert (config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md").exists()
     assert (config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md").exists()

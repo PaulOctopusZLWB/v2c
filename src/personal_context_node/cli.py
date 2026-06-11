@@ -329,6 +329,7 @@ def obsidian_publish_group(
                 f"session_notes_written={result.session_notes_written}",
                 f"candidate_review_written={result.candidate_review_written}",
                 f"speaker_review_written={result.speaker_review_written}",
+                f"confirmed_memory_written={result.confirmed_memory_written}",
             ]
         )
     )
