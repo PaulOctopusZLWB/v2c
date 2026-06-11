@@ -61,6 +61,7 @@ It also implements the human review boundary:
 14. Trusted `identity_profile.published` events materialize `identity_profile.v1` display names and predecessor references into `identity_profiles`.
 15. Trusted `memory_annotation.created` events materialize `memory_annotation.v1` rows; annotations for unknown cards remain `dangling` until the target card arrives.
 16. Verified but unsupported event types are retained in `signed_events` with `trust_status='unsupported'` and do not enter materialized current views.
+17. `pcn memory verify` rejects all branches of an `owner_id + owner_sequence` fork instead of allowing any conflicting branch into the trusted view.
 
 It also implements the speaker review boundary:
 

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
-from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef, create_signed_event
+from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef, create_signed_event, signing_body
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.signed_event_store import insert_signed_event
@@ -181,6 +181,46 @@ def test_memory_verify_preserves_verified_unsupported_events(tmp_path: Path) -> 
     assert cards == []
 
 
+def test_memory_verify_rejects_owner_sequence_forks(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        first = _memory_card("mem_test_001", "Use signed events.")
+        second = _memory_card("mem_test_002", "Use hash chains.")
+        first_event, first_public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=first,
+            signer_did="did:key:test-owner",
+            owner_sequence=1,
+        )
+        second_event, second_public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=second,
+            signer_did="did:key:test-owner",
+            owner_sequence=1,
+        )
+        _insert_unverified_event(conn, event=first_event, public_key=first_public_key)
+        _insert_unverified_event(conn, event=second_event, public_key=second_public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 2
+    assert result.valid_events == 0
+    assert result.invalid_events == 2
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select trust_status from signed_events order by event_hash")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert rows == [{"trust_status": "rejected"}, {"trust_status": "rejected"}]
+    assert cards == []
+
+
 def _insert_candidate(
     database_path: Path,
     *,
@@ -227,3 +267,65 @@ def _insert_candidate(
 def _mark_review_stable(path: Path) -> None:
     stable_time = time.time() - 121
     os.utime(path, (stable_time, stable_time))
+
+
+def _memory_card(card_id: str, claim: str) -> MemoryCard:
+    return MemoryCard(
+        card_id=card_id,
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim=claim,
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id=f"ev_{card_id}",
+                source_type="transcript_segment",
+                source_id=f"seg_{card_id}",
+                quote=claim,
+            )
+        ],
+    )
+
+
+def _insert_unverified_event(conn, *, event, public_key: str) -> None:
+    signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    raw_event_json = event.model_dump_json()
+    conn.execute(
+        """
+        insert into signed_events (
+          event_hash, event_id, event_type, signer_did,
+          owner_id, owner_sequence, prev_event_hash, envelope_version,
+          object_id, object_version, payload_type, payload_encoding,
+          created_at, payload_json, raw_event_json, signing_body_json,
+          canonical_signing_body_hash, signature_algorithm, public_key_id,
+          signature_value, trust_status, event_json, signature, public_key, verified
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event.event_hash,
+            event.event_hash,
+            event.event_type,
+            event.signer_did,
+            event.owner_id,
+            event.owner_sequence,
+            event.prev_event_hash,
+            event.envelope_version,
+            event.object_id,
+            event.object_version,
+            event.payload_type,
+            event.payload_encoding,
+            event.created_at,
+            json.dumps(event.payload, ensure_ascii=False, sort_keys=True),
+            raw_event_json,
+            signing_body_json,
+            event.event_hash,
+            event.signature.algorithm,
+            event.signature.public_key_id,
+            event.signature.value,
+            "unverified",
+            raw_event_json,
+            event.signature.value,
+            public_key,
+            0,
+        ),
+    )

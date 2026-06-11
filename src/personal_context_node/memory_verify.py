@@ -36,12 +36,14 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         trusted_events: list[SignedEvent] = []
         previous_hash_by_owner: dict[str, str] = {}
         previous_sequence_by_owner: dict[str, int] = {}
+        forked_event_hashes = _forked_event_hashes(rows)
         for row in rows:
             event_hash = _row_event_hash(row)
             try:
                 event = _event_from_row(row)
                 row_valid = (
-                    verify_signed_event(event, str(row["public_key"]))
+                    event_hash not in forked_event_hashes
+                    and verify_signed_event(event, str(row["public_key"]))
                     and _hash_fields_valid(row, event)
                     and _chain_fields_valid(
                         row,
@@ -141,6 +143,19 @@ def _signature_from_row(row: dict[str, object]) -> dict[str, str]:
 
 def _row_event_hash(row: dict[str, object]) -> str:
     return str(row.get("event_hash") or row["event_id"])
+
+
+def _forked_event_hashes(rows: list[dict[str, object]]) -> set[str]:
+    hashes_by_owner_sequence: dict[tuple[str, int], set[str]] = {}
+    for row in rows:
+        key = (str(row["owner_id"]), int(row["owner_sequence"]))
+        hashes_by_owner_sequence.setdefault(key, set()).add(_row_event_hash(row))
+    return {
+        event_hash
+        for row in rows
+        if len(hashes_by_owner_sequence[(str(row["owner_id"]), int(row["owner_sequence"]))]) > 1
+        for event_hash in [_row_event_hash(row)]
+    }
 
 
 def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[SignedEvent]) -> int:
