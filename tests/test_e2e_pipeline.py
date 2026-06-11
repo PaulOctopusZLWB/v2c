@@ -40,7 +40,7 @@ def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> N
     try:
         audio_files = fetch_all(db, "select source_device, sha256 from audio_files")
         segments = fetch_all(db, "select chunk_id, start_ms, end_ms, absolute_start_at, absolute_end_at from transcript_segments")
-        candidates = fetch_all(db, "select status, evidence_refs_json, date_key from memory_candidates")
+        candidates = fetch_all(db, "select status, evidence_refs_json, date_key, prompt_version from memory_candidates")
         evidence_refs = fetch_all(db, "select evidence_id, source_type, source_id, source_ref, quote from evidence_refs")
         events = fetch_all(db, "select event_type, owner_sequence, trust_status from signed_events")
     finally:
@@ -57,6 +57,7 @@ def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> N
     assert str(segments[0]["chunk_id"]).startswith("chk_")
     assert candidates[0]["status"] == "confirmed"
     assert candidates[0]["date_key"] == "2025-06-10"
+    assert candidates[0]["prompt_version"] == "llm_port.candidate_extraction.v1"
     assert "seg_" in candidates[0]["evidence_refs_json"]
     assert evidence_refs == [
         {

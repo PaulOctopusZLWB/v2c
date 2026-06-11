@@ -80,6 +80,20 @@ def test_initialize_tasks_schema_tracks_claim_priority_and_retry_metadata(tmp_pa
     assert [row["name"] for row in target_index] == ["target_type", "target_id"]
 
 
+def test_initialize_memory_candidates_schema_tracks_prompt_version(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(memory_candidates)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["prompt_version"]["type"].lower() == "text"
+    assert column_by_name["prompt_version"]["notnull"] == 1
+
+
 def test_initialize_sessions_schema_tracks_primary_person_and_date_index(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

@@ -94,6 +94,7 @@ create table if not exists memory_candidates (
   created_card_id text,
   date_key text,
   normalized_claim_hash text,
+  prompt_version text not null default 'unknown',
   created_at text not null default '',
   updated_at text not null default ''
 );
@@ -457,6 +458,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memory_candidates", "created_card_id", "text")
     _ensure_column(conn, "memory_candidates", "date_key", "text")
     _ensure_column(conn, "memory_candidates", "normalized_claim_hash", "text")
+    _ensure_column(conn, "memory_candidates", "prompt_version", "text not null default 'unknown'")
     _ensure_column(conn, "memory_candidates", "created_at", "text not null default ''")
     _ensure_column(conn, "memory_candidates", "updated_at", "text not null default ''")
     conn.execute("create index if not exists idx_candidates_status on memory_candidates(status)")

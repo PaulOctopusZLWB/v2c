@@ -145,8 +145,9 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
             """
             insert into memory_candidates (
               candidate_id, source_type, candidate_claim, claim_type, subject_json,
-              confidence, evidence_refs_json, status, memory_card_id, date_key, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              confidence, evidence_refs_json, status, memory_card_id, date_key,
+              prompt_version, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"cand_{uuid4().hex}",
@@ -163,6 +164,7 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
                 "pending_review",
                 None,
                 row["date_key"],
+                "llm_port.candidate_extraction.v1",
                 now,
                 now,
             ),

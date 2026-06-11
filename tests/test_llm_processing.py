@@ -250,7 +250,8 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
         candidates = fetch_all(
             conn,
             """
-            select candidate_claim, claim_type, source_type, evidence_refs_json, status, created_at, updated_at
+            select candidate_claim, claim_type, source_type, prompt_version,
+                   evidence_refs_json, status, created_at, updated_at
             from memory_candidates
             """,
         )
@@ -282,6 +283,7 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
     ]
     assert candidates[0]["claim_type"] == "requirement"
     assert candidates[0]["source_type"] == "llm_daily_context"
+    assert candidates[0]["prompt_version"] == "llm_port.candidate_extraction.v1"
     assert candidates[0]["status"] == "pending_review"
     assert candidates[0]["created_at"]
     assert candidates[0]["updated_at"]

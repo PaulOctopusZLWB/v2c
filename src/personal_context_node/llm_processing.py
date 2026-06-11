@@ -261,8 +261,8 @@ def _persist_candidates(
             insert into memory_candidates (
               candidate_id, source_type, candidate_claim, claim_type, subject_json,
               confidence, evidence_refs_json, status, memory_card_id,
-              date_key, normalized_claim_hash, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              date_key, normalized_claim_hash, prompt_version, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"cand_{uuid4().hex}",
@@ -280,6 +280,7 @@ def _persist_candidates(
                 None,
                 context.day,
                 normalized_claim_hash,
+                "llm_port.candidate_extraction.v1",
                 now,
                 now,
             ),
