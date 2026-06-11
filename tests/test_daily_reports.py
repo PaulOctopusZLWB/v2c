@@ -7,7 +7,7 @@ from pathlib import Path
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft
-from personal_context_node.daily_reports import get_daily_report_status
+from personal_context_node.daily_reports import get_daily_report_status, set_daily_report_status
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.storage.sqlite import connect, initialize
@@ -49,6 +49,33 @@ def test_daily_report_status_moves_generated_to_review_synced(tmp_path: Path) ->
     confirm_checked_candidates(config=config, day="2087-05-10")
 
     assert get_daily_report_status(config=config, day="2087-05-10") == "review_synced"
+
+
+def test_daily_report_status_updates_legacy_day_table_by_date_key(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            """
+            create table daily_reports (
+              day text primary key,
+              status text not null,
+              updated_at text not null,
+              error text
+            )
+            """
+        )
+        conn.execute(
+            "insert into daily_reports (day, status, updated_at, error) values (?, ?, ?, ?)",
+            ("2087-05-10", "generated", "2087-05-10T00:00:00Z", None),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    set_daily_report_status(config=config, day="2087-05-10", status="review_pending")
+
+    assert get_daily_report_status(config=config, day="2087-05-10") == "review_pending"
 
 
 def _mark_review_stable(path: Path) -> None:

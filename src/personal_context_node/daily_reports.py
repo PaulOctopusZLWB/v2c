@@ -10,16 +10,16 @@ def set_daily_report_status(*, config: AppConfig, day: str, status: str, error: 
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
-            insert into daily_reports (day, status, updated_at, error)
+            insert into daily_reports (date_key, status, created_at, updated_at)
             values (?, ?, ?, ?)
-            on conflict(day) do update set
+            on conflict(date_key) do update set
               status = excluded.status,
-              updated_at = excluded.updated_at,
-              error = excluded.error
+              updated_at = excluded.updated_at
             """,
-            (day, status, datetime.now(timezone.utc).isoformat(), error),
+            (day, status, now, now),
         )
         conn.commit()
     finally:
@@ -30,7 +30,7 @@ def get_daily_report_status(*, config: AppConfig, day: str) -> str:
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        row = conn.execute("select status from daily_reports where day = ?", (day,)).fetchone()
+        row = conn.execute("select status from daily_reports where date_key = ?", (day,)).fetchone()
         if row is None:
             return "not_started"
         return str(row["status"])

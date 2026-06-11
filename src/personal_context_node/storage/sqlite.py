@@ -173,10 +173,17 @@ create table if not exists summaries (
 );
 
 create table if not exists daily_reports (
-  day text primary key,
+  date_key text primary key,
   status text not null,
-  updated_at text not null,
-  error text
+  note_path text,
+  total_recorded_ms integer not null default 0,
+  active_speech_ms integer not null default 0,
+  self_speech_ms integer not null default 0,
+  others_speech_ms integer not null default 0,
+  generated_at text,
+  reviewed_at text,
+  created_at text not null default '',
+  updated_at text not null
 );
 
 create table if not exists sessions (
@@ -345,6 +352,19 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memory_candidates", "date_key", "text")
     _ensure_column(conn, "memory_candidates", "normalized_claim_hash", "text")
     _ensure_column(conn, "sessions", "exclude_from_memory", "integer not null default 0")
+    _ensure_column(conn, "daily_reports", "date_key", "text")
+    _ensure_column(conn, "daily_reports", "note_path", "text")
+    _ensure_column(conn, "daily_reports", "total_recorded_ms", "integer not null default 0")
+    _ensure_column(conn, "daily_reports", "active_speech_ms", "integer not null default 0")
+    _ensure_column(conn, "daily_reports", "self_speech_ms", "integer not null default 0")
+    _ensure_column(conn, "daily_reports", "others_speech_ms", "integer not null default 0")
+    _ensure_column(conn, "daily_reports", "generated_at", "text")
+    _ensure_column(conn, "daily_reports", "reviewed_at", "text")
+    _ensure_column(conn, "daily_reports", "created_at", "text not null default ''")
+    daily_report_columns = {row["name"] for row in conn.execute("pragma table_info(daily_reports)").fetchall()}
+    if "day" in daily_report_columns:
+        conn.execute("update daily_reports set date_key = day where date_key is null and day is not null")
+    conn.execute("create unique index if not exists idx_daily_reports_date_key on daily_reports(date_key)")
     _ensure_column(conn, "evidence_refs", "source_ref", "text not null default ''")
     _ensure_column(conn, "evidence_refs", "owner_id", "text")
     _ensure_column(conn, "evidence_refs", "summary", "text")

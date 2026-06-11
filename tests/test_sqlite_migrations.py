@@ -120,6 +120,62 @@ def test_initialize_signed_events_indexes_object_versions(tmp_path) -> None:
     assert [row["name"] for row in index_columns] == ["object_id", "object_version"]
 
 
+def test_initialize_daily_reports_schema_uses_date_key_and_metrics(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(daily_reports)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["date_key"]["pk"] == 1
+    assert column_by_name["status"]["notnull"] == 1
+    assert column_by_name["note_path"]["type"].lower() == "text"
+    assert column_by_name["total_recorded_ms"]["dflt_value"] == "0"
+    assert column_by_name["active_speech_ms"]["dflt_value"] == "0"
+    assert column_by_name["self_speech_ms"]["dflt_value"] == "0"
+    assert column_by_name["others_speech_ms"]["dflt_value"] == "0"
+    assert column_by_name["generated_at"]["type"].lower() == "text"
+    assert column_by_name["reviewed_at"]["type"].lower() == "text"
+    assert column_by_name["created_at"]["notnull"] == 1
+    assert column_by_name["updated_at"]["notnull"] == 1
+
+
+def test_initialize_migrates_legacy_daily_reports_day_to_date_key(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        conn.execute(
+            """
+            create table daily_reports (
+              day text primary key,
+              status text not null,
+              updated_at text not null,
+              error text
+            )
+            """
+        )
+        conn.execute(
+            "insert into daily_reports (day, status, updated_at, error) values (?, ?, ?, ?)",
+            ("2087-05-10", "review_pending", "2087-05-10T00:00:00Z", None),
+        )
+        initialize(conn)
+
+        rows = fetch_all(conn, "select date_key, status, created_at, updated_at from daily_reports")
+    finally:
+        conn.close()
+
+    assert rows == [
+        {
+            "date_key": "2087-05-10",
+            "status": "review_pending",
+            "created_at": "",
+            "updated_at": "2087-05-10T00:00:00Z",
+        }
+    ]
+
+
 def test_initialize_memory_cards_schema_includes_current_version(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:
