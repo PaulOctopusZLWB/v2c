@@ -139,6 +139,52 @@ print(json.dumps({
         raise AssertionError("CommandLLMAdapter accepted an incomplete memory candidate")
 
 
+def test_command_llm_adapter_rejects_missing_top_level_fields(tmp_path: Path) -> None:
+    script = tmp_path / "missing_top_level.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "memory_candidates": []
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "summary" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted missing top-level LLM fields")
+
+
+def test_command_llm_adapter_rejects_invalid_top_level_list_fields(tmp_path: Path) -> None:
+    script = tmp_path / "bad_list_field.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "bad",
+  "todos": "not-a-list",
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": []
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "todos" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted a non-list top-level field")
+
+
 def test_command_llm_adapter_rejects_invalid_claim_type(tmp_path: Path) -> None:
     script = tmp_path / "invalid_claim_type.py"
     script.write_text(

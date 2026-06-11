@@ -33,14 +33,26 @@ class CommandLLMAdapter:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
             raise TerminalPortError(f"invalid LLM JSON: {exc}") from exc
+        _validate_daily_context_payload(payload)
         return DailyContext(
             day=day,
-            summary=str(payload.get("summary", "")),
-            todos=[str(item) for item in payload.get("todos", [])],
-            facts=[str(item) for item in payload.get("facts", [])],
-            inferences=[str(item) for item in payload.get("inferences", [])],
-            memory_candidates=[_memory_candidate(item) for item in payload.get("memory_candidates", [])],
+            summary=str(payload["summary"]),
+            todos=[str(item) for item in payload["todos"]],
+            facts=[str(item) for item in payload["facts"]],
+            inferences=[str(item) for item in payload["inferences"]],
+            memory_candidates=[_memory_candidate(item) for item in payload["memory_candidates"]],
         )
+
+
+def _validate_daily_context_payload(payload: object) -> None:
+    if not isinstance(payload, dict):
+        raise TerminalPortError("LLM output must be an object")
+    for field in ["summary", "todos", "facts", "inferences", "memory_candidates"]:
+        if field not in payload:
+            raise TerminalPortError(f"LLM output missing required field: {field}")
+    for field in ["todos", "facts", "inferences", "memory_candidates"]:
+        if not isinstance(payload[field], list):
+            raise TerminalPortError(f"LLM output field must be a list: {field}")
 
 
 def _memory_candidate(item: object) -> MemoryCandidateDraft:
