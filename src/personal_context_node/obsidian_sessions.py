@@ -70,28 +70,39 @@ def _session_note_text(session: dict[str, object], *, existing_text: str | None 
             "",
             f"# {title}",
             "",
-            f'<!-- pcn:managed start type="session_summary" session_id="{session_id}" -->',
+            _block_start("session_summary", "managed"),
             *managed_lines,
-            f'<!-- pcn:managed end type="session_summary" session_id="{session_id}" -->',
+            _block_end("session_summary"),
             "",
             "## User Notes",
             "",
-            '<!-- pcn:user start type="user_notes" -->',
+            _block_start("user_notes", "user"),
             user_notes,
-            '<!-- pcn:user end type="user_notes" -->',
+            _block_end("user_notes"),
         ]
     )
+
+
+def _block_start(block_id: str, kind: str) -> str:
+    return f'<!-- pcn:block start id="{block_id}" kind="{kind}" version="1" -->'
+
+
+def _block_end(block_id: str) -> str:
+    return f'<!-- pcn:block end id="{block_id}" -->'
 
 
 def _existing_user_notes(existing_text: str | None) -> str:
     if not existing_text:
         return ""
-    match = re.search(
+    patterns = [
+        r'<!-- pcn:block start id="user_notes" kind="user" version="1" -->\n?(.*?)\n?<!-- pcn:block end id="user_notes" -->',
         r'<!-- pcn:user start type="user_notes" -->\n?(.*?)\n?<!-- pcn:user end type="user_notes" -->',
-        existing_text,
-        flags=re.DOTALL,
-    )
-    return match.group(1).rstrip("\n") if match else ""
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, existing_text, flags=re.DOTALL)
+        if match:
+            return match.group(1).rstrip("\n")
+    return ""
 
 
 def _summary_lines(session: dict[str, object], summary: dict[str, object] | None) -> list[str]:

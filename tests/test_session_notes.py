@@ -24,7 +24,8 @@ def test_publish_session_notes_creates_stable_session_note(tmp_path: Path) -> No
     assert "generated_at: " in text
     assert "\npcn_managed: true\n---\n" in text
     assert "# Session ses_test" in text
-    assert "<!-- pcn:managed start type=\"session_summary\"" in text
+    assert '<!-- pcn:block start id="session_summary" kind="managed" version="1" -->' in text
+    assert '<!-- pcn:block end id="session_summary" -->' in text
     assert "segment_count: 2" in text
     assert "完整转写不进入 session note" in text
 
@@ -37,8 +38,8 @@ def test_publish_session_notes_preserves_user_notes_block(tmp_path: Path) -> Non
     text = note_path.read_text(encoding="utf-8")
     note_path.write_text(
         text.replace(
-            "<!-- pcn:user end type=\"user_notes\" -->",
-            "用户保留的自由笔记。\n<!-- pcn:user end type=\"user_notes\" -->",
+            '<!-- pcn:block end id="user_notes" -->',
+            '用户保留的自由笔记。\n<!-- pcn:block end id="user_notes" -->',
         ),
         encoding="utf-8",
     )
@@ -47,8 +48,39 @@ def test_publish_session_notes_preserves_user_notes_block(tmp_path: Path) -> Non
 
     republished = note_path.read_text(encoding="utf-8")
     assert "用户保留的自由笔记。" in republished
-    assert republished.count("<!-- pcn:user start type=\"user_notes\" -->") == 1
-    assert republished.count("<!-- pcn:user end type=\"user_notes\" -->") == 1
+    assert republished.count('<!-- pcn:block start id="user_notes" kind="user" version="1" -->') == 1
+    assert republished.count('<!-- pcn:block end id="user_notes" -->') == 1
+
+
+def test_publish_session_notes_migrates_legacy_user_notes_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    publish_session_notes(config=config, day="2087-05-10")
+    note_path = config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md"
+    note_path.write_text(
+        """
+---
+pcn_schema: markdown_note.v1
+note_type: session
+date_key: 2087-05-10
+session_id: ses_test
+---
+
+## User Notes
+
+<!-- pcn:user start type="user_notes" -->
+旧格式 session 自由笔记。
+<!-- pcn:user end type="user_notes" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    publish_session_notes(config=config, day="2087-05-10")
+
+    republished = note_path.read_text(encoding="utf-8")
+    assert "旧格式 session 自由笔记。" in republished
+    assert "pcn:user start" not in republished
+    assert '<!-- pcn:block start id="user_notes" kind="user" version="1" -->' in republished
 
 
 def _insert_session(database_path: Path) -> None:
