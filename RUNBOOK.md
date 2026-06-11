@@ -67,6 +67,14 @@ It also implements a minimal diagnostics boundary:
 2. `pcn memory-verify` records a job run.
 3. `pcn job-status` lists recent job runs for launchd/manual diagnostics.
 
+It also implements the task lifecycle foundation:
+
+1. `tasks` stores `pending -> claimed -> running -> succeeded/failed_retryable/failed_terminal`.
+2. `task_type + target_type + target_id` is unique.
+3. `claimed_by_run_id` and `claimed_at` support lease-based recovery.
+4. Import registers the first `vad` task for each new audio file in the same SQLite transaction.
+5. `pcn process-status` lists current task state.
+
 Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, review, archive, and scheduling boundaries testable before model integration.
 
 ## Local uv Run
@@ -190,6 +198,9 @@ uv run pcn memory-verify \
 uv run pcn job-status \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
+uv run pcn process-status \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault
 ```
 
 Expected confirmation output:
@@ -209,6 +220,8 @@ Expected job status output shape:
 ```text
 run_id=run_... job_name=memory-verify status=succeeded error=
 ```
+
+After importing the seven sample files, `pcn process-status` should show seven pending `vad` tasks.
 
 After editing `.smoke-vault/90_System/Speaker_Review/2087-05-10.md`, sync speaker mappings:
 

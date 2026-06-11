@@ -20,6 +20,7 @@ from personal_context_node.core.protocols.memory import (
     verify_signed_event,
 )
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+from personal_context_node.tasks import enqueue_task_in_conn
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,7 @@ def _import_wavs(conn: sqlite3.Connection, config: AppConfig, source_dir: Path) 
         local_dir.mkdir(parents=True, exist_ok=True)
         local_path = local_dir / source_path.name
         shutil.copy2(source_path, local_path)
+        audio_file_id = f"aud_{uuid4().hex}"
         conn.execute(
             """
             insert into audio_files (
@@ -78,7 +80,7 @@ def _import_wavs(conn: sqlite3.Connection, config: AppConfig, source_dir: Path) 
             ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                f"aud_{uuid4().hex}",
+                audio_file_id,
                 config.source_device,
                 str(source_path),
                 str(local_path),
@@ -89,6 +91,7 @@ def _import_wavs(conn: sqlite3.Connection, config: AppConfig, source_dir: Path) 
                 "imported",
             ),
         )
+        enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
         imported += 1
     conn.commit()
     return imported

@@ -19,6 +19,7 @@ from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
+from personal_context_node.tasks import process_status_rows
 from personal_context_node.transcription import transcribe_pending_chunks
 
 
@@ -317,6 +318,31 @@ def job_status(
                     f"job_name={row['job_name']}",
                     f"status={row['status']}",
                     f"error={row['error'] or ''}",
+                ]
+            )
+        )
+
+
+@app.command(name="process-status")
+def process_status(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    for row in process_status_rows(config=config):
+        typer.echo(
+            " ".join(
+                [
+                    f"task_id={row['task_id']}",
+                    f"task_type={row['task_type']}",
+                    f"target_type={row['target_type']}",
+                    f"target_id={row['target_id']}",
+                    f"status={row['status']}",
+                    f"attempt_count={row['attempt_count']}",
+                    f"last_error={row['last_error'] or ''}",
                 ]
             )
         )

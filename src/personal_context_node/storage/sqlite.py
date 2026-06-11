@@ -107,6 +107,22 @@ create table if not exists job_runs (
   error text
 );
 
+create table if not exists tasks (
+  task_id text primary key,
+  task_type text not null,
+  target_type text not null,
+  target_id text not null,
+  status text not null,
+  attempt_count integer not null default 0,
+  claimed_by_run_id text,
+  claimed_at text,
+  started_at text,
+  finished_at text,
+  last_error text,
+  created_at text not null,
+  unique(task_type, target_type, target_id)
+);
+
 create table if not exists signed_events (
   event_id text primary key,
   event_type text not null,
