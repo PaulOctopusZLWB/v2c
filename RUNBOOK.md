@@ -210,6 +210,18 @@ uv run pcn transcribe \
   --asr-command "python3 scripts/asr_wrapper_example.py"
 ```
 
+For a real FunASR/SenseVoice runtime, install FunASR in the uv or Docker environment that executes the wrapper, then use:
+
+```bash
+uv run pcn transcribe \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --asr-backend command \
+  --asr-command "python3 scripts/funasr_sensevoice_wrapper.py --model iic/SenseVoiceSmall --model-version local"
+```
+
+The wrapper lazy-loads `funasr.AutoModel` and emits the same normalized JSON contract consumed by `CommandASRAdapter`. Core pipeline code does not import FunASR directly.
+
 Expected rule-based summary smoke output after mock ASR:
 
 ```text
