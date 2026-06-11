@@ -83,8 +83,12 @@ create table if not exists memory_candidates (
 create table if not exists evidence_refs (
   evidence_id text primary key,
   source_type text not null,
+  source_ref text not null default '',
   source_id text not null,
-  quote text not null
+  owner_id text,
+  quote text not null,
+  summary text,
+  created_at text not null default ''
 );
 
 create table if not exists memory_cards (
@@ -338,6 +342,11 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memory_candidates", "date_key", "text")
     _ensure_column(conn, "memory_candidates", "normalized_claim_hash", "text")
     _ensure_column(conn, "sessions", "exclude_from_memory", "integer not null default 0")
+    _ensure_column(conn, "evidence_refs", "source_ref", "text not null default ''")
+    _ensure_column(conn, "evidence_refs", "owner_id", "text")
+    _ensure_column(conn, "evidence_refs", "summary", "text")
+    _ensure_column(conn, "evidence_refs", "created_at", "text not null default ''")
+    conn.execute("update evidence_refs set source_ref = source_id where source_ref = ''")
     _ensure_column(conn, "memory_cards", "source_type", "text not null default 'confirmed_generated'")
     _ensure_column(conn, "memory_cards", "current_version", "integer not null default 1")
     _ensure_column(conn, "memory_cards", "owner_id", "text not null default ''")

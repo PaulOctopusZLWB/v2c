@@ -42,7 +42,12 @@ def generate_daily_context(*, config: AppConfig, day: str, llm: LLMPort) -> Dail
         context = llm.generate_daily_context(day=day, transcript_segments=llm_segments)
         _persist_legacy_summary(conn, context)
         _persist_formal_summary(conn, context=context, segments=stored_segments)
-        candidates_created = _persist_candidates(conn, context=context, segments=stored_segments)
+        candidates_created = _persist_candidates(
+            conn,
+            context=context,
+            segments=stored_segments,
+            owner_id=config.owner_did,
+        )
         conn.commit()
         set_daily_report_status(config=config, day=day, status="generated")
         return DailyContextGenerationResult(summaries_created=1, memory_candidates_created=candidates_created)
@@ -178,7 +183,13 @@ def _segment_for_text(text: str, segments: list[dict[str, object]]) -> dict[str,
     return segments[0]
 
 
-def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segments: list[dict[str, object]]) -> int:
+def _persist_candidates(
+    conn: sqlite3.Connection,
+    *,
+    context: DailyContext,
+    segments: list[dict[str, object]],
+    owner_id: str,
+) -> int:
     segment_by_llm_ref = _segment_by_llm_ref(segments)
     created = 0
     for candidate in _merge_daily_duplicate_candidates(context.memory_candidates):
@@ -197,14 +208,25 @@ def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segm
             )
             conn.execute(
                 """
-                insert into evidence_refs (evidence_id, source_type, source_id, quote)
-                values (?, ?, ?, ?)
+                insert into evidence_refs (
+                  evidence_id, source_type, source_ref, source_id, owner_id, quote, created_at
+                ) values (?, ?, ?, ?, ?, ?, ?)
                 on conflict(evidence_id) do update set
                   source_type = excluded.source_type,
+                  source_ref = excluded.source_ref,
                   source_id = excluded.source_id,
+                  owner_id = excluded.owner_id,
                   quote = excluded.quote
                 """,
-                (source["evidence_id"], "transcript_segment", source["segment_id"], source["text"]),
+                (
+                    source["evidence_id"],
+                    "transcript_segment",
+                    source["segment_id"],
+                    source["segment_id"],
+                    owner_id,
+                    source["text"],
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
         if not evidence_refs:
             raise ValueError("LLM memory candidates require evidence refs")

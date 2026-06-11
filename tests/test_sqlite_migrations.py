@@ -42,6 +42,24 @@ def test_initialize_memory_cards_schema_includes_source_type(tmp_path) -> None:
     assert column_by_name["source_type"]["dflt_value"] == "'confirmed_generated'"
 
 
+def test_initialize_evidence_refs_schema_includes_design_columns(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(evidence_refs)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["source_ref"]["type"].lower() == "text"
+    assert column_by_name["source_ref"]["notnull"] == 1
+    assert column_by_name["owner_id"]["type"].lower() == "text"
+    assert column_by_name["summary"]["type"].lower() == "text"
+    assert column_by_name["created_at"]["type"].lower() == "text"
+    assert column_by_name["created_at"]["notnull"] == 1
+
+
 def test_initialize_memory_cards_schema_includes_current_version(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

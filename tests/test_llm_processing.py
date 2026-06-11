@@ -196,7 +196,7 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
         candidates = fetch_all(conn, "select candidate_claim, claim_type, evidence_refs_json, status from memory_candidates")
         evidence_refs = fetch_all(
             conn,
-            "select evidence_id, source_type, source_id, quote from evidence_refs",
+            "select evidence_id, source_type, source_id, source_ref, owner_id, summary, quote, created_at from evidence_refs",
         )
     finally:
         conn.close()
@@ -221,9 +221,14 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
             "evidence_id": "ev_test",
             "source_type": "transcript_segment",
             "source_id": "seg_test",
+            "source_ref": "seg_test",
+            "owner_id": "did:key:local-owner",
+            "summary": None,
             "quote": "我要求音频和转写处理保持本地。",
+            "created_at": evidence_refs[0]["created_at"],
         }
     ]
+    assert evidence_refs[0]["created_at"]
 
 
 def test_generate_daily_context_accepts_llm_evidence_id_refs(tmp_path: Path) -> None:
