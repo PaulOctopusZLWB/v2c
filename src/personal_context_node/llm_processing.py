@@ -172,12 +172,18 @@ def _segment_for_text(text: str, segments: list[dict[str, object]]) -> dict[str,
 
 
 def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segments: list[dict[str, object]]) -> int:
-    segment_by_id = {str(segment["segment_id"]): segment for segment in segments}
+    segment_by_llm_ref = {
+        ref: segment
+        for segment in segments
+        for ref in (str(segment["segment_id"]), str(segment["evidence_id"]))
+    }
     created = 0
     for candidate in context.memory_candidates:
         evidence_refs = []
         for source_id in candidate.evidence_source_ids:
-            source = segment_by_id[source_id]
+            source = segment_by_llm_ref.get(source_id)
+            if source is None:
+                raise ValueError(f"unknown evidence_id: {source_id}")
             evidence_refs.append(
                 {
                     "evidence_id": source["evidence_id"],

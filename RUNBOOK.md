@@ -41,6 +41,7 @@ It also implements the LLM text-processing boundary before provider integration:
 4. `pcn summarize` to generate daily context and memory candidates from transcript text only.
 5. LLM-generated candidates upsert internal `evidence_refs` rows keyed by `evidence_id`.
 6. `CommandLLMAdapter` for local or cloud wrapper commands that receive transcript JSON on stdin and emit normalized daily context JSON.
+7. Memory candidate evidence references accept input `evidence_id` values, and unknown references fail generation without committing partial summaries or candidates.
 
 It also implements the human review boundary:
 

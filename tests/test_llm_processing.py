@@ -32,6 +32,44 @@ class RecordingLLM:
         )
 
 
+class EvidenceIdLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=[],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="用户要求音频和转写处理保持本地。",
+                    claim_type="requirement",
+                    confidence=0.91,
+                    evidence_source_ids=[transcript_segments[0]["evidence_id"]],
+                )
+            ],
+        )
+
+
+class UnknownEvidenceLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=[],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="用户要求音频和转写处理保持本地。",
+                    claim_type="requirement",
+                    confidence=0.91,
+                    evidence_source_ids=["ev_missing"],
+                )
+            ],
+        )
+
+
 def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
@@ -142,3 +180,99 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
             "quote": "我要求音频和转写处理保持本地。",
         }
     ]
+
+
+def test_generate_daily_context_accepts_llm_evidence_id_refs(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+
+    result = generate_daily_context(config=config, day="2087-05-10", llm=EvidenceIdLLM())
+
+    assert result.memory_candidates_created == 1
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select evidence_refs_json from memory_candidates")
+    finally:
+        conn.close()
+    assert json.loads(candidates[0]["evidence_refs_json"]) == [
+        {
+            "evidence_id": "ev_test",
+            "source_type": "transcript_segment",
+            "source_id": "seg_test",
+            "quote": "我要求音频和转写处理保持本地。",
+        }
+    ]
+
+
+def test_generate_daily_context_rejects_unknown_llm_evidence_refs_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+
+    try:
+        generate_daily_context(config=config, day="2087-05-10", llm=UnknownEvidenceLLM())
+    except ValueError as exc:
+        assert "unknown evidence_id: ev_missing" in str(exc)
+    else:
+        raise AssertionError("unknown LLM evidence reference was accepted")
+
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select candidate_id from memory_candidates")
+        summaries = fetch_all(conn, "select summary_id from summaries")
+        legacy_summaries = fetch_all(conn, "select day from daily_summaries")
+    finally:
+        conn.close()
+    assert candidates == []
+    assert summaries == []
+    assert legacy_summaries == []
+
+
+def _insert_transcript(database_path: Path) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_test",
+                "DJI Mic 3",
+                "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav",
+                "/private/raw/TX02_MIC001_20870510_173550_orig.wav",
+                "sha256:test",
+                1000,
+                "2087-05-10T00:00:00+08:00",
+                "2087-05-10T00:10:00+08:00",
+                "imported",
+            ),
+        )
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "seg_test",
+                "aud_test",
+                "chk_test",
+                0,
+                1000,
+                "我要求音频和转写处理保持本地。",
+                "zh",
+                "self",
+                "ev_test",
+                0.99,
+                "MockASRAdapter",
+                "mock-asr",
+                "test",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
