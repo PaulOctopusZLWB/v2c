@@ -83,9 +83,18 @@ def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_pa
     conn = connect(config.database_path)
     try:
         events = fetch_all(conn, "select event_type from signed_events")
+        logs = fetch_all(conn, "select source, target_id, status, message from sync_logs")
     finally:
         conn.close()
     assert events == [{"event_type": "memory_card.created"}]
+    assert logs == [
+        {
+            "source": "memory_candidate_review",
+            "target_id": "cand_test_001",
+            "status": "ignored",
+            "message": "ignored edit to consumed review receipt: cand_test_001",
+        }
+    ]
 
 
 def test_publish_candidate_review_only_includes_candidates_for_requested_date_key(tmp_path: Path) -> None:

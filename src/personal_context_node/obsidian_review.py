@@ -117,8 +117,9 @@ def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str 
 def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandidatesResult:
     assert_personal_context_vault(config)
     review_path = config.obsidian_vault / "30_Memory_Candidates" / f"{day}.md"
+    edited_receipt_candidate_ids = _edited_receipt_candidate_ids(review_path)
     checked_actions = _checked_candidate_actions(review_path)
-    if not checked_actions:
+    if not checked_actions and not edited_receipt_candidate_ids:
         return ConfirmCandidatesResult(candidates_confirmed=0, signed_events_created=0)
 
     conn = connect(config.database_path)
@@ -136,6 +137,16 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             )
             conn.commit()
             return ConfirmCandidatesResult(candidates_confirmed=0, signed_events_created=0)
+        for candidate_id in edited_receipt_candidate_ids:
+            record_sync_log(
+                config=config,
+                conn=conn,
+                day=day,
+                source="memory_candidate_review",
+                target_id=candidate_id,
+                status="ignored",
+                message=f"ignored edit to consumed review receipt: {candidate_id}",
+            )
         confirmed = 0
         events = 0
         receipts: dict[str, dict[str, str | None]] = {}
@@ -320,6 +331,19 @@ def _checked_candidate_actions(path: Path) -> list[ReviewAction]:
         else:
             checked.append(ReviewAction(match.group(1), action_text or "confirm"))
     return checked
+
+
+def _edited_receipt_candidate_ids(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    receipt_ids = set(re.findall(r'pcn:review_receipt start\b[^>]*candidate_id="([^"]+)"', text))
+    edited_ids: set[str] = set()
+    for line in text.splitlines():
+        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|", line)
+        if match and match.group(1) in receipt_ids:
+            edited_ids.add(match.group(1))
+    return sorted(edited_ids)
 
 
 def _review_block_actions(text: str) -> list[ReviewAction]:
