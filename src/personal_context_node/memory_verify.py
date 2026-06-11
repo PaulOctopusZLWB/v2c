@@ -257,6 +257,7 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
         if event.event_type == "memory_card.created":
             card = MemoryCard.model_validate(event.payload)
             expected[card.card_id] = _card_projection(card, source_event_hash=event.event_hash, status="active")
+    for event in trusted_events:
         if event.event_type == "memory_card.revoked":
             revocation = MemoryCardRevocation.model_validate(event.payload)
             if revocation.card_id in expected:
