@@ -18,7 +18,7 @@ class RecordingLLM:
         return DailyContext(
             day=day,
             summary="今天讨论了本地上下文系统。",
-            todos=["继续接入真实 ASR"],
+            todos=["音频和转写处理保持本地"],
             facts=["系统需要保持音频本地处理"],
             inferences=["用户关注可追溯证据链"],
             memory_candidates=[
@@ -127,6 +127,18 @@ class SummaryOnlyLLM:
             summary="summary",
             todos=[],
             facts=["系统需要保持音频本地处理"],
+            inferences=[],
+            memory_candidates=[],
+        )
+
+
+class UnmatchedTodoLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=["这个待办没有对应的转写证据"],
+            facts=[],
             inferences=[],
             memory_candidates=[],
         )
@@ -318,7 +330,7 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
     assert content["date_key"] == "2087-05-10"
     assert content["headline"] == "今天讨论了本地上下文系统。"
     assert content["todos_rollup"] == [
-        {"text": "继续接入真实 ASR", "owner": "self", "session_id": "ses_test", "evidence_refs": ["ev_test"]}
+        {"text": "音频和转写处理保持本地", "owner": "self", "session_id": "ses_test", "evidence_refs": ["ev_test"]}
     ]
     assert candidates[0]["claim_type"] == "requirement"
     assert candidates[0]["source_type"] == "llm_daily_context"
@@ -544,6 +556,29 @@ def test_generate_daily_context_mints_evidence_refs_before_candidate_extraction(
             "quote": "我要求音频和转写处理保持本地。",
         }
     ]
+
+
+def test_generate_daily_context_rejects_unmatched_todo_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+
+    try:
+        generate_daily_context(config=config, day="2087-05-10", llm=UnmatchedTodoLLM())
+    except ValueError as exc:
+        assert "todo missing evidence" in str(exc)
+    else:
+        raise AssertionError("generate_daily_context accepted an unmatched todo")
+
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(conn, "select summary_id from summaries")
+        legacy_summaries = fetch_all(conn, "select day from daily_summaries")
+        evidence_refs = fetch_all(conn, "select evidence_id from evidence_refs")
+    finally:
+        conn.close()
+    assert summaries == []
+    assert legacy_summaries == []
+    assert evidence_refs == []
 
 
 def test_generate_daily_context_merges_duplicate_candidates_within_day(tmp_path: Path) -> None:

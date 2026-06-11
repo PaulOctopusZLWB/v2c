@@ -168,6 +168,8 @@ def _todo_rollup(*, context: DailyContext, segments: list[dict[str, object]]) ->
     rollup: list[dict[str, object]] = []
     for todo in context.todos:
         source = _segment_for_text(todo, segments)
+        if source is None:
+            raise ValueError(f"todo missing evidence: {todo}")
         rollup.append(
             {
                 "text": todo,
@@ -196,11 +198,11 @@ def _inference_items(inferences: list[object]) -> list[dict[str, object]]:
     return items
 
 
-def _segment_for_text(text: str, segments: list[dict[str, object]]) -> dict[str, object]:
+def _segment_for_text(text: str, segments: list[dict[str, object]]) -> dict[str, object] | None:
     for segment in segments:
         if text in str(segment["text"]):
             return segment
-    return segments[0]
+    return None
 
 
 def _persist_candidates(
