@@ -371,8 +371,8 @@ def _insert_candidate(
             """
             insert into memory_candidates (
               candidate_id, candidate_claim, claim_type, subject_json,
-              confidence, evidence_refs_json, status, memory_card_id
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+              confidence, evidence_refs_json, status, memory_card_id, date_key
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 candidate_id,
@@ -394,6 +394,7 @@ def _insert_candidate(
                 ),
                 "pending_review",
                 None,
+                "2087-05-10",
             ),
         )
         conn.commit()

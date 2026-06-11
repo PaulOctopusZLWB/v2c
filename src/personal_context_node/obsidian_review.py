@@ -48,8 +48,10 @@ def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str 
             select candidate_id, candidate_claim, claim_type, confidence
             from memory_candidates
             where status = 'pending_review'
+              and date_key = ?
             order by candidate_id
             """,
+            (day,),
         )
     finally:
         conn.close()
@@ -97,8 +99,9 @@ def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str 
             update memory_candidates
             set review_note_path = ?, updated_at = ?
             where status = 'pending_review'
+              and date_key = ?
             """,
-            (str(review_path), now),
+            (str(review_path), now, day),
         )
         conn.commit()
     finally:

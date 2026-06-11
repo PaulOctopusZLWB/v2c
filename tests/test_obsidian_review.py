@@ -88,6 +88,27 @@ def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_pa
     assert events == [{"event_type": "memory_card.created"}]
 
 
+def test_publish_candidate_review_only_includes_candidates_for_requested_date_key(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="当天候选。", date_key="2087-05-10")
+    _insert_candidate(config.database_path, candidate_id="cand_test_002", claim="次日候选。", date_key="2087-05-11")
+
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+
+    text = review_path.read_text(encoding="utf-8")
+    assert "cand_test_001" in text
+    assert "cand_test_002" not in text
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select candidate_id, review_note_path from memory_candidates order by candidate_id")
+    finally:
+        conn.close()
+    assert rows == [
+        {"candidate_id": "cand_test_001", "review_note_path": str(review_path)},
+        {"candidate_id": "cand_test_002", "review_note_path": None},
+    ]
+
+
 def test_sync_review_parses_review_block_and_ignores_checked_free_text(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="用户要求音频本地处理。")
@@ -575,6 +596,7 @@ def _insert_candidate(
     *,
     candidate_id: str = "cand_test_001",
     claim: str = "用户要求音频本地处理。",
+    date_key: str = "2087-05-10",
 ) -> None:
     conn = connect(database_path)
     try:
@@ -583,8 +605,8 @@ def _insert_candidate(
             """
             insert into memory_candidates (
               candidate_id, candidate_claim, claim_type, subject_json,
-              confidence, evidence_refs_json, status, memory_card_id
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+              confidence, evidence_refs_json, status, memory_card_id, date_key
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 candidate_id,
@@ -606,6 +628,7 @@ def _insert_candidate(
                 ),
                 "pending_review",
                 None,
+                date_key,
             ),
         )
         conn.commit()
