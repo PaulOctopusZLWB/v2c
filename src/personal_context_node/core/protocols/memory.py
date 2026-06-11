@@ -314,7 +314,11 @@ def materialize_cards(events: list[SignedEvent], public_keys_by_did: dict[str, s
         public_key = public_keys_by_did.get(event.signer_did)
         if public_key is None or not verify_signed_event(event, public_key):
             raise ValueError(f"invalid signed event: {event.event_id}")
-        if event.event_type in {"memory_card.confirmed.v1", "memory_card.created"}:
+        if (
+            event.event_type in {"memory_card.confirmed.v1", "memory_card.created"}
+            and event.payload_encoding == "plain"
+            and event.payload_type == "memory_card.v1"
+        ):
             card = MemoryCard.model_validate(event.payload)
             cards[card.card_id] = card
     return cards

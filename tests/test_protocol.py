@@ -266,6 +266,45 @@ def test_memory_card_visibility_scalar_is_normalized_in_signed_payload() -> None
     assert event.payload["visibility"] == {"type": "public"}
 
 
+def test_materialize_cards_skips_unknown_payload_type() -> None:
+    private_key = Ed25519PrivateKey.generate()
+    card = MemoryCard(
+        card_id="mem_future_payload_type",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Future payload versions must not enter the v1 readable view.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_future_payload_type",
+                source_type="transcript_segment",
+                source_id="seg_future_payload_type",
+                quote="future payload version",
+            )
+        ],
+    )
+    event, public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+        private_key=private_key,
+    )
+    event_body = event.model_dump(mode="json", exclude={"signature"})
+    event_body["payload_type"] = "memory_card.v2"
+    signature = private_key.sign(canonical_json_bytes(event_body))
+    future_event = SignedEvent(
+        **event_body,
+        signature=EventSignature(
+            public_key_id=card.owner_did,
+            value=base64.urlsafe_b64encode(signature).decode("ascii").rstrip("="),
+        ),
+    )
+
+    materialized = materialize_cards([future_event], {card.owner_did: public_key})
+
+    assert materialized == {}
+
+
 def test_unknown_memory_card_visibility_fails_closed_to_private() -> None:
     scalar = MemoryCard(
         card_id="mem_test_scalar",
