@@ -24,6 +24,13 @@ class ConfirmCandidatesResult:
     signed_events_created: int
 
 
+@dataclass(frozen=True)
+class ReviewAction:
+    candidate_id: str
+    action: str
+    edited_claim: str | None = None
+
+
 def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
     conn = connect(config.database_path)
     try:
@@ -67,7 +74,9 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         confirmed = 0
         events = 0
         receipts: dict[str, dict[str, str | None]] = {}
-        for candidate_id, action in checked_actions:
+        for review_action in checked_actions:
+            candidate_id = review_action.candidate_id
+            action = review_action.action
             row = conn.execute(
                 """
                 select candidate_id, candidate_claim, claim_type, subject_json, evidence_refs_json, status
@@ -92,7 +101,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 card_id=f"mem_{uuid4().hex}",
                 owner_did=config.owner_did,
                 claim_type=row["claim_type"],
-                claim=row["candidate_claim"],
+                claim=review_action.edited_claim or row["candidate_claim"],
                 subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
                 evidence_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs_json"])],
                 candidate_claim=row["candidate_claim"],
@@ -108,7 +117,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 "update memory_candidates set status = 'confirmed', memory_card_id = ? where candidate_id = ?",
                 (card.card_id, candidate_id),
             )
-            receipts[candidate_id] = {"action": "confirm", "card_id": card.card_id}
+            receipts[candidate_id] = {"action": action, "card_id": card.card_id}
             confirmed += 1
             events += 1
         conn.commit()
@@ -121,15 +130,20 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         conn.close()
 
 
-def _checked_candidate_actions(path: Path) -> list[tuple[str, str]]:
+def _checked_candidate_actions(path: Path) -> list[ReviewAction]:
     if not path.exists():
         return []
     receipt_ids = set(re.findall(r'candidate_id="([^"]+)"', path.read_text(encoding="utf-8")))
-    checked: list[tuple[str, str]] = []
+    checked: list[ReviewAction] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|[^|]+\|[^|]+(?:\| *(confirm|reject|defer))?", line)
-        if match and match.group(1) not in receipt_ids:
-            checked.append((match.group(1), match.group(2) or "confirm"))
+        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|[^|]+\|[^|]+(?:\| *(.*))?", line)
+        if not match or match.group(1) in receipt_ids:
+            continue
+        action_text = (match.group(2) or "confirm").strip()
+        if action_text.startswith("edit:"):
+            checked.append(ReviewAction(match.group(1), "edit", action_text.removeprefix("edit:").strip()))
+        else:
+            checked.append(ReviewAction(match.group(1), action_text or "confirm"))
     return checked
 
 
@@ -137,7 +151,7 @@ def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | 
     synced_at = datetime.now(timezone.utc).isoformat()
     rewritten: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \| ([^|]+) \| ([^|]+)(?:\| *(confirm|reject|defer))?", line)
+        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \| ([^|]+) \| ([^|]+)(?:\| *(.*))?", line)
         if not match or match.group(1) not in receipts:
             rewritten.append(line)
             continue

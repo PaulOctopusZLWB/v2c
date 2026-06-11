@@ -118,6 +118,34 @@ def test_sync_review_defers_candidate_without_side_effects(tmp_path: Path) -> No
     assert events == []
 
 
+def test_sync_review_edits_claim_while_preserving_candidate_claim(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    edited_claim = "用户要求 ASR 和原始转写必须在本地处理。"
+    review_path.write_text(
+        text.replace(
+            "- [ ] cand_test_001 | requirement | 用户要求音频本地处理。",
+            f"- [x] cand_test_001 | requirement | 用户要求音频本地处理。 | edit: {edited_claim}",
+        ),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 1
+    assert result.signed_events_created == 1
+    receipt = review_path.read_text(encoding="utf-8")
+    assert "action=edit" in receipt
+    conn = connect(config.database_path)
+    try:
+        cards = fetch_all(conn, "select claim, candidate_claim from memory_cards")
+    finally:
+        conn.close()
+    assert cards == [{"claim": edited_claim, "candidate_claim": "用户要求音频本地处理。"}]
+
+
 def test_confirming_multiple_candidates_creates_owner_hash_chain(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
     _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="用户要求音频本地处理。")
