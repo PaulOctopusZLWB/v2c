@@ -15,6 +15,7 @@ from personal_context_node.archive import archive_completed_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
+from personal_context_node.doctor import run_doctor
 from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.init_health import check_health, initialize_workspace
 from personal_context_node.launchd import install_launchd_plists, uninstall_launchd_plists, write_launchd_plists
@@ -77,6 +78,36 @@ def health_cmd(
                 f"status={result.status}",
                 f"database={result.database}",
                 f"obsidian_vault={result.obsidian_vault}",
+            ]
+        )
+    )
+
+
+@app.command(name="doctor")
+def doctor_cmd(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    source_dir: Path | None = typer.Option(None, help="Optional recording source directory to check."),
+    archive_root: Path | None = typer.Option(None, help="Optional archive root to check."),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = run_doctor(config=config, source_dir=source_dir, archive_root=archive_root)
+    typer.echo(
+        " ".join(
+            [
+                f"status={result.status}",
+                f"database={result.database}",
+                f"obsidian_vault={result.obsidian_vault}",
+                f"source_dir={result.source_dir}",
+                f"archive_root={result.archive_root}",
+                f"pending_tasks={result.pending_tasks}",
+                f"failed_tasks={result.failed_tasks}",
+                f"recent_failed_jobs={result.recent_failed_jobs}",
+                f"memory_invalid_events={result.memory_invalid_events}",
+                f"memory_materialization_mismatches={result.memory_materialization_mismatches}",
             ]
         )
     )
