@@ -319,6 +319,36 @@ print(json.dumps({
         raise AssertionError("CommandLLMAdapter accepted an invalid claim_type")
 
 
+def test_command_llm_adapter_rejects_empty_candidate_evidence_refs(tmp_path: Path) -> None:
+    script = tmp_path / "empty_candidate_evidence.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "bad",
+  "todos": [],
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": [{
+    "candidate_claim": "缺少证据",
+    "claim_type": "requirement",
+    "confidence": 0.9,
+    "evidence_refs": []
+  }]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "evidence_refs" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted a candidate without evidence refs")
+
+
 def test_command_llm_adapter_rejects_empty_candidate_subject_fields(tmp_path: Path) -> None:
     script = tmp_path / "empty_subject.py"
     script.write_text(
@@ -348,3 +378,29 @@ print(json.dumps({
         assert "subject id" in str(exc)
     else:
         raise AssertionError("CommandLLMAdapter accepted an empty subject id")
+
+
+def test_command_llm_adapter_rejects_empty_session_decision_evidence_refs(tmp_path: Path) -> None:
+    script = tmp_path / "empty_session_decision_evidence.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "bad",
+  "summary": "bad",
+  "topics": [],
+  "decisions": [{"text": "缺少证据", "evidence_refs": []}],
+  "todos": [],
+  "open_questions": []
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "evidence_refs" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted a session decision without evidence refs")

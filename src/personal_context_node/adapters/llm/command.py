@@ -103,6 +103,8 @@ def _session_decision(item: object) -> SessionDecision:
     evidence_refs = item["evidence_refs"]
     if not isinstance(evidence_refs, list):
         raise TerminalPortError("LLM session_summary decision evidence_refs must be a list")
+    if not evidence_refs:
+        raise TerminalPortError("LLM session_summary decision evidence_refs must not be empty")
     return SessionDecision(text=str(item["text"]), evidence_refs=[str(ref) for ref in evidence_refs])
 
 
@@ -115,6 +117,8 @@ def _session_todo(item: object) -> SessionTodo:
     evidence_refs = item["evidence_refs"]
     if not isinstance(evidence_refs, list):
         raise TerminalPortError("LLM session_summary todo evidence_refs must be a list")
+    if not evidence_refs:
+        raise TerminalPortError("LLM session_summary todo evidence_refs must not be empty")
     return SessionTodo(text=str(item["text"]), owner=str(item["owner"]), evidence_refs=[str(ref) for ref in evidence_refs])
 
 
@@ -146,6 +150,8 @@ def _memory_candidate(item: object) -> MemoryCandidateDraft:
     evidence_source_ids = item.get("evidence_refs", item.get("evidence_source_ids"))
     if not isinstance(evidence_source_ids, list):
         raise TerminalPortError("LLM memory_candidate evidence_source_ids must be a list")
+    if not evidence_source_ids:
+        raise TerminalPortError("LLM memory_candidate evidence_refs must not be empty")
     try:
         confidence = float(item["confidence"])
     except (TypeError, ValueError) as exc:
