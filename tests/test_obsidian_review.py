@@ -337,6 +337,51 @@ visibility:
     assert json.loads(events[0]["payload_json"])["visibility"] == expected_visibility
 
 
+def test_sync_review_applies_review_subject_and_tags_to_memory_card(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="带主题和标签的声明。")
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / "2087-05-10.md"
+    review_path.write_text(
+        """
+# 2087-05-10 Memory Candidate Review
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_001" version="1" -->
+```yaml
+action: confirm
+claim: "带主题和标签的声明。"
+claim_type: requirement
+subject:
+  type: project
+  id: project_review
+  label: Review Project
+tags:
+  - local-first
+  - review-edited
+```
+<!-- pcn:review end candidate_id="cand_test_001" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 1
+    conn = connect(config.database_path)
+    try:
+        cards = fetch_all(conn, "select subject_json, tags_json from memory_cards")
+        events = fetch_all(conn, "select payload_json from signed_events")
+    finally:
+        conn.close()
+    expected_subject = {"type": "project", "id": "project_review", "label": "Review Project"}
+    assert json.loads(cards[0]["subject_json"]) == expected_subject
+    assert json.loads(cards[0]["tags_json"]) == ["local-first", "review-edited"]
+    event_payload = json.loads(events[0]["payload_json"])
+    assert event_payload["subject"] == expected_subject
+    assert event_payload["tags"] == ["local-first", "review-edited"]
+
+
 def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)

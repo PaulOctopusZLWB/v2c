@@ -37,10 +37,12 @@ class ReviewAction:
     action: str
     edited_claim: str | None = None
     visibility: "ReviewYamlValue | None" = None
+    subject: dict[str, str] | None = None
+    tags: list[str] | None = None
     parse_error: str | None = None
 
 
-ReviewYamlValue = str | dict[str, str]
+ReviewYamlValue = str | dict[str, str] | list[str]
 ALLOWED_REVIEW_ACTIONS = {"confirm", "edit", "reject", "defer", "exclude_from_memory"}
 
 
@@ -232,12 +234,13 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 owner_did=config.owner_did,
                 claim_type=row["claim_type"],
                 claim=review_action.edited_claim or row["candidate_claim"],
-                subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
+                subject=SubjectRef.model_validate(review_action.subject or json.loads(row["subject_json"])),
                 evidence_refs=hydrate_candidate_evidence_refs(conn, str(row["evidence_refs_json"])),
                 source_type="confirmed_generated",
                 candidate_claim=row["candidate_claim"],
                 confidence=float(row["confidence"]) if row["confidence"] is not None else None,
                 visibility=review_action.visibility or {"type": "private"},
+                tags=review_action.tags or [],
             )
             event, public_key = create_chained_event(
                 conn,
@@ -385,7 +388,16 @@ def _review_block_actions(text: str) -> list[ReviewAction]:
         if action == "pending":
             continue
         edited_claim = _yaml_scalar(values.get("claim", "")) if action in {"confirm", "edit"} else None
-        actions.append(ReviewAction(candidate_id, action, edited_claim, values.get("visibility")))
+        actions.append(
+            ReviewAction(
+                candidate_id,
+                action,
+                edited_claim,
+                values.get("visibility"),
+                _yaml_object(values.get("subject")),
+                _yaml_string_list(values.get("tags")),
+            )
+        )
     return actions
 
 
@@ -416,14 +428,31 @@ def _review_yaml_value(value: object) -> ReviewYamlValue:
             normalized[str(key)] = "" if nested_value is None else str(nested_value)
         return normalized
     if isinstance(value, list):
-        raise ReviewYamlError("review yaml values must be scalar or object")
+        normalized_list = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                raise ReviewYamlError("review yaml list values must be scalar")
+            normalized_list.append("" if item is None else str(item))
+        return normalized_list
     return "" if value is None else str(value)
 
 
 def _yaml_scalar(value: ReviewYamlValue) -> str:
-    if isinstance(value, dict):
+    if isinstance(value, (dict, list)):
         return ""
     return value
+
+
+def _yaml_object(value: ReviewYamlValue | None) -> dict[str, str] | None:
+    if isinstance(value, dict):
+        return value
+    return None
+
+
+def _yaml_string_list(value: ReviewYamlValue | None) -> list[str] | None:
+    if isinstance(value, list):
+        return [item for item in value if item]
+    return None
 
 
 def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | None]]) -> None:
