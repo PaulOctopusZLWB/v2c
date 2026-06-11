@@ -28,6 +28,7 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert (data_dir / "db").is_dir()
     assert (data_dir / "audio" / "raw").is_dir()
     assert (data_dir / "audio" / "work").is_dir()
+    assert (data_dir / "keys").is_dir()
     assert (data_dir / "logs").is_dir()
     assert (vault / "10_Daily").is_dir()
     assert (vault / "30_Memory_Candidates").is_dir()

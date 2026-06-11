@@ -61,6 +61,10 @@ class AppConfig(BaseModel):
     def raw_audio_dir(self) -> Path:
         return self.data_dir / "audio" / "raw"
 
+    @property
+    def signing_key_path(self) -> Path:
+        return self.data_dir / "keys" / "pcn_ed25519.key"
+
 
 def _resolve_path(base_dir: Path, value: object) -> Path:
     path = Path(str(value))

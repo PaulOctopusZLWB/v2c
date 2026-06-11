@@ -15,6 +15,7 @@ from personal_context_node.core.protocols.memory import (
     SubjectRef,
 )
 from personal_context_node.daily_reports import set_daily_report_status
+from personal_context_node.identity_keys import load_or_create_signing_key
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -85,6 +86,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         confirmed = 0
         events = 0
         receipts: dict[str, dict[str, str | None]] = {}
+        signing_key = load_or_create_signing_key(config)
         for review_action in checked_actions:
             candidate_id = review_action.candidate_id
             action = review_action.action
@@ -139,6 +141,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 event_type="memory_card.created",
                 payload=card,
                 signer_did=config.owner_did,
+                private_key=signing_key,
             )
             insert_signed_event(conn, event=event, public_key=public_key)
             conn.execute(

@@ -4,7 +4,7 @@
 
 This repository currently implements the first milestone from `IMPLEMENTATION_PLAN.md`:
 
-1. `pcn init` creates local data directories, SQLite schema, Obsidian vault folders, and an optional TOML config.
+1. `pcn init` creates local data directories, including `keys/`, SQLite schema, Obsidian vault folders, and an optional TOML config.
 2. `pcn health` checks SQLite initialization and Obsidian vault writability.
 3. `pcn doctor` aggregates health, task, job, memory verification, source, and archive diagnostics.
 4. `pcn ingest scan` lists WAV candidates from a source directory before import.
@@ -13,7 +13,7 @@ This repository currently implements the first milestone from `IMPLEMENTATION_PL
 7. Enqueue the first `vad` task for each newly imported audio file.
 8. Produce deterministic mock transcript segments.
 9. Generate memory candidates with transcript evidence references.
-10. Optionally confirm the first candidate into a signed `memory_card.created` event.
+10. Optionally confirm the first candidate into a signed `memory_card.created` event using a local Ed25519 key file with `0600` permissions.
 11. Publish a daily Markdown note to the configured PersonalContext Obsidian vault.
 
 It also implements the first audio preprocessing boundary:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import stat
 
 from personal_context_node.config import AppConfig
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
@@ -252,7 +253,7 @@ def test_confirming_multiple_candidates_creates_owner_hash_chain(tmp_path: Path)
         events = fetch_all(
             conn,
             """
-            select event_hash, owner_id, owner_sequence, prev_event_hash,
+            select event_hash, owner_id, owner_sequence, prev_event_hash, public_key,
                    raw_event_json, signing_body_json, canonical_signing_body_hash, trust_status
             from signed_events
             order by owner_sequence
@@ -269,6 +270,9 @@ def test_confirming_multiple_candidates_creates_owner_hash_chain(tmp_path: Path)
     assert events[1]["owner_sequence"] == 2
     assert events[1]["prev_event_hash"] == events[0]["event_hash"]
     assert events[1]["event_hash"] == events[1]["canonical_signing_body_hash"]
+    assert events[1]["public_key"] == events[0]["public_key"]
+    assert config.signing_key_path.exists()
+    assert stat.S_IMODE(config.signing_key_path.stat().st_mode) == 0o600
     assert '"signature"' in events[1]["raw_event_json"]
     assert '"signature"' not in events[1]["signing_body_json"]
 

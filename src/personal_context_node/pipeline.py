@@ -12,6 +12,7 @@ from personal_context_node.core.protocols.memory import (
     MemoryCard,
     SubjectRef,
 )
+from personal_context_node.identity_keys import load_or_create_signing_key
 from personal_context_node.ingest import import_audio_files_in_conn
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -39,7 +40,7 @@ def run_first_milestone(
         _mock_transcribe(conn)
         _create_memory_candidates(conn)
         if confirm_first_candidate:
-            _confirm_first_candidate(conn, config.owner_did)
+            _confirm_first_candidate(conn, config)
         _publish_daily_notes(conn, config)
         return FirstMilestoneResult(
             imported_files=imported,
@@ -131,7 +132,7 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _confirm_first_candidate(conn: sqlite3.Connection, owner_did: str) -> None:
+def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> None:
     row = conn.execute(
         """
         select candidate_id, candidate_claim, claim_type, subject_json, evidence_refs_json
@@ -146,7 +147,7 @@ def _confirm_first_candidate(conn: sqlite3.Connection, owner_did: str) -> None:
     evidence_refs = [EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs_json"])]
     card = MemoryCard(
         card_id=f"mem_{uuid4().hex}",
-        owner_did=owner_did,
+        owner_did=config.owner_did,
         claim_type=row["claim_type"],
         claim=row["candidate_claim"],
         subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
@@ -157,7 +158,8 @@ def _confirm_first_candidate(conn: sqlite3.Connection, owner_did: str) -> None:
         conn,
         event_type="memory_card.created",
         payload=card,
-        signer_did=owner_did,
+        signer_did=config.owner_did,
+        private_key=load_or_create_signing_key(config),
     )
     insert_signed_event(conn, event=event, public_key=public_key)
     conn.execute(

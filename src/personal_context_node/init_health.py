@@ -35,6 +35,7 @@ def initialize_workspace(*, config: AppConfig, config_path: Path | None = None) 
         config.data_dir / "db",
         config.data_dir / "audio" / "raw",
         config.data_dir / "audio" / "work",
+        config.data_dir / "keys",
         config.data_dir / "logs",
     ]:
         directory.mkdir(parents=True, exist_ok=True)

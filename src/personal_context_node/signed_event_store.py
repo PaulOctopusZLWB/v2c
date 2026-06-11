@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import BaseModel
 
 from personal_context_node.core.protocols.memory import (
@@ -40,6 +41,7 @@ def create_chained_event(
     event_type: str,
     payload: BaseModel,
     signer_did: str,
+    private_key: Ed25519PrivateKey | None = None,
 ) -> tuple[SignedEvent, str]:
     previous = conn.execute(
         """
@@ -57,6 +59,7 @@ def create_chained_event(
         event_type=event_type,
         payload=payload,
         signer_did=signer_did,
+        private_key=private_key,
         owner_sequence=owner_sequence,
         prev_event_hash=prev_event_hash,
     )
