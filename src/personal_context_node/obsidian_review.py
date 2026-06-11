@@ -59,6 +59,19 @@ def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
     ]
     for row in rows:
         lines.append(f"- [ ] {row['candidate_id']} | {row['claim_type']} | {row['candidate_claim']}")
+        lines.extend(
+            [
+                "",
+                f'<!-- pcn:review start type="memory_candidate" candidate_id="{row["candidate_id"]}" version="1" -->',
+                "```yaml",
+                "action: pending",
+                f'claim: "{_yaml_quote(str(row["candidate_claim"]))}"',
+                f"claim_type: {row['claim_type']}",
+                "```",
+                f'<!-- pcn:review end candidate_id="{row["candidate_id"]}" -->',
+                "",
+            ]
+        )
     review_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     conn = connect(config.database_path)
     try:
@@ -207,6 +220,10 @@ def _within_edit_grace(path: Path, *, edit_grace_seconds: int) -> bool:
     return time.time() - path.stat().st_mtime < edit_grace_seconds
 
 
+def _yaml_quote(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _mark_evidence_sessions_excluded(conn, *, evidence_refs_json: str) -> None:
     source_ids = [
         str(item["source_id"])
@@ -239,7 +256,7 @@ def _checked_candidate_actions(path: Path) -> list[ReviewAction]:
     block_actions = _review_block_actions(text)
     if block_actions:
         return block_actions
-    receipt_ids = set(re.findall(r'candidate_id="([^"]+)"', text))
+    receipt_ids = set(re.findall(r'pcn:review_receipt start\b[^>]*candidate_id="([^"]+)"', text))
     checked: list[ReviewAction] = []
     for line in text.splitlines():
         match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|[^|]+\|[^|]+(?:\| *(.*))?", line)
