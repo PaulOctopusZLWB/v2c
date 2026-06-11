@@ -2,6 +2,7 @@
 .venv/
 .smoke-data/
 .smoke-vault/
+.smoke-nas/
 data/
 __pycache__/
 *.py[cod]

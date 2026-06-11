@@ -88,6 +88,16 @@ create table if not exists segment_person_overrides (
   updated_at text not null
 );
 
+create table if not exists archive_records (
+  archive_record_id text primary key,
+  audio_file_id text not null references audio_files(audio_file_id),
+  source_path text not null,
+  archive_path text not null,
+  sha256 text not null,
+  verified integer not null,
+  archived_at text not null
+);
+
 create table if not exists signed_events (
   event_id text primary key,
   event_type text not null,

@@ -4,9 +4,11 @@ from pathlib import Path
 
 import typer
 
+from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
+from personal_context_node.archive import archive_completed_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.llm_processing import generate_daily_context
@@ -186,6 +188,31 @@ def sync_speaker_review_cmd(
             [
                 f"mappings_upserted={result.mappings_upserted}",
                 f"segment_overrides_upserted={result.segment_overrides_upserted}",
+            ]
+        )
+    )
+
+
+@app.command()
+def archive(
+    archive_root: Path = typer.Option(..., help="NAS or local archive root."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    require_existing_root: bool = typer.Option(False, help="Treat a missing archive root as unavailable."),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = archive_completed_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root, require_existing_root=require_existing_root),
+    )
+    typer.echo(
+        " ".join(
+            [
+                f"files_archived={result.files_archived}",
+                f"files_pending={result.files_pending}",
             ]
         )
     )

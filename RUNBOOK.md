@@ -46,7 +46,14 @@ It also implements the speaker review boundary:
 3. Segment-level lines can override a specific segment when changed to a concrete person label.
 4. `pcn sync-speaker-review` reads mappings and segment overrides back into SQLite without overwriting raw transcript speaker labels.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, NAS archive, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, and review boundaries testable before model integration.
+It also implements the archive boundary:
+
+1. `ArchivePort` as the core-owned archive interface.
+2. A local filesystem archive adapter that can target a mounted NAS path.
+3. Hash verification before `audio_files.status` becomes `archived`.
+4. `pcn archive` for raw audio archive smoke tests.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, review, and archive boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -79,6 +86,10 @@ uv run pcn publish-speaker-review \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
+uv run pcn archive \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --archive-root .smoke-nas
 ```
 
 Expected first milestone smoke output:
@@ -135,6 +146,12 @@ Expected speaker sync output shape:
 
 ```text
 mappings_upserted=<n> segment_overrides_upserted=<n>
+```
+
+Expected archive smoke output with the sample data:
+
+```text
+files_archived=7 files_pending=0
 ```
 
 ## Docker Run
