@@ -38,6 +38,7 @@ from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.process_runner import process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
+from personal_context_node.system_summary import daily_system_summary
 from personal_context_node.tasks import process_status_rows, rerun_task, retry_task
 from personal_context_node.transcription import transcribe_pending_chunks
 
@@ -813,6 +814,32 @@ def job_status(
                 ]
             )
         )
+
+
+@app.command(name="system-summary")
+def system_summary(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    day: str = typer.Option(..., help="Day to summarize, formatted as YYYY-MM-DD."),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    summary = daily_system_summary(config=config, day=day)
+    typer.echo(
+        " ".join(
+            [
+                f"day={summary.day}",
+                f"jobs_total={summary.jobs_total}",
+                f"jobs_succeeded={summary.jobs_succeeded}",
+                f"jobs_failed={summary.jobs_failed}",
+                f"tasks_pending={summary.tasks_pending}",
+                f"tasks_failed={summary.tasks_failed}",
+                f"archived_records={summary.archived_records}",
+            ]
+        )
+    )
 
 
 @app.command(name="process-status")
