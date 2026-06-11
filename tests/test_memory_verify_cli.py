@@ -64,6 +64,37 @@ def test_memory_verify_group_cli_reports_valid_events(tmp_path: Path) -> None:
     assert "invalid_events=0" in result.output
 
 
+def test_memory_verify_cli_fails_when_materialized_view_mismatches(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
+    confirm_checked_candidates(config=config, day="2087-05-10")
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update memory_cards set claim = ?", ("篡改后的 materialized claim",))
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "memory-verify",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "valid_events=1" in result.output
+    assert "invalid_events=0" in result.output
+    assert "materialization_mismatches=1" in result.output
+
+
 def _insert_candidate(database_path: Path) -> None:
     conn = connect(database_path)
     try:

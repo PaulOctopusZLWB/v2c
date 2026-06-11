@@ -613,6 +613,8 @@ def _memory_verify(*, data_dir: Path, obsidian_vault: Path) -> None:
             ]
         )
     )
+    if result.invalid_events or result.materialization_mismatches:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="memory-export")
