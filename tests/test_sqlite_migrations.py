@@ -26,3 +26,17 @@ def test_initialize_does_not_duplicate_schema_migration_rows(tmp_path) -> None:
         conn.close()
 
     assert migrations == [{"version": 1, "name": "base_schema"}]
+
+
+def test_initialize_memory_cards_schema_includes_source_type(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(memory_cards)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["source_type"]["notnull"] == 1
+    assert column_by_name["source_type"]["dflt_value"] == "'confirmed_generated'"

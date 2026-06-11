@@ -328,14 +328,15 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
     conn.execute(
         """
         insert into memory_cards (
-          card_id, owner_did, claim_type, claim, subject_json, evidence_refs_json,
+          card_id, owner_did, claim_type, claim, source_type, subject_json, evidence_refs_json,
           candidate_claim, visibility_json, tags_json, status, source_event_hash,
           created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(card_id) do update set
           owner_did = excluded.owner_did,
           claim_type = excluded.claim_type,
           claim = excluded.claim,
+          source_type = excluded.source_type,
           subject_json = excluded.subject_json,
           evidence_refs_json = excluded.evidence_refs_json,
           candidate_claim = excluded.candidate_claim,
@@ -351,6 +352,7 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
             card.owner_did,
             card.claim_type,
             card.claim,
+            card.source_type,
             card.subject.model_dump_json(),
             json.dumps([evidence.model_dump(mode="json") for evidence in card.evidence_refs], ensure_ascii=False, sort_keys=True),
             card.candidate_claim,

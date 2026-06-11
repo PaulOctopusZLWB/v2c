@@ -450,7 +450,7 @@ def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[s
     actual_rows = fetch_all(
         conn,
         """
-        select card_id, owner_did, claim_type, claim, visibility_json, tags_json, status, source_event_hash
+        select card_id, owner_did, claim_type, claim, source_type, visibility_json, tags_json, status, source_event_hash
         from memory_cards
         order by card_id
         """,
@@ -513,6 +513,7 @@ def _card_projection(card: MemoryCard, *, source_event_hash: str, status: str) -
         "owner_did": card.owner_did,
         "claim_type": card.claim_type,
         "claim": card.claim,
+        "source_type": card.source_type,
         "visibility_json": json.dumps(card.visibility.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True),
         "tags_json": json.dumps(card.tags, ensure_ascii=False, sort_keys=True),
         "status": status,
@@ -552,6 +553,7 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
           owner_did text not null,
           claim_type text not null,
           claim text not null,
+          source_type text not null default 'confirmed_generated',
           subject_json text not null,
           evidence_refs_json text not null,
           candidate_claim text,
@@ -566,6 +568,7 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
     )
     existing_card_columns = {row["name"] for row in conn.execute("pragma table_info(memory_cards)").fetchall()}
     card_column_migrations = {
+        "source_type": "alter table memory_cards add column source_type text not null default 'confirmed_generated'",
         "visibility_json": "alter table memory_cards add column visibility_json text not null default '{\"type\":\"private\"}'",
         "tags_json": "alter table memory_cards add column tags_json text not null default '[]'",
         "updated_at": "alter table memory_cards add column updated_at text not null default ''",
