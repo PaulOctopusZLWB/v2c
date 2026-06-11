@@ -325,23 +325,17 @@ def transcribe(
 @app.command()
 def summarize(
     day: str = typer.Option(..., help="Recording day in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
-    llm_backend: str = typer.Option("rule_based", help="LLM backend: rule_based or command."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    if llm_backend == "rule_based":
-        llm = RuleBasedLLMAdapter()
-    elif llm_backend == "command":
-        if not llm_command:
-            raise typer.BadParameter("--llm-command is required when --llm-backend command")
-        llm = CommandLLMAdapter(command=llm_command.split())
-    else:
-        raise typer.BadParameter("--llm-backend must be 'rule_based' or 'command'")
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
     result = generate_daily_context(config=config, day=day, llm=llm)
     typer.echo(
         " ".join(

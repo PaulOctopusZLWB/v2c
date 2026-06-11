@@ -6,7 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
-from personal_context_node.storage.sqlite import connect, initialize
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
 def test_summarize_cli_uses_command_llm_backend(tmp_path: Path) -> None:
@@ -57,6 +57,61 @@ print(json.dumps({
     assert result.exit_code == 0, result.output
     assert "summaries_created=1" in result.output
     assert "memory_candidates_created=1" in result.output
+
+
+def test_summarize_cli_uses_command_llm_from_config(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    vault = tmp_path / "vault"
+    _insert_transcript(data_dir / "db" / "personal_context.sqlite")
+    script = tmp_path / "fake_llm.py"
+    script.write_text(
+        """
+import json
+import sys
+payload = json.loads(sys.stdin.read())
+if payload["task"] != "daily_context":
+    raise SystemExit(2)
+first = payload["transcript_segments"][0]["evidence_id"]
+print(json.dumps({
+  "summary": "配置命令式 LLM 摘要",
+  "todos": [],
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": [{
+    "candidate_claim": "配置命令式 LLM 候选",
+    "claim_type": "observation",
+    "confidence": 0.7,
+    "evidence_refs": [first]
+  }]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data_dir}"
+obsidian_vault = "{vault}"
+
+[llm]
+backend = "command"
+command = "python3 {script}"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["summarize", "--config", str(config_path), "--day", "2087-05-10"])
+
+    assert result.exit_code == 0, result.output
+    assert "summaries_created=1" in result.output
+    conn = connect(data_dir / "db" / "personal_context.sqlite")
+    try:
+        summaries = fetch_all(conn, "select summary from daily_summaries")
+    finally:
+        conn.close()
+    assert summaries == [{"summary": "配置命令式 LLM 摘要"}]
 
 
 def _insert_transcript(database_path: Path) -> None:
