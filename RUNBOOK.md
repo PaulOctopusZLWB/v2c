@@ -85,10 +85,10 @@ It also implements the task lifecycle foundation:
 2. `task_type + target_type + target_id` is unique.
 3. `claimed_by_run_id` and `claimed_at` support lease-based recovery.
 4. Import registers the first `vad` task for each new audio file in the same SQLite transaction.
-5. `pcn process-status` lists current task state.
-6. `pcn process-run` claims one pending task, runs VAD, ASR, or session derivation, and records success/failure.
-7. `pcn process-retry --task-id ...` resets a failed task to `pending`.
-8. `pcn process-rerun --task-type ... --target-type ... --target-id ...` reopens or enqueues a deterministic task target.
+5. `pcn process status` lists current task state.
+6. `pcn process run` claims one pending task, runs VAD, ASR, or session derivation, and records success/failure.
+7. `pcn process retry --task-id ...` resets a failed task to `pending`.
+8. `pcn process rerun --task-type ... --target-type ... --target-id ...` reopens or enqueues a deterministic task target.
 
 It also implements session derivation:
 
@@ -113,7 +113,7 @@ It also implements the daily/publish task DAG:
 3. When all session summaries for the day have succeeded, the runner enqueues `daily_generate`.
 4. `daily_generate` creates daily context and enqueues `obsidian_publish`.
 5. `obsidian_publish` writes session notes, memory candidate review, and speaker review.
-6. Repeated `pcn process-run` calls can now advance VAD -> ASR -> session -> session summary -> daily -> Obsidian publish.
+6. Repeated `pcn process run` calls can now advance VAD -> ASR -> session -> session summary -> daily -> Obsidian publish.
 
 Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, and rsync/restic-specific NAS behavior are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, session, context-generation, review, archive, scheduling, and protocol boundaries testable before model integration.
 
@@ -139,7 +139,7 @@ uv run pcn ingest import \
   --source-dir sample_data \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
-uv run pcn process-status \
+uv run pcn process status \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
 uv run pcn run-first-milestone \
@@ -208,7 +208,7 @@ files_found=7
 imported_files=7
 ```
 
-After import, `pcn process-status` should show seven pending `vad` tasks. `pcn run-first-milestone` remains a compact end-to-end smoke wrapper; use a fresh `--data-dir` if you want it to report `imported_files=7` after a standalone import smoke.
+After import, `pcn process status` should show seven pending `vad` tasks. `pcn run-first-milestone` remains a compact end-to-end smoke wrapper; use a fresh `--data-dir` if you want it to report `imported_files=7` after a standalone import smoke.
 
 Expected preprocessing smoke output shape:
 
@@ -315,10 +315,10 @@ uv run pcn memory-verify \
 uv run pcn job-status \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
-uv run pcn process-status \
+uv run pcn process status \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
-uv run pcn process-run \
+uv run pcn process run \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --vad-threshold 0.01 \
@@ -357,17 +357,17 @@ Expected job status output shape:
 run_id=run_... job_name=memory-verify status=succeeded error=
 ```
 
-After importing the seven sample files, `pcn process-status` should show seven pending `vad` tasks.
-Repeated `pcn process-run` calls advance those tasks, enqueue/run `asr` tasks for generated chunks, run `session_derive`, run `summarize_session`, generate daily context, and publish Obsidian review/session notes.
+After importing the seven sample files, `pcn process status` should show seven pending `vad` tasks.
+Repeated `pcn process run` calls advance those tasks, enqueue/run `asr` tasks for generated chunks, run `session_derive`, run `summarize_session`, generate daily context, and publish Obsidian review/session notes.
 
 Manual task recovery:
 
 ```bash
-uv run pcn process-retry \
+uv run pcn process retry \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --task-id task_...
-uv run pcn process-rerun \
+uv run pcn process rerun \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --task-type asr \

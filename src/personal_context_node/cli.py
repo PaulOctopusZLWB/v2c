@@ -35,6 +35,8 @@ from personal_context_node.transcription import transcribe_pending_chunks
 app = typer.Typer(help="Personal Context Node local pipeline.")
 ingest_app = typer.Typer(help="Audio ingest commands.")
 app.add_typer(ingest_app, name="ingest")
+process_app = typer.Typer(help="Task processing commands.")
+app.add_typer(process_app, name="process")
 
 
 @app.callback()
@@ -558,6 +560,21 @@ def process_status(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
+    _process_status(data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@process_app.command(name="status")
+def process_status_group(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _process_status(data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+def _process_status(*, data_dir: Path, obsidian_vault: Path) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     for row in process_status_rows(config=config):
         typer.echo(
@@ -584,6 +601,22 @@ def process_retry(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
+    _process_retry(task_id=task_id, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@process_app.command(name="retry")
+def process_retry_group(
+    task_id: str = typer.Option(..., help="Task id to reset to pending."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _process_retry(task_id=task_id, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+def _process_retry(*, task_id: str, data_dir: Path, obsidian_vault: Path) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = retry_task(config=config, task_id=task_id)
     typer.echo(f"task_id={result.task_id} status={result.status}")
@@ -599,6 +632,43 @@ def process_rerun(
         Path("/Users/paul/Documents/Obsidian/PersonalContext"),
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
+) -> None:
+    _process_rerun(
+        task_type=task_type,
+        target_type=target_type,
+        target_id=target_id,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+    )
+
+
+@process_app.command(name="rerun")
+def process_rerun_group(
+    task_type: str = typer.Option(..., help="Task type to rerun, e.g. asr."),
+    target_type: str = typer.Option(..., help="Task target type, e.g. audio_chunk."),
+    target_id: str = typer.Option(..., help="Task target id."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _process_rerun(
+        task_type=task_type,
+        target_type=target_type,
+        target_id=target_id,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+    )
+
+
+def _process_rerun(
+    *,
+    task_type: str,
+    target_type: str,
+    target_id: str,
+    data_dir: Path,
+    obsidian_vault: Path,
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = rerun_task(config=config, task_type=task_type, target_type=target_type, target_id=target_id)
@@ -619,6 +689,59 @@ def process_run(
     asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
+) -> None:
+    _process_run(
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+        vad_threshold=vad_threshold,
+        vad_backend=vad_backend,
+        vad_command=vad_command,
+        max_chunk_ms=max_chunk_ms,
+        asr_backend=asr_backend,
+        asr_command=asr_command,
+        mock_text=mock_text,
+    )
+
+
+@process_app.command(name="run")
+def process_run_group(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
+    vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
+    max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
+    asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
+    asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
+    mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
+) -> None:
+    _process_run(
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+        vad_threshold=vad_threshold,
+        vad_backend=vad_backend,
+        vad_command=vad_command,
+        max_chunk_ms=max_chunk_ms,
+        asr_backend=asr_backend,
+        asr_command=asr_command,
+        mock_text=mock_text,
+    )
+
+
+def _process_run(
+    *,
+    data_dir: Path,
+    obsidian_vault: Path,
+    vad_threshold: float,
+    vad_backend: str,
+    vad_command: str | None,
+    max_chunk_ms: int,
+    asr_backend: str,
+    asr_command: str | None,
+    mock_text: str,
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     vad = _build_vad(vad_backend=vad_backend, vad_command=vad_command, vad_threshold=vad_threshold)
