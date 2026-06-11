@@ -127,7 +127,7 @@ def _persist_formal_summary(
 
 
 def _decision_rollup(*, context: DailyContext, segments: list[dict[str, object]]) -> list[dict[str, object]]:
-    segment_by_id = {str(segment["segment_id"]): segment for segment in segments}
+    segment_by_llm_ref = _segment_by_llm_ref(segments)
     rollup: list[dict[str, object]] = []
     for candidate in context.memory_candidates:
         if candidate.claim_type != "decision":
@@ -135,7 +135,9 @@ def _decision_rollup(*, context: DailyContext, segments: list[dict[str, object]]
         evidence_refs = []
         session_id: object = None
         for source_id in candidate.evidence_source_ids:
-            source = segment_by_id[source_id]
+            source = segment_by_llm_ref.get(source_id)
+            if source is None:
+                raise ValueError(f"unknown evidence_id: {source_id}")
             evidence_refs.append(str(source["evidence_id"]))
             session_id = source.get("session_id")
         rollup.append(
@@ -173,11 +175,7 @@ def _segment_for_text(text: str, segments: list[dict[str, object]]) -> dict[str,
 
 
 def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segments: list[dict[str, object]]) -> int:
-    segment_by_llm_ref = {
-        ref: segment
-        for segment in segments
-        for ref in (str(segment["segment_id"]), str(segment["evidence_id"]))
-    }
+    segment_by_llm_ref = _segment_by_llm_ref(segments)
     created = 0
     for candidate in _merge_daily_duplicate_candidates(context.memory_candidates):
         evidence_refs = []
@@ -240,6 +238,14 @@ def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segm
         )
         created += 1
     return created
+
+
+def _segment_by_llm_ref(segments: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    return {
+        ref: segment
+        for segment in segments
+        for ref in (str(segment["segment_id"]), str(segment["evidence_id"]))
+    }
 
 
 def _merge_daily_duplicate_candidates(candidates: list[MemoryCandidateDraft]) -> list[MemoryCandidateDraft]:

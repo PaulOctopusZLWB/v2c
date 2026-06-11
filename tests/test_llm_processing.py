@@ -51,6 +51,25 @@ class EvidenceIdLLM:
         )
 
 
+class DecisionEvidenceIdLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=[],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="系统采用本地优先的音频处理边界。",
+                    claim_type="decision",
+                    confidence=0.91,
+                    evidence_source_ids=[transcript_segments[0]["evidence_id"]],
+                )
+            ],
+        )
+
+
 class UnknownEvidenceLLM:
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
         return DailyContext(
@@ -225,6 +244,35 @@ def test_generate_daily_context_accepts_llm_evidence_id_refs(tmp_path: Path) -> 
             "source_type": "transcript_segment",
             "source_id": "seg_test",
             "quote": "我要求音频和转写处理保持本地。",
+        }
+    ]
+
+
+def test_generate_daily_context_accepts_evidence_id_refs_in_decision_rollup(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+
+    generate_daily_context(config=config, day="2087-05-10", llm=DecisionEvidenceIdLLM())
+
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(
+            conn,
+            """
+            select content_json
+            from summaries
+            where summary_type = 'daily'
+            """,
+        )
+    finally:
+        conn.close()
+
+    content = json.loads(str(summaries[0]["content_json"]))
+    assert content["decisions_rollup"] == [
+        {
+            "text": "系统采用本地优先的音频处理边界。",
+            "session_id": None,
+            "evidence_refs": ["ev_test"],
         }
     ]
 
