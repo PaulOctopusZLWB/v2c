@@ -6,6 +6,12 @@ from typing import Any
 
 
 SCHEMA = """
+create table if not exists schema_migrations (
+  version integer primary key,
+  name text not null,
+  applied_at text not null default current_timestamp
+);
+
 create table if not exists audio_files (
   audio_file_id text primary key,
   source_device text not null,
@@ -226,6 +232,10 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "audio_files", "source_size_bytes", "integer not null default 0")
     _ensure_column(conn, "audio_files", "source_mtime_ns", "integer not null default 0")
+    conn.execute(
+        "insert or ignore into schema_migrations (version, name) values (?, ?)",
+        (1, "base_schema"),
+    )
     conn.commit()
 
 

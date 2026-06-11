@@ -79,6 +79,11 @@ It also implements a minimal diagnostics boundary:
 2. `pcn memory verify` records a job run.
 3. `pcn job-status` lists recent job runs for launchd/manual diagnostics.
 
+It also implements the first SQLite schema migration foundation:
+
+1. `schema_migrations` records the applied base schema version.
+2. Repeated initialization is idempotent and does not duplicate migration rows.
+
 It also implements the task lifecycle foundation:
 
 1. `tasks` stores `pending -> claimed -> running -> succeeded/failed_retryable/failed_terminal`.
