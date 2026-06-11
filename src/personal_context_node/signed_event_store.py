@@ -6,6 +6,7 @@ import sqlite3
 from pydantic import BaseModel
 
 from personal_context_node.core.protocols.memory import (
+    MemoryCard,
     SignedEvent,
     canonical_signing_body_hash,
     create_signed_event,
@@ -84,5 +85,41 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
             event.signature.value,
             public_key,
             1 if verified else 0,
+        ),
+    )
+    if event.event_type == "memory_card.created" and verified:
+        _upsert_memory_card(conn, event=event)
+
+
+def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    card = MemoryCard.model_validate(event.payload)
+    conn.execute(
+        """
+        insert into memory_cards (
+          card_id, owner_did, claim_type, claim, subject_json, evidence_refs_json,
+          candidate_claim, status, source_event_hash, created_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(card_id) do update set
+          owner_did = excluded.owner_did,
+          claim_type = excluded.claim_type,
+          claim = excluded.claim,
+          subject_json = excluded.subject_json,
+          evidence_refs_json = excluded.evidence_refs_json,
+          candidate_claim = excluded.candidate_claim,
+          status = excluded.status,
+          source_event_hash = excluded.source_event_hash,
+          created_at = excluded.created_at
+        """,
+        (
+            card.card_id,
+            card.owner_did,
+            card.claim_type,
+            card.claim,
+            card.subject.model_dump_json(),
+            json.dumps([evidence.model_dump(mode="json") for evidence in card.evidence_refs], ensure_ascii=False, sort_keys=True),
+            card.candidate_claim,
+            "active",
+            event.event_hash,
+            str(card.created_at),
         ),
     )

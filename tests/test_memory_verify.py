@@ -21,6 +21,54 @@ def test_memory_verify_rechecks_stored_signed_events(tmp_path: Path) -> None:
     assert result.total_events == 1
     assert result.valid_events == 1
     assert result.invalid_events == 0
+    assert result.materialization_mismatches == 0
+
+
+def test_confirmed_candidate_materializes_memory_card(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+
+    confirm_checked_candidates(config=config, day="2087-05-10")
+
+    conn = connect(config.database_path)
+    try:
+        cards = fetch_all(conn, "select claim, claim_type, status, source_event_hash from memory_cards")
+    finally:
+        conn.close()
+
+    assert cards == [
+        {
+            "claim": "用户要求音频本地处理。",
+            "claim_type": "requirement",
+            "status": "active",
+            "source_event_hash": cards[0]["source_event_hash"],
+        }
+    ]
+    assert cards[0]["source_event_hash"].startswith("sha256:")
+
+
+def test_memory_verify_detects_materialized_card_mismatch(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    confirm_checked_candidates(config=config, day="2087-05-10")
+
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update memory_cards set claim = ?", ("篡改后的 materialized claim",))
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 1
+    assert result.valid_events == 1
+    assert result.invalid_events == 0
+    assert result.materialization_mismatches == 1
 
 
 def test_memory_verify_detects_tampered_payload(tmp_path: Path) -> None:

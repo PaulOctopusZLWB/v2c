@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
-from personal_context_node.core.protocols.memory import SignedEvent, canonical_signing_body_hash, verify_signed_event
+from personal_context_node.core.protocols.memory import MemoryCard, SignedEvent, canonical_signing_body_hash, verify_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -14,6 +14,7 @@ class MemoryVerifyResult:
     total_events: int
     valid_events: int
     invalid_events: int
+    materialization_mismatches: int = 0
 
 
 def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
@@ -31,6 +32,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         )
         valid = 0
         invalid = 0
+        trusted_events: list[SignedEvent] = []
         previous_hash_by_owner: dict[str, str] = {}
         previous_sequence_by_owner: dict[str, int] = {}
         for row in rows:
@@ -50,6 +52,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                 row_valid = False
             if row_valid:
                 valid += 1
+                trusted_events.append(event)
                 previous_hash_by_owner[str(row["owner_id"])] = event_hash
                 previous_sequence_by_owner[str(row["owner_id"])] = int(row["owner_sequence"])
                 conn.execute(
@@ -62,8 +65,14 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                     "update signed_events set verified = 0, trust_status = 'rejected' where event_hash = ?",
                     (event_hash,),
                 )
+        mismatches = _materialization_mismatches(conn, trusted_events)
         conn.commit()
-        return MemoryVerifyResult(total_events=len(rows), valid_events=valid, invalid_events=invalid)
+        return MemoryVerifyResult(
+            total_events=len(rows),
+            valid_events=valid,
+            invalid_events=invalid,
+            materialization_mismatches=mismatches,
+        )
     finally:
         conn.close()
 
@@ -131,6 +140,42 @@ def _row_event_hash(row: dict[str, object]) -> str:
     return str(row.get("event_hash") or row["event_id"])
 
 
+def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[SignedEvent]) -> int:
+    expected = {
+        card.card_id: _card_projection(card, source_event_hash=event.event_hash)
+        for event in trusted_events
+        if event.event_type == "memory_card.created"
+        for card in [MemoryCard.model_validate(event.payload)]
+    }
+    actual_rows = fetch_all(
+        conn,
+        """
+        select card_id, owner_did, claim_type, claim, status, source_event_hash
+        from memory_cards
+        order by card_id
+        """,
+    )
+    actual = {str(row["card_id"]): row for row in actual_rows}
+    mismatches = 0
+    for card_id, expected_row in expected.items():
+        actual_row = actual.pop(card_id, None)
+        if actual_row != expected_row:
+            mismatches += 1
+    mismatches += len(actual)
+    return mismatches
+
+
+def _card_projection(card: MemoryCard, *, source_event_hash: str) -> dict[str, object]:
+    return {
+        "card_id": card.card_id,
+        "owner_did": card.owner_did,
+        "claim_type": card.claim_type,
+        "claim": card.claim,
+        "status": "active",
+        "source_event_hash": source_event_hash,
+    }
+
+
 def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
     existing = {row["name"] for row in conn.execute("pragma table_info(signed_events)").fetchall()}
     migrations = {
@@ -156,4 +201,20 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
     for column, sql in migrations.items():
         if column not in existing:
             conn.execute(sql)
+    conn.execute(
+        """
+        create table if not exists memory_cards (
+          card_id text primary key,
+          owner_did text not null,
+          claim_type text not null,
+          claim text not null,
+          subject_json text not null,
+          evidence_refs_json text not null,
+          candidate_claim text,
+          status text not null,
+          source_event_hash text not null,
+          created_at text not null
+        )
+        """
+    )
     conn.commit()

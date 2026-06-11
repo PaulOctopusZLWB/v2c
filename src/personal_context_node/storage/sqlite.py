@@ -70,6 +70,19 @@ create table if not exists memory_candidates (
   memory_card_id text
 );
 
+create table if not exists memory_cards (
+  card_id text primary key,
+  owner_did text not null,
+  claim_type text not null,
+  claim text not null,
+  subject_json text not null,
+  evidence_refs_json text not null,
+  candidate_claim text,
+  status text not null,
+  source_event_hash text not null,
+  created_at text not null
+);
+
 create table if not exists daily_summaries (
   day text primary key,
   summary text not null,

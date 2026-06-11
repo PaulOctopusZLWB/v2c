@@ -374,6 +374,7 @@ def memory_verify(
                 f"total_events={result.total_events}",
                 f"valid_events={result.valid_events}",
                 f"invalid_events={result.invalid_events}",
+                f"materialization_mismatches={result.materialization_mismatches}",
             ]
         )
     )
