@@ -141,16 +141,40 @@ create table if not exists sessions (
   updated_at text not null
 );
 
+create table if not exists persons (
+  person_id text primary key,
+  display_name text not null,
+  person_type text not null,
+  is_self integer not null default 0,
+  public_identity_id text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create unique index if not exists idx_persons_self
+on persons(is_self) where is_self = 1;
+
+create table if not exists speaker_clusters (
+  speaker_cluster_id text primary key,
+  label text not null,
+  source_type text not null,
+  source_ref text,
+  created_at text not null
+);
+
 create table if not exists speaker_mappings (
   speaker text primary key,
   person_label text not null,
-  updated_at text not null
+  updated_at text not null,
+  speaker_cluster_id text,
+  person_id text
 );
 
 create table if not exists segment_person_overrides (
   segment_id text primary key,
   person_label text not null,
-  updated_at text not null
+  updated_at text not null,
+  person_id text
 );
 
 create table if not exists archive_records (
@@ -224,6 +248,18 @@ on signed_events(object_id, object_version) where trust_status = 'trusted';
 
 create index if not exists idx_signed_events_owner_seq
 on signed_events(owner_id, owner_sequence);
+
+create view if not exists v_segment_attribution as
+select
+  ts.segment_id,
+  coalesce(override.person_id, mapping.person_id) as person_id,
+  case
+    when override.person_id is not null then 'override'
+    when mapping.person_id is not null then 'cluster_mapping'
+  end as attribution_source
+from transcript_segments ts
+left join segment_person_overrides override on override.segment_id = ts.segment_id
+left join speaker_mappings mapping on mapping.speaker = ts.speaker;
 """
 
 
@@ -239,6 +275,9 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "audio_files", "source_size_bytes", "integer not null default 0")
     _ensure_column(conn, "audio_files", "source_mtime_ns", "integer not null default 0")
+    _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
+    _ensure_column(conn, "speaker_mappings", "person_id", "text")
+    _ensure_column(conn, "segment_person_overrides", "person_id", "text")
     conn.execute(
         "insert or ignore into schema_migrations (version, name) values (?, ?)",
         (1, "base_schema"),

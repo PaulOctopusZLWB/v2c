@@ -49,6 +49,37 @@ def test_speaker_review_mapping_and_segment_override_are_materialized(tmp_path: 
     ]
 
 
+def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_segments(config.database_path)
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    edited = text.replace("- spk_self: self", "- spk_self: Paul")
+    edited = edited.replace("<!-- segment_id: seg_guest -->\nspk_self -> self:", "<!-- segment_id: seg_guest -->\nspk_self -> Guest:")
+    review_path.write_text(edited, encoding="utf-8")
+
+    sync_speaker_review(config=config, day="2087-05-10")
+
+    conn = connect(config.database_path)
+    try:
+        persons = fetch_all(conn, "select display_name, is_self from persons order by display_name")
+        clusters = fetch_all(conn, "select speaker_cluster_id, label from speaker_clusters")
+        mappings = fetch_all(conn, "select speaker, person_label, speaker_cluster_id, person_id from speaker_mappings")
+        attribution = fetch_all(conn, "select segment_id, person_id, attribution_source from v_segment_attribution order by segment_id")
+    finally:
+        conn.close()
+
+    assert persons == [{"display_name": "Guest", "is_self": 0}, {"display_name": "Paul", "is_self": 0}]
+    assert clusters == [{"speaker_cluster_id": "spk_self", "label": "spk_self"}]
+    assert mappings[0]["speaker"] == "spk_self"
+    assert mappings[0]["person_label"] == "Paul"
+    assert mappings[0]["speaker_cluster_id"] == "spk_self"
+    assert mappings[0]["person_id"].startswith("per_")
+    by_segment = {row["segment_id"]: row for row in attribution}
+    assert by_segment["seg_self"]["attribution_source"] == "cluster_mapping"
+    assert by_segment["seg_guest"]["attribution_source"] == "override"
+
+
 def _insert_segments(database_path: Path) -> None:
     conn = connect(database_path)
     try:

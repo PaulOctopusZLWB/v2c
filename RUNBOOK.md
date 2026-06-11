@@ -62,6 +62,7 @@ It also implements the speaker review boundary:
 2. The user edits speaker mapping lines such as `- self: Paul`.
 3. Segment-level lines can override a specific segment when changed to a concrete person label.
 4. `pcn sync-speaker-review` reads mappings and segment overrides back into SQLite without overwriting raw transcript speaker labels.
+5. Sync also maintains normalized `persons`, `speaker_clusters`, and `v_segment_attribution` rows while retaining the legacy label columns for compatibility.
 
 It also implements the archive boundary:
 

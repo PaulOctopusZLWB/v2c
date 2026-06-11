@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,26 +87,34 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
     try:
         initialize(conn)
         for speaker, person in mappings.items():
+            person_id = _person_id_for_label(person)
+            _upsert_person(conn, person_id=person_id, display_name=person, now=now)
+            _upsert_speaker_cluster(conn, speaker=speaker, now=now)
             conn.execute(
                 """
-                insert into speaker_mappings (speaker, person_label, updated_at)
-                values (?, ?, ?)
+                insert into speaker_mappings (speaker, person_label, updated_at, speaker_cluster_id, person_id)
+                values (?, ?, ?, ?, ?)
                 on conflict(speaker) do update set
                   person_label = excluded.person_label,
-                  updated_at = excluded.updated_at
+                  updated_at = excluded.updated_at,
+                  speaker_cluster_id = excluded.speaker_cluster_id,
+                  person_id = excluded.person_id
                 """,
-                (speaker, person, now),
+                (speaker, person, now, speaker, person_id),
             )
         for segment_id, person in overrides.items():
+            person_id = _person_id_for_label(person)
+            _upsert_person(conn, person_id=person_id, display_name=person, now=now)
             conn.execute(
                 """
-                insert into segment_person_overrides (segment_id, person_label, updated_at)
-                values (?, ?, ?)
+                insert into segment_person_overrides (segment_id, person_label, updated_at, person_id)
+                values (?, ?, ?, ?)
                 on conflict(segment_id) do update set
                   person_label = excluded.person_label,
-                  updated_at = excluded.updated_at
+                  updated_at = excluded.updated_at,
+                  person_id = excluded.person_id
                 """,
-                (segment_id, person, now),
+                (segment_id, person, now, person_id),
             )
         conn.commit()
     finally:
@@ -150,6 +159,37 @@ def _parse_mappings(text: str) -> dict[str, str]:
         if match:
             mappings[match.group(1).strip()] = match.group(2).strip()
     return mappings
+
+
+def _person_id_for_label(label: str) -> str:
+    if label == "self":
+        return "per_self"
+    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()[:16]
+    return f"per_{digest}"
+
+
+def _upsert_person(conn, *, person_id: str, display_name: str, now: str) -> None:
+    conn.execute(
+        """
+        insert into persons (person_id, display_name, person_type, is_self, public_identity_id, created_at, updated_at)
+        values (?, ?, ?, ?, ?, ?, ?)
+        on conflict(person_id) do update set
+          display_name = excluded.display_name,
+          updated_at = excluded.updated_at
+        """,
+        (person_id, display_name, "self" if person_id == "per_self" else "local", 1 if person_id == "per_self" else 0, None, now, now),
+    )
+
+
+def _upsert_speaker_cluster(conn, *, speaker: str, now: str) -> None:
+    conn.execute(
+        """
+        insert into speaker_clusters (speaker_cluster_id, label, source_type, source_ref, created_at)
+        values (?, ?, ?, ?, ?)
+        on conflict(speaker_cluster_id) do nothing
+        """,
+        (speaker, speaker, "transcript_speaker", speaker, now),
+    )
 
 
 def _parse_overrides(text: str) -> dict[str, tuple[str, str]]:
