@@ -67,14 +67,22 @@ def _append_sync_log_note(
         )
     entry = "\n".join(
         [
-            f'<!-- pcn:managed start type="sync_log_entry" target_id="{target_id}" created_at="{created_at}" -->',
+            _block_start(f"sync_log_entry:{target_id}:{created_at}", "managed"),
             f"- created_at: {created_at}",
             f"- source: {source}",
             f"- target_id: {target_id}",
             f"- status: {status}",
             f"- message: {message}",
-            '<!-- pcn:managed end type="sync_log_entry" -->',
+            _block_end(f"sync_log_entry:{target_id}:{created_at}"),
             "",
         ]
     )
     write_text_atomic(path, text + entry)
+
+
+def _block_start(block_id: str, kind: str) -> str:
+    return f'<!-- pcn:block start id="{block_id}" kind="{kind}" version="1" -->'
+
+
+def _block_end(block_id: str) -> str:
+    return f'<!-- pcn:block end id="{block_id}" -->'

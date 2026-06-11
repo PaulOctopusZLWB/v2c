@@ -519,9 +519,12 @@ claim_type: requirement
     assert sync_log_note.exists()
     sync_log_text = sync_log_note.read_text(encoding="utf-8")
     assert "note_type: sync_log" in sync_log_text
+    assert '<!-- pcn:block start id="sync_log_entry:' in sync_log_text
+    assert '<!-- pcn:block end id="sync_log_entry:' in sync_log_text
     assert "- status: failed" in sync_log_text
     assert "target_id: cand_test_001" in sync_log_text
     assert "yaml parse failed: cand_test_001" in sync_log_text
+    assert "pcn:managed start" not in sync_log_text
 
 
 def test_sync_review_logs_unknown_action_without_side_effects(tmp_path: Path) -> None:
