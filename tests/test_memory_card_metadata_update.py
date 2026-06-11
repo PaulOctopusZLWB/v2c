@@ -72,6 +72,53 @@ def test_memory_card_metadata_updated_event_updates_metadata_without_changing_cl
     ]
 
 
+def test_memory_card_metadata_update_materializes_when_update_arrives_before_card(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        private_key = Ed25519PrivateKey.generate()
+        card = _memory_card()
+        created_event, public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=card,
+            signer_did=card.owner_did,
+            private_key=private_key,
+            owner_sequence=1,
+        )
+        update = MemoryCardMetadataUpdate(
+            card_id=card.card_id,
+            updated_by=card.owner_did,
+            visibility={"type": "group", "group_id": "grp_test"},
+            tags=["protocol"],
+        )
+        updated_event, _ = create_signed_event(
+            event_type="memory_card.metadata_updated",
+            payload=update,
+            signer_did=card.owner_did,
+            private_key=private_key,
+            owner_sequence=2,
+            prev_event_hash=created_event.event_hash,
+            object_version=2,
+        )
+
+        insert_signed_event(conn, event=updated_event, public_key=public_key)
+        insert_signed_event(conn, event=created_event, public_key=public_key)
+
+        rows = fetch_all(conn, "select card_id, visibility_json, tags_json, source_event_hash from memory_cards")
+    finally:
+        conn.close()
+
+    assert rows == [
+        {
+            "card_id": "mem_test_001",
+            "visibility_json": json.dumps({"type": "group", "group_id": "grp_test"}, ensure_ascii=False, sort_keys=True),
+            "tags_json": json.dumps(["protocol"], ensure_ascii=False, sort_keys=True),
+            "source_event_hash": updated_event.event_hash,
+        }
+    ]
+
+
 def test_memory_verify_accepts_metadata_updated_materialized_card(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)

@@ -60,6 +60,46 @@ def test_memory_card_revoked_event_marks_card_revoked(tmp_path: Path) -> None:
     ]
 
 
+def test_memory_card_revocation_materializes_when_revocation_arrives_before_card(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        private_key = Ed25519PrivateKey.generate()
+        card = _memory_card()
+        created_event, public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=card,
+            signer_did=card.owner_did,
+            private_key=private_key,
+            owner_sequence=1,
+        )
+        revoked_event, _ = create_signed_event(
+            event_type="memory_card.revoked",
+            payload=MemoryCardRevocation(card_id=card.card_id, revoked_by=card.owner_did),
+            signer_did=card.owner_did,
+            private_key=private_key,
+            owner_sequence=2,
+            prev_event_hash=created_event.event_hash,
+            object_version=2,
+        )
+
+        insert_signed_event(conn, event=revoked_event, public_key=public_key)
+        insert_signed_event(conn, event=created_event, public_key=public_key)
+
+        rows = fetch_all(conn, "select card_id, status, source_event_hash from memory_cards")
+    finally:
+        conn.close()
+
+    assert rows == [
+        {
+            "card_id": "mem_test_001",
+            "status": "revoked",
+            "source_event_hash": revoked_event.event_hash,
+        }
+    ]
+
+
 def test_memory_verify_accepts_revoked_materialized_card(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)

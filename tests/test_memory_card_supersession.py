@@ -77,6 +77,65 @@ def test_memory_card_superseded_event_marks_old_card_superseded(tmp_path: Path) 
     ]
 
 
+def test_memory_card_supersession_materializes_when_successor_arrives_before_card(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        private_key = Ed25519PrivateKey.generate()
+        old_card = _memory_card("mem_old_001", "Use signed events.")
+        new_card = _memory_card("mem_new_001", "Use signed event hash chains.")
+        old_event, public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=old_card,
+            signer_did=old_card.owner_did,
+            private_key=private_key,
+            owner_sequence=1,
+        )
+        new_event, _ = create_signed_event(
+            event_type="memory_card.created",
+            payload=new_card,
+            signer_did=new_card.owner_did,
+            private_key=private_key,
+            owner_sequence=2,
+            prev_event_hash=old_event.event_hash,
+        )
+        superseded_event, _ = create_signed_event(
+            event_type="memory_card.superseded",
+            payload=MemoryCardSupersession(
+                card_id=old_card.card_id,
+                superseded_by_card_id=new_card.card_id,
+                superseded_by=old_card.owner_did,
+            ),
+            signer_did=old_card.owner_did,
+            private_key=private_key,
+            owner_sequence=3,
+            prev_event_hash=new_event.event_hash,
+            object_version=2,
+        )
+
+        insert_signed_event(conn, event=superseded_event, public_key=public_key)
+        insert_signed_event(conn, event=old_event, public_key=public_key)
+        insert_signed_event(conn, event=new_event, public_key=public_key)
+
+        rows = fetch_all(conn, "select card_id, status, source_event_hash from memory_cards order by card_id")
+    finally:
+        conn.close()
+
+    assert rows == [
+        {
+            "card_id": "mem_new_001",
+            "status": "active",
+            "source_event_hash": new_event.event_hash,
+        },
+        {
+            "card_id": "mem_old_001",
+            "status": "superseded",
+            "source_event_hash": superseded_event.event_hash,
+        },
+    ]
+
+
 def test_memory_verify_accepts_superseded_materialized_card(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)

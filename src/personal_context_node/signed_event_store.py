@@ -111,6 +111,7 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     )
     if event.event_type == "memory_card.created" and trust_status == "trusted":
         _upsert_memory_card(conn, event=event)
+        _apply_trusted_card_successors(conn, card_id=event.object_id)
         _activate_dangling_annotations(conn, target_card_id=event.object_id)
     if event.event_type == "memory_card.metadata_updated" and trust_status == "trusted":
         _update_memory_card_metadata(conn, event=event)
@@ -216,6 +217,32 @@ def _update_memory_card_metadata(conn: sqlite3.Connection, *, event: SignedEvent
             update.card_id,
         ),
     )
+
+
+def _apply_trusted_card_successors(conn: sqlite3.Connection, *, card_id: str) -> None:
+    rows = conn.execute(
+        """
+        select raw_event_json
+        from signed_events
+        where trust_status = 'trusted'
+          and object_id = ?
+          and event_type in (
+            'memory_card.metadata_updated',
+            'memory_card.revoked',
+            'memory_card.superseded'
+          )
+        order by owner_sequence, event_hash
+        """,
+        (card_id,),
+    ).fetchall()
+    for row in rows:
+        successor = SignedEvent.model_validate_json(str(row["raw_event_json"]))
+        if successor.event_type == "memory_card.metadata_updated":
+            _update_memory_card_metadata(conn, event=successor)
+        if successor.event_type == "memory_card.revoked":
+            _revoke_memory_card(conn, event=successor)
+        if successor.event_type == "memory_card.superseded":
+            _supersede_memory_card(conn, event=successor)
 
 
 def _revoke_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
