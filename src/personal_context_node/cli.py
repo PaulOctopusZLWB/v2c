@@ -278,6 +278,7 @@ def preprocess(
         config=config,
         vad=vad,
         max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
+        chunk_overlap_ms=config.chunk_overlap_ms if config_path else 0,
     )
     typer.echo(
         " ".join(

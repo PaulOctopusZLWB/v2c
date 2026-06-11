@@ -25,6 +25,7 @@ def preprocess_imported_audio(
     config: AppConfig,
     vad: VADPort,
     max_chunk_ms: int = 30_000,
+    chunk_overlap_ms: int = 0,
     audio_file_id: str | None = None,
 ) -> PreprocessResult:
     conn = connect(config.database_path)
@@ -52,7 +53,7 @@ def preprocess_imported_audio(
             vad_result = vad.detect(local_raw_path)
             for speech_range in vad_result.ranges:
                 ranges_created += 1
-                for chunk_range in _split_range(speech_range, max_chunk_ms=max_chunk_ms):
+                for chunk_range in _split_range(speech_range, max_chunk_ms=max_chunk_ms, chunk_overlap_ms=chunk_overlap_ms):
                     created_at = datetime.now(timezone.utc).isoformat()
                     absolute_start_at = _absolute_time(str(audio_file["recorded_at"]), chunk_range.start_ms)
                     absolute_end_at = _absolute_time(str(audio_file["recorded_at"]), chunk_range.end_ms)
@@ -100,13 +101,19 @@ def preprocess_imported_audio(
         conn.close()
 
 
-def _split_range(speech_range: SpeechRange, *, max_chunk_ms: int) -> list[SpeechRange]:
+def _split_range(speech_range: SpeechRange, *, max_chunk_ms: int, chunk_overlap_ms: int = 0) -> list[SpeechRange]:
+    if chunk_overlap_ms < 0:
+        raise ValueError("chunk_overlap_ms must be non-negative")
+    if chunk_overlap_ms >= max_chunk_ms:
+        raise ValueError("chunk_overlap_ms must be smaller than max_chunk_ms")
     chunks: list[SpeechRange] = []
     cursor = speech_range.start_ms
     while cursor < speech_range.end_ms:
         end_ms = min(cursor + max_chunk_ms, speech_range.end_ms)
         chunks.append(SpeechRange(start_ms=cursor, end_ms=end_ms))
-        cursor = end_ms
+        if end_ms == speech_range.end_ms:
+            break
+        cursor = end_ms - chunk_overlap_ms
     return chunks
 
 

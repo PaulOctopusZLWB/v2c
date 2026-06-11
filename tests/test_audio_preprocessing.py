@@ -6,8 +6,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
-from personal_context_node.audio_preprocessing import preprocess_imported_audio
+from personal_context_node.audio_preprocessing import _split_range, preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.vad import SpeechRange
 from personal_context_node.ingest import import_audio_files
 from personal_context_node.pipeline import run_first_milestone
 from personal_context_node.storage.sqlite import connect, fetch_all
@@ -56,11 +57,21 @@ def test_energy_vad_filters_silence_and_merges_nearby_speech(tmp_path: Path) -> 
     assert 1100 <= result.ranges[0].end_ms <= 1200
 
 
+def test_split_range_applies_configured_chunk_overlap() -> None:
+    chunks = _split_range(SpeechRange(start_ms=0, end_ms=1000), max_chunk_ms=400, chunk_overlap_ms=100)
+
+    assert chunks == [
+        SpeechRange(start_ms=0, end_ms=400),
+        SpeechRange(start_ms=300, end_ms=700),
+        SpeechRange(start_ms=600, end_ms=1000),
+    ]
+
+
 def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path) -> None:
     source = tmp_path / "source"
     wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
     _write_wav(wav_path, [(0.20, 0), (0.50, 10_000), (0.20, 0)])
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", chunk_overlap_ms=0)
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
     result = preprocess_imported_audio(
@@ -121,6 +132,9 @@ work_audio_dir = "{tmp_path / "work-store"}"
 sqlite_path = "{tmp_path / "state" / "pcn.sqlite"}"
 obsidian_vault = "{tmp_path / "vault"}"
 nas_archive_root = "{tmp_path / "nas"}"
+
+[vad]
+chunk_overlap_ms = 0
 """.strip(),
         encoding="utf-8",
     )
@@ -150,7 +164,7 @@ def test_preprocess_writes_chunks_using_configured_audio_format(tmp_path: Path) 
     source = tmp_path / "source"
     wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
     _write_stereo_wav(wav_path, [(0.60, 10_000)], sample_rate=8_000)
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", chunk_overlap_ms=0)
 
     import_audio_files(config=config, source_dir=source)
     result = preprocess_imported_audio(

@@ -183,6 +183,50 @@ chunk_overlap_ms = 0
     assert "audio_chunks_created=0" in preprocess_result.output
 
 
+def test_preprocess_cli_uses_chunk_overlap_from_config(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tone_wav(source / "TX02_MIC001_20870510_173550_orig.wav", seconds=0.90, amplitude=10_000)
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data}"
+obsidian_vault = "{vault}"
+
+[vad]
+backend = "energy"
+threshold = 0.05
+min_speech_ms = 100
+merge_gap_ms = 100
+max_chunk_ms = 400
+chunk_overlap_ms = 100
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    import_result = runner.invoke(
+        app,
+        [
+            "ingest-import",
+            "--source-dir",
+            str(source),
+            "--data-dir",
+            str(data),
+            "--obsidian-vault",
+            str(vault),
+        ],
+    )
+    assert import_result.exit_code == 0, import_result.output
+
+    preprocess_result = runner.invoke(app, ["preprocess", "--config", str(config_path)])
+
+    assert preprocess_result.exit_code == 0, preprocess_result.output
+    assert "audio_chunks_created=3" in preprocess_result.output
+
+
 def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
