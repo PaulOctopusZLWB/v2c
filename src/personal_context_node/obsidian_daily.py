@@ -69,9 +69,15 @@ def _daily_metrics(conn, *, day: str, sessions: list[dict[str, object]]) -> dict
     rows = fetch_all(
         conn,
         """
+        with daily_audio as (
+          select distinct af.audio_file_id, af.duration_ms
+          from sessions s
+          join transcript_segments ts on ts.session_id = s.session_id
+          join audio_files af on af.audio_file_id = ts.audio_file_id
+          where s.date_key = ?
+        )
         select count(*) as file_count, coalesce(sum(duration_ms), 0) as total_duration_ms
-        from audio_files
-        where substr(recorded_at, 1, 10) = ?
+        from daily_audio
         """,
         (day,),
     )
