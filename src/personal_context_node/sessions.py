@@ -107,15 +107,20 @@ def _group_segments(rows: list[dict[str, object]], *, gap_ms: int) -> list[list[
     current: list[dict[str, object]] = []
     previous_end: int | None = None
     for row in rows:
-        start_ms = int(row["start_ms"])
+        start_ms = _absolute_epoch_ms(row, offset_field="start_ms")
         if current and previous_end is not None and start_ms - previous_end > gap_ms:
             groups.append(current)
             current = []
         current.append(row)
-        previous_end = int(row["end_ms"])
+        previous_end = _absolute_epoch_ms(row, offset_field="end_ms")
     if current:
         groups.append(current)
     return groups
+
+
+def _absolute_epoch_ms(row: dict[str, object], *, offset_field: str) -> int:
+    recorded_at = datetime.fromisoformat(str(row["recorded_at"]))
+    return int(recorded_at.timestamp() * 1000) + int(row[offset_field])
 
 
 def _absolute_time(row: dict[str, object]) -> str:

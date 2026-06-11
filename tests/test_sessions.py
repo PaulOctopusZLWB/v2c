@@ -117,6 +117,17 @@ def test_derive_sessions_clears_inactive_segment_session_assignments_on_rebuild(
     assert rows[1]["session_id"]
 
 
+def test_derive_sessions_splits_segments_by_absolute_gap_across_audio_files(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_two_audio_files_with_absolute_gap(config.database_path)
+
+    result = derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    assert result.sessions_derived == 2
+    rows = _session_rows(config.database_path)
+    assert [row["segment_count"] for row in rows] == [1, 1]
+
+
 def _insert_audio_and_segments(database_path: Path) -> None:
     conn = connect(database_path)
     try:
@@ -157,6 +168,61 @@ def _insert_audio_and_segments(database_path: Path) -> None:
                     f"chk_{segment_id}",
                     start_ms,
                     end_ms,
+                    "测试片段",
+                    "zh",
+                    "self",
+                    f"ev_{segment_id}",
+                    0.99,
+                    "MockASRAdapter",
+                    "mock-asr",
+                    "test",
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_two_audio_files_with_absolute_gap(database_path: Path) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        for audio_file_id, recorded_at, segment_id in [
+            ("aud_early", "2087-05-10T08:00:00+08:00", "seg_early"),
+            ("aud_late", "2087-05-10T09:00:00+08:00", "seg_late"),
+        ]:
+            conn.execute(
+                """
+                insert into audio_files (
+                  audio_file_id, source_device, source_path, local_raw_path, sha256,
+                  duration_ms, recorded_at, imported_at, status
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audio_file_id,
+                    "DJI Mic 3",
+                    f"/source/{audio_file_id}.wav",
+                    f"/local/{audio_file_id}.wav",
+                    f"sha256:{audio_file_id}",
+                    60_000,
+                    recorded_at,
+                    "2087-05-10T10:00:00+08:00",
+                    "imported",
+                ),
+            )
+            conn.execute(
+                """
+                insert into transcript_segments (
+                  segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+                  language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    segment_id,
+                    audio_file_id,
+                    f"chk_{segment_id}",
+                    0,
+                    10_000,
                     "测试片段",
                     "zh",
                     "self",
