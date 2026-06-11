@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import MemoryCard, SignedEvent, canonical_signing_body_hash, verify_signed_event
+from personal_context_node.signed_event_store import trust_status_for_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -52,12 +53,14 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
                 row_valid = False
             if row_valid:
                 valid += 1
-                trusted_events.append(event)
+                trust_status = trust_status_for_event(event=event, verified=True)
+                if trust_status == "trusted":
+                    trusted_events.append(event)
                 previous_hash_by_owner[str(row["owner_id"])] = event_hash
                 previous_sequence_by_owner[str(row["owner_id"])] = int(row["owner_sequence"])
                 conn.execute(
-                    "update signed_events set verified = 1, trust_status = 'trusted' where event_hash = ?",
-                    (event_hash,),
+                    "update signed_events set verified = 1, trust_status = ? where event_hash = ?",
+                    (trust_status, event_hash),
                 )
             else:
                 invalid += 1

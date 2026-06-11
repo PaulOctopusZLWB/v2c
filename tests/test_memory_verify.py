@@ -6,8 +6,10 @@ import time
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
+from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef, create_signed_event
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
+from personal_context_node.signed_event_store import insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -132,6 +134,51 @@ def test_memory_verify_detects_broken_owner_hash_chain(tmp_path: Path) -> None:
     assert result.total_events == 2
     assert result.valid_events == 1
     assert result.invalid_events == 1
+
+
+def test_memory_verify_preserves_verified_unsupported_events(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        card = MemoryCard(
+            card_id="mem_test_001",
+            owner_did="did:key:test-owner",
+            claim_type="decision",
+            claim="Use signed events.",
+            subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+            evidence_refs=[
+                EvidenceRef(
+                    evidence_id="ev_test",
+                    source_type="transcript_segment",
+                    source_id="seg_test",
+                    quote="Use signed events.",
+                )
+            ],
+        )
+        event, public_key = create_signed_event(
+            event_type="future_protocol.created",
+            payload=card,
+            signer_did="did:key:test-owner",
+        )
+        insert_signed_event(conn, event=event, public_key=public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 1
+    assert result.valid_events == 1
+    assert result.invalid_events == 0
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select trust_status from signed_events")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert rows == [{"trust_status": "unsupported"}]
+    assert cards == []
 
 
 def _insert_candidate(

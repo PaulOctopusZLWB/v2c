@@ -54,7 +54,7 @@ def create_chained_event(
 
 def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str) -> None:
     verified = verify_signed_event(event, public_key)
-    trust_status = _trust_status_for_event(event=event, verified=verified)
+    trust_status = trust_status_for_event(event=event, verified=verified)
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
@@ -106,7 +106,7 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         _upsert_identity_profile(conn, event=event)
 
 
-def _trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:
+def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:
     if not verified:
         return "rejected"
     if event.event_type not in SUPPORTED_EVENT_TYPES:
