@@ -90,8 +90,9 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
     rows = fetch_all(
         conn,
         """
-        select ts.segment_id, ts.evidence_id, ts.text
+        select ts.segment_id, ts.evidence_id, ts.text, substr(af.recorded_at, 1, 10) as date_key
         from transcript_segments ts
+        join audio_files af on af.audio_file_id = ts.audio_file_id
         where ts.evidence_id not in (
           select json_extract(value, '$.evidence_id')
           from memory_candidates, json_each(memory_candidates.evidence_refs_json)
@@ -113,8 +114,8 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
             """
             insert into memory_candidates (
               candidate_id, source_type, candidate_claim, claim_type, subject_json,
-              confidence, evidence_refs_json, status, memory_card_id, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              confidence, evidence_refs_json, status, memory_card_id, date_key, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"cand_{uuid4().hex}",
@@ -130,6 +131,7 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
                 json.dumps(evidence, ensure_ascii=False, sort_keys=True),
                 "pending_review",
                 None,
+                row["date_key"],
                 now,
                 now,
             ),
