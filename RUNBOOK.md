@@ -58,6 +58,7 @@ It also implements the human review boundary:
 8. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
 9. Review sync skips files modified within `edit_grace_seconds` (default 120) and records a `sync_logs` skipped row to avoid reading a file while the user is still editing.
 10. Checked candidate lines ending with `| exclude_from_memory` mark evidence-linked sessions as excluded from long-term memory and move the candidate to `excluded_from_memory` without creating signed events.
+11. Daily LLM context generation skips transcript segments attached to sessions marked `exclude_from_memory`.
 10. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
 11. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
 12. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.

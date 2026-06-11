@@ -299,6 +299,18 @@ def test_generate_daily_context_omits_speaker_labels_when_disabled(tmp_path: Pat
     ]
 
 
+def test_generate_daily_context_skips_sessions_excluded_from_memory(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_excluded_session_transcript(config.database_path)
+
+    llm = RecordingLLM()
+    result = generate_daily_context(config=config, day="2087-05-10", llm=llm)
+
+    assert result.summaries_created == 0
+    assert result.memory_candidates_created == 0
+    assert llm.received_segments == []
+
+
 def test_generate_daily_context_rejects_unknown_llm_evidence_refs_without_side_effects(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_transcript(config.database_path)
@@ -497,6 +509,80 @@ def _insert_audio_and_transcript(
                 "zh",
                 "self",
                 evidence_id,
+                0.99,
+                "MockASRAdapter",
+                "mock-asr",
+                "test",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_excluded_session_transcript(database_path: Path) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_excluded",
+                "DJI Mic 3",
+                "/Volumes/DJI/excluded.wav",
+                "/private/raw/excluded.wav",
+                "sha256:excluded",
+                1000,
+                "2087-05-10T00:00:00+08:00",
+                "2087-05-10T00:10:00+08:00",
+                "imported",
+            ),
+        )
+        conn.execute(
+            """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id,
+              exclude_from_memory, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ses_excluded",
+                "2087-05-10",
+                "2087-05-10T08:00:00+08:00",
+                "2087-05-10T08:10:00+08:00",
+                "derived_from_segments",
+                1,
+                1000,
+                "seg_excluded",
+                1,
+                "2087-05-10T09:00:00+08:00",
+                "2087-05-10T09:00:00+08:00",
+            ),
+        )
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "seg_excluded",
+                "aud_excluded",
+                "chk_excluded",
+                "ses_excluded",
+                0,
+                1000,
+                "这段对话不应进入长期记忆。",
+                "zh",
+                "self",
+                "ev_excluded",
                 0.99,
                 "MockASRAdapter",
                 "mock-asr",
