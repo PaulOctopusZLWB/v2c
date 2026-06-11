@@ -35,6 +35,9 @@ class ReviewAction:
     parse_error: str | None = None
 
 
+ALLOWED_REVIEW_ACTIONS = {"confirm", "edit", "reject", "defer", "exclude_from_memory"}
+
+
 def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
     conn = connect(config.database_path)
     try:
@@ -136,6 +139,15 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                     target_id=candidate_id,
                     status="failed",
                     message=f"yaml parse failed: {candidate_id}",
+                )
+                continue
+            if action not in ALLOWED_REVIEW_ACTIONS:
+                _insert_sync_log(
+                    conn,
+                    source="memory_candidate_review",
+                    target_id=candidate_id,
+                    status="failed",
+                    message=f"invalid action {action}: {candidate_id}",
                 )
                 continue
             if action in {"confirm", "edit"} and review_action.edited_claim is not None and not review_action.edited_claim.strip():
