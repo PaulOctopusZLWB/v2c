@@ -74,6 +74,7 @@ It also implements the task lifecycle foundation:
 3. `claimed_by_run_id` and `claimed_at` support lease-based recovery.
 4. Import registers the first `vad` task for each new audio file in the same SQLite transaction.
 5. `pcn process-status` lists current task state.
+6. `pcn process-run` claims one pending task, runs VAD or ASR, and records success/failure.
 
 Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, review, archive, and scheduling boundaries testable before model integration.
 
@@ -201,6 +202,11 @@ uv run pcn job-status \
 uv run pcn process-status \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
+uv run pcn process-run \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --vad-threshold 0.01 \
+  --max-chunk-ms 30000
 ```
 
 Expected confirmation output:
@@ -222,6 +228,7 @@ run_id=run_... job_name=memory-verify status=succeeded error=
 ```
 
 After importing the seven sample files, `pcn process-status` should show seven pending `vad` tasks.
+Repeated `pcn process-run` calls advance those tasks and enqueue/run `asr` tasks for generated chunks.
 
 After editing `.smoke-vault/90_System/Speaker_Review/2087-05-10.md`, sync speaker mappings:
 

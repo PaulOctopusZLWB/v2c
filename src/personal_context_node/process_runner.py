@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from personal_context_node.audio_preprocessing import preprocess_imported_audio
+from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.asr import ASRPort
+from personal_context_node.core.ports.vad import VADPort
+from personal_context_node.storage.sqlite import connect, fetch_all
+from personal_context_node.tasks import claim_next_task, enqueue_task, fail_task, start_task, succeed_task
+from personal_context_node.transcription import transcribe_pending_chunks
+
+
+@dataclass(frozen=True)
+class ProcessOnceResult:
+    task_id: str | None
+    task_type: str | None
+    status: str
+
+
+def process_once(
+    *,
+    config: AppConfig,
+    run_id: str,
+    vad: VADPort,
+    asr: ASRPort,
+    max_chunk_ms: int = 30_000,
+) -> ProcessOnceResult:
+    task = claim_next_task(config=config, task_type="vad", run_id=run_id)
+    if task is None:
+        task = claim_next_task(config=config, task_type="asr", run_id=run_id)
+    if task is None:
+        return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
+
+    try:
+        start_task(config=config, task_id=task.task_id)
+        if task.task_type == "vad":
+            preprocess_imported_audio(config=config, vad=vad, max_chunk_ms=max_chunk_ms, audio_file_id=task.target_id)
+            for chunk_id in _chunk_ids_for_audio_file(config=config, audio_file_id=task.target_id):
+                enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id=chunk_id)
+        elif task.task_type == "asr":
+            transcribe_pending_chunks(config=config, asr=asr, chunk_id=task.target_id)
+        else:
+            raise ValueError(f"unsupported task type: {task.task_type}")
+        succeed_task(config=config, task_id=task.task_id)
+        return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
+    except Exception as exc:
+        fail_task(config=config, task_id=task.task_id, error=str(exc), terminal=False)
+        raise
+
+
+def _chunk_ids_for_audio_file(*, config: AppConfig, audio_file_id: str) -> list[str]:
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            "select chunk_id from audio_chunks where audio_file_id = ? order by source_start_ms",
+            (audio_file_id,),
+        )
+        return [str(row["chunk_id"]) for row in rows]
+    finally:
+        conn.close()

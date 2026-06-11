@@ -18,6 +18,7 @@ from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
+from personal_context_node.process_runner import process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
 from personal_context_node.tasks import process_status_rows
 from personal_context_node.transcription import transcribe_pending_chunks
@@ -346,3 +347,47 @@ def process_status(
                 ]
             )
         )
+
+
+@app.command(name="process-run")
+def process_run(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
+    asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
+    asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
+    mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    if asr_backend == "mock":
+        asr = MockASRAdapter(text=mock_text)
+    elif asr_backend == "command":
+        if not asr_command:
+            raise typer.BadParameter("--asr-command is required when --asr-backend command")
+        asr = CommandASRAdapter(command=asr_command.split())
+    else:
+        raise typer.BadParameter("--asr-backend must be 'mock' or 'command'")
+    result = record_job_run(
+        config=config,
+        job_name="process-run",
+        operation=lambda: process_once(
+            config=config,
+            run_id="cli-process-run",
+            vad=EnergyVadAdapter(threshold=vad_threshold),
+            asr=asr,
+            max_chunk_ms=max_chunk_ms,
+        ),
+    ).result
+    typer.echo(
+        " ".join(
+            [
+                f"task_id={result.task_id or ''}",
+                f"task_type={result.task_type or ''}",
+                f"status={result.status}",
+            ]
+        )
+    )

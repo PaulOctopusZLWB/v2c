@@ -18,18 +18,30 @@ class PreprocessResult:
     audio_chunks_created: int
 
 
-def preprocess_imported_audio(*, config: AppConfig, vad: VADPort, max_chunk_ms: int = 30_000) -> PreprocessResult:
+def preprocess_imported_audio(
+    *,
+    config: AppConfig,
+    vad: VADPort,
+    max_chunk_ms: int = 30_000,
+    audio_file_id: str | None = None,
+) -> PreprocessResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        where_clause = "where audio_file_id not in (select distinct audio_file_id from speech_ranges)"
+        params: tuple[object, ...] = ()
+        if audio_file_id is not None:
+            where_clause += " and audio_file_id = ?"
+            params = (audio_file_id,)
         files = fetch_all(
             conn,
-            """
+            f"""
             select audio_file_id, local_raw_path, recorded_at
             from audio_files
-            where audio_file_id not in (select distinct audio_file_id from speech_ranges)
+            {where_clause}
             order by imported_at
             """,
+            params,
         )
         ranges_created = 0
         chunks_created = 0

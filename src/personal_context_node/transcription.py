@@ -16,19 +16,25 @@ class TranscriptionResult:
     segments_created: int
 
 
-def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort) -> TranscriptionResult:
+def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str | None = None) -> TranscriptionResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
         _ensure_transcript_columns(conn)
+        where_clause = "where ac.status = 'pending_asr'"
+        params: tuple[object, ...] = ()
+        if chunk_id is not None:
+            where_clause += " and ac.chunk_id = ?"
+            params = (chunk_id,)
         chunks = fetch_all(
             conn,
-            """
+            f"""
             select ac.chunk_id, ac.audio_file_id, ac.source_start_ms, ac.source_end_ms, ac.local_chunk_path
             from audio_chunks ac
-            where ac.status = 'pending_asr'
+            {where_clause}
             order by ac.source_start_ms
             """,
+            params,
         )
         segments_created = 0
         for chunk in chunks:
