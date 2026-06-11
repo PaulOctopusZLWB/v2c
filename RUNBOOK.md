@@ -11,7 +11,15 @@ This repository currently implements the first milestone from `IMPLEMENTATION_PL
 5. Optionally confirm the first candidate into a signed `memory_card.confirmed.v1` event.
 6. Publish a daily Markdown note to the configured PersonalContext Obsidian vault.
 
-Real VAD, FunASR/SenseVoice transcription, LLM summaries, speaker review read-back, NAS archive, and launchd jobs are not implemented yet.
+It also implements the first audio preprocessing boundary:
+
+1. `VADPort` as the core-owned voice activity detection interface.
+2. A deterministic local `EnergyVadAdapter` used as a fallback and test adapter.
+3. SQLite persistence for `speech_ranges` and `audio_chunks`.
+4. Work WAV chunk generation under `data/audio/work/YYYY-MM-DD/`.
+5. A `pcn preprocess` CLI command.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, LLM summaries, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD is not the final production VAD; it is intentionally simple and exists to make the chunking and storage boundary testable before model integration.
 
 ## Local uv Run
 
@@ -23,13 +31,26 @@ uv run pcn run-first-milestone \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --confirm-first-candidate
+uv run pcn preprocess \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --vad-threshold 0.01 \
+  --max-chunk-ms 30000
 ```
 
-Expected smoke output:
+Expected first milestone smoke output:
 
 ```text
 imported_files=7 transcript_segments=7 memory_candidates=7 signed_events=1
 ```
+
+Expected preprocessing smoke output shape:
+
+```text
+audio_files_processed=7 speech_ranges_created=<n> audio_chunks_created=<n>
+```
+
+With the current energy VAD and the checked-in real samples, `vad-threshold 0.01` produced one range/chunk in local verification. Treat this as adapter smoke coverage, not ASR-quality evidence.
 
 ## Docker Run
 

@@ -30,6 +30,26 @@ create table if not exists transcript_segments (
   evidence_id text not null unique
 );
 
+create table if not exists speech_ranges (
+  speech_range_id text primary key,
+  audio_file_id text not null references audio_files(audio_file_id),
+  start_ms integer not null,
+  end_ms integer not null,
+  vad_backend text not null,
+  unique(audio_file_id, start_ms, end_ms, vad_backend)
+);
+
+create table if not exists audio_chunks (
+  chunk_id text primary key,
+  audio_file_id text not null references audio_files(audio_file_id),
+  speech_range_id text not null references speech_ranges(speech_range_id),
+  source_start_ms integer not null,
+  source_end_ms integer not null,
+  local_chunk_path text not null,
+  status text not null,
+  unique(audio_file_id, source_start_ms, source_end_ms)
+);
+
 create table if not exists memory_candidates (
   candidate_id text primary key,
   candidate_claim text not null,
