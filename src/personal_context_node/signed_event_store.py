@@ -17,6 +17,13 @@ from personal_context_node.core.protocols.memory import (
 )
 
 
+SUPPORTED_EVENT_TYPES = {
+    "memory_card.created",
+    "identity_profile.published",
+    "memory_annotation.created",
+}
+
+
 def create_chained_event(
     conn: sqlite3.Connection,
     *,
@@ -47,6 +54,7 @@ def create_chained_event(
 
 def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str) -> None:
     verified = verify_signed_event(event, public_key)
+    trust_status = _trust_status_for_event(event=event, verified=verified)
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
@@ -82,7 +90,7 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
             event.signature.algorithm,
             event.signature.public_key_id,
             event.signature.value,
-            "trusted" if verified else "rejected",
+            trust_status,
             raw_event_json,
             event.signature.value,
             public_key,
@@ -96,6 +104,14 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         _upsert_memory_annotation(conn, event=event)
     if event.event_type == "identity_profile.published" and verified:
         _upsert_identity_profile(conn, event=event)
+
+
+def _trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:
+    if not verified:
+        return "rejected"
+    if event.event_type not in SUPPORTED_EVENT_TYPES:
+        return "unsupported"
+    return "trusted"
 
 
 def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
