@@ -33,6 +33,7 @@ It also implements the LLM text-processing boundary before provider integration:
 2. A deterministic `RuleBasedLLMAdapter` for local smoke tests.
 3. `daily_summaries` storage for summary, todos, facts, and inferences.
 4. `pcn summarize` to generate daily context and memory candidates from transcript text only.
+5. `CommandLLMAdapter` for local or cloud wrapper commands that receive transcript JSON on stdin and emit normalized daily context JSON.
 
 It also implements the human review boundary:
 
@@ -210,6 +211,17 @@ Expected rule-based summary smoke output after mock ASR:
 
 ```text
 summaries_created=1 memory_candidates_created=<n>
+```
+
+To use a command LLM wrapper instead of rule-based text processing:
+
+```bash
+uv run pcn summarize \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --day 2087-05-10 \
+  --llm-backend command \
+  --llm-command "python3 scripts/llm_wrapper_example.py"
 ```
 
 After editing `.smoke-vault/30_Memory_Candidates/2087-05-10.md` and changing one candidate from `- [ ]` to `- [x]`, confirm it:

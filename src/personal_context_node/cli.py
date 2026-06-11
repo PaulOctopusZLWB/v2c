@@ -7,6 +7,7 @@ import typer
 from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
 from personal_context_node.adapters.asr.command import CommandASRAdapter
 from personal_context_node.adapters.asr.mock import MockASRAdapter
+from personal_context_node.adapters.llm.command import CommandLLMAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.archive import archive_completed_audio
@@ -128,9 +129,19 @@ def summarize(
         Path("/Users/paul/Documents/Obsidian/PersonalContext"),
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
+    llm_backend: str = typer.Option("rule_based", help="LLM backend: rule_based or command."),
+    llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    result = generate_daily_context(config=config, day=day, llm=RuleBasedLLMAdapter())
+    if llm_backend == "rule_based":
+        llm = RuleBasedLLMAdapter()
+    elif llm_backend == "command":
+        if not llm_command:
+            raise typer.BadParameter("--llm-command is required when --llm-backend command")
+        llm = CommandLLMAdapter(command=llm_command.split())
+    else:
+        raise typer.BadParameter("--llm-backend must be 'rule_based' or 'command'")
+    result = generate_daily_context(config=config, day=day, llm=llm)
     typer.echo(
         " ".join(
             [
