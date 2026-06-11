@@ -22,6 +22,8 @@ class ArchiveCompletedAudioResult:
     transcripts_pending: int = 0
     summaries_archived: int = 0
     summaries_pending: int = 0
+    memory_candidates_archived: int = 0
+    memory_candidates_pending: int = 0
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,23 @@ def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> Archi
             order by summary_type, target_type, target_id, summary_id
             """,
         )
+        memory_candidates_archived, memory_candidates_pending = _archive_rows_as_jsonl(
+            conn,
+            config=config,
+            archive=archive,
+            target_type="memory_candidates",
+            target_id="all",
+            source_filename="memory_candidates.jsonl",
+            relative_path=Path("derived") / "memory_candidates.jsonl",
+            sql="""
+            select candidate_id, source_type, candidate_claim, edited_claim, claim_type,
+                   subject_json, confidence, evidence_refs_json, status, memory_card_id,
+                   review_note_path, reviewed_at, created_card_id, date_key,
+                   normalized_claim_hash, prompt_version, created_at, updated_at
+            from memory_candidates
+            order by date_key, candidate_id
+            """,
+        )
         conn.commit()
         return ArchiveCompletedAudioResult(
             files_archived=archived,
@@ -126,6 +145,8 @@ def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> Archi
             transcripts_pending=transcripts_pending,
             summaries_archived=summaries_archived,
             summaries_pending=summaries_pending,
+            memory_candidates_archived=memory_candidates_archived,
+            memory_candidates_pending=memory_candidates_pending,
         )
     finally:
         conn.close()

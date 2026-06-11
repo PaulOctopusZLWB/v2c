@@ -210,13 +210,19 @@ def test_archive_completed_audio_exports_transcripts_and_summaries_jsonl(tmp_pat
     assert result.files_archived == 1
     assert result.transcripts_archived == 1
     assert result.summaries_archived == 1
+    assert result.memory_candidates_archived == 1
     transcripts_path = archive_root / "derived" / "transcript_segments.jsonl"
     summaries_path = archive_root / "derived" / "summaries.jsonl"
+    candidates_path = archive_root / "derived" / "memory_candidates.jsonl"
     transcript_rows = [json.loads(line) for line in transcripts_path.read_text(encoding="utf-8").splitlines()]
     summary_rows = [json.loads(line) for line in summaries_path.read_text(encoding="utf-8").splitlines()]
+    candidate_rows = [json.loads(line) for line in candidates_path.read_text(encoding="utf-8").splitlines()]
     assert transcript_rows[0]["segment_id"] == "seg_archive_test"
     assert transcript_rows[0]["text"] == "归档转写。"
     assert summary_rows[0]["summary_id"] == "sum_archive_test"
+    assert candidate_rows[0]["candidate_id"] == "cand_archive_test"
+    assert candidate_rows[0]["prompt_version"] == "llm_port.candidate_extraction.v1"
+    assert "ev_archive_test" in candidate_rows[0]["evidence_refs_json"]
 
     conn = connect(config.database_path)
     try:
@@ -225,6 +231,7 @@ def test_archive_completed_audio_exports_transcripts_and_summaries_jsonl(tmp_pat
         conn.close()
     assert {"target_type": "transcript_segments", "target_id": "all", "archive_path": str(transcripts_path), "verified": 1} in records
     assert {"target_type": "summaries", "target_id": "all", "archive_path": str(summaries_path), "verified": 1} in records
+    assert {"target_type": "memory_candidates", "target_id": "all", "archive_path": str(candidates_path), "verified": 1} in records
 
 
 def _insert_audio(database_path: Path, raw_path: Path, sha256: str, *, status: str, audio_file_id: str = "aud_test") -> None:
@@ -381,6 +388,42 @@ def _insert_transcript_and_summary(database_path: Path) -> None:
                 "llm_port.daily_summary.v1",
                 "rule_based",
                 json.dumps({"headline": "归档日报", "summary": "归档摘要。"}, ensure_ascii=False, sort_keys=True),
+                "2087-05-10T10:00:00+08:00",
+                "2087-05-10T10:00:00+08:00",
+            ),
+        )
+        conn.execute(
+            """
+            insert into memory_candidates (
+              candidate_id, source_type, candidate_claim, claim_type, subject_json,
+              confidence, evidence_refs_json, status, memory_card_id, date_key,
+              normalized_claim_hash, prompt_version, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "cand_archive_test",
+                "llm_daily_context",
+                "归档候选记忆。",
+                "observation",
+                json.dumps({"type": "project", "id": "personal_context_node", "label": "Personal Context Node"}, ensure_ascii=False, sort_keys=True),
+                0.8,
+                json.dumps(
+                    [
+                        {
+                            "evidence_id": "ev_archive_test",
+                            "source_type": "transcript_segment",
+                            "source_id": "seg_archive_test",
+                            "quote": "归档转写。",
+                        }
+                    ],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "pending_review",
+                None,
+                "2087-05-10",
+                "sha256:archive-test",
+                "llm_port.candidate_extraction.v1",
                 "2087-05-10T10:00:00+08:00",
                 "2087-05-10T10:00:00+08:00",
             ),
