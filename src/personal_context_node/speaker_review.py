@@ -10,6 +10,7 @@ import yaml
 
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
+from personal_context_node.obsidian_sync_log import record_sync_log
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -118,7 +119,25 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
     mapping_block = _speaker_mapping_block(text)
     if mapping_block is None:
         return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
-    parsed = _parse_speaker_review(mapping_block)
+    try:
+        parsed = _parse_speaker_review(mapping_block)
+    except yaml.YAMLError:
+        conn = connect(config.database_path)
+        try:
+            initialize(conn)
+            record_sync_log(
+                config=config,
+                conn=conn,
+                day=day,
+                source="speaker_mapping_review",
+                target_id=day,
+                status="failed",
+                message=f"yaml parse failed: {day}",
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
     mappings = {speaker: person_id for speaker, person_id in parsed.mappings.items() if person_id in parsed.persons}
     overrides = {segment_id: person_id for segment_id, person_id in parsed.segment_overrides.items() if person_id in parsed.persons}
     now = datetime.now(timezone.utc).isoformat()

@@ -17,6 +17,7 @@ from personal_context_node.core.protocols.memory import (
 )
 from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.identity_keys import load_or_create_signing_key
+from personal_context_node.obsidian_sync_log import record_sync_log
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -121,7 +122,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
     try:
         initialize(conn)
         if _within_edit_grace(review_path, edit_grace_seconds=config.edit_grace_seconds):
-            _record_sync_log(
+            record_sync_log(
                 config=config,
                 conn=conn,
                 day=day,
@@ -140,7 +141,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             candidate_id = review_action.candidate_id
             action = review_action.action
             if action == "parse_error":
-                _record_sync_log(
+                record_sync_log(
                     config=config,
                     conn=conn,
                     day=day,
@@ -151,7 +152,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 )
                 continue
             if action not in ALLOWED_REVIEW_ACTIONS:
-                _record_sync_log(
+                record_sync_log(
                     config=config,
                     conn=conn,
                     day=day,
@@ -163,7 +164,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 continue
             if action in {"confirm", "edit"} and review_action.edited_claim is not None and not review_action.edited_claim.strip():
                 empty_message = "empty edit claim" if action == "edit" else "empty claim"
-                _record_sync_log(
+                record_sync_log(
                     config=config,
                     conn=conn,
                     day=day,
@@ -367,78 +368,6 @@ def _simple_yaml_block(markdown: str) -> dict[str, str]:
             value = value[1:-1]
         values[match.group(1)] = value
     return values
-
-
-def _record_sync_log(
-    *,
-    config: AppConfig,
-    conn,
-    day: str,
-    source: str,
-    target_id: str,
-    status: str,
-    message: str,
-) -> None:
-    created_at = datetime.now(timezone.utc).isoformat()
-    conn.execute(
-        """
-        insert into sync_logs (sync_log_id, source, target_id, status, message, created_at)
-        values (?, ?, ?, ?, ?, ?)
-        """,
-        (f"sync_{uuid4().hex}", source, target_id, status, message, created_at),
-    )
-    _append_sync_log_note(
-        path=config.obsidian_vault / "90_System" / "Sync_Log" / f"{day}.md",
-        day=day,
-        source=source,
-        target_id=target_id,
-        status=status,
-        message=message,
-        created_at=created_at,
-    )
-
-
-def _append_sync_log_note(
-    *,
-    path: Path,
-    day: str,
-    source: str,
-    target_id: str,
-    status: str,
-    message: str,
-    created_at: str,
-) -> None:
-    if path.exists():
-        text = path.read_text(encoding="utf-8").rstrip() + "\n"
-    else:
-        text = "\n".join(
-            [
-                "---",
-                "pcn_schema: markdown_note.v1",
-                "note_type: sync_log",
-                f"date_key: {day}",
-                "generated_by: personal-context-node",
-                f"generated_at: {created_at}",
-                "pcn_managed: true",
-                "---",
-                "",
-                f"# {day} Sync Log",
-                "",
-            ]
-        )
-    entry = "\n".join(
-        [
-            f'<!-- pcn:managed start type="sync_log_entry" target_id="{target_id}" created_at="{created_at}" -->',
-            f"- created_at: {created_at}",
-            f"- source: {source}",
-            f"- target_id: {target_id}",
-            f"- status: {status}",
-            f"- message: {message}",
-            '<!-- pcn:managed end type="sync_log_entry" -->',
-            "",
-        ]
-    )
-    write_text_atomic(path, text + entry)
 
 
 def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | None]]) -> None:

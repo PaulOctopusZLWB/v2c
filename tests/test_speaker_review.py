@@ -230,6 +230,54 @@ def test_speaker_review_sync_ignores_text_outside_mapping_block(tmp_path: Path) 
     assert overrides == []
 
 
+def test_speaker_review_sync_logs_malformed_yaml_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_segments(config.database_path)
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    review_path.write_text(
+        """
+# 2087-05-10 Speaker Review
+
+<!-- pcn:speaker_mapping start date_key="2087-05-10" version="1" -->
+```yaml
+mappings: [
+persons:
+  per_paul:
+    display_name: Paul
+    is_self: false
+```
+<!-- pcn:speaker_mapping end date_key="2087-05-10" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = sync_speaker_review(config=config, day="2087-05-10")
+
+    assert result.mappings_upserted == 0
+    assert result.segment_overrides_upserted == 0
+    conn = connect(config.database_path)
+    try:
+        mappings = fetch_all(conn, "select speaker from speaker_mappings")
+        logs = fetch_all(conn, "select source, target_id, status, message from sync_logs")
+    finally:
+        conn.close()
+    assert mappings == []
+    assert logs == [
+        {
+            "source": "speaker_mapping_review",
+            "target_id": "2087-05-10",
+            "status": "failed",
+            "message": "yaml parse failed: 2087-05-10",
+        }
+    ]
+    sync_log_note = config.obsidian_vault / "90_System" / "Sync_Log" / "2087-05-10.md"
+    assert sync_log_note.exists()
+    sync_log_text = sync_log_note.read_text(encoding="utf-8")
+    assert "note_type: sync_log" in sync_log_text
+    assert "source: speaker_mapping_review" in sync_log_text
+    assert "yaml parse failed: 2087-05-10" in sync_log_text
+
+
 def _insert_segments(
     database_path: Path,
     *,
