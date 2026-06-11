@@ -83,6 +83,46 @@ def test_preprocess_cli_creates_audio_chunks(tmp_path: Path) -> None:
     assert list((data / "audio" / "work" / "2087-05-10").glob("*.wav"))
 
 
+def test_preprocess_cli_uses_command_vad_backend(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    vad_script = tmp_path / "fake_vad.py"
+    vad_script.write_text(
+        """
+import json
+print(json.dumps({"ranges": [{"start_ms": 0, "end_ms": 500}]}))
+""",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        app,
+        ["run-first-milestone", "--source-dir", str(source), "--data-dir", str(data), "--obsidian-vault", str(vault)],
+    ).exit_code == 0
+
+    preprocess_result = runner.invoke(
+        app,
+        [
+            "preprocess",
+            "--data-dir",
+            str(data),
+            "--obsidian-vault",
+            str(vault),
+            "--vad-backend",
+            "command",
+            "--vad-command",
+            f"python3 {vad_script}",
+            "--max-chunk-ms",
+            "300",
+        ],
+    )
+
+    assert preprocess_result.exit_code == 0, preprocess_result.output
+    assert "audio_chunks_created=2" in preprocess_result.output
+
+
 def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")

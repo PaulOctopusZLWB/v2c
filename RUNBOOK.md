@@ -17,7 +17,8 @@ It also implements the first audio preprocessing boundary:
 2. A deterministic local `EnergyVadAdapter` used as a fallback and test adapter.
 3. SQLite persistence for `speech_ranges` and `audio_chunks`.
 4. Work WAV chunk generation under `data/audio/work/YYYY-MM-DD/`.
-5. A `pcn preprocess` CLI command.
+5. `CommandVADAdapter` for local commands or Docker wrapper scripts that emit normalized VAD JSON.
+6. A `pcn preprocess` CLI command.
 
 It also implements the ASR boundary before real model integration:
 
@@ -175,6 +176,27 @@ audio_files_processed=7 speech_ranges_created=<n> audio_chunks_created=<n>
 ```
 
 With the current energy VAD and the checked-in real samples, `vad-threshold 0.01` produced one range/chunk in local verification. Treat this as adapter smoke coverage, not ASR-quality evidence.
+
+To use a command/Docker VAD wrapper instead of energy VAD, the command must accept one WAV path and print:
+
+```json
+{
+  "ranges": [
+    {"start_ms": 120, "end_ms": 4200}
+  ]
+}
+```
+
+Example:
+
+```bash
+uv run pcn preprocess \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --vad-backend command \
+  --vad-command "python3 scripts/funasr_vad_wrapper.py" \
+  --max-chunk-ms 30000
+```
 
 Expected mock ASR smoke output after preprocessing:
 

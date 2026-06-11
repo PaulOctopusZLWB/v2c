@@ -9,6 +9,7 @@ from personal_context_node.adapters.asr.command import CommandASRAdapter
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.llm.command import CommandLLMAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
+from personal_context_node.adapters.vad.command import CommandVADAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.archive import archive_completed_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
@@ -71,12 +72,15 @@ def preprocess(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
+    vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    vad = _build_vad(vad_backend=vad_backend, vad_command=vad_command, vad_threshold=vad_threshold)
     result = preprocess_imported_audio(
         config=config,
-        vad=EnergyVadAdapter(threshold=vad_threshold),
+        vad=vad,
         max_chunk_ms=max_chunk_ms,
     )
     typer.echo(
@@ -384,12 +388,15 @@ def process_run(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
+    vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
     asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    vad = _build_vad(vad_backend=vad_backend, vad_command=vad_command, vad_threshold=vad_threshold)
     if asr_backend == "mock":
         asr = MockASRAdapter(text=mock_text)
     elif asr_backend == "command":
@@ -404,7 +411,7 @@ def process_run(
         operation=lambda: process_once(
             config=config,
             run_id="cli-process-run",
-            vad=EnergyVadAdapter(threshold=vad_threshold),
+            vad=vad,
             asr=asr,
             max_chunk_ms=max_chunk_ms,
         ),
@@ -418,6 +425,16 @@ def process_run(
             ]
         )
     )
+
+
+def _build_vad(*, vad_backend: str, vad_command: str | None, vad_threshold: float):
+    if vad_backend == "energy":
+        return EnergyVadAdapter(threshold=vad_threshold)
+    if vad_backend == "command":
+        if not vad_command:
+            raise typer.BadParameter("--vad-command is required when --vad-backend command")
+        return CommandVADAdapter(command=vad_command.split())
+    raise typer.BadParameter("--vad-backend must be 'energy' or 'command'")
 
 
 @app.command(name="daily-status")
