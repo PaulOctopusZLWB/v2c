@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from personal_context_node.core.ports.asr import ASRSegment
+from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
 class CommandASRAdapter:
@@ -30,11 +31,11 @@ class CommandASRAdapter:
             text=True,
         )
         if completed.returncode != 0:
-            raise RuntimeError(f"ASR command failed with exit {completed.returncode}: {completed.stderr.strip()}")
+            raise RetryablePortError(f"ASR command failed with exit {completed.returncode}: {completed.stderr.strip()}")
         try:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid ASR JSON: {exc}") from exc
+            raise TerminalPortError(f"invalid ASR JSON: {exc}") from exc
         self.model_name = str(payload.get("model_name", self.model_name))
         self.model_version = str(payload.get("model_version", self.model_version))
         return [ASRSegment(**segment) for segment in payload.get("segments", [])]

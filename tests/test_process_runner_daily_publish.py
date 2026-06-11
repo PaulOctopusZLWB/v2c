@@ -5,6 +5,7 @@ from pathlib import Path
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.errors import TerminalPortError
 from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft, SessionSummary
 import personal_context_node.process_runner as process_runner
 from personal_context_node.process_runner import PipelineEdge, process_once
@@ -33,6 +34,14 @@ class RecordingLLM:
                 )
             ],
         )
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        raise AssertionError("daily_generate should not request a session summary")
+
+
+class TerminalLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
+        raise TerminalPortError("invalid LLM contract")
 
     def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
         raise AssertionError("daily_generate should not request a session summary")
@@ -160,6 +169,33 @@ def test_process_once_rolls_back_success_when_downstream_registration_fails(tmp_
 
     assert rows == [{"status": "failed_retryable"}]
     assert publish_tasks == []
+
+
+def test_process_once_marks_terminal_port_errors_terminal(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_transcript(config.database_path)
+    task = enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id="2087-05-10")
+
+    try:
+        process_once(
+            config=config,
+            run_id="run_daily_terminal",
+            vad=EnergyVadAdapter(),
+            asr=MockASRAdapter(),
+            llm=TerminalLLM(),
+        )
+    except TerminalPortError:
+        pass
+    else:
+        raise AssertionError("process_once should surface terminal port errors")
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select status, last_error from tasks where task_id = ?", (task.task_id,))
+    finally:
+        conn.close()
+
+    assert rows == [{"status": "failed_terminal", "last_error": "invalid LLM contract"}]
 
 
 def _insert_session_and_transcript(database_path: Path) -> None:

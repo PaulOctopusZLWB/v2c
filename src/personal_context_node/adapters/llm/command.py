@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 
+from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft
 
 
@@ -23,11 +24,11 @@ class CommandLLMAdapter:
             text=True,
         )
         if completed.returncode != 0:
-            raise RuntimeError(f"LLM command failed with exit {completed.returncode}: {completed.stderr.strip()}")
+            raise RetryablePortError(f"LLM command failed with exit {completed.returncode}: {completed.stderr.strip()}")
         try:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid LLM JSON: {exc}") from exc
+            raise TerminalPortError(f"invalid LLM JSON: {exc}") from exc
         return DailyContext(
             day=day,
             summary=str(payload.get("summary", "")),

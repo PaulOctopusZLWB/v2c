@@ -5,6 +5,7 @@ import stat
 from pathlib import Path
 
 from personal_context_node.adapters.llm.command import CommandLLMAdapter
+from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
 def test_command_llm_adapter_sends_text_only_and_parses_context(tmp_path: Path) -> None:
@@ -65,7 +66,20 @@ def test_command_llm_adapter_reports_invalid_json(tmp_path: Path) -> None:
 
     try:
         adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
-    except ValueError as exc:
+    except TerminalPortError as exc:
         assert "invalid LLM JSON" in str(exc)
     else:
         raise AssertionError("CommandLLMAdapter accepted invalid JSON")
+
+
+def test_command_llm_adapter_reports_command_failure_as_retryable(tmp_path: Path) -> None:
+    script = tmp_path / "failed_llm.py"
+    script.write_text("import sys\nsys.stderr.write('rate limited')\nsys.exit(8)", encoding="utf-8")
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except RetryablePortError as exc:
+        assert "rate limited" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted a failed command")

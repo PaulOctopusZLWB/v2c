@@ -5,6 +5,7 @@ import stat
 from pathlib import Path
 
 from personal_context_node.adapters.asr.command import CommandASRAdapter
+from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
 def test_command_asr_adapter_parses_json_segments(tmp_path: Path) -> None:
@@ -50,7 +51,23 @@ def test_command_asr_adapter_reports_invalid_output(tmp_path: Path) -> None:
 
     try:
         adapter.transcribe(chunk)
-    except ValueError as exc:
+    except TerminalPortError as exc:
         assert "invalid ASR JSON" in str(exc)
     else:
         raise AssertionError("CommandASRAdapter accepted invalid JSON")
+
+
+def test_command_asr_adapter_reports_command_failure_as_retryable(tmp_path: Path) -> None:
+    chunk = tmp_path / "chunk.wav"
+    chunk.write_bytes(b"fake wav")
+    script = tmp_path / "failed_asr.py"
+    script.write_text("import sys\nsys.stderr.write('model busy')\nsys.exit(7)", encoding="utf-8")
+
+    adapter = CommandASRAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.transcribe(chunk)
+    except RetryablePortError as exc:
+        assert "model busy" in str(exc)
+    else:
+        raise AssertionError("CommandASRAdapter accepted a failed command")

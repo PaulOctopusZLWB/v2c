@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from personal_context_node.adapters.vad.command import CommandVADAdapter
+from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
 def test_command_vad_adapter_parses_json_ranges(tmp_path: Path) -> None:
@@ -39,5 +40,15 @@ print(json.dumps({"ranges": [{"start_ms": 900, "end_ms": 100}]}))
     audio = tmp_path / "chunk.wav"
     audio.write_bytes(b"RIFFfake")
 
-    with pytest.raises(ValueError, match="invalid VAD range"):
+    with pytest.raises(TerminalPortError, match="invalid VAD range"):
+        CommandVADAdapter(command=["python3", str(script)]).detect(audio)
+
+
+def test_command_vad_adapter_reports_command_failure_as_retryable(tmp_path: Path) -> None:
+    script = tmp_path / "failed_vad.py"
+    script.write_text("import sys\nsys.stderr.write('device busy')\nsys.exit(9)", encoding="utf-8")
+    audio = tmp_path / "chunk.wav"
+    audio.write_bytes(b"RIFFfake")
+
+    with pytest.raises(RetryablePortError, match="device busy"):
         CommandVADAdapter(command=["python3", str(script)]).detect(audio)

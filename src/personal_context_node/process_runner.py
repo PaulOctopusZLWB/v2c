@@ -8,6 +8,7 @@ from typing import Callable
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.errors import TerminalPortError
 from personal_context_node.core.ports.llm import LLMPort
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.core.ports.vad import VADPort
@@ -89,7 +90,7 @@ def process_once(
         _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
         return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
     except Exception as exc:
-        fail_task(config=config, task_id=task.task_id, error=str(exc), terminal=False)
+        fail_task(config=config, task_id=task.task_id, error=str(exc), terminal=isinstance(exc, TerminalPortError))
         raise
 
 
