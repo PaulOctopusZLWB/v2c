@@ -807,6 +807,7 @@ def job_status(
                     f"run_id={row['run_id']}",
                     f"job_name={row['job_name']}",
                     f"status={row['status']}",
+                    f"duration_ms={row['duration_ms'] if row['duration_ms'] is not None else ''}",
                     f"error={row['error'] or ''}",
                 ]
             )

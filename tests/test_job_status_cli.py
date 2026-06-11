@@ -25,3 +25,4 @@ def test_job_status_cli_lists_recent_runs(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "health" in result.output
     assert "succeeded" in result.output
+    assert "duration_ms=" in result.output

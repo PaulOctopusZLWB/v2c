@@ -46,7 +46,7 @@ def job_status_rows(*, config: AppConfig, limit: int = 20) -> list[dict[str, obj
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        return fetch_all(
+        rows = fetch_all(
             conn,
             """
             select run_id, job_name, status, started_at, finished_at, error
@@ -56,6 +56,7 @@ def job_status_rows(*, config: AppConfig, limit: int = 20) -> list[dict[str, obj
             """,
             (limit,),
         )
+        return [_with_duration(row) for row in rows]
     finally:
         conn.close()
 
@@ -74,3 +75,12 @@ def _finish_run(*, config: AppConfig, run_id: str, status: str, error: str | Non
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _with_duration(row: dict[str, object]) -> dict[str, object]:
+    started_at = row["started_at"]
+    finished_at = row["finished_at"]
+    if not isinstance(started_at, str) or not isinstance(finished_at, str) or not finished_at:
+        return {**row, "duration_ms": None}
+    duration = datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)
+    return {**row, "duration_ms": max(0, int(duration.total_seconds() * 1000))}
