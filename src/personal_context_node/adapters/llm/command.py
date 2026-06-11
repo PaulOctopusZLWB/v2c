@@ -5,7 +5,14 @@ import subprocess
 from typing import get_args
 
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
-from personal_context_node.core.ports.llm import ClaimType, DailyContext, MemoryCandidateDraft
+from personal_context_node.core.ports.llm import (
+    ClaimType,
+    DailyContext,
+    MemoryCandidateDraft,
+    SessionDecision,
+    SessionSummary,
+    SessionTodo,
+)
 
 
 ALLOWED_CLAIM_TYPES = set(get_args(ClaimType))
@@ -20,19 +27,7 @@ class CommandLLMAdapter:
         self.command = command
 
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
-        completed = subprocess.run(
-            self.command,
-            input=json.dumps({"day": day, "transcript_segments": transcript_segments}, ensure_ascii=False),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if completed.returncode != 0:
-            raise RetryablePortError(f"LLM command failed with exit {completed.returncode}: {completed.stderr.strip()}")
-        try:
-            payload = json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:
-            raise TerminalPortError(f"invalid LLM JSON: {exc}") from exc
+        payload = self._run_json({"task": "daily_context", "day": day, "transcript_segments": transcript_segments})
         _validate_daily_context_payload(payload)
         return DailyContext(
             day=day,
@@ -42,6 +37,39 @@ class CommandLLMAdapter:
             inferences=[str(item) for item in payload["inferences"]],
             memory_candidates=[_memory_candidate(item) for item in payload["memory_candidates"]],
         )
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        payload = self._run_json(
+            {"task": "session_summary", "session_id": session_id, "transcript_segments": transcript_segments}
+        )
+        _validate_session_summary_payload(payload)
+        return SessionSummary(
+            session_id=session_id,
+            headline=str(payload["headline"]),
+            summary=str(payload["summary"]),
+            topics=[str(item) for item in payload["topics"]],
+            decisions=[_session_decision(item) for item in payload["decisions"]],
+            todos=[_session_todo(item) for item in payload["todos"]],
+            open_questions=[str(item) for item in payload["open_questions"]],
+        )
+
+    def _run_json(self, payload: dict[str, object]) -> dict[str, object]:
+        completed = subprocess.run(
+            self.command,
+            input=json.dumps(payload, ensure_ascii=False),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            raise RetryablePortError(f"LLM command failed with exit {completed.returncode}: {completed.stderr.strip()}")
+        try:
+            decoded = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise TerminalPortError(f"invalid LLM JSON: {exc}") from exc
+        if not isinstance(decoded, dict):
+            raise TerminalPortError("LLM output must be an object")
+        return decoded
 
 
 def _validate_daily_context_payload(payload: object) -> None:
@@ -53,6 +81,41 @@ def _validate_daily_context_payload(payload: object) -> None:
     for field in ["todos", "facts", "inferences", "memory_candidates"]:
         if not isinstance(payload[field], list):
             raise TerminalPortError(f"LLM output field must be a list: {field}")
+
+
+def _validate_session_summary_payload(payload: object) -> None:
+    if not isinstance(payload, dict):
+        raise TerminalPortError("LLM output must be an object")
+    for field in ["headline", "summary", "topics", "decisions", "todos", "open_questions"]:
+        if field not in payload:
+            raise TerminalPortError(f"LLM session_summary missing required field: {field}")
+    for field in ["topics", "decisions", "todos", "open_questions"]:
+        if not isinstance(payload[field], list):
+            raise TerminalPortError(f"LLM session_summary field must be a list: {field}")
+
+
+def _session_decision(item: object) -> SessionDecision:
+    if not isinstance(item, dict):
+        raise TerminalPortError("LLM session_summary decision must be an object")
+    for field in ["text", "evidence_refs"]:
+        if field not in item:
+            raise TerminalPortError(f"LLM session_summary decision missing required field: {field}")
+    evidence_refs = item["evidence_refs"]
+    if not isinstance(evidence_refs, list):
+        raise TerminalPortError("LLM session_summary decision evidence_refs must be a list")
+    return SessionDecision(text=str(item["text"]), evidence_refs=[str(ref) for ref in evidence_refs])
+
+
+def _session_todo(item: object) -> SessionTodo:
+    if not isinstance(item, dict):
+        raise TerminalPortError("LLM session_summary todo must be an object")
+    for field in ["text", "owner", "evidence_refs"]:
+        if field not in item:
+            raise TerminalPortError(f"LLM session_summary todo missing required field: {field}")
+    evidence_refs = item["evidence_refs"]
+    if not isinstance(evidence_refs, list):
+        raise TerminalPortError("LLM session_summary todo evidence_refs must be a list")
+    return SessionTodo(text=str(item["text"]), owner=str(item["owner"]), evidence_refs=[str(ref) for ref in evidence_refs])
 
 
 def _memory_candidate(item: object) -> MemoryCandidateDraft:

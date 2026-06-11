@@ -88,6 +88,82 @@ print(json.dumps({
     assert context.memory_candidates[0].evidence_source_ids == ["ev_1"]
 
 
+def test_command_llm_adapter_generates_session_summary(tmp_path: Path) -> None:
+    capture = tmp_path / "session_input.json"
+    script = tmp_path / "fake_session_llm.py"
+    script.write_text(
+        f"""
+import json
+import sys
+payload = json.loads(sys.stdin.read())
+open({str(capture)!r}, "w").write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+first = payload["transcript_segments"][0]["evidence_id"]
+print(json.dumps({{
+  "headline": "命令式 session headline",
+  "summary": "命令式 session summary",
+  "topics": ["asr"],
+  "decisions": [{{"text": "继续本地 ASR", "evidence_refs": [first]}}],
+  "todos": [{{"text": "完成 smoke test", "owner": "self", "evidence_refs": [first]}}],
+  "open_questions": ["是否需要备选模型"]
+}}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    summary = adapter.generate_session_summary(
+        session_id="ses_1",
+        transcript_segments=[
+            {
+                "segment_id": "seg_1",
+                "speaker": "self",
+                "start_ms": 0,
+                "end_ms": 1000,
+                "text": "继续本地 ASR。",
+                "evidence_id": "ev_1",
+            }
+        ],
+    )
+
+    assert summary.session_id == "ses_1"
+    assert summary.headline == "命令式 session headline"
+    assert summary.summary == "命令式 session summary"
+    assert summary.topics == ["asr"]
+    assert summary.decisions[0].text == "继续本地 ASR"
+    assert summary.decisions[0].evidence_refs == ["ev_1"]
+    assert summary.todos[0].text == "完成 smoke test"
+    assert summary.todos[0].owner == "self"
+    assert summary.todos[0].evidence_refs == ["ev_1"]
+    assert summary.open_questions == ["是否需要备选模型"]
+    sent = json.loads(capture.read_text(encoding="utf-8"))
+    assert sent["task"] == "session_summary"
+    assert sent["session_id"] == "ses_1"
+    assert "local_raw_path" not in json.dumps(sent)
+    assert ".wav" not in json.dumps(sent).lower()
+
+
+def test_command_llm_adapter_rejects_incomplete_session_summary(tmp_path: Path) -> None:
+    script = tmp_path / "bad_session_llm.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "bad",
+  "summary": "missing collections"
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "topics" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted an incomplete session summary")
+
+
 def test_command_llm_adapter_reports_invalid_json(tmp_path: Path) -> None:
     script = tmp_path / "bad_llm.py"
     script.write_text("print('not json')", encoding="utf-8")
