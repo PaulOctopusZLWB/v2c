@@ -49,7 +49,7 @@ def test_transcribe_pending_chunks_persists_segments_with_chunk_evidence(tmp_pat
             """
             select chunk_id, start_ms, end_ms, absolute_start_at, absolute_end_at,
                    text, speaker, speaker_cluster_id, asr_backend, model_name,
-                   model_version, decode_config_json
+                   model_version, decode_config_json, is_active
             from transcript_segments
             where asr_backend = 'MockASRAdapter'
             order by start_ms
@@ -61,6 +61,7 @@ def test_transcribe_pending_chunks_persists_segments_with_chunk_evidence(tmp_pat
         conn.close()
 
     assert [row["text"] for row in rows] == ["本地转写结果", "本地转写结果", "本地转写结果"]
+    assert [row["is_active"] for row in rows] == [1, 1, 1]
     assert [row["speaker"] for row in rows] == ["self", "self", "self"]
     assert [row["speaker_cluster_id"] for row in rows] == ["self", "self", "self"]
     assert rows[0]["model_name"] == "mock-asr"

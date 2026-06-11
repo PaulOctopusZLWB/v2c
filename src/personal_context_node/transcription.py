@@ -40,11 +40,15 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
             params,
         )
         segments_created = 0
+        deactivated_audio_file_ids: set[str] = set()
         for chunk in chunks:
-            conn.execute(
-                "update transcript_segments set is_active = 0 where audio_file_id = ? and is_active = 1",
-                (chunk["audio_file_id"],),
-            )
+            audio_file_id = str(chunk["audio_file_id"])
+            if audio_file_id not in deactivated_audio_file_ids:
+                conn.execute(
+                    "update transcript_segments set is_active = 0 where audio_file_id = ? and is_active = 1",
+                    (audio_file_id,),
+                )
+                deactivated_audio_file_ids.add(audio_file_id)
             asr_run_id = f"asrrun_{uuid4().hex}"
             chunk_path = config.data_dir / chunk["local_chunk_path"]
             asr_result = asr.transcribe(chunk_path)

@@ -316,7 +316,8 @@ model_name = "configured-mock-asr"
     assert result.exit_code == 0, result.output
     conn = connect(data / "db" / "personal_context.sqlite")
     try:
-        rows = fetch_all(conn, "select language, model_name, text from transcript_segments where is_active = 1")
+        rows = fetch_all(conn, "select language, model_name, text from transcript_segments where is_active = 1 order by start_ms")
     finally:
         conn.close()
-    assert rows == [{"language": "yue", "model_name": "configured-mock-asr", "text": "配置 ASR 输出"}]
+    assert rows
+    assert all(row == {"language": "yue", "model_name": "configured-mock-asr", "text": "配置 ASR 输出"} for row in rows)
