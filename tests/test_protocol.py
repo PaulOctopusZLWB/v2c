@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import base64
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 import personal_context_node.core.protocols.memory as protocol
 from personal_context_node.core.protocols.memory import (
     EvidenceRef,
+    EventSignature,
     MemoryCard,
     SignedEvent,
     SubjectRef,
+    canonical_json_bytes,
     create_signed_event,
     materialize_cards,
     verify_signed_event,
@@ -223,4 +229,50 @@ def test_verified_unknown_event_is_stored_as_unsupported(tmp_path) -> None:
     finally:
         conn.close()
     assert rows == [{"event_type": "future_protocol.created", "trust_status": "unsupported"}]
+    assert cards == []
+
+
+def test_verified_encrypted_payload_event_is_stored_as_unsupported(tmp_path) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    event_body = {
+        "envelope_version": "signed_event.v1",
+        "event_type": "memory_card.created",
+        "object_id": "mem_encrypted_001",
+        "object_version": 1,
+        "owner_id": "did:key:test-owner",
+        "owner_sequence": 1,
+        "prev_event_hash": None,
+        "payload_type": "memory_card.v1",
+        "payload_encoding": "encrypted",
+        "payload": {"ciphertext": "base64:test"},
+        "created_at": "2087-05-10T00:00:00Z",
+    }
+    signature = private_key.sign(canonical_json_bytes(event_body))
+    event = SignedEvent(
+        **event_body,
+        signature=EventSignature(
+            public_key_id="did:key:test-owner",
+            value=base64.urlsafe_b64encode(signature).decode("ascii").rstrip("="),
+        ),
+    )
+    public_key = base64.urlsafe_b64encode(
+        private_key.public_key().public_bytes_raw()
+    ).decode("ascii")
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        insert_signed_event(conn, event=event, public_key=public_key)
+
+        rows = fetch_all(conn, "select event_type, payload_encoding, trust_status from signed_events")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert rows == [
+        {
+            "event_type": "memory_card.created",
+            "payload_encoding": "encrypted",
+            "trust_status": "unsupported",
+        }
+    ]
     assert cards == []

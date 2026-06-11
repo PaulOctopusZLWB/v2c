@@ -113,7 +113,7 @@ class SignedEvent(BaseModel):
     owner_sequence: int
     prev_event_hash: str | None
     payload_type: str
-    payload_encoding: Literal["plain"] = "plain"
+    payload_encoding: str = "plain"
     payload: dict
     created_at: str
     signature: EventSignature

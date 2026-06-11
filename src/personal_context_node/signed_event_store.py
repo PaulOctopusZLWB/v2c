@@ -97,18 +97,20 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
             1 if verified else 0,
         ),
     )
-    if event.event_type == "memory_card.created" and verified:
+    if event.event_type == "memory_card.created" and trust_status == "trusted":
         _upsert_memory_card(conn, event=event)
         _activate_dangling_annotations(conn, target_card_id=event.object_id)
-    if event.event_type == "memory_annotation.created" and verified:
+    if event.event_type == "memory_annotation.created" and trust_status == "trusted":
         _upsert_memory_annotation(conn, event=event)
-    if event.event_type == "identity_profile.published" and verified:
+    if event.event_type == "identity_profile.published" and trust_status == "trusted":
         _upsert_identity_profile(conn, event=event)
 
 
 def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:
     if not verified:
         return "rejected"
+    if event.payload_encoding != "plain":
+        return "unsupported"
     if event.event_type not in SUPPORTED_EVENT_TYPES:
         return "unsupported"
     return "trusted"
