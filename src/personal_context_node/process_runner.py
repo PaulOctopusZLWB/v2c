@@ -55,18 +55,18 @@ def process_once(
     max_chunk_ms: int = 30_000,
 ) -> ProcessOnceResult:
     llm_adapter = llm or RuleBasedLLMAdapter()
-    reclaim_expired_tasks(config=config, lease_seconds=1800)
-    task = claim_next_task(config=config, task_type="vad", run_id=run_id)
+    reclaim_expired_tasks(config=config, lease_seconds=config.task_lease_seconds)
+    task = claim_next_task(config=config, task_type="vad", run_id=run_id, lease_seconds=config.task_lease_seconds)
     if task is None:
-        task = claim_next_task(config=config, task_type="asr", run_id=run_id)
+        task = claim_next_task(config=config, task_type="asr", run_id=run_id, lease_seconds=config.task_lease_seconds)
     if task is None:
-        task = claim_next_task(config=config, task_type="session_derive", run_id=run_id)
+        task = claim_next_task(config=config, task_type="session_derive", run_id=run_id, lease_seconds=config.task_lease_seconds)
     if task is None:
-        task = claim_next_task(config=config, task_type="summarize_session", run_id=run_id)
+        task = claim_next_task(config=config, task_type="summarize_session", run_id=run_id, lease_seconds=config.task_lease_seconds)
     if task is None:
-        task = claim_next_task(config=config, task_type="daily_generate", run_id=run_id)
+        task = claim_next_task(config=config, task_type="daily_generate", run_id=run_id, lease_seconds=config.task_lease_seconds)
     if task is None:
-        task = claim_next_task(config=config, task_type="obsidian_publish", run_id=run_id)
+        task = claim_next_task(config=config, task_type="obsidian_publish", run_id=run_id, lease_seconds=config.task_lease_seconds)
     if task is None:
         return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
 
@@ -148,6 +148,7 @@ def _enqueue_downstream_tasks_in_conn(
                 task_type=edge.downstream_task_type,
                 target_type=edge.downstream_target_type,
                 target_id=target_id,
+                max_retries=config.task_max_retries,
             )
 
 

@@ -253,6 +253,26 @@ def test_failed_retryable_and_lease_reclaim(tmp_path) -> None:
     assert rows[0]["status"] == "pending"
 
 
+def test_claim_next_task_skips_retryable_tasks_at_max_retries(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", task_max_retries=1)
+    task = enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
+    claimed = claim_next_task(config=config, task_type="asr", run_id="run_1")
+    assert claimed is not None
+    fail_task(config=config, task_id=task.task_id, error="model unavailable", terminal=False)
+
+    retry = claim_next_task(config=config, task_type="asr", run_id="run_2")
+
+    assert retry is None
+    rows = process_status_rows(config=config)
+    assert rows[0]["status"] == "failed_retryable"
+    conn = connect(config.database_path)
+    try:
+        stored = fetch_all(conn, "select retry_count, max_retries from tasks where task_id = ?", (task.task_id,))
+    finally:
+        conn.close()
+    assert stored == [{"retry_count": 1, "max_retries": 1}]
+
+
 def test_retry_task_resets_failed_task_to_pending(tmp_path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     task = enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")

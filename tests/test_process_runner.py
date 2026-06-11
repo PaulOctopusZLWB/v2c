@@ -85,6 +85,28 @@ def test_process_once_reclaims_expired_task_before_claiming(tmp_path: Path) -> N
     assert result.status == "succeeded"
 
 
+def test_process_once_enqueues_downstream_tasks_with_configured_max_retries(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", task_max_retries=2)
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    process_once(
+        config=config,
+        run_id="run_vad",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="本地任务转写"),
+        max_chunk_ms=1000,
+    )
+
+    conn = connect(config.database_path)
+    try:
+        rows = conn.execute("select task_type, max_retries from tasks where task_type = 'asr'").fetchall()
+    finally:
+        conn.close()
+    assert [(row["task_type"], row["max_retries"]) for row in rows] == [("asr", 2)]
+
+
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:

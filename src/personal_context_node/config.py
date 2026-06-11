@@ -54,6 +54,8 @@ class AppConfig(BaseModel):
     send_speaker_labels: bool = True
     max_chunk_tokens: int = 6000
     edit_grace_seconds: int = 120
+    task_lease_seconds: int = 1800
+    task_max_retries: int = 3
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
     audio: AudioProcessingConfig = AudioProcessingConfig()
 
@@ -70,6 +72,7 @@ class AppConfig(BaseModel):
         device = raw.get("device", {})
         dji_mic_3 = device.get("dji_mic_3", {})
         audio = raw.get("audio", {})
+        tasks = raw.get("tasks", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
             "raw_audio_path": _optional_resolve_path(base_dir, paths.get("raw_audio_dir")),
@@ -96,6 +99,8 @@ class AppConfig(BaseModel):
             "send_speaker_labels": llm.get("send_speaker_labels", cls.model_fields["send_speaker_labels"].default),
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
             "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
+            "task_lease_seconds": tasks.get("lease_seconds", cls.model_fields["task_lease_seconds"].default),
+            "task_max_retries": tasks.get("max_retries", cls.model_fields["task_max_retries"].default),
             "dji_mic_3": _device_config(base_dir, dji_mic_3),
             "audio": _audio_config(audio),
         }

@@ -47,7 +47,13 @@ def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        result = enqueue_task_in_conn(conn, task_type=task_type, target_type=target_type, target_id=target_id)
+        result = enqueue_task_in_conn(
+            conn,
+            task_type=task_type,
+            target_type=target_type,
+            target_id=target_id,
+            max_retries=config.task_max_retries,
+        )
         conn.commit()
         return result
     finally:
@@ -60,6 +66,7 @@ def enqueue_task_in_conn(
     task_type: str,
     target_type: str,
     target_id: str,
+    max_retries: int = 3,
 ) -> EnqueueTaskResult:
     _validate_task_type(task_type)
     existing = conn.execute(
@@ -73,10 +80,10 @@ def enqueue_task_in_conn(
     conn.execute(
         """
         insert into tasks (
-          task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?)
+          task_id, task_type, target_type, target_id, status, max_retries, available_at, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (task_id, task_type, target_type, target_id, "pending", now, now, now),
+        (task_id, task_type, target_type, target_id, "pending", max_retries, now, now, now),
     )
     return EnqueueTaskResult(task_id=task_id, created=True)
 
@@ -91,7 +98,11 @@ def claim_next_task(*, config: AppConfig, task_type: str, run_id: str, lease_sec
             """
             select *
             from tasks
-            where task_type = ? and status in ('pending', 'failed_retryable')
+            where task_type = ?
+              and (
+                status = 'pending'
+                or (status = 'failed_retryable' and retry_count < max_retries)
+              )
               and available_at <= ?
             order by available_at, priority, created_at
             limit 1
