@@ -167,4 +167,6 @@ def _subject(item: object) -> dict[str, str]:
     for field in ["type", "id", "label"]:
         if field not in item:
             raise TerminalPortError(f"LLM memory_candidate subject missing required field: {field}")
+        if not str(item[field]).strip():
+            raise TerminalPortError(f"LLM memory_candidate subject {field} must not be empty")
     return {"type": str(item["type"]), "id": str(item["id"]), "label": str(item["label"])}

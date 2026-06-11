@@ -317,3 +317,34 @@ print(json.dumps({
         assert "claim_type" in str(exc)
     else:
         raise AssertionError("CommandLLMAdapter accepted an invalid claim_type")
+
+
+def test_command_llm_adapter_rejects_empty_candidate_subject_fields(tmp_path: Path) -> None:
+    script = tmp_path / "empty_subject.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "bad",
+  "todos": [],
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": [{
+    "candidate_claim": "主体为空",
+    "claim_type": "requirement",
+    "subject": {"type": "project", "id": " ", "label": "Project"},
+    "confidence": 0.9,
+    "evidence_refs": ["ev_1"]
+  }]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "subject id" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted an empty subject id")
