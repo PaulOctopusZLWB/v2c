@@ -515,6 +515,13 @@ claim_type: requirement
             "message": "yaml parse failed: cand_test_001",
         }
     ]
+    sync_log_note = config.obsidian_vault / "90_System" / "Sync_Log" / "2087-05-10.md"
+    assert sync_log_note.exists()
+    sync_log_text = sync_log_note.read_text(encoding="utf-8")
+    assert "note_type: sync_log" in sync_log_text
+    assert "- status: failed" in sync_log_text
+    assert "target_id: cand_test_001" in sync_log_text
+    assert "yaml parse failed: cand_test_001" in sync_log_text
 
 
 def test_sync_review_logs_unknown_action_without_side_effects(tmp_path: Path) -> None:
