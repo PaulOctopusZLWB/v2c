@@ -42,7 +42,8 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
             select distinct ts.speaker
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
-            where substr(af.recorded_at, 1, 10) = ?
+            join sessions s on s.session_id = ts.session_id
+            where s.date_key = ?
             order by ts.speaker
             """,
             (day,),
@@ -53,8 +54,9 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
             select ts.segment_id, ts.speaker, ts.text
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
-            where substr(af.recorded_at, 1, 10) = ?
-            order by ts.start_ms, ts.segment_id
+            join sessions s on s.session_id = ts.session_id
+            where s.date_key = ?
+            order by s.started_at, ts.start_ms, ts.segment_id
             """,
             (day,),
         )
@@ -185,10 +187,11 @@ def materialized_transcript_segments(*, config: AppConfig, day: str) -> list[dic
               ts.end_ms
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
+            join sessions s on s.session_id = ts.session_id
             left join speaker_mappings mapping on mapping.speaker = ts.speaker
             left join segment_person_overrides override on override.segment_id = ts.segment_id
-            where substr(af.recorded_at, 1, 10) = ?
-            order by ts.start_ms, ts.segment_id
+            where s.date_key = ?
+            order by s.started_at, ts.start_ms, ts.segment_id
             """,
             (day,),
         )

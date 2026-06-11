@@ -173,6 +173,23 @@ def test_speaker_review_sync_reads_yaml_mapping_block(tmp_path: Path) -> None:
     assert by_id["seg_guest"]["effective_person"] == "Guest"
 
 
+def test_speaker_review_uses_session_date_key_for_cross_midnight_segments(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_segments(
+        config.database_path,
+        recorded_at="2087-05-09T23:55:00+08:00",
+        date_key="2087-05-10",
+        session_id="ses_cross_midnight",
+    )
+
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+
+    text = review_path.read_text(encoding="utf-8")
+    assert "- seg_self | spk_self | 这是本人发言。" in text
+    materialized = materialized_transcript_segments(config=config, day="2087-05-10")
+    assert [row["segment_id"] for row in materialized] == ["seg_guest", "seg_self"]
+
+
 def test_speaker_review_sync_ignores_text_outside_mapping_block(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_segments(config.database_path)
@@ -213,7 +230,13 @@ def test_speaker_review_sync_ignores_text_outside_mapping_block(tmp_path: Path) 
     assert overrides == []
 
 
-def _insert_segments(database_path: Path) -> None:
+def _insert_segments(
+    database_path: Path,
+    *,
+    recorded_at: str = "2087-05-10T00:00:00+08:00",
+    date_key: str = "2087-05-10",
+    session_id: str = "ses_test",
+) -> None:
     conn = connect(database_path)
     try:
         initialize(conn)
@@ -231,23 +254,46 @@ def _insert_segments(database_path: Path) -> None:
                 "/local.wav",
                 "sha256:test",
                 1000,
-                "2087-05-10T00:00:00+08:00",
+                recorded_at,
                 "2087-05-10T00:10:00+08:00",
                 "imported",
+            ),
+        )
+        conn.execute(
+            """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id,
+              exclude_from_memory, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                date_key,
+                recorded_at,
+                recorded_at,
+                "derived_from_segments",
+                2,
+                2000,
+                "seg_self",
+                0,
+                "2087-05-10T00:10:00+08:00",
+                "2087-05-10T00:10:00+08:00",
             ),
         )
         for segment_id, text in [("seg_self", "这是本人发言。"), ("seg_guest", "这句实际是客人说的。")]:
             conn.execute(
                 """
                 insert into transcript_segments (
-                  segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+                  segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
                   language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     segment_id,
                     "aud_test",
                     f"chk_{segment_id}",
+                    session_id,
                     0,
                     1000,
                     text,

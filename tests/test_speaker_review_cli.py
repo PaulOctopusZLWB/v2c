@@ -74,15 +74,38 @@ def _insert_segment(database_path: Path) -> None:
         )
         conn.execute(
             """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id,
+              exclude_from_memory, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ses_test",
+                "2087-05-10",
+                "2087-05-10T00:00:00+08:00",
+                "2087-05-10T00:00:01+08:00",
+                "derived_from_segments",
+                1,
+                1000,
+                "seg_test",
+                0,
+                "2087-05-10T00:10:00+08:00",
+                "2087-05-10T00:10:00+08:00",
+            ),
+        )
+        conn.execute(
+            """
             insert into transcript_segments (
-              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
               language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "seg_test",
                 "aud_test",
                 "chk_test",
+                "ses_test",
                 0,
                 1000,
                 "本人发言。",
