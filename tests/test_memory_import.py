@@ -109,6 +109,49 @@ def test_import_memory_events_rejects_invalid_signatures_without_materializing(t
     assert cards == []
 
 
+def test_import_memory_events_stores_broken_hash_chain_as_dangling(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    card = MemoryCard(
+        card_id="mem_dangling_import",
+        owner_did="did:key:external-owner",
+        claim_type="decision",
+        claim="Broken hash-chain imports must not materialize.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_dangling_import",
+                source_type="transcript_segment",
+                source_id="seg_dangling_import",
+                quote="dangling quote",
+            )
+        ],
+    )
+    event, public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+        owner_sequence=2,
+        prev_event_hash="sha256:missing-predecessor",
+    )
+    input_path = tmp_path / "events.jsonl"
+    input_path.write_text(event.model_dump_json() + "\n", encoding="utf-8")
+
+    result = import_memory_events(config=config, input_path=input_path, public_key=public_key)
+
+    assert result.events_imported == 1
+    assert result.trusted_events == 0
+    assert result.rejected_events == 0
+    assert result.unsupported_events == 0
+    conn = connect(config.database_path)
+    try:
+        events = fetch_all(conn, "select event_type, trust_status from signed_events")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert events == [{"event_type": "memory_card.created", "trust_status": "dangling"}]
+    assert cards == []
+
+
 def test_import_memory_events_preserves_signed_unknown_top_level_fields(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     private_key = Ed25519PrivateKey.generate()

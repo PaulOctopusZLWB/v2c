@@ -75,19 +75,7 @@ def create_chained_event(
 
 def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str) -> None:
     verified = verify_signed_event(event, public_key)
-    trust_status = trust_status_for_event(event=event, verified=verified)
-    if trust_status == "trusted" and _event_after_existing_rotation(conn, event=event):
-        trust_status = "rejected"
-    if trust_status == "trusted" and _invalid_successor_chain_start(conn, event=event):
-        trust_status = "rejected"
-    if trust_status == "trusted" and _unauthorized_known_card_successor(conn, event=event):
-        trust_status = "rejected"
-    if trust_status == "trusted" and _unauthorized_known_annotation_revocation(conn, event=event):
-        trust_status = "rejected"
-    if trust_status == "trusted" and not _payload_authority_matches_event(event):
-        trust_status = "rejected"
-    if trust_status == "trusted" and not _object_id_matches_payload(event):
-        trust_status = "rejected"
+    trust_status = _trusted_or_rejected_status(conn, event=event, public_key=public_key)
     event_hash = event.event_hash
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
@@ -130,24 +118,93 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
             1 if verified else 0,
         ),
     )
-    if event.event_type == "memory_card.created" and trust_status == "trusted":
+    if trust_status == "trusted":
+        _apply_trusted_event(conn, event=event)
+        _promote_dangling_successors(conn, predecessor=event)
+
+
+def _apply_trusted_event(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    if event.event_type == "memory_card.created":
         _upsert_memory_card(conn, event=event)
         _apply_trusted_card_successors(conn, card_id=event.object_id)
         _activate_dangling_annotations(conn, target_card_id=event.object_id)
-    if event.event_type == "memory_card.metadata_updated" and trust_status == "trusted":
+    if event.event_type == "memory_card.metadata_updated":
         _update_memory_card_metadata(conn, event=event)
-    if event.event_type == "memory_card.revoked" and trust_status == "trusted":
+    if event.event_type == "memory_card.revoked":
         _revoke_memory_card(conn, event=event)
-    if event.event_type == "memory_card.superseded" and trust_status == "trusted":
+    if event.event_type == "memory_card.superseded":
         _supersede_memory_card(conn, event=event)
-    if event.event_type == "memory_annotation.created" and trust_status == "trusted":
+    if event.event_type == "memory_annotation.created":
         _upsert_memory_annotation(conn, event=event)
-    if event.event_type == "memory_annotation.revoked" and trust_status == "trusted":
+    if event.event_type == "memory_annotation.revoked":
         _revoke_memory_annotation(conn, event=event)
-    if event.event_type == "identity_profile.published" and trust_status == "trusted":
+    if event.event_type == "identity_profile.published":
         _upsert_identity_profile(conn, event=event)
-    if event.event_type == "identity_key.rotated" and trust_status == "trusted":
+    if event.event_type == "identity_key.rotated":
         IdentityKeyRotation.model_validate(event.payload)
+
+
+def _promote_dangling_successors(conn: sqlite3.Connection, *, predecessor: SignedEvent) -> None:
+    rows = conn.execute(
+        """
+        select raw_event_json, public_key
+        from signed_events
+        where owner_id = ?
+          and owner_sequence = ?
+          and prev_event_hash = ?
+          and trust_status = 'dangling'
+        order by event_hash
+        """,
+        (predecessor.owner_id, predecessor.owner_sequence + 1, predecessor.event_hash),
+    ).fetchall()
+    for row in rows:
+        event = SignedEvent.model_validate_json(str(row["raw_event_json"]))
+        public_key = str(row["public_key"])
+        verified = verify_signed_event(event, public_key)
+        trust_status = _trusted_or_rejected_status(conn, event=event, public_key=public_key)
+        conn.execute(
+            "update signed_events set trust_status = ?, verified = ? where event_hash = ?",
+            (trust_status, 1 if verified else 0, event.event_hash),
+        )
+        if trust_status == "trusted":
+            _apply_trusted_event(conn, event=event)
+            _promote_dangling_successors(conn, predecessor=event)
+
+
+def _trusted_or_rejected_status(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str) -> str:
+    verified = verify_signed_event(event, public_key)
+    trust_status = trust_status_for_event(event=event, verified=verified)
+    if trust_status == "trusted" and _event_hash_chain_dangling(conn, event=event):
+        trust_status = "dangling"
+    if trust_status == "trusted" and _event_after_existing_rotation(conn, event=event):
+        trust_status = "rejected"
+    if trust_status == "trusted" and _invalid_successor_chain_start(conn, event=event):
+        trust_status = "rejected"
+    if trust_status == "trusted" and _unauthorized_known_card_successor(conn, event=event):
+        trust_status = "rejected"
+    if trust_status == "trusted" and _unauthorized_known_annotation_revocation(conn, event=event):
+        trust_status = "rejected"
+    if trust_status == "trusted" and not _payload_authority_matches_event(event):
+        trust_status = "rejected"
+    if trust_status == "trusted" and not _object_id_matches_payload(event):
+        trust_status = "rejected"
+    return trust_status
+
+
+def _event_hash_chain_dangling(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
+    if event.owner_sequence == 1:
+        return event.prev_event_hash is not None
+    previous = conn.execute(
+        """
+        select event_hash
+        from signed_events
+        where owner_id = ?
+          and owner_sequence = ?
+          and trust_status = 'trusted'
+        """,
+        (event.owner_id, event.owner_sequence - 1),
+    ).fetchone()
+    return previous is None or str(previous["event_hash"]) != event.prev_event_hash
 
 
 def _event_after_existing_rotation(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
