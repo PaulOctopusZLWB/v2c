@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
@@ -40,16 +41,18 @@ def publish_session_notes(*, config: AppConfig, day: str) -> PublishSessionNotes
     output_dir.mkdir(parents=True, exist_ok=True)
     for session in sessions:
         note_path = output_dir / f"{session['session_id']}.md"
-        note_path.write_text(_session_note_text(session), encoding="utf-8")
+        existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
+        note_path.write_text(_session_note_text(session, existing_text=existing_text), encoding="utf-8")
     return PublishSessionNotesResult(notes_written=len(sessions))
 
 
-def _session_note_text(session: dict[str, object]) -> str:
+def _session_note_text(session: dict[str, object], *, existing_text: str | None = None) -> str:
     session_id = str(session["session_id"])
     summary_json = session.get("summary_json")
     summary = json.loads(str(summary_json)) if summary_json else None
     title = summary["headline"] if summary else f"Session {session_id}"
     managed_lines = _summary_lines(session, summary)
+    user_notes = _existing_user_notes(existing_text)
     return "\n".join(
         [
             f"# {title}",
@@ -60,8 +63,22 @@ def _session_note_text(session: dict[str, object]) -> str:
             "",
             "## User Notes",
             "",
+            '<!-- pcn:user start type="user_notes" -->',
+            user_notes,
+            '<!-- pcn:user end type="user_notes" -->',
         ]
     )
+
+
+def _existing_user_notes(existing_text: str | None) -> str:
+    if not existing_text:
+        return ""
+    match = re.search(
+        r'<!-- pcn:user start type="user_notes" -->\n?(.*?)\n?<!-- pcn:user end type="user_notes" -->',
+        existing_text,
+        flags=re.DOTALL,
+    )
+    return match.group(1).rstrip("\n") if match else ""
 
 
 def _summary_lines(session: dict[str, object], summary: dict[str, object] | None) -> list[str]:

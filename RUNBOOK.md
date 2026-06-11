@@ -132,6 +132,7 @@ It also implements session derivation:
 5. `summaries` stores `session_summary.v1` JSON for each session.
 6. Long sessions are reduced through in-memory chunk summaries before the final `session_summary.v1` row is stored.
 7. `pcn publish-session-notes` writes `20_Conversations/YYYY-MM-DD/ses_*.md` notes without embedding full transcripts.
+8. Re-publishing session notes rewrites the managed summary block while preserving the `user_notes` block.
 
 It also implements active transcript semantics:
 

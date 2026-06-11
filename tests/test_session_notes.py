@@ -23,6 +23,28 @@ def test_publish_session_notes_creates_stable_session_note(tmp_path: Path) -> No
     assert "完整转写不进入 session note" in text
 
 
+def test_publish_session_notes_preserves_user_notes_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    publish_session_notes(config=config, day="2087-05-10")
+    note_path = config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md"
+    text = note_path.read_text(encoding="utf-8")
+    note_path.write_text(
+        text.replace(
+            "<!-- pcn:user end type=\"user_notes\" -->",
+            "用户保留的自由笔记。\n<!-- pcn:user end type=\"user_notes\" -->",
+        ),
+        encoding="utf-8",
+    )
+
+    publish_session_notes(config=config, day="2087-05-10")
+
+    republished = note_path.read_text(encoding="utf-8")
+    assert "用户保留的自由笔记。" in republished
+    assert republished.count("<!-- pcn:user start type=\"user_notes\" -->") == 1
+    assert republished.count("<!-- pcn:user end type=\"user_notes\" -->") == 1
+
+
 def _insert_session(database_path: Path) -> None:
     conn = connect(database_path)
     try:
