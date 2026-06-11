@@ -5,8 +5,35 @@ import json
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft, SessionSummary
 from personal_context_node.pipeline import run_first_milestone
 from personal_context_node.storage.sqlite import connect, fetch_all
+
+
+class RecordingMilestoneLLM:
+    def __init__(self) -> None:
+        self.daily_segments: list[dict[str, object]] = []
+
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
+        self.daily_segments = transcript_segments
+        return DailyContext(
+            day=day,
+            summary="subagent 模拟 LLM 日报",
+            todos=[],
+            facts=["subagent 只接收转写文本"],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="subagent 模拟生成的记忆候选。",
+                    claim_type="observation",
+                    confidence=0.88,
+                    evidence_source_ids=[str(transcript_segments[0]["evidence_id"])],
+                )
+            ],
+        )
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        raise AssertionError("first milestone should use daily LLM context only")
 
 
 def _write_tiny_wav(path: Path) -> None:
@@ -81,3 +108,61 @@ def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> N
     assert "# 2025-06-10 Daily Context" in text
     assert "## Memory Candidates" in text
     assert "TX02_MIC001_20870510_173550_orig.wav" in text
+
+
+def test_first_milestone_uses_injected_llm_subagent_for_e2e(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mounted_dji"
+    _write_tiny_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "PersonalContext")
+    llm = RecordingMilestoneLLM()
+
+    result = run_first_milestone(
+        config=config,
+        source_dir=source_dir,
+        confirm_first_candidate=True,
+        llm=llm,
+    )
+
+    assert result.memory_candidates == 1
+    assert llm.daily_segments
+    assert "wav" not in json.dumps(llm.daily_segments, ensure_ascii=False).lower()
+
+    db = connect(config.database_path)
+    try:
+        candidates = fetch_all(db, "select candidate_claim, source_type, prompt_version, status from memory_candidates")
+        summaries = fetch_all(db, "select content_json from summaries where summary_type = 'daily'")
+    finally:
+        db.close()
+
+    assert candidates == [
+        {
+            "candidate_claim": "subagent 模拟生成的记忆候选。",
+            "source_type": "llm_daily_context",
+            "prompt_version": "llm_port.candidate_extraction.v1",
+            "status": "confirmed",
+        }
+    ]
+    assert "subagent 模拟 LLM 日报" in summaries[0]["content_json"]
+
+
+def test_first_milestone_default_mock_keeps_one_candidate_per_recording_without_exposing_audio_names(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mounted_dji"
+    _write_tiny_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source_dir / "TX02_MIC002_20870510_174010_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "PersonalContext")
+
+    result = run_first_milestone(config=config, source_dir=source_dir, confirm_first_candidate=False)
+
+    assert result.imported_files == 2
+    assert result.transcript_segments == 2
+    assert result.memory_candidates == 2
+
+    db = connect(config.database_path)
+    try:
+        rows = fetch_all(db, "select candidate_claim, evidence_refs_json from memory_candidates order by candidate_claim")
+    finally:
+        db.close()
+
+    assert len(rows) == 2
+    assert rows[0]["candidate_claim"] != rows[1]["candidate_claim"]
+    assert ".wav" not in json.dumps(rows, ensure_ascii=False).lower()

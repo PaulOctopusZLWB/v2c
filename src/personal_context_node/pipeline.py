@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
+from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
+from personal_context_node.core.ports.llm import LLMPort
 from personal_context_node.core.protocols.memory import (
     MemoryCard,
     SubjectRef,
@@ -16,6 +18,8 @@ from personal_context_node.core.protocols.memory import (
 from personal_context_node.evidence_refs import hydrate_candidate_evidence_refs
 from personal_context_node.identity_keys import load_or_create_signing_key
 from personal_context_node.ingest import import_audio_files_in_conn
+from personal_context_node.llm_processing import generate_daily_context
+from personal_context_node.sessions import derive_sessions_for_day
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -33,14 +37,19 @@ def run_first_milestone(
     config: AppConfig,
     source_dir: Path,
     confirm_first_candidate: bool = False,
+    llm: LLMPort | None = None,
 ) -> FirstMilestoneResult:
+    llm_adapter = llm or RuleBasedLLMAdapter()
     conn = connect(config.database_path)
     try:
         initialize(conn)
         imported = import_audio_files_in_conn(conn, config=config, source_dir=source_dir)
         conn.commit()
         _mock_transcribe(conn)
-        _create_memory_candidates(conn)
+        days = _transcript_days(conn)
+        for day in days:
+            derive_sessions_for_day(config=config, day=day)
+            generate_daily_context(config=config, day=day, llm=llm_adapter)
         if confirm_first_candidate:
             _confirm_first_candidate(conn, config)
         _publish_daily_notes(conn, config)
@@ -54,6 +63,19 @@ def run_first_milestone(
         conn.close()
 
 
+def _transcript_days(conn: sqlite3.Connection) -> list[str]:
+    rows = fetch_all(
+        conn,
+        """
+        select distinct substr(af.recorded_at, 1, 10) as date_key
+        from transcript_segments ts
+        join audio_files af on af.audio_file_id = ts.audio_file_id
+        order by date_key
+        """,
+    )
+    return [str(row["date_key"]) for row in rows]
+
+
 def _mock_transcribe(conn: sqlite3.Connection) -> None:
     rows = fetch_all(
         conn,
@@ -64,8 +86,7 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
         order by local_raw_path
         """,
     )
-    for row in rows:
-        source_name = Path(row["local_raw_path"]).name
+    for index, row in enumerate(rows, start=1):
         segment_id = f"seg_{uuid4().hex}"
         chunk_id = f"chk_{segment_id}"
         absolute_start_at = _absolute_time(str(row["recorded_at"]), 0)
@@ -85,7 +106,7 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
                 3000,
                 absolute_start_at,
                 absolute_end_at,
-                f"模拟转写：{source_name} 需要生成本地上下文和记忆候选。",
+                f"模拟转写片段 {index}: 需要生成本地上下文和记忆候选。",
                 "zh",
                 "self",
                 f"ev_{segment_id}",
