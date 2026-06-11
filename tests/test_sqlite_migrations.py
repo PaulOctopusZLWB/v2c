@@ -28,6 +28,32 @@ def test_initialize_does_not_duplicate_schema_migration_rows(tmp_path) -> None:
     assert migrations == [{"version": 1, "name": "base_schema"}]
 
 
+def test_initialize_audio_files_indexes_source_identity_time_and_status(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        indexes = fetch_all(conn, "pragma index_list(audio_files)")
+        source_identity = fetch_all(conn, "pragma index_info(idx_audio_files_source_identity)")
+        recorded_at = fetch_all(conn, "pragma index_info(idx_audio_files_recorded_at)")
+        status = fetch_all(conn, "pragma index_info(idx_audio_files_status)")
+    finally:
+        conn.close()
+
+    index_names = {row["name"] for row in indexes}
+    assert "idx_audio_files_source_identity" in index_names
+    assert "idx_audio_files_recorded_at" in index_names
+    assert "idx_audio_files_status" in index_names
+    assert [row["name"] for row in source_identity] == [
+        "source_device",
+        "source_path",
+        "source_size_bytes",
+        "source_mtime_ns",
+    ]
+    assert [row["name"] for row in recorded_at] == ["recorded_at"]
+    assert [row["name"] for row in status] == ["status"]
+
+
 def test_initialize_memory_cards_schema_includes_source_type(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

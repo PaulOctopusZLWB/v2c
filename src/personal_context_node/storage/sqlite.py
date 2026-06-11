@@ -362,6 +362,14 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "audio_files", "source_size_bytes", "integer not null default 0")
     _ensure_column(conn, "audio_files", "source_mtime_ns", "integer not null default 0")
+    conn.execute(
+        """
+        create unique index if not exists idx_audio_files_source_identity
+        on audio_files(source_device, source_path, source_size_bytes, source_mtime_ns)
+        """
+    )
+    conn.execute("create index if not exists idx_audio_files_recorded_at on audio_files(recorded_at)")
+    conn.execute("create index if not exists idx_audio_files_status on audio_files(status)")
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
     _ensure_column(conn, "speaker_mappings", "person_id", "text")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
