@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import yaml
+
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
@@ -34,10 +36,11 @@ class ReviewAction:
     candidate_id: str
     action: str
     edited_claim: str | None = None
-    visibility: str | None = None
+    visibility: "ReviewYamlValue | None" = None
     parse_error: str | None = None
 
 
+ReviewYamlValue = str | dict[str, str]
 ALLOWED_REVIEW_ACTIONS = {"confirm", "edit", "reject", "defer", "exclude_from_memory"}
 
 
@@ -378,10 +381,10 @@ def _review_block_actions(text: str) -> list[ReviewAction]:
         except ReviewYamlError as error:
             actions.append(ReviewAction(candidate_id, "parse_error", parse_error=str(error)))
             continue
-        action = values.get("action", "pending")
+        action = _yaml_scalar(values.get("action", "pending"))
         if action == "pending":
             continue
-        edited_claim = values.get("claim", "") if action in {"confirm", "edit"} else None
+        edited_claim = _yaml_scalar(values.get("claim", "")) if action in {"confirm", "edit"} else None
         actions.append(ReviewAction(candidate_id, action, edited_claim, values.get("visibility")))
     return actions
 
@@ -390,28 +393,37 @@ class ReviewYamlError(ValueError):
     pass
 
 
-def _simple_yaml_block(markdown: str) -> dict[str, str]:
+def _simple_yaml_block(markdown: str) -> dict[str, ReviewYamlValue]:
     fence = re.search(r"```yaml\s*(?P<body>.*?)```", markdown, flags=re.DOTALL)
     body = fence.group("body") if fence else markdown
-    values: dict[str, str] = {}
-    for line in body.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if line.startswith((" ", "\t", "- ")):
-            continue
-        match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$", line)
-        if not match:
-            raise ReviewYamlError(f"invalid yaml line: {line.strip()}")
-        value = match.group(2).strip()
-        if not value:
-            values[match.group(1)] = value
-            continue
-        if value[0] in {"'", '"'} and (len(value) < 2 or value[-1] != value[0]):
-            raise ReviewYamlError(f"unterminated quoted scalar: {match.group(1)}")
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        values[match.group(1)] = value
-    return values
+    try:
+        loaded = yaml.safe_load(body)
+    except yaml.YAMLError as error:
+        raise ReviewYamlError(str(error)) from error
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ReviewYamlError("review yaml must be a mapping")
+    return {str(key): _review_yaml_value(value) for key, value in loaded.items()}
+
+
+def _review_yaml_value(value: object) -> ReviewYamlValue:
+    if isinstance(value, dict):
+        normalized: dict[str, str] = {}
+        for key, nested_value in value.items():
+            if isinstance(nested_value, (dict, list)):
+                raise ReviewYamlError(f"nested yaml value must be scalar: {key}")
+            normalized[str(key)] = "" if nested_value is None else str(nested_value)
+        return normalized
+    if isinstance(value, list):
+        raise ReviewYamlError("review yaml values must be scalar or object")
+    return "" if value is None else str(value)
+
+
+def _yaml_scalar(value: ReviewYamlValue) -> str:
+    if isinstance(value, dict):
+        return ""
+    return value
 
 
 def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | None]]) -> None:
@@ -426,7 +438,7 @@ def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | 
             return match.group(0)
         rendered_receipts.add(candidate_id)
         values = _simple_yaml_block(match.group("body"))
-        original_claim = values.get("claim", "")
+        original_claim = _yaml_scalar(values.get("claim", ""))
         return "\n".join(_receipt_lines(candidate_id, receipt, original_claim=original_claim, synced_at=synced_at))
 
     text = re.sub(
