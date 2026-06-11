@@ -16,7 +16,7 @@ from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
 from personal_context_node.jobs import job_status_rows, record_job_run
-from personal_context_node.launchd import write_launchd_plists
+from personal_context_node.launchd import install_launchd_plists, uninstall_launchd_plists, write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
@@ -303,6 +303,54 @@ def launchd_write_plists(
         dry_run=True,
     )
     typer.echo(f"plists_written={len(paths)} output_dir={output_dir}")
+
+
+@app.command(name="launchd-install")
+def launchd_install(
+    plist_dir: Path = typer.Option(Path("build/launchd"), help="Directory containing generated plist templates."),
+    launch_agents_dir: Path = typer.Option(
+        Path.home() / "Library" / "LaunchAgents",
+        help="User LaunchAgents directory.",
+    ),
+    uid: int | None = typer.Option(None, help="macOS user id. Defaults to current process uid."),
+    execute: bool = typer.Option(False, help="Actually copy files and call launchctl."),
+) -> None:
+    plist_paths = sorted(plist_dir.glob("com.personal-context-node.*.plist"))
+    result = install_launchd_plists(
+        plist_paths=plist_paths,
+        launch_agents_dir=launch_agents_dir,
+        uid=uid,
+        dry_run=not execute,
+    )
+    typer.echo(f"launchd_install dry_run={not execute} plists={len(result.installed_paths)}")
+    for command in result.commands:
+        typer.echo(" ".join(command))
+
+
+@app.command(name="launchd-uninstall")
+def launchd_uninstall(
+    launch_agents_dir: Path = typer.Option(
+        Path.home() / "Library" / "LaunchAgents",
+        help="User LaunchAgents directory.",
+    ),
+    uid: int | None = typer.Option(None, help="macOS user id. Defaults to current process uid."),
+    execute: bool = typer.Option(False, help="Actually call launchctl and remove files."),
+) -> None:
+    labels = [
+        "com.personal-context-node.ingest",
+        "com.personal-context-node.process",
+        "com.personal-context-node.daily",
+        "com.personal-context-node.archive",
+    ]
+    result = uninstall_launchd_plists(
+        labels=labels,
+        launch_agents_dir=launch_agents_dir,
+        uid=uid,
+        dry_run=not execute,
+    )
+    typer.echo(f"launchd_uninstall dry_run={not execute} plists={len(result.removed_paths)}")
+    for command in result.commands:
+        typer.echo(" ".join(command))
 
 
 @app.command(name="memory-verify")

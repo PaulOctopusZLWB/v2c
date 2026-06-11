@@ -58,11 +58,13 @@ It also implements the archive boundary:
 3. Hash verification before `audio_files.status` becomes `archived`.
 4. `pcn archive` for raw audio archive smoke tests.
 
-It also implements launchd template generation:
+It also implements launchd template generation and controlled install/uninstall:
 
 1. `pcn launchd-write-plists` writes ingest, process, daily, and archive plist templates.
 2. Templates use `uv run pcn ...` commands and per-job log paths.
-3. The command writes project files only; it does not call `launchctl` or install into `~/Library/LaunchAgents`.
+3. `pcn launchd-install` copies generated plist files into `~/Library/LaunchAgents` and runs `launchctl bootstrap` only when `--execute` is passed.
+4. `pcn launchd-uninstall` runs `launchctl bootout` and removes plist files only when `--execute` is passed.
+5. Both install commands default to dry-run and print the launchctl commands they would run.
 
 It also implements a minimal diagnostics boundary:
 
@@ -104,7 +106,7 @@ It also implements the daily/publish task DAG:
 5. `obsidian_publish` writes session notes, memory candidate review, and speaker review.
 6. Repeated `pcn process-run` calls can now advance VAD -> ASR -> session -> session summary -> daily -> Obsidian publish.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, session, context-generation, review, archive, and scheduling boundaries testable before model integration.
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, and rsync/restic-specific NAS behavior are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, session, context-generation, review, archive, scheduling, and protocol boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -339,6 +341,29 @@ Expected launchd template output:
 
 ```text
 plists_written=4 output_dir=.smoke-launchd
+```
+
+Dry-run install preview:
+
+```bash
+uv run pcn launchd-install \
+  --plist-dir .smoke-launchd \
+  --launch-agents-dir ~/Library/LaunchAgents
+```
+
+Actual install requires the explicit `--execute` flag:
+
+```bash
+uv run pcn launchd-install \
+  --plist-dir .smoke-launchd \
+  --launch-agents-dir ~/Library/LaunchAgents \
+  --execute
+```
+
+Uninstall also defaults to dry-run:
+
+```bash
+uv run pcn launchd-uninstall --launch-agents-dir ~/Library/LaunchAgents
 ```
 
 ## Docker Run

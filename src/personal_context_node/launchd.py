@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
 import plistlib
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -12,6 +16,18 @@ class LaunchdJob:
     start_interval_seconds: int
     working_directory: str
     log_directory: str
+
+
+@dataclass(frozen=True)
+class LaunchdInstallResult:
+    installed_paths: list[Path]
+    commands: list[list[str]]
+
+
+@dataclass(frozen=True)
+class LaunchdUninstallResult:
+    removed_paths: list[Path]
+    commands: list[list[str]]
 
 
 def render_plist(job: LaunchdJob) -> bytes:
@@ -120,5 +136,51 @@ def write_launchd_plists(
     return paths
 
 
+def install_launchd_plists(
+    *,
+    plist_paths: list[Path],
+    launch_agents_dir: Path,
+    uid: int | None = None,
+    runner: Callable[[list[str]], object] | None = None,
+    dry_run: bool = True,
+) -> LaunchdInstallResult:
+    uid = uid if uid is not None else os.getuid()
+    installed_paths = [launch_agents_dir / path.name for path in plist_paths]
+    commands = [["launchctl", "bootstrap", f"gui/{uid}", str(path)] for path in installed_paths]
+    if dry_run:
+        return LaunchdInstallResult(installed_paths=installed_paths, commands=commands)
+    launch_agents_dir.mkdir(parents=True, exist_ok=True)
+    run = runner or _run_command
+    for source, destination, command in zip(plist_paths, installed_paths, commands, strict=True):
+        shutil.copy2(source, destination)
+        run(command)
+    return LaunchdInstallResult(installed_paths=installed_paths, commands=commands)
+
+
+def uninstall_launchd_plists(
+    *,
+    labels: list[str],
+    launch_agents_dir: Path,
+    uid: int | None = None,
+    runner: Callable[[list[str]], object] | None = None,
+    dry_run: bool = True,
+) -> LaunchdUninstallResult:
+    uid = uid if uid is not None else os.getuid()
+    removed_paths = [launch_agents_dir / f"{label}.plist" for label in labels]
+    commands = [["launchctl", "bootout", f"gui/{uid}", str(path)] for path in removed_paths]
+    if dry_run:
+        return LaunchdUninstallResult(removed_paths=removed_paths, commands=commands)
+    run = runner or _run_command
+    for path, command in zip(removed_paths, commands, strict=True):
+        run(command)
+        if path.exists():
+            path.unlink()
+    return LaunchdUninstallResult(removed_paths=removed_paths, commands=commands)
+
+
 def _date_placeholder() -> str:
     return "TODAY"
+
+
+def _run_command(command: list[str]) -> None:
+    subprocess.run(command, check=True)
