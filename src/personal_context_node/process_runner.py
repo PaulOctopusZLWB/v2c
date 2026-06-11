@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
@@ -22,6 +23,23 @@ class ProcessOnceResult:
     task_id: str | None
     task_type: str | None
     status: str
+
+
+@dataclass(frozen=True)
+class PipelineEdge:
+    upstream_task_type: str
+    downstream_task_type: str
+    downstream_target_type: str
+    target_ids: Callable[[AppConfig, str], list[str]]
+
+
+PIPELINE = (
+    PipelineEdge("vad", "asr", "audio_chunk", lambda config, target_id: _chunk_ids_for_audio_file(config=config, audio_file_id=target_id)),
+    PipelineEdge("asr", "session_derive", "date_key", lambda config, target_id: _ready_session_derive_dates(config=config, chunk_id=target_id)),
+    PipelineEdge("session_derive", "summarize_session", "session", lambda config, target_id: _session_ids_for_day(config=config, day=target_id)),
+    PipelineEdge("summarize_session", "daily_generate", "date_key", lambda config, target_id: _ready_daily_generate_dates(config=config, session_id=target_id)),
+    PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _config, target_id: [target_id]),
+)
 
 
 def process_once(
@@ -52,34 +70,40 @@ def process_once(
         start_task(config=config, task_id=task.task_id)
         if task.task_type == "vad":
             preprocess_imported_audio(config=config, vad=vad, max_chunk_ms=max_chunk_ms, audio_file_id=task.target_id)
-            for chunk_id in _chunk_ids_for_audio_file(config=config, audio_file_id=task.target_id):
-                enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id=chunk_id)
         elif task.task_type == "asr":
             transcribe_pending_chunks(config=config, asr=asr, chunk_id=task.target_id)
-            for date_key in _ready_session_derive_dates(config=config, chunk_id=task.target_id):
-                enqueue_task(config=config, task_type="session_derive", target_type="date_key", target_id=date_key)
         elif task.task_type == "session_derive":
             derive_sessions_for_day(config=config, day=task.target_id)
-            for session_id in _session_ids_for_day(config=config, day=task.target_id):
-                enqueue_task(config=config, task_type="summarize_session", target_type="session", target_id=session_id)
         elif task.task_type == "summarize_session":
             summarize_session(config=config, session_id=task.target_id, llm=llm_adapter)
             succeed_task(config=config, task_id=task.task_id)
-            for date_key in _ready_daily_generate_dates(config=config, session_id=task.target_id):
-                enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id=date_key)
+            _enqueue_downstream_tasks(config=config, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
             return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
         elif task.task_type == "daily_generate":
             generate_daily_context(config=config, day=task.target_id, llm=llm_adapter)
-            enqueue_task(config=config, task_type="obsidian_publish", target_type="date_key", target_id=task.target_id)
         elif task.task_type == "obsidian_publish":
             publish_obsidian_day(config=config, day=task.target_id)
         else:
             raise ValueError(f"unsupported task type: {task.task_type}")
         succeed_task(config=config, task_id=task.task_id)
+        _enqueue_downstream_tasks(config=config, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
         return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
     except Exception as exc:
         fail_task(config=config, task_id=task.task_id, error=str(exc), terminal=False)
         raise
+
+
+def _enqueue_downstream_tasks(*, config: AppConfig, upstream_task_type: str, upstream_target_id: str) -> None:
+    for edge in PIPELINE:
+        if edge.upstream_task_type != upstream_task_type:
+            continue
+        for target_id in edge.target_ids(config, upstream_target_id):
+            enqueue_task(
+                config=config,
+                task_type=edge.downstream_task_type,
+                target_type=edge.downstream_target_type,
+                target_id=target_id,
+            )
 
 
 def _chunk_ids_for_audio_file(*, config: AppConfig, audio_file_id: str) -> list[str]:
