@@ -15,6 +15,10 @@ data_dir = "pcn-data"
 obsidian_vault = "/vault"
 nas_archive_root = "/nas"
 
+[identity]
+owner_did = "did:key:configured-owner"
+signing_key_path = "keys/configured_ed25519.key"
+
 [asr]
 backend = "command"
 command = "python scripts/funasr_wrapper.py"
@@ -41,6 +45,8 @@ edit_grace_seconds = 45
     assert config.data_dir == tmp_path / "config" / "pcn-data"
     assert config.obsidian_vault == Path("/vault")
     assert config.nas_archive_root == Path("/nas")
+    assert config.owner_did == "did:key:configured-owner"
+    assert config.signing_key_path == tmp_path / "config" / "keys" / "configured_ed25519.key"
     assert config.asr_backend == "command"
     assert config.asr_command == "python scripts/funasr_wrapper.py"
     assert config.vad_backend == "energy"

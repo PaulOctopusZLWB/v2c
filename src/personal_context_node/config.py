@@ -15,6 +15,7 @@ class AppConfig(BaseModel):
     nas_archive_root: Path = Path("/Volumes/NAS/PersonalContext")
     source_device: str = "DJI Mic 3"
     owner_did: str = "did:key:local-owner"
+    identity_key_path: Path | None = None
     vad_backend: str = "energy"
     vad_threshold: float = 0.03
     max_chunk_ms: int = 30_000
@@ -35,10 +36,13 @@ class AppConfig(BaseModel):
         asr = raw.get("asr", {})
         llm = raw.get("llm", {})
         obsidian = raw.get("obsidian", {})
+        identity = raw.get("identity", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
             "obsidian_vault": Path(paths.get("obsidian_vault", cls.model_fields["obsidian_vault"].default)),
             "nas_archive_root": Path(paths.get("nas_archive_root", cls.model_fields["nas_archive_root"].default)),
+            "owner_did": identity.get("owner_did", cls.model_fields["owner_did"].default),
+            "identity_key_path": _optional_resolve_path(base_dir, identity.get("signing_key_path")),
             "vad_backend": vad.get("backend", cls.model_fields["vad_backend"].default),
             "vad_threshold": vad.get("threshold", cls.model_fields["vad_threshold"].default),
             "max_chunk_ms": vad.get("max_chunk_ms", cls.model_fields["max_chunk_ms"].default),
@@ -63,6 +67,10 @@ class AppConfig(BaseModel):
 
     @property
     def signing_key_path(self) -> Path:
+        if self.identity_key_path is not None:
+            if self.identity_key_path.is_absolute():
+                return self.identity_key_path
+            return self.data_dir / self.identity_key_path
         return self.data_dir / "keys" / "pcn_ed25519.key"
 
 
@@ -71,3 +79,9 @@ def _resolve_path(base_dir: Path, value: object) -> Path:
     if path.is_absolute():
         return path
     return base_dir / path
+
+
+def _optional_resolve_path(base_dir: Path, value: object | None) -> Path | None:
+    if value is None:
+        return None
+    return _resolve_path(base_dir, value)

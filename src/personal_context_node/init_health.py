@@ -35,7 +35,7 @@ def initialize_workspace(*, config: AppConfig, config_path: Path | None = None) 
         config.data_dir / "db",
         config.data_dir / "audio" / "raw",
         config.data_dir / "audio" / "work",
-        config.data_dir / "keys",
+        config.signing_key_path.parent,
         config.data_dir / "logs",
     ]:
         directory.mkdir(parents=True, exist_ok=True)
@@ -83,6 +83,10 @@ def _config_text(config: AppConfig) -> str:
             f'data_dir = "{config.data_dir}"',
             f'obsidian_vault = "{config.obsidian_vault}"',
             f'nas_archive_root = "{config.nas_archive_root}"',
+            "",
+            "[identity]",
+            f'owner_did = "{config.owner_did}"',
+            f'signing_key_path = "{config.signing_key_path}"',
             "",
             "[vad]",
             f'backend = "{config.vad_backend}"',

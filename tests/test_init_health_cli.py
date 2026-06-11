@@ -38,6 +38,9 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert "send_person_names = true" in config_text
     assert "send_speaker_labels = true" in config_text
     assert "max_chunk_tokens = 6000" in config_text
+    assert "[identity]" in config_text
+    assert 'owner_did = "did:key:local-owner"' in config_text
+    assert 'signing_key_path = "' in config_text
 
 
 def test_health_cli_reports_ok_for_initialized_workspace(tmp_path) -> None:
