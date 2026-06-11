@@ -30,6 +30,17 @@ def test_publish_daily_note_preserves_user_notes_block(tmp_path: Path) -> None:
     assert republished.count('<!-- pcn:user end type="user_notes" -->') == 1
 
 
+def test_publish_daily_note_writes_markdown_frontmatter(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_daily_summary(config.database_path)
+
+    publish_daily_note(config=config, day="2087-05-10")
+
+    note_path = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
+    text = note_path.read_text(encoding="utf-8")
+    assert text.startswith("---\npcn_schema: markdown_note.v1\nnote_type: daily\ndate_key: 2087-05-10\n")
+
+
 def _insert_daily_summary(database_path: Path) -> None:
     conn = connect(database_path)
     try:

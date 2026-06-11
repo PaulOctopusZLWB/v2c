@@ -55,6 +55,14 @@ def _session_note_text(session: dict[str, object], *, existing_text: str | None 
     user_notes = _existing_user_notes(existing_text)
     return "\n".join(
         [
+            "---",
+            "pcn_schema: markdown_note.v1",
+            "note_type: session",
+            f"date_key: {session['date_key']}",
+            f"session_id: {session_id}",
+            "pcn_managed: true",
+            "---",
+            "",
             f"# {title}",
             "",
             f'<!-- pcn:managed start type="session_summary" session_id="{session_id}" -->',

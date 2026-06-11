@@ -86,6 +86,13 @@ def _daily_note_text(
     user_notes = _existing_user_notes(existing_text)
     return "\n".join(
         [
+            "---",
+            "pcn_schema: markdown_note.v1",
+            "note_type: daily",
+            f"date_key: {day}",
+            "pcn_managed: true",
+            "---",
+            "",
             f"# {day}",
             "",
             f'<!-- pcn:managed start type="daily_headline" date_key="{day}" -->',

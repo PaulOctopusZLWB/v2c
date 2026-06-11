@@ -17,6 +17,9 @@ def test_publish_session_notes_creates_stable_session_note(tmp_path: Path) -> No
     note_path = config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md"
     assert note_path.exists()
     text = note_path.read_text(encoding="utf-8")
+    assert text.startswith(
+        "---\npcn_schema: markdown_note.v1\nnote_type: session\ndate_key: 2087-05-10\nsession_id: ses_test\n"
+    )
     assert "# Session ses_test" in text
     assert "<!-- pcn:managed start type=\"session_summary\"" in text
     assert "segment_count: 2" in text
