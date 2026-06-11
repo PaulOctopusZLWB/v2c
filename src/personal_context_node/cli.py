@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 import typer
 
@@ -1041,12 +1042,14 @@ def _process_run(
         model_name=config.asr_model_name,
     )
     llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
+    run_id = f"run_{uuid4().hex}"
     result = record_job_run(
         config=config,
         job_name="process-run",
+        run_id=run_id,
         operation=lambda: process_once(
             config=config,
-            run_id="cli-process-run",
+            run_id=run_id,
             vad=vad,
             asr=asr,
             llm=llm,

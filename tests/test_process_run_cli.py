@@ -40,6 +40,16 @@ def test_process_run_cli_advances_vad_task(tmp_path: Path) -> None:
     assert "task_type=vad" in result.output
     assert "status=succeeded" in result.output
 
+    conn = connect(config.database_path)
+    try:
+        job_rows = fetch_all(conn, "select run_id from job_runs where job_name = 'process-run'")
+        task_rows = fetch_all(conn, "select claimed_by_run_id from tasks where task_type = 'vad'")
+    finally:
+        conn.close()
+
+    assert len(job_rows) == 1
+    assert task_rows == [{"claimed_by_run_id": job_rows[0]["run_id"]}]
+
 
 def test_process_run_group_cli_advances_vad_task(tmp_path: Path) -> None:
     source = tmp_path / "source"

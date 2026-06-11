@@ -20,8 +20,14 @@ class JobRunResult:
     result: object
 
 
-def record_job_run(*, config: AppConfig, job_name: str, operation: Callable[[], T]) -> JobRunResult:
-    run_id = f"run_{uuid4().hex}"
+def record_job_run(
+    *,
+    config: AppConfig,
+    job_name: str,
+    operation: Callable[[], T],
+    run_id: str | None = None,
+) -> JobRunResult:
+    run_id = run_id or f"run_{uuid4().hex}"
     conn = connect(config.database_path)
     try:
         initialize(conn)
