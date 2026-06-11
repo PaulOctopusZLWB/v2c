@@ -101,11 +101,10 @@ def _session_decision(item: object) -> SessionDecision:
         if field not in item:
             raise TerminalPortError(f"LLM session_summary decision missing required field: {field}")
     evidence_refs = item["evidence_refs"]
-    if not isinstance(evidence_refs, list):
-        raise TerminalPortError("LLM session_summary decision evidence_refs must be a list")
-    if not evidence_refs:
-        raise TerminalPortError("LLM session_summary decision evidence_refs must not be empty")
-    return SessionDecision(text=str(item["text"]), evidence_refs=[str(ref) for ref in evidence_refs])
+    return SessionDecision(
+        text=str(item["text"]),
+        evidence_refs=_evidence_refs(evidence_refs, "LLM session_summary decision evidence_refs"),
+    )
 
 
 def _session_todo(item: object) -> SessionTodo:
@@ -115,11 +114,11 @@ def _session_todo(item: object) -> SessionTodo:
         if field not in item:
             raise TerminalPortError(f"LLM session_summary todo missing required field: {field}")
     evidence_refs = item["evidence_refs"]
-    if not isinstance(evidence_refs, list):
-        raise TerminalPortError("LLM session_summary todo evidence_refs must be a list")
-    if not evidence_refs:
-        raise TerminalPortError("LLM session_summary todo evidence_refs must not be empty")
-    return SessionTodo(text=str(item["text"]), owner=str(item["owner"]), evidence_refs=[str(ref) for ref in evidence_refs])
+    return SessionTodo(
+        text=str(item["text"]),
+        owner=str(item["owner"]),
+        evidence_refs=_evidence_refs(evidence_refs, "LLM session_summary todo evidence_refs"),
+    )
 
 
 def _inference(item: object) -> object:
@@ -148,10 +147,7 @@ def _memory_candidate(item: object) -> MemoryCandidateDraft:
     if claim_type not in ALLOWED_CLAIM_TYPES:
         raise TerminalPortError(f"LLM memory_candidate has invalid claim_type: {claim_type}")
     evidence_source_ids = item.get("evidence_refs", item.get("evidence_source_ids"))
-    if not isinstance(evidence_source_ids, list):
-        raise TerminalPortError("LLM memory_candidate evidence_source_ids must be a list")
-    if not evidence_source_ids:
-        raise TerminalPortError("LLM memory_candidate evidence_refs must not be empty")
+    evidence_refs = _evidence_refs(evidence_source_ids, "LLM memory_candidate evidence_refs")
     try:
         confidence = float(item["confidence"])
     except (TypeError, ValueError) as exc:
@@ -160,9 +156,18 @@ def _memory_candidate(item: object) -> MemoryCandidateDraft:
         candidate_claim=str(item["candidate_claim"]),
         claim_type=claim_type,
         confidence=confidence,
-        evidence_source_ids=[str(source_id) for source_id in evidence_source_ids],
+        evidence_source_ids=evidence_refs,
         subject=_subject(item.get("subject")),
     )
+
+
+def _evidence_refs(value: object, label: str) -> list[str]:
+    if not isinstance(value, list):
+        raise TerminalPortError(f"{label} must be a list")
+    refs = [str(ref).strip() for ref in value]
+    if not refs or any(not ref for ref in refs):
+        raise TerminalPortError(f"{label} must not be empty")
+    return refs
 
 
 def _subject(item: object) -> dict[str, str]:
