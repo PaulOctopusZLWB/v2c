@@ -31,6 +31,7 @@ class ReviewAction:
     candidate_id: str
     action: str
     edited_claim: str | None = None
+    visibility: str | None = None
 
 
 def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
@@ -173,6 +174,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 source_type="confirmed_generated",
                 candidate_claim=row["candidate_claim"],
                 confidence=float(row["confidence"]) if row["confidence"] is not None else None,
+                visibility=review_action.visibility or {"type": "private"},
             )
             event, public_key = create_chained_event(
                 conn,
@@ -285,7 +287,7 @@ def _review_block_actions(text: str) -> list[ReviewAction]:
         if action == "pending":
             continue
         edited_claim = values.get("claim", "") if action in {"confirm", "edit"} else None
-        actions.append(ReviewAction(match.group("candidate_id"), action, edited_claim))
+        actions.append(ReviewAction(match.group("candidate_id"), action, edited_claim, values.get("visibility")))
     return actions
 
 

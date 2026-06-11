@@ -173,6 +173,55 @@ def test_sync_review_rewrites_review_block_as_managed_receipt(tmp_path: Path) ->
     assert "- [ ] cand_test_001" not in receipt
 
 
+def test_sync_review_normalizes_visibility_from_review_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="公开声明。")
+    _insert_candidate(config.database_path, candidate_id="cand_test_002", claim="未知可见性声明。")
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / "2087-05-10.md"
+    review_path.write_text(
+        """
+# 2087-05-10 Memory Candidate Review
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_001" version="1" -->
+```yaml
+action: confirm
+claim: "公开声明。"
+claim_type: requirement
+visibility: public
+```
+<!-- pcn:review end candidate_id="cand_test_001" -->
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_002" version="1" -->
+```yaml
+action: confirm
+claim: "未知可见性声明。"
+claim_type: requirement
+visibility: friends
+```
+<!-- pcn:review end candidate_id="cand_test_002" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 2
+    conn = connect(config.database_path)
+    try:
+        cards = fetch_all(conn, "select claim, visibility_json from memory_cards order by claim")
+        events = fetch_all(conn, "select payload_json from signed_events order by owner_sequence")
+    finally:
+        conn.close()
+    assert cards == [
+        {"claim": "公开声明。", "visibility_json": json.dumps({"type": "public"}, ensure_ascii=False, sort_keys=True)},
+        {"claim": "未知可见性声明。", "visibility_json": json.dumps({"type": "private"}, ensure_ascii=False, sort_keys=True)},
+    ]
+    assert json.loads(events[0]["payload_json"])["visibility"] == {"type": "public"}
+    assert json.loads(events[1]["payload_json"])["visibility"] == {"type": "private"}
+
+
 def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
