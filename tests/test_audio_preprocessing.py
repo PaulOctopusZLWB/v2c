@@ -52,7 +52,7 @@ def test_energy_vad_filters_silence_and_merges_nearby_speech(tmp_path: Path) -> 
     assert 1100 <= ranges[0].end_ms <= 1200
 
 
-def test_preprocess_imported_audio_persists_ranges_and_chunks(tmp_path: Path) -> None:
+def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path) -> None:
     source = tmp_path / "source"
     wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
     _write_wav(wav_path, [(0.20, 0), (0.50, 10_000), (0.20, 0)])
@@ -71,7 +71,7 @@ def test_preprocess_imported_audio_persists_ranges_and_chunks(tmp_path: Path) ->
 
     conn = connect(config.database_path)
     try:
-        ranges = fetch_all(conn, "select start_ms, end_ms from speech_ranges")
+        range_tables = fetch_all(conn, "select name from sqlite_master where type = 'table' and name = 'speech_ranges'")
         chunks = fetch_all(
             conn,
             """
@@ -87,11 +87,10 @@ def test_preprocess_imported_audio_persists_ranges_and_chunks(tmp_path: Path) ->
     finally:
         conn.close()
 
-    assert ranges[0]["start_ms"] >= 150
-    assert ranges[0]["end_ms"] <= 750
-    assert chunks[0]["source_start_ms"] == ranges[0]["start_ms"]
+    assert range_tables == []
+    assert chunks[0]["source_start_ms"] >= 150
     assert chunks[0]["start_ms"] == chunks[0]["source_start_ms"]
-    assert chunks[-1]["source_end_ms"] == ranges[0]["end_ms"]
+    assert chunks[-1]["source_end_ms"] <= 750
     assert chunks[-1]["end_ms"] == chunks[-1]["source_end_ms"]
     assert chunks[0]["local_work_path"] == chunks[0]["local_chunk_path"]
     expected_start = datetime.fromisoformat(audio[0]["recorded_at"]) + timedelta(milliseconds=chunks[0]["start_ms"])

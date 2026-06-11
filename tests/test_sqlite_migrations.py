@@ -171,6 +171,21 @@ def test_initialize_audio_chunks_schema_tracks_work_path_absolute_time_and_index
     assert [row["name"] for row in audio_time] == ["audio_file_id", "start_ms", "end_ms"]
 
 
+def test_initialize_does_not_persist_speech_ranges_table(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        tables = fetch_all(
+            conn,
+            "select name from sqlite_master where type = 'table' and name = 'speech_ranges'",
+        )
+    finally:
+        conn.close()
+
+    assert tables == []
+
+
 def test_initialize_memory_cards_schema_includes_source_type(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

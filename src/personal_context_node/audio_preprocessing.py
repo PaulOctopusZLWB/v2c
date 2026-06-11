@@ -30,7 +30,7 @@ def preprocess_imported_audio(
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        where_clause = "where audio_file_id not in (select distinct audio_file_id from speech_ranges)"
+        where_clause = "where audio_file_id not in (select distinct audio_file_id from audio_chunks)"
         params: tuple[object, ...] = ()
         if audio_file_id is not None:
             where_clause += " and audio_file_id = ?"
@@ -51,21 +51,6 @@ def preprocess_imported_audio(
             local_raw_path = Path(audio_file["local_raw_path"])
             speech_ranges = vad.detect(local_raw_path)
             for speech_range in speech_ranges:
-                range_id = f"rng_{uuid4().hex}"
-                conn.execute(
-                    """
-                    insert into speech_ranges (
-                      speech_range_id, audio_file_id, start_ms, end_ms, vad_backend
-                    ) values (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        range_id,
-                        audio_file["audio_file_id"],
-                        speech_range.start_ms,
-                        speech_range.end_ms,
-                        vad.__class__.__name__,
-                    ),
-                )
                 ranges_created += 1
                 for chunk_range in _split_range(speech_range, max_chunk_ms=max_chunk_ms):
                     created_at = datetime.now(timezone.utc).isoformat()
@@ -81,16 +66,15 @@ def preprocess_imported_audio(
                     conn.execute(
                         """
                         insert into audio_chunks (
-                          chunk_id, audio_file_id, speech_range_id, local_work_path,
+                          chunk_id, audio_file_id, local_work_path,
                           start_ms, end_ms, absolute_start_at, absolute_end_at,
                           vad_backend, vad_config_json, created_at,
                           source_start_ms, source_end_ms, local_chunk_path, status
-                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             f"chk_{uuid4().hex}",
                             audio_file["audio_file_id"],
-                            range_id,
                             str(chunk_path),
                             chunk_range.start_ms,
                             chunk_range.end_ms,

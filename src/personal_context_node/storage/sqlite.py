@@ -57,19 +57,9 @@ on transcript_segments(session_id, absolute_start_at);
 create index if not exists idx_segments_audio_time
 on transcript_segments(audio_file_id, start_ms, end_ms);
 
-create table if not exists speech_ranges (
-  speech_range_id text primary key,
-  audio_file_id text not null references audio_files(audio_file_id),
-  start_ms integer not null,
-  end_ms integer not null,
-  vad_backend text not null,
-  unique(audio_file_id, start_ms, end_ms, vad_backend)
-);
-
 create table if not exists audio_chunks (
   chunk_id text primary key,
   audio_file_id text not null references audio_files(audio_file_id),
-  speech_range_id text not null references speech_ranges(speech_range_id),
   local_work_path text not null default '',
   start_ms integer not null default 0,
   end_ms integer not null default 0,
@@ -430,6 +420,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.execute("update audio_chunks set local_work_path = local_chunk_path where local_work_path = ''")
     conn.execute("update audio_chunks set start_ms = source_start_ms where start_ms = 0")
     conn.execute("update audio_chunks set end_ms = source_end_ms where end_ms = 0")
+    _remove_speech_ranges_storage(conn)
     conn.execute("create index if not exists idx_chunks_audio_time on audio_chunks(audio_file_id, start_ms, end_ms)")
     _ensure_column(conn, "speaker_mappings", "speaker_mapping_id", "text")
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
@@ -543,3 +534,47 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"alter table {table} add column {column} {definition}")
+
+
+def _remove_speech_ranges_storage(conn: sqlite3.Connection) -> None:
+    audio_chunk_columns = {row["name"] for row in conn.execute("pragma table_info(audio_chunks)").fetchall()}
+    if "speech_range_id" in audio_chunk_columns:
+        conn.execute("drop index if exists idx_chunks_audio_time")
+        conn.execute("alter table audio_chunks rename to audio_chunks_with_ranges")
+        conn.execute(
+            """
+            create table audio_chunks (
+              chunk_id text primary key,
+              audio_file_id text not null references audio_files(audio_file_id),
+              local_work_path text not null default '',
+              start_ms integer not null default 0,
+              end_ms integer not null default 0,
+              absolute_start_at text,
+              absolute_end_at text,
+              vad_backend text,
+              vad_config_json text,
+              created_at text not null default '',
+              source_start_ms integer not null,
+              source_end_ms integer not null,
+              local_chunk_path text not null,
+              status text not null,
+              unique(audio_file_id, source_start_ms, source_end_ms)
+            )
+            """
+        )
+        conn.execute(
+            """
+            insert into audio_chunks (
+              chunk_id, audio_file_id, local_work_path, start_ms, end_ms,
+              absolute_start_at, absolute_end_at, vad_backend, vad_config_json,
+              created_at, source_start_ms, source_end_ms, local_chunk_path, status
+            )
+            select
+              chunk_id, audio_file_id, local_work_path, start_ms, end_ms,
+              absolute_start_at, absolute_end_at, vad_backend, vad_config_json,
+              created_at, source_start_ms, source_end_ms, local_chunk_path, status
+            from audio_chunks_with_ranges
+            """
+        )
+        conn.execute("drop table audio_chunks_with_ranges")
+    conn.execute("drop table if exists speech_ranges")
