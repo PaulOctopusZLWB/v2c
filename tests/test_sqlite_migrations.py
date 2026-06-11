@@ -72,6 +72,29 @@ def test_initialize_sessions_schema_tracks_primary_person_and_date_index(tmp_pat
     assert [row["name"] for row in index_columns] == ["date_key", "started_at"]
 
 
+def test_initialize_transcript_segments_schema_tracks_absolute_time_and_indexes(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(transcript_segments)")
+        indexes = fetch_all(conn, "pragma index_list(transcript_segments)")
+        session_time = fetch_all(conn, "pragma index_info(idx_segments_session_time)")
+        audio_time = fetch_all(conn, "pragma index_info(idx_segments_audio_time)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["absolute_start_at"]["type"].lower() == "text"
+    assert column_by_name["absolute_end_at"]["type"].lower() == "text"
+    assert column_by_name["decode_config_json"]["type"].lower() == "text"
+    index_names = {row["name"] for row in indexes}
+    assert "idx_segments_session_time" in index_names
+    assert "idx_segments_audio_time" in index_names
+    assert [row["name"] for row in session_time] == ["session_id", "absolute_start_at"]
+    assert [row["name"] for row in audio_time] == ["audio_file_id", "start_ms", "end_ms"]
+
+
 def test_initialize_memory_cards_schema_includes_source_type(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

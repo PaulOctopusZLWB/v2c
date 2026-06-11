@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -30,8 +30,9 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
         chunks = fetch_all(
             conn,
             f"""
-            select ac.chunk_id, ac.audio_file_id, ac.source_start_ms, ac.source_end_ms, ac.local_chunk_path
+            select ac.chunk_id, ac.audio_file_id, ac.source_start_ms, ac.source_end_ms, ac.local_chunk_path, af.recorded_at
             from audio_chunks ac
+            join audio_files af on af.audio_file_id = ac.audio_file_id
             {where_clause}
             order by ac.source_start_ms
             """,
@@ -48,13 +49,16 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
             for segment in asr.transcribe(chunk_path):
                 absolute_start_ms = chunk["source_start_ms"] + segment.start_ms
                 absolute_end_ms = min(chunk["source_start_ms"] + segment.end_ms, chunk["source_end_ms"])
+                absolute_start_at = _absolute_time(str(chunk["recorded_at"]), int(absolute_start_ms))
+                absolute_end_at = _absolute_time(str(chunk["recorded_at"]), int(absolute_end_ms))
                 conn.execute(
                     """
                     insert into transcript_segments (
-                      segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+                      segment_id, audio_file_id, chunk_id, start_ms, end_ms,
+                      absolute_start_at, absolute_end_at, text,
                       language, speaker, evidence_id, confidence, asr_backend,
                       model_name, model_version, asr_run_id, is_active, created_at
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         f"seg_{uuid4().hex}",
@@ -62,6 +66,8 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                         chunk["chunk_id"],
                         absolute_start_ms,
                         absolute_end_ms,
+                        absolute_start_at,
+                        absolute_end_at,
                         segment.text,
                         segment.language,
                         "self",
@@ -87,10 +93,13 @@ def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
     existing = {row["name"] for row in conn.execute("pragma table_info(transcript_segments)").fetchall()}
     migrations = {
         "chunk_id": "alter table transcript_segments add column chunk_id text",
+        "absolute_start_at": "alter table transcript_segments add column absolute_start_at text",
+        "absolute_end_at": "alter table transcript_segments add column absolute_end_at text",
         "confidence": "alter table transcript_segments add column confidence real",
         "asr_backend": "alter table transcript_segments add column asr_backend text not null default 'mock_first_milestone'",
         "model_name": "alter table transcript_segments add column model_name text not null default 'mock'",
         "model_version": "alter table transcript_segments add column model_version text not null default 'mock'",
+        "decode_config_json": "alter table transcript_segments add column decode_config_json text",
         "asr_run_id": "alter table transcript_segments add column asr_run_id text",
         "is_active": "alter table transcript_segments add column is_active integer not null default 1",
         "created_at": "alter table transcript_segments add column created_at text not null default ''",
@@ -98,4 +107,10 @@ def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
     for column, sql in migrations.items():
         if column not in existing:
             conn.execute(sql)
+    conn.execute("create index if not exists idx_segments_session_time on transcript_segments(session_id, absolute_start_at)")
+    conn.execute("create index if not exists idx_segments_audio_time on transcript_segments(audio_file_id, start_ms, end_ms)")
     conn.commit()
+
+
+def _absolute_time(recorded_at: str, offset_ms: int) -> str:
+    return (datetime.fromisoformat(recorded_at) + timedelta(milliseconds=offset_ms)).isoformat()

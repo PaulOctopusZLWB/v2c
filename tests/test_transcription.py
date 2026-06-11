@@ -47,13 +47,14 @@ def test_transcribe_pending_chunks_persists_segments_with_chunk_evidence(tmp_pat
         rows = fetch_all(
             conn,
             """
-            select chunk_id, start_ms, end_ms, text, speaker, asr_backend, model_name
+            select chunk_id, start_ms, end_ms, absolute_start_at, absolute_end_at, text, speaker, asr_backend, model_name
             from transcript_segments
             where asr_backend = 'MockASRAdapter'
             order by start_ms
             """,
         )
         chunks = fetch_all(conn, "select chunk_id, source_start_ms, source_end_ms, status from audio_chunks order by source_start_ms")
+        audio = fetch_all(conn, "select recorded_at from audio_files")
     finally:
         conn.close()
 
@@ -61,5 +62,7 @@ def test_transcribe_pending_chunks_persists_segments_with_chunk_evidence(tmp_pat
     assert [row["speaker"] for row in rows] == ["self", "self", "self"]
     assert rows[0]["chunk_id"] == chunks[0]["chunk_id"]
     assert rows[0]["start_ms"] == chunks[0]["source_start_ms"]
+    assert rows[0]["absolute_start_at"] == audio[0]["recorded_at"]
     assert rows[-1]["end_ms"] == chunks[-1]["source_end_ms"]
+    assert rows[-1]["absolute_end_at"]
     assert all(chunk["status"] == "transcribed" for chunk in chunks)

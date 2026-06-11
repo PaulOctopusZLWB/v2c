@@ -34,6 +34,8 @@ create table if not exists transcript_segments (
   session_id text,
   start_ms integer not null,
   end_ms integer not null,
+  absolute_start_at text,
+  absolute_end_at text,
   text text not null,
   language text not null,
   speaker text not null,
@@ -42,10 +44,17 @@ create table if not exists transcript_segments (
   asr_backend text not null default 'mock_first_milestone',
   model_name text not null default 'mock',
   model_version text not null default 'mock',
+  decode_config_json text,
   asr_run_id text,
   is_active integer not null default 1,
   created_at text not null default ''
 );
+
+create index if not exists idx_segments_session_time
+on transcript_segments(session_id, absolute_start_at);
+
+create index if not exists idx_segments_audio_time
+on transcript_segments(audio_file_id, start_ms, end_ms);
 
 create table if not exists speech_ranges (
   speech_range_id text primary key,
@@ -374,6 +383,11 @@ def initialize(conn: sqlite3.Connection) -> None:
     )
     conn.execute("create index if not exists idx_audio_files_recorded_at on audio_files(recorded_at)")
     conn.execute("create index if not exists idx_audio_files_status on audio_files(status)")
+    _ensure_column(conn, "transcript_segments", "absolute_start_at", "text")
+    _ensure_column(conn, "transcript_segments", "absolute_end_at", "text")
+    _ensure_column(conn, "transcript_segments", "decode_config_json", "text")
+    conn.execute("create index if not exists idx_segments_session_time on transcript_segments(session_id, absolute_start_at)")
+    conn.execute("create index if not exists idx_segments_audio_time on transcript_segments(audio_file_id, start_ms, end_ms)")
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
     _ensure_column(conn, "speaker_mappings", "person_id", "text")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
