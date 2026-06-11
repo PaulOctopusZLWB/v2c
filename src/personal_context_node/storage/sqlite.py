@@ -196,6 +196,15 @@ create table if not exists job_runs (
   error text
 );
 
+create table if not exists sync_logs (
+  sync_log_id text primary key,
+  source text not null,
+  target_id text,
+  status text not null,
+  message text not null,
+  created_at text not null
+);
+
 create table if not exists tasks (
   task_id text primary key,
   task_type text not null,

@@ -50,11 +50,12 @@ It also implements the human review boundary:
 4. Checked candidate lines ending with `| edit: ...` create confirmed memory cards using the edited claim while preserving the original `candidate_claim`.
 5. Checked candidate lines ending with `| reject` update local status to `rejected` without creating signed events.
 6. Checked candidate lines ending with `| defer` are consumed without changing candidate status or creating signed events.
-7. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
-8. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
-9. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
-10. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
-11. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
+7. Empty edit claims are rejected with a `sync_logs` failure row and no side effects.
+8. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
+9. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
+10. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
+11. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
+12. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
 
 It also implements the speaker review boundary:
 

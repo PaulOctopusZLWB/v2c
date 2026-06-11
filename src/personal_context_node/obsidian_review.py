@@ -77,6 +77,15 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         for review_action in checked_actions:
             candidate_id = review_action.candidate_id
             action = review_action.action
+            if action == "edit" and not review_action.edited_claim:
+                _insert_sync_log(
+                    conn,
+                    source="memory_candidate_review",
+                    target_id=candidate_id,
+                    status="failed",
+                    message=f"empty edit claim: {candidate_id}",
+                )
+                continue
             row = conn.execute(
                 """
                 select candidate_id, candidate_claim, claim_type, subject_json, evidence_refs_json, status
@@ -145,6 +154,16 @@ def _checked_candidate_actions(path: Path) -> list[ReviewAction]:
         else:
             checked.append(ReviewAction(match.group(1), action_text or "confirm"))
     return checked
+
+
+def _insert_sync_log(conn, *, source: str, target_id: str, status: str, message: str) -> None:
+    conn.execute(
+        """
+        insert into sync_logs (sync_log_id, source, target_id, status, message, created_at)
+        values (?, ?, ?, ?, ?, ?)
+        """,
+        (f"sync_{uuid4().hex}", source, target_id, status, message, datetime.now(timezone.utc).isoformat()),
+    )
 
 
 def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | None]]) -> None:
