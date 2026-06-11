@@ -34,7 +34,7 @@ class CommandLLMAdapter:
             summary=str(payload["summary"]),
             todos=[str(item) for item in payload["todos"]],
             facts=[str(item) for item in payload["facts"]],
-            inferences=[str(item) for item in payload["inferences"]],
+            inferences=[_inference(item) for item in payload["inferences"]],
             memory_candidates=[_memory_candidate(item) for item in payload["memory_candidates"]],
         )
 
@@ -116,6 +116,20 @@ def _session_todo(item: object) -> SessionTodo:
     if not isinstance(evidence_refs, list):
         raise TerminalPortError("LLM session_summary todo evidence_refs must be a list")
     return SessionTodo(text=str(item["text"]), owner=str(item["owner"]), evidence_refs=[str(ref) for ref in evidence_refs])
+
+
+def _inference(item: object) -> object:
+    if isinstance(item, dict):
+        if "text" not in item:
+            raise TerminalPortError("LLM inference missing required field: text")
+        if "confidence" not in item:
+            raise TerminalPortError("LLM inference missing required field: confidence")
+        try:
+            confidence = float(item["confidence"])
+        except (TypeError, ValueError) as exc:
+            raise TerminalPortError("LLM inference confidence must be numeric") from exc
+        return {"type": str(item.get("type", "inference")), "text": str(item["text"]), "confidence": confidence}
+    return str(item)
 
 
 def _memory_candidate(item: object) -> MemoryCandidateDraft:

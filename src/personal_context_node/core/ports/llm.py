@@ -30,7 +30,7 @@ class DailyContext:
     summary: str
     todos: list[str]
     facts: list[str]
-    inferences: list[str]
+    inferences: list[object]
     memory_candidates: list[MemoryCandidateDraft]
 
 

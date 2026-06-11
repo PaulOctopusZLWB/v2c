@@ -87,7 +87,7 @@ def _persist_legacy_summary(conn: sqlite3.Connection, context: DailyContext) -> 
             context.summary,
             json.dumps(context.todos, ensure_ascii=False, sort_keys=True),
             json.dumps(context.facts, ensure_ascii=False, sort_keys=True),
-            json.dumps(context.inferences, ensure_ascii=False, sort_keys=True),
+            json.dumps(_inference_items(context.inferences), ensure_ascii=False, sort_keys=True),
             "llm_port.daily_context.v1",
             datetime.now(timezone.utc).isoformat(),
         ),
@@ -107,6 +107,7 @@ def _persist_formal_summary(
         "headline": context.summary,
         "summary": context.summary,
         "highlights": context.facts,
+        "inferences": _inference_items(context.inferences),
         "decisions_rollup": _decision_rollup(context=context, segments=segments),
         "todos_rollup": _todo_rollup(context=context, segments=segments),
     }
@@ -174,6 +175,21 @@ def _todo_rollup(*, context: DailyContext, segments: list[dict[str, object]]) ->
             }
         )
     return rollup
+
+
+def _inference_items(inferences: list[object]) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for inference in inferences:
+        if isinstance(inference, dict):
+            text = str(inference.get("text") or inference.get("claim") or "").strip()
+            confidence = float(inference.get("confidence", 0.5))
+        else:
+            text = str(inference).strip()
+            confidence = 0.5
+        if not text:
+            continue
+        items.append({"type": "inference", "text": text, "confidence": confidence})
+    return items
 
 
 def _segment_for_text(text: str, segments: list[dict[str, object]]) -> dict[str, object]:

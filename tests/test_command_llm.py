@@ -88,6 +88,28 @@ print(json.dumps({
     assert context.memory_candidates[0].evidence_source_ids == ["ev_1"]
 
 
+def test_command_llm_adapter_preserves_structured_inferences(tmp_path: Path) -> None:
+    script = tmp_path / "fake_llm.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "命令式 LLM 摘要",
+  "todos": [],
+  "facts": [],
+  "inferences": [{"type": "inference", "text": "用户关注证据链", "confidence": 0.72}],
+  "memory_candidates": []
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    context = adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+
+    assert context.inferences == [{"type": "inference", "text": "用户关注证据链", "confidence": 0.72}]
+
+
 def test_command_llm_adapter_generates_session_summary(tmp_path: Path) -> None:
     capture = tmp_path / "session_input.json"
     script = tmp_path / "fake_session_llm.py"

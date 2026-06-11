@@ -251,6 +251,13 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
 
     assert summaries[0]["day"] == "2087-05-10"
     assert "本地上下文系统" in summaries[0]["summary"]
+    assert json.loads(summaries[0]["inferences_json"]) == [
+        {
+            "type": "inference",
+            "text": "用户关注可追溯证据链",
+            "confidence": 0.5,
+        }
+    ]
     assert formal_summaries[0]["target_type"] == "date_key"
     assert formal_summaries[0]["target_id"] == "2087-05-10"
     assert formal_summaries[0]["prompt_version"] == "llm_port.daily_summary.v1"
