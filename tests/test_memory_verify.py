@@ -221,6 +221,49 @@ def test_memory_verify_rejects_owner_sequence_forks(tmp_path: Path) -> None:
     assert cards == []
 
 
+def test_memory_verify_rejects_object_version_conflicts(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        first = _memory_card("mem_test_001", "Use signed events.")
+        second = _memory_card("mem_test_001", "Use a different claim for the same object version.")
+        first_event, first_public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=first,
+            signer_did="did:key:test-owner",
+            owner_sequence=1,
+            object_version=1,
+        )
+        second_event, second_public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=second,
+            signer_did="did:key:test-owner",
+            owner_sequence=2,
+            prev_event_hash=first_event.event_hash,
+            object_version=1,
+        )
+        _insert_unverified_event(conn, event=first_event, public_key=first_public_key)
+        _insert_unverified_event(conn, event=second_event, public_key=second_public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 2
+    assert result.valid_events == 0
+    assert result.invalid_events == 2
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select trust_status from signed_events order by event_hash")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert rows == [{"trust_status": "rejected"}, {"trust_status": "rejected"}]
+    assert cards == []
+
+
 def _insert_candidate(
     database_path: Path,
     *,

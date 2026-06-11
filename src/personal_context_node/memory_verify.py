@@ -57,6 +57,7 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         previous_sequence_by_owner: dict[str, int] = {}
         closed_owner_sequence: dict[str, int] = {}
         forked_event_hashes = _forked_event_hashes(rows)
+        forked_event_hashes |= _object_version_conflict_hashes(rows)
         successor_rotations = _successor_rotation_index(rows)
         card_owner_by_id = _card_owner_index(rows, forked_event_hashes=forked_event_hashes)
         trusted_successor_profiles: set[str] = set()
@@ -206,6 +207,19 @@ def _forked_event_hashes(rows: list[dict[str, object]]) -> set[str]:
         event_hash
         for row in rows
         if len(hashes_by_owner_sequence[(str(row["owner_id"]), int(row["owner_sequence"]))]) > 1
+        for event_hash in [_row_event_hash(row)]
+    }
+
+
+def _object_version_conflict_hashes(rows: list[dict[str, object]]) -> set[str]:
+    hashes_by_object_version: dict[tuple[str, int], set[str]] = {}
+    for row in rows:
+        key = (str(row["object_id"]), int(row["object_version"]))
+        hashes_by_object_version.setdefault(key, set()).add(_row_event_hash(row))
+    return {
+        event_hash
+        for row in rows
+        if len(hashes_by_object_version[(str(row["object_id"]), int(row["object_version"]))]) > 1
         for event_hash in [_row_event_hash(row)]
     }
 
