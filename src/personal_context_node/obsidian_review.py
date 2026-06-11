@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from uuid import uuid4
+
+from personal_context_node.config import AppConfig
+from personal_context_node.core.protocols.memory import (
+    EvidenceRef,
+    MemoryCard,
+    SubjectRef,
+    create_signed_event,
+    verify_signed_event,
+)
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+
+@dataclass(frozen=True)
+class ConfirmCandidatesResult:
+    candidates_confirmed: int
+    signed_events_created: int
+
+
+def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            """
+            select candidate_id, candidate_claim, claim_type, confidence
+            from memory_candidates
+            where status = 'pending_review'
+            order by candidate_id
+            """,
+        )
+    finally:
+        conn.close()
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / f"{day}.md"
+    lines = [
+        f"# {day} Memory Candidate Review",
+        "",
+        "<!-- pcn-review-format: memory-candidates.v1 -->",
+        "",
+    ]
+    for row in rows:
+        lines.append(f"- [ ] {row['candidate_id']} | {row['claim_type']} | {row['candidate_claim']}")
+    review_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return review_path
+
+
+def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandidatesResult:
+    review_path = config.obsidian_vault / "30_Memory_Candidates" / f"{day}.md"
+    checked_ids = _checked_candidate_ids(review_path)
+    if not checked_ids:
+        return ConfirmCandidatesResult(candidates_confirmed=0, signed_events_created=0)
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        confirmed = 0
+        events = 0
+        for candidate_id in checked_ids:
+            row = conn.execute(
+                """
+                select candidate_id, candidate_claim, claim_type, subject_json, evidence_refs_json, status
+                from memory_candidates
+                where candidate_id = ?
+                """,
+                (candidate_id,),
+            ).fetchone()
+            if row is None or row["status"] != "pending_review":
+                continue
+            card = MemoryCard(
+                card_id=f"mem_{uuid4().hex}",
+                owner_did=config.owner_did,
+                claim_type=row["claim_type"],
+                claim=row["candidate_claim"],
+                subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
+                evidence_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs_json"])],
+                candidate_claim=row["candidate_claim"],
+            )
+            event, public_key = create_signed_event(
+                event_type="memory_card.confirmed.v1",
+                payload=card,
+                signer_did=config.owner_did,
+            )
+            conn.execute(
+                """
+                insert into signed_events (
+                  event_id, event_type, signer_did, payload_json, signature, public_key, verified
+                ) values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.event_type,
+                    event.signer_did,
+                    json.dumps(event.payload, ensure_ascii=False, sort_keys=True),
+                    event.signature,
+                    public_key,
+                    1 if verify_signed_event(event, public_key) else 0,
+                ),
+            )
+            conn.execute(
+                "update memory_candidates set status = 'confirmed', memory_card_id = ? where candidate_id = ?",
+                (card.card_id, candidate_id),
+            )
+            confirmed += 1
+            events += 1
+        conn.commit()
+        return ConfirmCandidatesResult(candidates_confirmed=confirmed, signed_events_created=events)
+    finally:
+        conn.close()
+
+
+def _checked_candidate_ids(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    checked: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|", line)
+        if match:
+            checked.append(match.group(1))
+    return checked

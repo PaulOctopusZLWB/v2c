@@ -10,6 +10,7 @@ from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.llm_processing import generate_daily_context
+from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.transcription import transcribe_pending_chunks
 
@@ -114,6 +115,41 @@ def summarize(
             [
                 f"summaries_created={result.summaries_created}",
                 f"memory_candidates_created={result.memory_candidates_created}",
+            ]
+        )
+    )
+
+
+@app.command()
+def publish_review(
+    day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    review_path = publish_candidate_review(config=config, day=day)
+    typer.echo(f"review_path={review_path}")
+
+
+@app.command()
+def confirm_review(
+    day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = confirm_checked_candidates(config=config, day=day)
+    typer.echo(
+        " ".join(
+            [
+                f"candidates_confirmed={result.candidates_confirmed}",
+                f"signed_events_created={result.signed_events_created}",
             ]
         )
     )

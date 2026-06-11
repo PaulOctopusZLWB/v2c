@@ -33,7 +33,13 @@ It also implements the LLM text-processing boundary before provider integration:
 3. `daily_summaries` storage for summary, todos, facts, and inferences.
 4. `pcn summarize` to generate daily context and memory candidates from transcript text only.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, and context-generation boundaries testable before model integration.
+It also implements the human review boundary:
+
+1. `pcn publish-review` writes pending memory candidates into `30_Memory_Candidates/YYYY-MM-DD.md`.
+2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
+3. `pcn confirm-review` parses checked candidates, creates confirmed memory cards, and emits signed events.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, and human-confirmation boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -55,6 +61,10 @@ uv run pcn transcribe \
   --obsidian-vault .smoke-vault \
   --mock-text "真实样本的本地 mock ASR 输出"
 uv run pcn summarize \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --day 2087-05-10
+uv run pcn publish-review \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
@@ -84,6 +94,21 @@ Expected rule-based summary smoke output after mock ASR:
 
 ```text
 summaries_created=1 memory_candidates_created=<n>
+```
+
+After editing `.smoke-vault/30_Memory_Candidates/2087-05-10.md` and changing one candidate from `- [ ]` to `- [x]`, confirm it:
+
+```bash
+uv run pcn confirm-review \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --day 2087-05-10
+```
+
+Expected confirmation output:
+
+```text
+candidates_confirmed=1 signed_events_created=1
 ```
 
 ## Docker Run
