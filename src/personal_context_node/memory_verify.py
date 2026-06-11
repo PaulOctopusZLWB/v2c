@@ -5,7 +5,13 @@ import sqlite3
 from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
-from personal_context_node.core.protocols.memory import MemoryCard, SignedEvent, canonical_signing_body_hash, verify_signed_event
+from personal_context_node.core.protocols.memory import (
+    MemoryCard,
+    MemoryCardRevocation,
+    SignedEvent,
+    canonical_signing_body_hash,
+    verify_signed_event,
+)
 from personal_context_node.signed_event_store import trust_status_for_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -159,12 +165,16 @@ def _forked_event_hashes(rows: list[dict[str, object]]) -> set[str]:
 
 
 def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[SignedEvent]) -> int:
-    expected = {
-        card.card_id: _card_projection(card, source_event_hash=event.event_hash)
-        for event in trusted_events
-        if event.event_type == "memory_card.created"
-        for card in [MemoryCard.model_validate(event.payload)]
-    }
+    expected: dict[str, dict[str, object]] = {}
+    for event in trusted_events:
+        if event.event_type == "memory_card.created":
+            card = MemoryCard.model_validate(event.payload)
+            expected[card.card_id] = _card_projection(card, source_event_hash=event.event_hash, status="active")
+        if event.event_type == "memory_card.revoked":
+            revocation = MemoryCardRevocation.model_validate(event.payload)
+            if revocation.card_id in expected:
+                expected[revocation.card_id]["status"] = "revoked"
+                expected[revocation.card_id]["source_event_hash"] = event.event_hash
     actual_rows = fetch_all(
         conn,
         """
@@ -183,13 +193,13 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
     return mismatches
 
 
-def _card_projection(card: MemoryCard, *, source_event_hash: str) -> dict[str, object]:
+def _card_projection(card: MemoryCard, *, source_event_hash: str, status: str) -> dict[str, object]:
     return {
         "card_id": card.card_id,
         "owner_did": card.owner_did,
         "claim_type": card.claim_type,
         "claim": card.claim,
-        "status": "active",
+        "status": status,
         "source_event_hash": source_event_hash,
     }
 

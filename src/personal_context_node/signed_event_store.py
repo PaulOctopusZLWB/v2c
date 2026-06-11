@@ -9,6 +9,7 @@ from personal_context_node.core.protocols.memory import (
     IdentityProfile,
     MemoryAnnotation,
     MemoryCard,
+    MemoryCardRevocation,
     SignedEvent,
     canonical_signing_body_hash,
     create_signed_event,
@@ -19,6 +20,7 @@ from personal_context_node.core.protocols.memory import (
 
 SUPPORTED_EVENT_TYPES = {
     "memory_card.created",
+    "memory_card.revoked",
     "identity_profile.published",
     "memory_annotation.created",
 }
@@ -100,6 +102,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     if event.event_type == "memory_card.created" and trust_status == "trusted":
         _upsert_memory_card(conn, event=event)
         _activate_dangling_annotations(conn, target_card_id=event.object_id)
+    if event.event_type == "memory_card.revoked" and trust_status == "trusted":
+        _revoke_memory_card(conn, event=event)
     if event.event_type == "memory_annotation.created" and trust_status == "trusted":
         _upsert_memory_annotation(conn, event=event)
     if event.event_type == "identity_profile.published" and trust_status == "trusted":
@@ -147,6 +151,19 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
             event.event_hash,
             str(card.created_at),
         ),
+    )
+
+
+def _revoke_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    revocation = MemoryCardRevocation.model_validate(event.payload)
+    conn.execute(
+        """
+        update memory_cards
+        set status = 'revoked',
+            source_event_hash = ?
+        where card_id = ?
+        """,
+        (event.event_hash, revocation.card_id),
     )
 
 
