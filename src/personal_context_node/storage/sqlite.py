@@ -22,12 +22,17 @@ create table if not exists audio_files (
 create table if not exists transcript_segments (
   segment_id text primary key,
   audio_file_id text not null references audio_files(audio_file_id),
+  chunk_id text,
   start_ms integer not null,
   end_ms integer not null,
   text text not null,
   language text not null,
   speaker text not null,
-  evidence_id text not null unique
+  evidence_id text not null unique,
+  confidence real,
+  asr_backend text not null default 'mock_first_milestone',
+  model_name text not null default 'mock',
+  model_version text not null default 'mock'
 );
 
 create table if not exists speech_ranges (

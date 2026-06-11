@@ -19,7 +19,14 @@ It also implements the first audio preprocessing boundary:
 4. Work WAV chunk generation under `data/audio/work/YYYY-MM-DD/`.
 5. A `pcn preprocess` CLI command.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, LLM summaries, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD is not the final production VAD; it is intentionally simple and exists to make the chunking and storage boundary testable before model integration.
+It also implements the ASR boundary before real model integration:
+
+1. `ASRPort` as the core-owned transcription interface.
+2. A deterministic `MockASRAdapter` for tests and local wiring.
+3. `pcn transcribe` to process `pending_asr` chunks into transcript segments.
+4. Transcript storage now records `chunk_id`, confidence, ASR backend, model name, and model version.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, LLM summaries, speaker review read-back, NAS archive, and launchd jobs are not implemented yet. The energy VAD and mock ASR are not the final production audio intelligence adapters; they exist to make the chunking, storage, and transcript boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -36,6 +43,10 @@ uv run pcn preprocess \
   --obsidian-vault .smoke-vault \
   --vad-threshold 0.01 \
   --max-chunk-ms 30000
+uv run pcn transcribe \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --mock-text "真实样本的本地 mock ASR 输出"
 ```
 
 Expected first milestone smoke output:
@@ -51,6 +62,12 @@ audio_files_processed=7 speech_ranges_created=<n> audio_chunks_created=<n>
 ```
 
 With the current energy VAD and the checked-in real samples, `vad-threshold 0.01` produced one range/chunk in local verification. Treat this as adapter smoke coverage, not ASR-quality evidence.
+
+Expected mock ASR smoke output after preprocessing:
+
+```text
+chunks_transcribed=1 segments_created=1
+```
 
 ## Docker Run
 

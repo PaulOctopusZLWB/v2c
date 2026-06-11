@@ -4,10 +4,12 @@ from pathlib import Path
 
 import typer
 
+from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
+from personal_context_node.transcription import transcribe_pending_chunks
 
 
 app = typer.Typer(help="Personal Context Node local pipeline.")
@@ -68,6 +70,27 @@ def preprocess(
                 f"audio_files_processed={result.audio_files_processed}",
                 f"speech_ranges_created={result.speech_ranges_created}",
                 f"audio_chunks_created={result.audio_chunks_created}",
+            ]
+        )
+    )
+
+
+@app.command()
+def transcribe(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    mock_text: str = typer.Option("模拟本地转写", help="Text emitted by the mock ASR adapter."),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = transcribe_pending_chunks(config=config, asr=MockASRAdapter(text=mock_text))
+    typer.echo(
+        " ".join(
+            [
+                f"chunks_transcribed={result.chunks_transcribed}",
+                f"segments_created={result.segments_created}",
             ]
         )
     )

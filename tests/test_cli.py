@@ -81,3 +81,46 @@ def test_preprocess_cli_creates_audio_chunks(tmp_path: Path) -> None:
     assert "audio_files_processed=1" in preprocess_result.output
     assert "audio_chunks_created=" in preprocess_result.output
     assert list((data / "audio" / "work" / "2087-05-10").glob("*.wav"))
+
+
+def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    runner = CliRunner()
+    assert runner.invoke(
+        app,
+        ["run-first-milestone", "--source-dir", str(source), "--data-dir", str(data), "--obsidian-vault", str(vault)],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "preprocess",
+            "--data-dir",
+            str(data),
+            "--obsidian-vault",
+            str(vault),
+            "--vad-threshold",
+            "0.0001",
+            "--max-chunk-ms",
+            "300",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "transcribe",
+            "--data-dir",
+            str(data),
+            "--obsidian-vault",
+            str(vault),
+            "--mock-text",
+            "CLI 本地转写",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "chunks_transcribed=" in result.output
+    assert "segments_created=" in result.output
