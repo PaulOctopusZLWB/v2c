@@ -95,6 +95,31 @@ def test_initialize_transcript_segments_schema_tracks_absolute_time_and_indexes(
     assert [row["name"] for row in audio_time] == ["audio_file_id", "start_ms", "end_ms"]
 
 
+def test_initialize_audio_chunks_schema_tracks_work_path_absolute_time_and_index(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(audio_chunks)")
+        indexes = fetch_all(conn, "pragma index_list(audio_chunks)")
+        audio_time = fetch_all(conn, "pragma index_info(idx_chunks_audio_time)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["local_work_path"]["type"].lower() == "text"
+    assert column_by_name["start_ms"]["type"].lower() == "integer"
+    assert column_by_name["end_ms"]["type"].lower() == "integer"
+    assert column_by_name["absolute_start_at"]["type"].lower() == "text"
+    assert column_by_name["absolute_end_at"]["type"].lower() == "text"
+    assert column_by_name["vad_backend"]["type"].lower() == "text"
+    assert column_by_name["vad_config_json"]["type"].lower() == "text"
+    assert column_by_name["created_at"]["type"].lower() == "text"
+    index_names = {row["name"] for row in indexes}
+    assert "idx_chunks_audio_time" in index_names
+    assert [row["name"] for row in audio_time] == ["audio_file_id", "start_ms", "end_ms"]
+
+
 def test_initialize_memory_cards_schema_includes_source_type(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

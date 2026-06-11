@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import wave
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -66,6 +68,9 @@ def preprocess_imported_audio(
                 )
                 ranges_created += 1
                 for chunk_range in _split_range(speech_range, max_chunk_ms=max_chunk_ms):
+                    created_at = datetime.now(timezone.utc).isoformat()
+                    absolute_start_at = _absolute_time(str(audio_file["recorded_at"]), chunk_range.start_ms)
+                    absolute_end_at = _absolute_time(str(audio_file["recorded_at"]), chunk_range.end_ms)
                     chunk_path = _write_chunk(
                         config=config,
                         source_path=local_raw_path,
@@ -76,14 +81,24 @@ def preprocess_imported_audio(
                     conn.execute(
                         """
                         insert into audio_chunks (
-                          chunk_id, audio_file_id, speech_range_id, source_start_ms,
-                          source_end_ms, local_chunk_path, status
-                        ) values (?, ?, ?, ?, ?, ?, ?)
+                          chunk_id, audio_file_id, speech_range_id, local_work_path,
+                          start_ms, end_ms, absolute_start_at, absolute_end_at,
+                          vad_backend, vad_config_json, created_at,
+                          source_start_ms, source_end_ms, local_chunk_path, status
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             f"chk_{uuid4().hex}",
                             audio_file["audio_file_id"],
                             range_id,
+                            str(chunk_path),
+                            chunk_range.start_ms,
+                            chunk_range.end_ms,
+                            absolute_start_at,
+                            absolute_end_at,
+                            vad.__class__.__name__,
+                            _vad_config_json(vad),
+                            created_at,
                             chunk_range.start_ms,
                             chunk_range.end_ms,
                             str(chunk_path),
@@ -127,3 +142,16 @@ def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, sta
             target.setframerate(sample_rate)
             target.writeframes(frames)
     return chunk_path
+
+
+def _absolute_time(recorded_at: str, offset_ms: int) -> str:
+    return (datetime.fromisoformat(recorded_at) + timedelta(milliseconds=offset_ms)).isoformat()
+
+
+def _vad_config_json(vad: VADPort) -> str:
+    config = {
+        key: value
+        for key, value in vars(vad).items()
+        if isinstance(value, str | int | float | bool | type(None))
+    }
+    return json.dumps(config, ensure_ascii=False, sort_keys=True)

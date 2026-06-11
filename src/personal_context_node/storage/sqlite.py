@@ -69,12 +69,23 @@ create table if not exists audio_chunks (
   chunk_id text primary key,
   audio_file_id text not null references audio_files(audio_file_id),
   speech_range_id text not null references speech_ranges(speech_range_id),
+  local_work_path text not null default '',
+  start_ms integer not null default 0,
+  end_ms integer not null default 0,
+  absolute_start_at text,
+  absolute_end_at text,
+  vad_backend text,
+  vad_config_json text,
+  created_at text not null default '',
   source_start_ms integer not null,
   source_end_ms integer not null,
   local_chunk_path text not null,
   status text not null,
   unique(audio_file_id, source_start_ms, source_end_ms)
 );
+
+create index if not exists idx_chunks_audio_time
+on audio_chunks(audio_file_id, start_ms, end_ms);
 
 create table if not exists memory_candidates (
   candidate_id text primary key,
@@ -388,6 +399,18 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "transcript_segments", "decode_config_json", "text")
     conn.execute("create index if not exists idx_segments_session_time on transcript_segments(session_id, absolute_start_at)")
     conn.execute("create index if not exists idx_segments_audio_time on transcript_segments(audio_file_id, start_ms, end_ms)")
+    _ensure_column(conn, "audio_chunks", "local_work_path", "text not null default ''")
+    _ensure_column(conn, "audio_chunks", "start_ms", "integer not null default 0")
+    _ensure_column(conn, "audio_chunks", "end_ms", "integer not null default 0")
+    _ensure_column(conn, "audio_chunks", "absolute_start_at", "text")
+    _ensure_column(conn, "audio_chunks", "absolute_end_at", "text")
+    _ensure_column(conn, "audio_chunks", "vad_backend", "text")
+    _ensure_column(conn, "audio_chunks", "vad_config_json", "text")
+    _ensure_column(conn, "audio_chunks", "created_at", "text not null default ''")
+    conn.execute("update audio_chunks set local_work_path = local_chunk_path where local_work_path = ''")
+    conn.execute("update audio_chunks set start_ms = source_start_ms where start_ms = 0")
+    conn.execute("update audio_chunks set end_ms = source_end_ms where end_ms = 0")
+    conn.execute("create index if not exists idx_chunks_audio_time on audio_chunks(audio_file_id, start_ms, end_ms)")
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
     _ensure_column(conn, "speaker_mappings", "person_id", "text")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")

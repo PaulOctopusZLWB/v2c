@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import wave
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
@@ -71,14 +72,34 @@ def test_preprocess_imported_audio_persists_ranges_and_chunks(tmp_path: Path) ->
     conn = connect(config.database_path)
     try:
         ranges = fetch_all(conn, "select start_ms, end_ms from speech_ranges")
-        chunks = fetch_all(conn, "select source_start_ms, source_end_ms, local_chunk_path from audio_chunks order by source_start_ms")
+        chunks = fetch_all(
+            conn,
+            """
+            select
+              source_start_ms, source_end_ms, start_ms, end_ms,
+              local_chunk_path, local_work_path, absolute_start_at, absolute_end_at,
+              vad_backend, vad_config_json, created_at
+            from audio_chunks
+            order by source_start_ms
+            """,
+        )
+        audio = fetch_all(conn, "select recorded_at from audio_files")
     finally:
         conn.close()
 
     assert ranges[0]["start_ms"] >= 150
     assert ranges[0]["end_ms"] <= 750
     assert chunks[0]["source_start_ms"] == ranges[0]["start_ms"]
+    assert chunks[0]["start_ms"] == chunks[0]["source_start_ms"]
     assert chunks[-1]["source_end_ms"] == ranges[0]["end_ms"]
+    assert chunks[-1]["end_ms"] == chunks[-1]["source_end_ms"]
+    assert chunks[0]["local_work_path"] == chunks[0]["local_chunk_path"]
+    expected_start = datetime.fromisoformat(audio[0]["recorded_at"]) + timedelta(milliseconds=chunks[0]["start_ms"])
+    assert chunks[0]["absolute_start_at"] == expected_start.isoformat()
+    assert chunks[-1]["absolute_end_at"]
+    assert chunks[0]["vad_backend"] == "EnergyVadAdapter"
+    assert chunks[0]["vad_config_json"]
+    assert chunks[0]["created_at"]
     assert all((tmp_path / "data").joinpath(chunk["local_chunk_path"]).exists() for chunk in chunks)
 
 
