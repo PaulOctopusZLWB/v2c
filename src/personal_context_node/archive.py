@@ -32,6 +32,25 @@ class CleanupArchivedAudioResult:
     files_pending: int
 
 
+def archive_status_rows(*, config: AppConfig, limit: int = 20) -> list[dict[str, object]]:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        return fetch_all(
+            conn,
+            """
+            select archive_record_id, target_type, target_id, source_path, archive_path,
+                   sha256, status, verified, archived_at, last_error
+            from archive_records
+            order by archived_at desc, archive_record_id
+            limit ?
+            """,
+            (limit,),
+        )
+    finally:
+        conn.close()
+
+
 def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> ArchiveCompletedAudioResult:
     conn = connect(config.database_path)
     try:

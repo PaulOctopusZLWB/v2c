@@ -14,7 +14,7 @@ from personal_context_node.adapters.llm.command import CommandLLMAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.command import CommandVADAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
-from personal_context_node.archive import archive_completed_audio, cleanup_archived_audio
+from personal_context_node.archive import archive_completed_audio, archive_status_rows, cleanup_archived_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
@@ -535,6 +535,49 @@ def archive_cleanup_group(
         archived_before=_parse_iso_datetime(archived_before),
     )
     typer.echo(f"files_removed={result.files_removed} files_pending={result.files_pending}")
+
+
+@app.command(name="archive-status")
+def archive_status(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    limit: int = typer.Option(20, min=1, help="Maximum rows to print."),
+) -> None:
+    _archive_status(data_dir=data_dir, obsidian_vault=obsidian_vault, limit=limit)
+
+
+@archive_app.command(name="status")
+def archive_status_group(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    limit: int = typer.Option(20, min=1, help="Maximum rows to print."),
+) -> None:
+    _archive_status(data_dir=data_dir, obsidian_vault=obsidian_vault, limit=limit)
+
+
+def _archive_status(*, data_dir: Path, obsidian_vault: Path, limit: int) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    for row in archive_status_rows(config=config, limit=limit):
+        typer.echo(
+            " ".join(
+                [
+                    f"archive_record_id={row['archive_record_id']}",
+                    f"target_type={row['target_type']}",
+                    f"target_id={row['target_id']}",
+                    f"status={row['status']}",
+                    f"verified={row['verified']}",
+                    f"archived_at={row['archived_at']}",
+                    f"archive_path={row['archive_path']}",
+                    f"last_error={row['last_error'] or ''}",
+                ]
+            )
+        )
 
 
 def _archive_run(
