@@ -34,7 +34,7 @@ def publish_confirmed_memory_note(*, config: AppConfig, day: str, source_run_id:
             from active_memory_cards
             left join memory_candidates
               on memory_candidates.created_card_id = active_memory_cards.card_id
-            where memory_candidates.review_note_path like '%' || ? || '.md'
+            where memory_candidates.date_key = ?
                or (memory_candidates.created_card_id is null and substr(active_memory_cards.created_at, 1, 10) = ?)
             order by active_memory_cards.created_at, active_memory_cards.card_id
             """,
