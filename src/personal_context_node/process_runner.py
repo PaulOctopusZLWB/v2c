@@ -12,6 +12,7 @@ from personal_context_node.core.ports.errors import TerminalPortError
 from personal_context_node.core.ports.llm import LLMPort
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.core.ports.vad import VADPort
+from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.session_summaries import summarize_session
@@ -83,6 +84,7 @@ def process_once(
             _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
             return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
         elif task.task_type == "daily_generate":
+            set_daily_report_status(config=config, day=task.target_id, status="generating")
             generate_daily_context(config=config, day=task.target_id, llm=llm_adapter)
         elif task.task_type == "obsidian_publish":
             publish_obsidian_day(config=config, day=task.target_id, source_run_id=run_id)
@@ -91,6 +93,8 @@ def process_once(
         _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
         return ProcessOnceResult(task_id=task.task_id, task_type=task.task_type, status="succeeded")
     except Exception as exc:
+        if task.task_type == "daily_generate":
+            set_daily_report_status(config=config, day=task.target_id, status="failed", error=str(exc))
         fail_task(config=config, task_id=task.task_id, error=str(exc), terminal=isinstance(exc, TerminalPortError))
         raise
 

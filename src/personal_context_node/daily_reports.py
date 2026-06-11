@@ -13,13 +13,14 @@ def set_daily_report_status(*, config: AppConfig, day: str, status: str, error: 
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
-            insert into daily_reports (date_key, status, created_at, updated_at)
-            values (?, ?, ?, ?)
+            insert into daily_reports (date_key, status, error, created_at, updated_at)
+            values (?, ?, ?, ?, ?)
             on conflict(date_key) do update set
               status = excluded.status,
+              error = excluded.error,
               updated_at = excluded.updated_at
             """,
-            (day, status, now, now),
+            (day, status, error, now, now),
         )
         conn.commit()
     finally:

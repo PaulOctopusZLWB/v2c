@@ -204,6 +204,7 @@ create table if not exists daily_reports (
   others_speech_ms integer not null default 0,
   generated_at text,
   reviewed_at text,
+  error text,
   created_at text not null default '',
   updated_at text not null
 );
@@ -471,6 +472,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "daily_reports", "others_speech_ms", "integer not null default 0")
     _ensure_column(conn, "daily_reports", "generated_at", "text")
     _ensure_column(conn, "daily_reports", "reviewed_at", "text")
+    _ensure_column(conn, "daily_reports", "error", "text")
     _ensure_column(conn, "daily_reports", "created_at", "text not null default ''")
     daily_report_columns = {row["name"] for row in conn.execute("pragma table_info(daily_reports)").fetchall()}
     if "day" in daily_report_columns:

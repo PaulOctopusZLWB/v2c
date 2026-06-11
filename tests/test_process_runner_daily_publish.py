@@ -195,10 +195,12 @@ def test_process_once_marks_terminal_port_errors_terminal(tmp_path: Path) -> Non
     conn = connect(config.database_path)
     try:
         rows = fetch_all(conn, "select status, last_error from tasks where task_id = ?", (task.task_id,))
+        reports = fetch_all(conn, "select status, error from daily_reports where date_key = ?", ("2087-05-10",))
     finally:
         conn.close()
 
     assert rows == [{"status": "failed_terminal", "last_error": "invalid LLM contract"}]
+    assert reports == [{"status": "failed", "error": "invalid LLM contract"}]
 
 
 def _insert_session_and_transcript(database_path: Path) -> None:

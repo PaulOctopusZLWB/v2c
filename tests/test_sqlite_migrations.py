@@ -311,6 +311,7 @@ def test_initialize_daily_reports_schema_uses_date_key_and_metrics(tmp_path) -> 
     assert column_by_name["others_speech_ms"]["dflt_value"] == "0"
     assert column_by_name["generated_at"]["type"].lower() == "text"
     assert column_by_name["reviewed_at"]["type"].lower() == "text"
+    assert column_by_name["error"]["type"].lower() == "text"
     assert column_by_name["created_at"]["notnull"] == 1
     assert column_by_name["updated_at"]["notnull"] == 1
 
