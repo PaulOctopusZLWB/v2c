@@ -306,9 +306,21 @@ def _payload_authority_matches_event(event: SignedEvent) -> bool:
     if event.event_type == "memory_card.created":
         card = MemoryCard.model_validate(event.payload)
         return event.owner_id == card.owner_did
+    if event.event_type == "memory_card.revoked":
+        revocation = MemoryCardRevocation.model_validate(event.payload)
+        return event.owner_id == revocation.revoked_by
+    if event.event_type == "memory_card.metadata_updated":
+        update = MemoryCardMetadataUpdate.model_validate(event.payload)
+        return event.owner_id == update.updated_by
+    if event.event_type == "memory_card.superseded":
+        supersession = MemoryCardSupersession.model_validate(event.payload)
+        return event.owner_id == supersession.superseded_by
     if event.event_type == "memory_annotation.created":
         annotation = MemoryAnnotation.model_validate(event.payload)
         return event.owner_id == annotation.author
+    if event.event_type == "memory_annotation.revoked":
+        revocation = MemoryAnnotationRevocation.model_validate(event.payload)
+        return event.owner_id == revocation.revoked_by
     return True
 
 
