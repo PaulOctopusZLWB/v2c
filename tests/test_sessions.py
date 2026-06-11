@@ -24,6 +24,34 @@ def test_derive_sessions_splits_by_gap_and_reuses_existing_ids(tmp_path: Path) -
     assert [row["session_id"] for row in _session_rows(config.database_path)] == first_ids
 
 
+def test_derive_sessions_preserves_exclude_from_memory_when_reusing_session_id(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_and_segments(config.database_path)
+
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+    conn = connect(config.database_path)
+    try:
+        first_session_id = fetch_all(conn, "select session_id from sessions order by started_at")[0]["session_id"]
+        conn.execute("update sessions set exclude_from_memory = 1 where session_id = ?", (first_session_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            "select session_id, exclude_from_memory from sessions order by started_at",
+        )
+    finally:
+        conn.close()
+
+    assert rows[0] == {"session_id": first_session_id, "exclude_from_memory": 1}
+    assert rows[1]["exclude_from_memory"] == 0
+
+
 def test_derive_sessions_sets_primary_person_from_segment_attribution(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_audio_and_segments(config.database_path)

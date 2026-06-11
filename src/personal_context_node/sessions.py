@@ -45,8 +45,8 @@ def derive_sessions_for_day(
         groups = _group_segments(segments, gap_ms=session_gap_minutes * 60 * 1000)
         now = datetime.now(timezone.utc).isoformat()
         existing_by_first_segment = {
-            str(row["first_segment_id"]): str(row["session_id"])
-            for row in fetch_all(conn, "select first_segment_id, session_id from sessions where date_key = ?", (day,))
+            str(row["first_segment_id"]): row
+            for row in fetch_all(conn, "select first_segment_id, session_id, exclude_from_memory from sessions where date_key = ?", (day,))
         }
         conn.execute(
             """
@@ -64,7 +64,9 @@ def derive_sessions_for_day(
         assigned = 0
         for group in groups:
             first_segment_id = str(group[0]["segment_id"])
-            session_id = existing_by_first_segment.get(first_segment_id) or f"ses_{uuid4().hex}"
+            existing = existing_by_first_segment.get(first_segment_id)
+            session_id = str(existing["session_id"]) if existing else f"ses_{uuid4().hex}"
+            exclude_from_memory = int(existing["exclude_from_memory"]) if existing else 0
             started_at = _absolute_time(group[0])
             ended_at = _absolute_time({**group[-1], "start_ms": group[-1]["end_ms"]})
             active_speech_ms = sum(int(row["end_ms"]) - int(row["start_ms"]) for row in group)
@@ -73,8 +75,9 @@ def derive_sessions_for_day(
                 """
                 insert into sessions (
                   session_id, date_key, started_at, ended_at, source,
-                  segment_count, active_speech_ms, primary_person_id, first_segment_id, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  segment_count, active_speech_ms, primary_person_id, first_segment_id,
+                  exclude_from_memory, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -86,6 +89,7 @@ def derive_sessions_for_day(
                     active_speech_ms,
                     primary_person_id,
                     first_segment_id,
+                    exclude_from_memory,
                     now,
                     now,
                 ),
