@@ -44,6 +44,7 @@ It also implements the LLM text-processing boundary before provider integration:
 7. Memory candidate evidence references accept input `evidence_id` values, and unknown references fail generation without committing partial summaries or candidates.
 8. Duplicate memory candidates within the same daily generation are merged by claim type and normalized claim, preserving all evidence references.
 9. Cross-day duplicate memory candidates are marked `possible_duplicate` instead of being sent directly to normal review.
+10. LLM text-boundary config includes `send_person_names`, `send_speaker_labels`, and `max_chunk_tokens` in both TOML loading and generated config templates.
 
 It also implements the human review boundary:
 

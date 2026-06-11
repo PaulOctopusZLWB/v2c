@@ -32,7 +32,11 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert (vault / "10_Daily").is_dir()
     assert (vault / "30_Memory_Candidates").is_dir()
     assert config_path.exists()
-    assert "obsidian_vault" in config_path.read_text(encoding="utf-8")
+    config_text = config_path.read_text(encoding="utf-8")
+    assert "obsidian_vault" in config_text
+    assert "send_person_names = true" in config_text
+    assert "send_speaker_labels = true" in config_text
+    assert "max_chunk_tokens = 6000" in config_text
 
 
 def test_health_cli_reports_ok_for_initialized_workspace(tmp_path) -> None:

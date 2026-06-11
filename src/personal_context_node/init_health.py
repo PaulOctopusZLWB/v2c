@@ -93,6 +93,9 @@ def _config_text(config: AppConfig) -> str:
             "",
             "[llm]",
             f'backend = "{config.llm_backend}"',
+            f"send_person_names = {str(config.send_person_names).lower()}",
+            f"send_speaker_labels = {str(config.send_speaker_labels).lower()}",
+            f"max_chunk_tokens = {config.max_chunk_tokens}",
             "",
         ]
     )

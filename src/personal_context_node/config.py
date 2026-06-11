@@ -21,6 +21,9 @@ class AppConfig(BaseModel):
     asr_backend: str = "mock"
     asr_command: str | None = None
     llm_backend: str = "rule_based"
+    send_person_names: bool = True
+    send_speaker_labels: bool = True
+    max_chunk_tokens: int = 6000
     edit_grace_seconds: int = 120
 
     @classmethod
@@ -42,6 +45,9 @@ class AppConfig(BaseModel):
             "asr_backend": asr.get("backend", cls.model_fields["asr_backend"].default),
             "asr_command": asr.get("command", cls.model_fields["asr_command"].default),
             "llm_backend": llm.get("backend", cls.model_fields["llm_backend"].default),
+            "send_person_names": llm.get("send_person_names", cls.model_fields["send_person_names"].default),
+            "send_speaker_labels": llm.get("send_speaker_labels", cls.model_fields["send_speaker_labels"].default),
+            "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
             "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
         }
         values.update({key: value for key, value in overrides.items() if value is not None})

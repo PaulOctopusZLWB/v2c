@@ -26,6 +26,9 @@ max_chunk_ms = 45000
 
 [llm]
 backend = "rule_based"
+send_person_names = false
+send_speaker_labels = false
+max_chunk_tokens = 4096
 
 [obsidian]
 edit_grace_seconds = 45
@@ -44,6 +47,9 @@ edit_grace_seconds = 45
     assert config.vad_threshold == 0.02
     assert config.max_chunk_ms == 45000
     assert config.llm_backend == "rule_based"
+    assert config.send_person_names is False
+    assert config.send_speaker_labels is False
+    assert config.max_chunk_tokens == 4096
     assert config.edit_grace_seconds == 45
 
 
