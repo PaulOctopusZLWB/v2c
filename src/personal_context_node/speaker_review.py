@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -104,7 +105,7 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
     )
     for row in segments:
         lines.append(f"- {row['segment_id']} | {row['speaker']} | {row['text']}")
-    review_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(review_path, "\n".join(lines) + "\n")
     return review_path
 
 

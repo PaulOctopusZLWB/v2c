@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -43,7 +44,7 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
     for session in sessions:
         note_path = output_dir / f"{session['session_id']}.md"
         existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
-        note_path.write_text(_session_note_text(session, existing_text=existing_text, source_run_id=source_run_id), encoding="utf-8")
+        write_text_atomic(note_path, _session_note_text(session, existing_text=existing_text, source_run_id=source_run_id))
     return PublishSessionNotesResult(notes_written=len(sessions))
 
 

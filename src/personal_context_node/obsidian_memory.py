@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -48,7 +49,7 @@ def publish_confirmed_memory_note(*, config: AppConfig, day: str, source_run_id:
     note_path = output_dir / f"{day}.md"
     if not rows:
         return PublishConfirmedMemoryResult(notes_written=0, note_path=note_path)
-    note_path.write_text(_confirmed_memory_note_text(day=day, rows=rows, source_run_id=source_run_id), encoding="utf-8")
+    write_text_atomic(note_path, _confirmed_memory_note_text(day=day, rows=rows, source_run_id=source_run_id))
     return PublishConfirmedMemoryResult(notes_written=1, note_path=note_path)
 
 

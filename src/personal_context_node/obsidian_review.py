@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
     EvidenceRef,
@@ -89,7 +90,7 @@ def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str 
                 "",
             ]
         )
-    review_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(review_path, "\n".join(lines) + "\n")
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -405,7 +406,7 @@ def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | 
             continue
         receipt = receipts[candidate_id]
         rewritten.extend(_receipt_lines(candidate_id, receipt, original_claim=match.group(3), synced_at=synced_at))
-    path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    write_text_atomic(path, "\n".join(rewritten) + "\n")
 
 
 def _receipt_lines(

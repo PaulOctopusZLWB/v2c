@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -51,7 +52,8 @@ def publish_daily_note(*, config: AppConfig, day: str, source_run_id: str | None
     output_dir.mkdir(parents=True, exist_ok=True)
     note_path = output_dir / f"{day}.md"
     existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
-    note_path.write_text(
+    write_text_atomic(
+        note_path,
         _daily_note_text(
             day=day,
             summary=summary,
@@ -60,7 +62,6 @@ def publish_daily_note(*, config: AppConfig, day: str, source_run_id: str | None
             existing_text=existing_text,
             source_run_id=source_run_id,
         ),
-        encoding="utf-8",
     )
     return PublishDailyNoteResult(notes_written=1)
 
