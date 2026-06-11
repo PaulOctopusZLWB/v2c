@@ -91,6 +91,52 @@ def test_explicit_asr_rerun_writes_new_active_segments_without_deleting_history(
     ]
 
 
+def test_asr_rerun_reopens_session_derivation_for_affected_day(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    for run_id, text in [
+        ("run_vad", "第一次 ASR"),
+        ("run_asr_first", "第一次 ASR"),
+        ("run_session_first", "第一次 ASR"),
+    ]:
+        process_once(
+            config=config,
+            run_id=run_id,
+            vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+            asr=MockASRAdapter(text=text),
+            max_chunk_ms=1000,
+        )
+
+    conn = connect(config.database_path)
+    try:
+        chunk_id = fetch_all(conn, "select chunk_id from audio_chunks")[0]["chunk_id"]
+    finally:
+        conn.close()
+
+    rerun_task(config=config, task_type="asr", target_type="audio_chunk", target_id=str(chunk_id))
+    process_once(
+        config=config,
+        run_id="run_asr_second",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="第二次 ASR"),
+        max_chunk_ms=1000,
+    )
+
+    conn = connect(config.database_path)
+    try:
+        session_tasks = fetch_all(
+            conn,
+            "select status, retry_count, attempt_count from tasks where task_type = 'session_derive'",
+        )
+    finally:
+        conn.close()
+
+    assert session_tasks == [{"status": "pending", "retry_count": 0, "attempt_count": 0}]
+
+
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:

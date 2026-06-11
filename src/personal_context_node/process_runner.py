@@ -147,13 +147,37 @@ def _enqueue_downstream_tasks_in_conn(
         if edge.upstream_task_type != upstream_task_type:
             continue
         for target_id in edge.target_ids(conn, config, upstream_target_id):
-            enqueue_task_in_conn(
+            result = enqueue_task_in_conn(
                 conn,
                 task_type=edge.downstream_task_type,
                 target_type=edge.downstream_target_type,
                 target_id=target_id,
                 max_retries=config.task_max_retries,
             )
+            if not result.created:
+                _reset_downstream_task_in_conn(conn, task_id=result.task_id)
+
+
+def _reset_downstream_task_in_conn(conn: sqlite3.Connection, *, task_id: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        update tasks
+        set status = 'pending',
+            retry_count = 0,
+            attempt_count = 0,
+            claimed_by_run_id = null,
+            claimed_at = null,
+            lease_expires_at = null,
+            started_at = null,
+            finished_at = null,
+            last_error = null,
+            available_at = ?,
+            updated_at = ?
+        where task_id = ?
+        """,
+        (now, now, task_id),
+    )
 
 
 def _chunk_ids_for_audio_file(*, config: AppConfig, audio_file_id: str) -> list[str]:
