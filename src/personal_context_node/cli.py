@@ -25,7 +25,7 @@ from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.process_runner import process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
-from personal_context_node.tasks import process_status_rows
+from personal_context_node.tasks import process_status_rows, rerun_task, retry_task
 from personal_context_node.transcription import transcribe_pending_chunks
 
 
@@ -472,6 +472,36 @@ def process_status(
                 ]
             )
         )
+
+
+@app.command(name="process-retry")
+def process_retry(
+    task_id: str = typer.Option(..., help="Task id to reset to pending."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = retry_task(config=config, task_id=task_id)
+    typer.echo(f"task_id={result.task_id} status={result.status}")
+
+
+@app.command(name="process-rerun")
+def process_rerun(
+    task_type: str = typer.Option(..., help="Task type to rerun, e.g. asr."),
+    target_type: str = typer.Option(..., help="Task target type, e.g. audio_chunk."),
+    target_id: str = typer.Option(..., help="Task target id."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = rerun_task(config=config, task_type=task_type, target_type=target_type, target_id=target_id)
+    typer.echo(f"task_id={result.task_id} created={result.created} status=pending")
 
 
 @app.command(name="process-run")

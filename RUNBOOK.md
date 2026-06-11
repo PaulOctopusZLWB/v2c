@@ -83,6 +83,8 @@ It also implements the task lifecycle foundation:
 4. Import registers the first `vad` task for each new audio file in the same SQLite transaction.
 5. `pcn process-status` lists current task state.
 6. `pcn process-run` claims one pending task, runs VAD, ASR, or session derivation, and records success/failure.
+7. `pcn process-retry --task-id ...` resets a failed task to `pending`.
+8. `pcn process-rerun --task-type ... --target-type ... --target-id ...` reopens or enqueues a deterministic task target.
 
 It also implements session derivation:
 
@@ -317,6 +319,21 @@ run_id=run_... job_name=memory-verify status=succeeded error=
 
 After importing the seven sample files, `pcn process-status` should show seven pending `vad` tasks.
 Repeated `pcn process-run` calls advance those tasks, enqueue/run `asr` tasks for generated chunks, run `session_derive`, run `summarize_session`, generate daily context, and publish Obsidian review/session notes.
+
+Manual task recovery:
+
+```bash
+uv run pcn process-retry \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --task-id task_...
+uv run pcn process-rerun \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --task-type asr \
+  --target-type audio_chunk \
+  --target-id chk_...
+```
 
 It also implements the daily report lifecycle:
 

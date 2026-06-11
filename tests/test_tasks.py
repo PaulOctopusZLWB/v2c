@@ -9,6 +9,8 @@ from personal_context_node.tasks import (
     fail_task,
     process_status_rows,
     reclaim_expired_tasks,
+    rerun_task,
+    retry_task,
     start_task,
     succeed_task,
 )
@@ -67,3 +69,35 @@ def test_failed_retryable_and_lease_reclaim(tmp_path) -> None:
     assert reclaimed == 1
     rows = process_status_rows(config=config)
     assert rows[0]["status"] == "pending"
+
+
+def test_retry_task_resets_failed_task_to_pending(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    task = enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
+    claimed = claim_next_task(config=config, task_type="asr", run_id="run_1")
+    assert claimed is not None
+    fail_task(config=config, task_id=task.task_id, error="model unavailable", terminal=True)
+
+    result = retry_task(config=config, task_id=task.task_id)
+
+    assert result.task_id == task.task_id
+    assert result.status == "pending"
+    rows = process_status_rows(config=config)
+    assert rows[0]["status"] == "pending"
+    assert rows[0]["last_error"] is None
+
+
+def test_rerun_task_reopens_existing_target_task(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    task = enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
+    claimed = claim_next_task(config=config, task_type="asr", run_id="run_1")
+    assert claimed is not None
+    succeed_task(config=config, task_id=task.task_id)
+
+    result = rerun_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
+
+    assert result.task_id == task.task_id
+    assert result.created is False
+    rows = process_status_rows(config=config)
+    assert rows[0]["status"] == "pending"
+    assert rows[0]["attempt_count"] == 0

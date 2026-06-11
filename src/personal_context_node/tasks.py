@@ -26,6 +26,12 @@ class ClaimedTask:
     claimed_by_run_id: str
 
 
+@dataclass(frozen=True)
+class RetryTaskResult:
+    task_id: str
+    status: str
+
+
 def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str) -> EnqueueTaskResult:
     conn = connect(config.database_path)
     try:
@@ -146,6 +152,64 @@ def reclaim_expired_tasks(*, config: AppConfig, lease_seconds: int, now: datetim
                 reclaimed += 1
         conn.commit()
         return reclaimed
+    finally:
+        conn.close()
+
+
+def retry_task(*, config: AppConfig, task_id: str) -> RetryTaskResult:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        row = conn.execute("select task_id from tasks where task_id = ?", (task_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"task not found: {task_id}")
+        conn.execute(
+            """
+            update tasks
+            set status = 'pending',
+                claimed_by_run_id = null,
+                claimed_at = null,
+                started_at = null,
+                finished_at = null,
+                last_error = null
+            where task_id = ?
+            """,
+            (task_id,),
+        )
+        conn.commit()
+        return RetryTaskResult(task_id=task_id, status="pending")
+    finally:
+        conn.close()
+
+
+def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str) -> EnqueueTaskResult:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        existing = conn.execute(
+            "select task_id from tasks where task_type = ? and target_type = ? and target_id = ?",
+            (task_type, target_type, target_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                update tasks
+                set status = 'pending',
+                    attempt_count = 0,
+                    claimed_by_run_id = null,
+                    claimed_at = null,
+                    started_at = null,
+                    finished_at = null,
+                    last_error = null
+                where task_id = ?
+                """,
+                (existing["task_id"],),
+            )
+            conn.commit()
+            return EnqueueTaskResult(task_id=str(existing["task_id"]), created=False)
+        result = enqueue_task_in_conn(conn, task_type=task_type, target_type=target_type, target_id=target_id)
+        conn.commit()
+        return result
     finally:
         conn.close()
 
