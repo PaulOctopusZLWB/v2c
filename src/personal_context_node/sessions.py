@@ -30,7 +30,7 @@ def derive_sessions_for_day(
             select ts.segment_id, ts.audio_file_id, ts.start_ms, ts.end_ms, af.recorded_at
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
-            where substr(af.recorded_at, 1, 10) = ?
+            where substr(af.recorded_at, 1, 10) = ? and ts.is_active = 1
             order by af.recorded_at, ts.start_ms, ts.segment_id
             """,
             (day,),

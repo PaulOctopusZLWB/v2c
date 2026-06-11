@@ -58,7 +58,7 @@ def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
         sessions = fetch_all(conn, "select date_key, segment_count from sessions")
     finally:
         conn.close()
-    assert sessions == [{"date_key": "2087-05-10", "segment_count": 2}]
+    assert sessions == [{"date_key": "2087-05-10", "segment_count": 1}]
     assert any(
         row["task_type"] == "daily_generate"
         and row["target_id"] == "2087-05-10"

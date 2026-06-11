@@ -33,7 +33,10 @@ create table if not exists transcript_segments (
   confidence real,
   asr_backend text not null default 'mock_first_milestone',
   model_name text not null default 'mock',
-  model_version text not null default 'mock'
+  model_version text not null default 'mock',
+  asr_run_id text,
+  is_active integer not null default 1,
+  created_at text not null default ''
 );
 
 create table if not exists speech_ranges (

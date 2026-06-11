@@ -28,7 +28,7 @@ def generate_daily_context(*, config: AppConfig, day: str, llm: LLMPort) -> Dail
             select ts.segment_id, ts.speaker, ts.start_ms, ts.end_ms, ts.text, ts.evidence_id
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
-            where substr(af.recorded_at, 1, 10) = ?
+            where substr(af.recorded_at, 1, 10) = ? and ts.is_active = 1
             order by ts.start_ms
             """,
             (day,),

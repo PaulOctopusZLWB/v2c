@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -38,6 +39,11 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
         )
         segments_created = 0
         for chunk in chunks:
+            conn.execute(
+                "update transcript_segments set is_active = 0 where audio_file_id = ? and is_active = 1",
+                (chunk["audio_file_id"],),
+            )
+            asr_run_id = f"asrrun_{uuid4().hex}"
             chunk_path = config.data_dir / chunk["local_chunk_path"]
             for segment in asr.transcribe(chunk_path):
                 absolute_start_ms = chunk["source_start_ms"] + segment.start_ms
@@ -47,8 +53,8 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                     insert into transcript_segments (
                       segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
                       language, speaker, evidence_id, confidence, asr_backend,
-                      model_name, model_version
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      model_name, model_version, asr_run_id, is_active, created_at
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         f"seg_{uuid4().hex}",
@@ -64,6 +70,9 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                         asr.__class__.__name__,
                         asr.model_name,
                         asr.model_version,
+                        asr_run_id,
+                        1,
+                        datetime.now(timezone.utc).isoformat(),
                     ),
                 )
                 segments_created += 1
@@ -82,6 +91,9 @@ def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
         "asr_backend": "alter table transcript_segments add column asr_backend text not null default 'mock_first_milestone'",
         "model_name": "alter table transcript_segments add column model_name text not null default 'mock'",
         "model_version": "alter table transcript_segments add column model_version text not null default 'mock'",
+        "asr_run_id": "alter table transcript_segments add column asr_run_id text",
+        "is_active": "alter table transcript_segments add column is_active integer not null default 1",
+        "created_at": "alter table transcript_segments add column created_at text not null default ''",
     }
     for column, sql in migrations.items():
         if column not in existing:

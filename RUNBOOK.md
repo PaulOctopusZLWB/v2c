@@ -84,6 +84,13 @@ It also implements session derivation:
 4. ASR task fan-in registers one `session_derive` task for the affected `date_key` when all chunks for an audio file are transcribed.
 5. `pcn publish-session-notes` writes `20_Conversations/YYYY-MM-DD/ses_*.md` notes without embedding full transcripts.
 
+It also implements active transcript semantics:
+
+1. `transcript_segments` has `is_active` and `asr_run_id`.
+2. A successful ASR task deactivates previous active transcript segments for the same audio file before inserting new segments.
+3. Session derivation and daily context generation read only active transcript segments.
+4. This lets ASR reruns replace materialized context without deleting historical evidence rows.
+
 It also implements the daily/publish task DAG:
 
 1. `session_derive` success enqueues `daily_generate`.
