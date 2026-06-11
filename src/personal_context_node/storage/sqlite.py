@@ -10,6 +10,8 @@ create table if not exists audio_files (
   audio_file_id text primary key,
   source_device text not null,
   source_path text not null,
+  source_size_bytes integer not null default 0,
+  source_mtime_ns integer not null default 0,
   local_raw_path text not null,
   sha256 text not null,
   duration_ms integer not null,
@@ -222,8 +224,16 @@ def connect(path: Path) -> sqlite3.Connection:
 
 def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _ensure_column(conn, "audio_files", "source_size_bytes", "integer not null default 0")
+    _ensure_column(conn, "audio_files", "source_mtime_ns", "integer not null default 0")
     conn.commit()
 
 
 def fetch_all(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"alter table {table} add column {column} {definition}")

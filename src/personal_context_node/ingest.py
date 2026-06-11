@@ -43,6 +43,7 @@ def import_audio_files(*, config: AppConfig, source_dir: Path) -> IngestImportRe
 def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, source_dir: Path) -> int:
     imported = 0
     for source_path in scan_audio_files(source_dir=source_dir).files:
+        source_stat = source_path.stat()
         sha256 = _sha256(source_path)
         existing = conn.execute(
             "select 1 from audio_files where source_path = ? and sha256 = ?",
@@ -59,14 +60,16 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
         conn.execute(
             """
             insert into audio_files (
-              audio_file_id, source_device, source_path, local_raw_path, sha256,
-              duration_ms, recorded_at, imported_at, status
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+              local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 audio_file_id,
                 config.source_device,
                 str(source_path),
+                source_stat.st_size,
+                source_stat.st_mtime_ns,
                 str(local_path),
                 sha256,
                 _duration_ms(source_path),
