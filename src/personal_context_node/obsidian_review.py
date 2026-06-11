@@ -85,6 +85,9 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 )
                 receipts[candidate_id] = {"action": "reject", "card_id": None}
                 continue
+            if action == "defer":
+                receipts[candidate_id] = {"action": "defer", "card_id": None}
+                continue
             card = MemoryCard(
                 card_id=f"mem_{uuid4().hex}",
                 owner_did=config.owner_did,
