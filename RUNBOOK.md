@@ -43,9 +43,9 @@ It also implements the LLM text-processing boundary before provider integration:
 
 It also implements the human review boundary:
 
-1. `pcn publish-review` writes pending memory candidates into `30_Memory_Candidates/YYYY-MM-DD.md`.
+1. `pcn obsidian publish --date ...` writes daily notes, session notes, pending memory candidates, and speaker review artifacts.
 2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
-3. `pcn confirm-review` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
+3. `pcn obsidian sync-review --date ...` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
 4. `pcn memory-verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
 5. `pcn memory-verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
 6. `pcn memory-export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
@@ -160,18 +160,10 @@ uv run pcn summarize \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
-uv run pcn publish-review \
+uv run pcn obsidian publish \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
-  --day 2087-05-10
-uv run pcn publish-speaker-review \
-  --data-dir .smoke-data \
-  --obsidian-vault .smoke-vault \
-  --day 2087-05-10
-uv run pcn publish-session-notes \
-  --data-dir .smoke-data \
-  --obsidian-vault .smoke-vault \
-  --day 2087-05-10
+  --date 2087-05-10
 uv run pcn archive \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
@@ -305,10 +297,10 @@ uv run pcn summarize \
 After editing `.smoke-vault/30_Memory_Candidates/2087-05-10.md` and changing one candidate from `- [ ]` to `- [x]`, confirm it:
 
 ```bash
-uv run pcn confirm-review \
+uv run pcn obsidian sync-review \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
-  --day 2087-05-10
+  --date 2087-05-10
 uv run pcn memory-verify \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
@@ -379,8 +371,8 @@ It also implements the daily report lifecycle:
 
 1. `daily_reports` stores status per day.
 2. `pcn summarize` marks the day `generated`.
-3. `pcn publish-review` marks the day `review_pending`.
-4. `pcn confirm-review` marks the day `review_synced` after at least one candidate is confirmed.
+3. `pcn obsidian publish --date ...` marks the day `review_pending`.
+4. `pcn obsidian sync-review --date ...` marks the day `review_synced` after at least one candidate is confirmed.
 5. `pcn daily-status --day YYYY-MM-DD` prints the current status.
 
 After editing `.smoke-vault/90_System/Speaker_Review/2087-05-10.md`, sync speaker mappings:

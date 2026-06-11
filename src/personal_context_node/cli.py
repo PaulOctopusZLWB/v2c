@@ -23,6 +23,7 @@ from personal_context_node.launchd import install_launchd_plists, uninstall_laun
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_export import export_memory_events
 from personal_context_node.memory_verify import verify_memory_events
+from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
@@ -37,6 +38,8 @@ ingest_app = typer.Typer(help="Audio ingest commands.")
 app.add_typer(ingest_app, name="ingest")
 process_app = typer.Typer(help="Task processing commands.")
 app.add_typer(process_app, name="process")
+obsidian_app = typer.Typer(help="Obsidian publish and review commands.")
+app.add_typer(obsidian_app, name="obsidian")
 
 
 @app.callback()
@@ -303,6 +306,29 @@ def publish_review(
     typer.echo(f"review_path={review_path}")
 
 
+@obsidian_app.command(name="publish")
+def obsidian_publish_group(
+    date: str = typer.Option(..., "--date", help="Publish date in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = publish_obsidian_day(config=config, day=date)
+    typer.echo(
+        " ".join(
+            [
+                f"daily_notes_written={result.daily_notes_written}",
+                f"session_notes_written={result.session_notes_written}",
+                f"candidate_review_written={result.candidate_review_written}",
+                f"speaker_review_written={result.speaker_review_written}",
+            ]
+        )
+    )
+
+
 @app.command(name="publish-session-notes")
 def publish_session_notes_cmd(
     day: str = typer.Option(..., help="Session day in YYYY-MM-DD format."),
@@ -326,6 +352,22 @@ def confirm_review(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
+    _sync_candidate_review(day=day, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@obsidian_app.command(name="sync-review")
+def obsidian_sync_review_group(
+    date: str = typer.Option(..., "--date", help="Review date in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _sync_candidate_review(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+def _sync_candidate_review(*, day: str, data_dir: Path, obsidian_vault: Path) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = confirm_checked_candidates(config=config, day=day)
     typer.echo(

@@ -52,6 +52,46 @@ def test_review_cli_publishes_and_confirms_checked_candidate(tmp_path: Path) -> 
     assert "signed_events_created=1" in confirm_result.output
 
 
+def test_obsidian_sync_review_group_cli_confirms_checked_candidate(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_candidate(config.database_path)
+    runner = CliRunner()
+    publish_result = runner.invoke(
+        app,
+        [
+            "publish-review",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--day",
+            "2087-05-10",
+        ],
+    )
+    assert publish_result.exit_code == 0, publish_result.output
+    review_path = config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md"
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+
+    confirm_result = runner.invoke(
+        app,
+        [
+            "obsidian",
+            "sync-review",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--date",
+            "2087-05-10",
+        ],
+    )
+
+    assert confirm_result.exit_code == 0, confirm_result.output
+    assert "candidates_confirmed=1" in confirm_result.output
+    assert "signed_events_created=1" in confirm_result.output
+
+
 def _insert_candidate(database_path: Path) -> None:
     conn = connect(database_path)
     try:
