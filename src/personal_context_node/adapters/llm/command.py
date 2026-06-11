@@ -155,4 +155,16 @@ def _memory_candidate(item: object) -> MemoryCandidateDraft:
         claim_type=claim_type,
         confidence=confidence,
         evidence_source_ids=[str(source_id) for source_id in evidence_source_ids],
+        subject=_subject(item.get("subject")),
     )
+
+
+def _subject(item: object) -> dict[str, str]:
+    if item is None:
+        return {"type": "project", "id": "personal_context_node", "label": "Personal Context Node"}
+    if not isinstance(item, dict):
+        raise TerminalPortError("LLM memory_candidate subject must be an object")
+    for field in ["type", "id", "label"]:
+        if field not in item:
+            raise TerminalPortError(f"LLM memory_candidate subject missing required field: {field}")
+    return {"type": str(item["type"]), "id": str(item["id"]), "label": str(item["label"])}

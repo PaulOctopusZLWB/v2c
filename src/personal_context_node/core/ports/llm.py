@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Literal, Protocol
 
 
@@ -22,6 +23,9 @@ class MemoryCandidateDraft:
     claim_type: ClaimType
     confidence: float
     evidence_source_ids: list[str]
+    subject: dict[str, str] = field(
+        default_factory=lambda: {"type": "project", "id": "personal_context_node", "label": "Personal Context Node"}
+    )
 
 
 @dataclass(frozen=True)

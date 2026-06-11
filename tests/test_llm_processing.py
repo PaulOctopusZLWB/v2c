@@ -145,6 +145,33 @@ class DuplicateDailyCandidateLLM:
         )
 
 
+class SameClaimDifferentSubjectLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=[],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="必须保持音频本地处理。",
+                    claim_type="requirement",
+                    confidence=0.8,
+                    evidence_source_ids=[transcript_segments[0]["evidence_id"]],
+                    subject={"type": "project", "id": "project_alpha", "label": "Project Alpha"},
+                ),
+                MemoryCandidateDraft(
+                    candidate_claim="必须保持音频本地处理。",
+                    claim_type="requirement",
+                    confidence=0.9,
+                    evidence_source_ids=[transcript_segments[1]["evidence_id"]],
+                    subject={"type": "project", "id": "project_beta", "label": "Project Beta"},
+                ),
+            ],
+        )
+
+
 def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
@@ -522,6 +549,44 @@ def test_generate_daily_context_merges_duplicate_candidates_within_day(tmp_path:
             "source_id": "seg_test_002",
             "quote": "我再次要求音频和转写处理保持本地。",
         },
+    ]
+
+
+def test_generate_daily_context_does_not_merge_same_claim_for_different_subjects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+    _insert_transcript_segment(
+        config.database_path,
+        segment_id="seg_test_002",
+        evidence_id="ev_test_002",
+        text="另一个项目也必须保持音频本地处理。",
+    )
+
+    result = generate_daily_context(config=config, day="2087-05-10", llm=SameClaimDifferentSubjectLLM())
+
+    assert result.memory_candidates_created == 2
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(
+            conn,
+            """
+            select subject_json, candidate_claim, confidence, evidence_refs_json, status
+            from memory_candidates
+            order by subject_json
+            """,
+        )
+    finally:
+        conn.close()
+    assert [json.loads(row["subject_json"])["id"] for row in candidates] == ["project_alpha", "project_beta"]
+    assert [row["candidate_claim"] for row in candidates] == [
+        "必须保持音频本地处理。",
+        "必须保持音频本地处理。",
+    ]
+    assert [row["confidence"] for row in candidates] == [0.8, 0.9]
+    assert [row["status"] for row in candidates] == ["pending_review", "pending_review"]
+    assert [json.loads(row["evidence_refs_json"])[0]["evidence_id"] for row in candidates] == [
+        "ev_test",
+        "ev_test_002",
     ]
 
 

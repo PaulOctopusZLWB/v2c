@@ -73,6 +73,7 @@ print(json.dumps({
     {
       "candidate_claim": "用户要求音频本地处理。",
       "claim_type": "requirement",
+      "subject": {"type": "project", "id": "project_audio", "label": "Audio Project"},
       "confidence": 0.9,
       "evidence_refs": ["ev_1"]
     }
@@ -86,6 +87,11 @@ print(json.dumps({
     context = adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
 
     assert context.memory_candidates[0].evidence_source_ids == ["ev_1"]
+    assert context.memory_candidates[0].subject == {
+        "type": "project",
+        "id": "project_audio",
+        "label": "Audio Project",
+    }
 
 
 def test_command_llm_adapter_preserves_structured_inferences(tmp_path: Path) -> None:

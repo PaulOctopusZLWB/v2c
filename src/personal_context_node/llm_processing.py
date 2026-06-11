@@ -249,9 +249,11 @@ def _persist_candidates(
         if not evidence_refs:
             raise ValueError("LLM memory candidates require evidence refs")
         normalized_claim_hash = _normalized_claim_hash(candidate.candidate_claim)
+        subject_json = _subject_json(candidate.subject)
         status = _candidate_status_for_daily_duplicate(
             conn,
             day=context.day,
+            subject_json=subject_json,
             claim_type=candidate.claim_type,
             normalized_claim_hash=normalized_claim_hash,
         )
@@ -269,11 +271,7 @@ def _persist_candidates(
                 "llm_daily_context",
                 candidate.candidate_claim,
                 candidate.claim_type,
-                json.dumps(
-                    {"type": "project", "id": "personal_context_node", "label": "Personal Context Node"},
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ),
+                subject_json,
                 candidate.confidence,
                 json.dumps(evidence_refs, ensure_ascii=False, sort_keys=True),
                 status,
@@ -297,7 +295,8 @@ def _merge_daily_duplicate_candidates(candidates: list[MemoryCandidateDraft]) ->
     merged: dict[tuple[str, str, str], MemoryCandidateDraft] = {}
     for candidate in candidates:
         normalized_claim = _normalize_claim(candidate.candidate_claim)
-        key = ("personal_context_node", candidate.claim_type, normalized_claim)
+        subject = _candidate_subject(candidate.subject)
+        key = (subject["id"], candidate.claim_type, normalized_claim)
         existing = merged.get(key)
         evidence_source_ids = _unique_preserve_order(
             (existing.evidence_source_ids if existing else []) + candidate.evidence_source_ids
@@ -307,6 +306,7 @@ def _merge_daily_duplicate_candidates(candidates: list[MemoryCandidateDraft]) ->
             claim_type=candidate.claim_type,
             confidence=max(existing.confidence if existing else candidate.confidence, candidate.confidence),
             evidence_source_ids=evidence_source_ids,
+            subject=subject,
         )
     return list(merged.values())
 
@@ -319,10 +319,24 @@ def _normalized_claim_hash(value: str) -> str:
     return f"sha256:{hashlib.sha256(_normalize_claim(value).encode('utf-8')).hexdigest()}"
 
 
+def _candidate_subject(subject: dict[str, str] | None) -> dict[str, str]:
+    if not subject:
+        return {"type": "project", "id": "personal_context_node", "label": "Personal Context Node"}
+    for field in ["type", "id", "label"]:
+        if not str(subject.get(field, "")).strip():
+            raise ValueError(f"LLM memory candidate subject missing {field}")
+    return {"type": str(subject["type"]), "id": str(subject["id"]), "label": str(subject["label"])}
+
+
+def _subject_json(subject: dict[str, str]) -> str:
+    return json.dumps(_candidate_subject(subject), ensure_ascii=False, sort_keys=True)
+
+
 def _candidate_status_for_daily_duplicate(
     conn: sqlite3.Connection,
     *,
     day: str,
+    subject_json: str,
     claim_type: str,
     normalized_claim_hash: str,
 ) -> str:
@@ -332,11 +346,12 @@ def _candidate_status_for_daily_duplicate(
         from memory_candidates
         where claim_type = ?
           and normalized_claim_hash = ?
+          and subject_json = ?
           and date_key is not null
           and date_key <> ?
         limit 1
         """,
-        (claim_type, normalized_claim_hash, day),
+        (claim_type, normalized_claim_hash, subject_json, day),
     ).fetchone()
     return "possible_duplicate" if duplicate else "pending_review"
 
