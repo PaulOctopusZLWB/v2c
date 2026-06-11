@@ -277,6 +277,28 @@ def test_generate_daily_context_accepts_evidence_id_refs_in_decision_rollup(tmp_
     ]
 
 
+def test_generate_daily_context_omits_speaker_labels_when_disabled(tmp_path: Path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        send_speaker_labels=False,
+    )
+    _insert_transcript(config.database_path)
+
+    llm = RecordingLLM()
+    generate_daily_context(config=config, day="2087-05-10", llm=llm)
+
+    assert llm.received_segments == [
+        {
+            "segment_id": "seg_test",
+            "start_ms": 0,
+            "end_ms": 1000,
+            "text": "我要求音频和转写处理保持本地。",
+            "evidence_id": "ev_test",
+        }
+    ]
+
+
 def test_generate_daily_context_rejects_unknown_llm_evidence_refs_without_side_effects(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_transcript(config.database_path)

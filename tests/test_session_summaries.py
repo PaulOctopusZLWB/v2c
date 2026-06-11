@@ -10,6 +10,18 @@ from personal_context_node.session_summaries import summarize_session
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
+class RecordingSessionLLM:
+    def __init__(self) -> None:
+        self.received_segments: list[dict[str, object]] = []
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]):
+        self.received_segments = transcript_segments
+        return RuleBasedLLMAdapter().generate_session_summary(
+            session_id=session_id,
+            transcript_segments=transcript_segments,
+        )
+
+
 def test_summarize_session_persists_schema_and_renders_note(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session_and_segments(config.database_path)
@@ -51,6 +63,35 @@ def test_summarize_session_persists_schema_and_renders_note(tmp_path: Path) -> N
     assert "- Decision: 我决定继续接入真实 ASR，需要保持音频本地处理。" in note
     assert "- Todo: 保持音频本地处理 (owner: self)" in note
     assert "完整转写不进入 session note" in note
+
+
+def test_summarize_session_omits_speaker_labels_when_disabled(tmp_path: Path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        send_speaker_labels=False,
+    )
+    _insert_session_and_segments(config.database_path)
+
+    llm = RecordingSessionLLM()
+    summarize_session(config=config, session_id="ses_test", llm=llm)
+
+    assert llm.received_segments == [
+        {
+            "segment_id": "seg_1",
+            "start_ms": 0,
+            "end_ms": 1000,
+            "text": "我决定继续接入真实 ASR，需要保持音频本地处理。",
+            "evidence_id": "ev_1",
+        },
+        {
+            "segment_id": "seg_2",
+            "start_ms": 1000,
+            "end_ms": 2000,
+            "text": "faster-whisper 备选是否需要提前装好",
+            "evidence_id": "ev_2",
+        },
+    ]
 
 
 def _insert_session_and_segments(database_path: Path) -> None:

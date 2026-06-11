@@ -35,7 +35,8 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
         )
         if not segments:
             return SessionSummaryResult(summaries_created=0)
-        summary = llm.generate_session_summary(session_id=session_id, transcript_segments=segments)
+        llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in segments]
+        summary = llm.generate_session_summary(session_id=session_id, transcript_segments=llm_segments)
         _persist_session_summary(conn, summary)
         conn.commit()
         return SessionSummaryResult(summaries_created=1)
@@ -72,3 +73,16 @@ def _persist_session_summary(conn: sqlite3.Connection, summary: SessionSummary) 
             now,
         ),
     )
+
+
+def _llm_segment(row: dict[str, object], *, include_speaker: bool) -> dict[str, object]:
+    segment = {
+        "segment_id": row["segment_id"],
+        "start_ms": row["start_ms"],
+        "end_ms": row["end_ms"],
+        "text": row["text"],
+        "evidence_id": row["evidence_id"],
+    }
+    if include_speaker:
+        segment["speaker"] = row["speaker"]
+    return segment

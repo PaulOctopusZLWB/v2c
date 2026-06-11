@@ -36,7 +36,7 @@ def generate_daily_context(*, config: AppConfig, day: str, llm: LLMPort) -> Dail
         )
         if not stored_segments:
             return DailyContextGenerationResult(summaries_created=0, memory_candidates_created=0)
-        llm_segments = [_llm_segment(row) for row in stored_segments]
+        llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in stored_segments]
         context = llm.generate_daily_context(day=day, transcript_segments=llm_segments)
         _persist_legacy_summary(conn, context)
         _persist_formal_summary(conn, context=context, segments=stored_segments)
@@ -48,15 +48,17 @@ def generate_daily_context(*, config: AppConfig, day: str, llm: LLMPort) -> Dail
         conn.close()
 
 
-def _llm_segment(row: dict[str, object]) -> dict[str, object]:
-    return {
+def _llm_segment(row: dict[str, object], *, include_speaker: bool) -> dict[str, object]:
+    segment = {
         "segment_id": row["segment_id"],
-        "speaker": row["speaker"],
         "start_ms": row["start_ms"],
         "end_ms": row["end_ms"],
         "text": row["text"],
         "evidence_id": row["evidence_id"],
     }
+    if include_speaker:
+        segment["speaker"] = row["speaker"]
+    return segment
 
 
 def _persist_legacy_summary(conn: sqlite3.Connection, context: DailyContext) -> None:
