@@ -230,6 +230,14 @@ run_id=run_... job_name=memory-verify status=succeeded error=
 After importing the seven sample files, `pcn process-status` should show seven pending `vad` tasks.
 Repeated `pcn process-run` calls advance those tasks and enqueue/run `asr` tasks for generated chunks.
 
+It also implements the daily report lifecycle:
+
+1. `daily_reports` stores status per day.
+2. `pcn summarize` marks the day `generated`.
+3. `pcn publish-review` marks the day `review_pending`.
+4. `pcn confirm-review` marks the day `review_synced` after at least one candidate is confirmed.
+5. `pcn daily-status --day YYYY-MM-DD` prints the current status.
+
 After editing `.smoke-vault/90_System/Speaker_Review/2087-05-10.md`, sync speaker mappings:
 
 ```bash

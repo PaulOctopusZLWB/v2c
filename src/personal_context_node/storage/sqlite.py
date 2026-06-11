@@ -76,6 +76,13 @@ create table if not exists daily_summaries (
   created_at text not null
 );
 
+create table if not exists daily_reports (
+  day text primary key,
+  status text not null,
+  updated_at text not null,
+  error text
+);
+
 create table if not exists speaker_mappings (
   speaker text primary key,
   person_label text not null,

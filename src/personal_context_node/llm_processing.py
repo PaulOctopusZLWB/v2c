@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import DailyContext, LLMPort
+from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -38,6 +39,7 @@ def generate_daily_context(*, config: AppConfig, day: str, llm: LLMPort) -> Dail
         _persist_summary(conn, context)
         candidates_created = _persist_candidates(conn, context=context, segments=segments)
         conn.commit()
+        set_daily_report_status(config=config, day=day, status="generated")
         return DailyContextGenerationResult(summaries_created=1, memory_candidates_created=candidates_created)
     finally:
         conn.close()

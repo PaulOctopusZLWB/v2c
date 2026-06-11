@@ -14,6 +14,7 @@ from personal_context_node.core.protocols.memory import (
     create_signed_event,
     verify_signed_event,
 )
+from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -50,6 +51,7 @@ def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
     for row in rows:
         lines.append(f"- [ ] {row['candidate_id']} | {row['claim_type']} | {row['candidate_claim']}")
     review_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    set_daily_report_status(config=config, day=day, status="review_pending")
     return review_path
 
 
@@ -115,6 +117,8 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             confirmed += 1
             events += 1
         conn.commit()
+        if confirmed:
+            set_daily_report_status(config=config, day=day, status="review_synced")
         return ConfirmCandidatesResult(candidates_confirmed=confirmed, signed_events_created=events)
     finally:
         conn.close()

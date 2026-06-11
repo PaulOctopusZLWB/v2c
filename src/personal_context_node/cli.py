@@ -12,6 +12,7 @@ from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.archive import archive_completed_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.daily_reports import get_daily_report_status
 from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.launchd import write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
@@ -391,3 +392,16 @@ def process_run(
             ]
         )
     )
+
+
+@app.command(name="daily-status")
+def daily_status(
+    day: str = typer.Option(..., help="Daily report day in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    typer.echo(f"day={day} status={get_daily_report_status(config=config, day=day)}")
