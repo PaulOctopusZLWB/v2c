@@ -82,6 +82,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         trust_status = "rejected"
     if trust_status == "trusted" and _unauthorized_known_card_successor(conn, event=event):
         trust_status = "rejected"
+    if trust_status == "trusted" and _unauthorized_known_annotation_revocation(conn, event=event):
+        trust_status = "rejected"
     if trust_status == "trusted" and not _payload_authority_matches_event(event):
         trust_status = "rejected"
     if trust_status == "trusted" and not _object_id_matches_payload(event):
@@ -235,6 +237,19 @@ def _card_successor_target_id(event: SignedEvent) -> str | None:
     if event.event_type == "memory_card.superseded":
         return MemoryCardSupersession.model_validate(event.payload).card_id
     return None
+
+
+def _unauthorized_known_annotation_revocation(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
+    if event.event_type != "memory_annotation.revoked":
+        return False
+    revocation = MemoryAnnotationRevocation.model_validate(event.payload)
+    row = conn.execute(
+        "select author_did from memory_annotations where annotation_id = ?",
+        (revocation.annotation_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    return event.owner_id != str(row["author_did"])
 
 
 def _identity_can_modify_card(conn: sqlite3.Connection, *, actor_did: str, card_owner_did: str) -> bool:

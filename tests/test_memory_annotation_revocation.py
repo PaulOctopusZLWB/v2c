@@ -127,6 +127,134 @@ def test_memory_verify_accepts_revoked_annotation(tmp_path: Path) -> None:
     assert result.materialization_mismatches == 0
 
 
+def test_memory_annotation_revocation_by_non_author_is_rejected(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        owner_key = Ed25519PrivateKey.generate()
+        author_key = Ed25519PrivateKey.generate()
+        attacker_key = Ed25519PrivateKey.generate()
+        card = _memory_card()
+        card_event, card_public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=card,
+            signer_did=card.owner_did,
+            private_key=owner_key,
+        )
+        insert_signed_event(conn, event=card_event, public_key=card_public_key)
+        annotation = MemoryAnnotation(
+            annotation_id="ann_test_001",
+            target_card_id=card.card_id,
+            author="did:key:commenter",
+            annotation_type="comment",
+            body="补充说明。",
+        )
+        annotation_event, annotation_public_key = create_signed_event(
+            event_type="memory_annotation.created",
+            payload=annotation,
+            signer_did=annotation.author,
+            private_key=author_key,
+        )
+        insert_signed_event(conn, event=annotation_event, public_key=annotation_public_key)
+        attacker_revocation, attacker_public_key = create_signed_event(
+            event_type="memory_annotation.revoked",
+            payload=MemoryAnnotationRevocation(annotation_id=annotation.annotation_id, revoked_by="did:key:attacker"),
+            signer_did="did:key:attacker",
+            private_key=attacker_key,
+            object_version=2,
+        )
+
+        insert_signed_event(conn, event=attacker_revocation, public_key=attacker_public_key)
+        conn.commit()
+
+        events = fetch_all(conn, "select event_type, trust_status from signed_events order by event_type")
+        annotations = fetch_all(conn, "select annotation_id, status, source_event_hash from memory_annotations")
+    finally:
+        conn.close()
+
+    assert events == [
+        {"event_type": "memory_annotation.created", "trust_status": "trusted"},
+        {"event_type": "memory_annotation.revoked", "trust_status": "rejected"},
+        {"event_type": "memory_card.created", "trust_status": "trusted"},
+    ]
+    assert annotations == [
+        {
+            "annotation_id": annotation.annotation_id,
+            "status": "active",
+            "source_event_hash": annotation_event.event_hash,
+        }
+    ]
+
+
+def test_memory_verify_rejects_non_author_annotation_revocation(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        owner_key = Ed25519PrivateKey.generate()
+        author_key = Ed25519PrivateKey.generate()
+        attacker_key = Ed25519PrivateKey.generate()
+        card = _memory_card()
+        card_event, card_public_key = create_signed_event(
+            event_type="memory_card.created",
+            payload=card,
+            signer_did=card.owner_did,
+            private_key=owner_key,
+        )
+        insert_signed_event(conn, event=card_event, public_key=card_public_key)
+        annotation = MemoryAnnotation(
+            annotation_id="ann_test_001",
+            target_card_id=card.card_id,
+            author="did:key:commenter",
+            annotation_type="comment",
+            body="补充说明。",
+        )
+        annotation_event, annotation_public_key = create_signed_event(
+            event_type="memory_annotation.created",
+            payload=annotation,
+            signer_did=annotation.author,
+            private_key=author_key,
+        )
+        insert_signed_event(conn, event=annotation_event, public_key=annotation_public_key)
+        attacker_revocation, attacker_public_key = create_signed_event(
+            event_type="memory_annotation.revoked",
+            payload=MemoryAnnotationRevocation(annotation_id=annotation.annotation_id, revoked_by="did:key:attacker"),
+            signer_did="did:key:attacker",
+            private_key=attacker_key,
+            object_version=2,
+        )
+        insert_signed_event(conn, event=attacker_revocation, public_key=attacker_public_key)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = verify_memory_events(config=config)
+
+    assert result.total_events == 3
+    assert result.valid_events == 2
+    assert result.invalid_events == 1
+    assert result.materialization_mismatches == 0
+    conn = connect(config.database_path)
+    try:
+        events = fetch_all(conn, "select event_type, trust_status from signed_events order by event_type")
+        annotations = fetch_all(conn, "select annotation_id, status, source_event_hash from memory_annotations")
+    finally:
+        conn.close()
+    assert events == [
+        {"event_type": "memory_annotation.created", "trust_status": "trusted"},
+        {"event_type": "memory_annotation.revoked", "trust_status": "rejected"},
+        {"event_type": "memory_card.created", "trust_status": "trusted"},
+    ]
+    assert annotations == [
+        {
+            "annotation_id": annotation.annotation_id,
+            "status": "active",
+            "source_event_hash": annotation_event.event_hash,
+        }
+    ]
+
+
 def _memory_card() -> MemoryCard:
     return MemoryCard(
         card_id="mem_test_001",
