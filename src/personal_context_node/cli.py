@@ -219,7 +219,11 @@ def _ingest_import(
     if source_dir is not None:
         result = import_audio_files(config=config, source_dir=source_dir)
     elif config.dji_mic_3.root_path is not None:
-        importer = LocalDirectoryFileImportAdapter(device_roots=[config.dji_mic_3.root_path], device_label=config.source_device)
+        importer = LocalDirectoryFileImportAdapter(
+            device_roots=[config.dji_mic_3.root_path],
+            device_label=config.source_device,
+            audio_globs=config.dji_mic_3.audio_globs,
+        )
         result = import_audio_files_from_port(config=config, importer=importer)
     else:
         raise typer.BadParameter("--source-dir is required when [device.dji_mic_3].root_path is not configured")

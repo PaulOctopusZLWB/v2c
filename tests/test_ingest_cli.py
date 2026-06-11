@@ -146,6 +146,41 @@ stable_seconds = 0
     ]
 
 
+def test_ingest_import_group_cli_uses_configured_audio_globs(tmp_path: Path) -> None:
+    source = tmp_path / "mounted_dji"
+    nested_audio = source / "REC" / "TX02_MIC001_20870510_173550_orig.wav"
+    _write_tiny_wav(nested_audio)
+    data_dir = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data_dir}"
+obsidian_vault = "{vault}"
+
+[device.dji_mic_3]
+root_path = "../mounted_dji"
+audio_globs = ["**/*.wav"]
+stable_seconds = 0
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["ingest", "import", "--config", str(config_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "imported_files=1" in result.output
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    conn = connect(config.database_path)
+    try:
+        audio_files = fetch_all(conn, "select source_path from audio_files")
+    finally:
+        conn.close()
+    assert audio_files == [{"source_path": str(nested_audio)}]
+
+
 def test_ingest_import_records_source_file_metadata(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     audio_path = source / "TX02_MIC001_20870510_173550_orig.wav"

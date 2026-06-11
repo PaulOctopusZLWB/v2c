@@ -27,6 +27,25 @@ def test_local_directory_file_import_adapter_copies_stable_audio_to_raw_store(tm
     assert imported.recorded_at == "2025-06-11T19:09:10+08:00"
 
 
+def test_local_directory_file_import_adapter_discovers_configured_audio_globs_recursively(tmp_path: Path) -> None:
+    device_root = tmp_path / "DJI_MIC"
+    nested_audio = device_root / "REC" / "TX02_MIC013_20870511_190910_orig.wav"
+    upper_audio = device_root / "REC" / "TX02_MIC014_20870511_191010_orig.WAV"
+    ignored_text = device_root / "REC" / "notes.txt"
+    _write_tiny_wav(nested_audio)
+    _write_tiny_wav(upper_audio)
+    ignored_text.write_text("not audio", encoding="utf-8")
+    adapter = LocalDirectoryFileImportAdapter(
+        device_roots=[device_root],
+        device_label="DJI Mic 3",
+        audio_globs=["**/*.WAV", "**/*.wav"],
+    )
+
+    sources = adapter.discover_audio_files(adapter.discover_devices()[0])
+
+    assert [source.source_path for source in sources] == [nested_audio, upper_audio]
+
+
 def _write_tiny_wav(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:

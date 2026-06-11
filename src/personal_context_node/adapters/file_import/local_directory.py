@@ -21,9 +21,10 @@ from personal_context_node.ingest import (
 
 
 class LocalDirectoryFileImportAdapter:
-    def __init__(self, *, device_roots: list[Path], device_label: str) -> None:
+    def __init__(self, *, device_roots: list[Path], device_label: str, audio_globs: list[str] | tuple[str, ...] | None = None) -> None:
         self.device_roots = device_roots
         self.device_label = device_label
+        self.audio_globs = tuple(audio_globs or ("*.wav", "*.WAV"))
 
     def discover_devices(self) -> list[MountedDevice]:
         return [
@@ -34,7 +35,7 @@ class LocalDirectoryFileImportAdapter:
 
     def discover_audio_files(self, device: MountedDevice) -> list[SourceAudioFile]:
         sources: list[SourceAudioFile] = []
-        for path in _iter_audio_paths(source_dir=device.root_path, recursive=False):
+        for path in self._iter_configured_audio_paths(device.root_path):
             stat = path.stat()
             sources.append(
                 SourceAudioFile(
@@ -45,6 +46,12 @@ class LocalDirectoryFileImportAdapter:
                 )
             )
         return sources
+
+    def _iter_configured_audio_paths(self, root_path: Path) -> list[Path]:
+        paths: set[Path] = set()
+        for pattern in self.audio_globs:
+            paths.update(path for path in root_path.glob(pattern) if path.is_file())
+        return sorted(paths)
 
     def wait_until_stable(self, source: SourceAudioFile, *, stable_seconds: int) -> StableSourceAudioFile:
         if not is_file_stable(source.source_path, settle_seconds=stable_seconds):
