@@ -236,7 +236,7 @@ def preprocess(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
+    vad_backend: str = typer.Option("energy", help="VAD backend: energy, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
 ) -> None:
@@ -911,7 +911,7 @@ def process_run(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
+    vad_backend: str = typer.Option("energy", help="VAD backend: energy, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
     asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
@@ -940,7 +940,7 @@ def process_run_group(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
+    vad_backend: str = typer.Option("energy", help="VAD backend: energy, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
     asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
@@ -1005,7 +1005,10 @@ def _build_vad(*, vad_backend: str, vad_command: str | None, vad_threshold: floa
         if not vad_command:
             raise typer.BadParameter("--vad-command is required when --vad-backend command")
         return CommandVADAdapter(command=vad_command.split())
-    raise typer.BadParameter("--vad-backend must be 'energy' or 'command'")
+    if vad_backend == "funasr":
+        command = vad_command.split() if vad_command else ["python3", "scripts/funasr_vad_wrapper.py"]
+        return CommandVADAdapter(command=command)
+    raise typer.BadParameter("--vad-backend must be 'energy', 'command', or 'funasr'")
 
 
 def _build_asr(*, asr_backend: str, asr_command: str | None, mock_text: str):
