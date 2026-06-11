@@ -65,6 +65,33 @@ def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_pa
     assert events == [{"event_type": "memory_card.created"}]
 
 
+def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(
+        text.replace("- [ ] cand_test_001 | requirement | 用户要求音频本地处理。", "- [x] cand_test_001 | requirement | 用户要求音频本地处理。 | reject"),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 0
+    assert result.signed_events_created == 0
+    receipt = review_path.read_text(encoding="utf-8")
+    assert "action=reject" in receipt
+    assert "card_id=" not in receipt
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select status, memory_card_id from memory_candidates")
+        events = fetch_all(conn, "select event_type from signed_events")
+    finally:
+        conn.close()
+    assert candidates == [{"status": "rejected", "memory_card_id": None}]
+    assert events == []
+
+
 def test_confirming_multiple_candidates_creates_owner_hash_chain(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
     _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="用户要求音频本地处理。")

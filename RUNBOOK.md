@@ -47,11 +47,12 @@ It also implements the human review boundary:
 1. `pcn obsidian publish --date ...` writes daily notes, session notes, pending memory candidates, and speaker review artifacts.
 2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
 3. `pcn obsidian sync-review --date ...` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
-4. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
-5. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
-6. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
-7. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
-8. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
+4. Checked candidate lines ending with `| reject` update local status to `rejected` without creating signed events.
+5. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
+6. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
+7. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
+8. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
+9. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
 
 It also implements the speaker review boundary:
 

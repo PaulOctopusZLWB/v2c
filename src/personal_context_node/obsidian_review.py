@@ -57,8 +57,8 @@ def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
 
 def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandidatesResult:
     review_path = config.obsidian_vault / "30_Memory_Candidates" / f"{day}.md"
-    checked_ids = _checked_candidate_ids(review_path)
-    if not checked_ids:
+    checked_actions = _checked_candidate_actions(review_path)
+    if not checked_actions:
         return ConfirmCandidatesResult(candidates_confirmed=0, signed_events_created=0)
 
     conn = connect(config.database_path)
@@ -66,8 +66,8 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         initialize(conn)
         confirmed = 0
         events = 0
-        receipts: dict[str, str] = {}
-        for candidate_id in checked_ids:
+        receipts: dict[str, dict[str, str | None]] = {}
+        for candidate_id, action in checked_actions:
             row = conn.execute(
                 """
                 select candidate_id, candidate_claim, claim_type, subject_json, evidence_refs_json, status
@@ -77,6 +77,13 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 (candidate_id,),
             ).fetchone()
             if row is None or row["status"] != "pending_review":
+                continue
+            if action == "reject":
+                conn.execute(
+                    "update memory_candidates set status = 'rejected' where candidate_id = ?",
+                    (candidate_id,),
+                )
+                receipts[candidate_id] = {"action": "reject", "card_id": None}
                 continue
             card = MemoryCard(
                 card_id=f"mem_{uuid4().hex}",
@@ -98,46 +105,51 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 "update memory_candidates set status = 'confirmed', memory_card_id = ? where candidate_id = ?",
                 (card.card_id, candidate_id),
             )
-            receipts[candidate_id] = card.card_id
+            receipts[candidate_id] = {"action": "confirm", "card_id": card.card_id}
             confirmed += 1
             events += 1
         conn.commit()
-        if confirmed:
+        if receipts:
             _rewrite_confirmed_receipts(review_path, receipts)
+        if confirmed:
             set_daily_report_status(config=config, day=day, status="review_synced")
         return ConfirmCandidatesResult(candidates_confirmed=confirmed, signed_events_created=events)
     finally:
         conn.close()
 
 
-def _checked_candidate_ids(path: Path) -> list[str]:
+def _checked_candidate_actions(path: Path) -> list[tuple[str, str]]:
     if not path.exists():
         return []
     receipt_ids = set(re.findall(r'candidate_id="([^"]+)"', path.read_text(encoding="utf-8")))
-    checked: list[str] = []
+    checked: list[tuple[str, str]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|", line)
+        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \|[^|]+\|[^|]+(?:\| *(confirm|reject|defer))?", line)
         if match and match.group(1) not in receipt_ids:
-            checked.append(match.group(1))
+            checked.append((match.group(1), match.group(2) or "confirm"))
     return checked
 
 
-def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, str]) -> None:
+def _rewrite_confirmed_receipts(path: Path, receipts: dict[str, dict[str, str | None]]) -> None:
     synced_at = datetime.now(timezone.utc).isoformat()
     rewritten: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \| ([^|]+) \| (.+)", line)
+        match = re.match(r"- \[[xX]\] (cand_[^ |]+) \| ([^|]+) \| ([^|]+)(?:\| *(confirm|reject|defer))?", line)
         if not match or match.group(1) not in receipts:
             rewritten.append(line)
             continue
         candidate_id = match.group(1)
-        card_id = receipts[candidate_id]
+        receipt = receipts[candidate_id]
+        action = receipt["action"]
+        card_id = receipt["card_id"]
+        card_part = f" card_id={card_id}" if card_id else ""
         rewritten.append(
             f'<!-- pcn:review_receipt start kind="managed" candidate_id="{candidate_id}" '
-            f'action=confirm card_id={card_id} synced_at="{synced_at}" -->'
+            f'action={action}{card_part} synced_at="{synced_at}" -->'
         )
-        rewritten.append(
-            f"confirmed {candidate_id} -> {card_id}; original_claim={match.group(3)}"
-        )
+        if card_id:
+            rewritten.append(f"confirmed {candidate_id} -> {card_id}; original_claim={match.group(3)}")
+        else:
+            rewritten.append(f"{action} {candidate_id}; original_claim={match.group(3)}")
         rewritten.append(f'<!-- pcn:review_receipt end candidate_id="{candidate_id}" -->')
     path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
