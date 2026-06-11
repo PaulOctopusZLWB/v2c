@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -31,5 +32,5 @@ def export_memory_events(*, config: AppConfig, output_path: Path, since: str) ->
         conn.close()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n".join(str(row["raw_event_json"]) for row in rows) + ("\n" if rows else ""), encoding="utf-8")
+    write_text_atomic(output_path, "\n".join(str(row["raw_event_json"]) for row in rows) + ("\n" if rows else ""))
     return MemoryExportResult(events_exported=len(rows), output_path=output_path)

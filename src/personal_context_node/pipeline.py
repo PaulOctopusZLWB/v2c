@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
     MemoryCard,
@@ -247,7 +248,7 @@ def _publish_daily_notes(conn: sqlite3.Connection, config: AppConfig) -> None:
         for row in day_rows:
             if row["candidate_claim"]:
                 lines.append(f"- [{row['status']}] {row['candidate_claim']}")
-        note.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        write_text_atomic(note, "\n".join(lines) + "\n")
 
 
 def _count(conn: sqlite3.Connection, table: str) -> int:

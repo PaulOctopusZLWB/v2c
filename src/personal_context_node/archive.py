@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.archive import ArchivePort
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -305,7 +306,7 @@ def _archive_signed_events(conn, *, config: AppConfig, archive: ArchivePort) -> 
         return 0, 0
     source_path = config.data_dir / "exports" / "signed_events.jsonl"
     source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text("\n".join(str(row["raw_event_json"]) for row in rows) + "\n", encoding="utf-8")
+    write_text_atomic(source_path, "\n".join(str(row["raw_event_json"]) for row in rows) + "\n")
     expected_sha256 = _sha256(source_path)
     result = archive.archive_file(
         source_path=source_path,
@@ -363,9 +364,9 @@ def _archive_rows_as_jsonl(
         return 0, 0
     source_path = config.data_dir / "exports" / source_filename
     source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text(
+    write_text_atomic(
+        source_path,
         "\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows) + "\n",
-        encoding="utf-8",
     )
     expected_sha256 = _sha256(source_path)
     result = archive.archive_file(
