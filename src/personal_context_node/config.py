@@ -49,6 +49,7 @@ class AppConfig(BaseModel):
     asr_language: str = "zh"
     asr_model_name: str = "sensevoice"
     llm_backend: str = "rule_based"
+    llm_command: str | None = None
     send_person_names: bool = True
     send_speaker_labels: bool = True
     max_chunk_tokens: int = 6000
@@ -90,6 +91,7 @@ class AppConfig(BaseModel):
             "asr_language": asr.get("language", cls.model_fields["asr_language"].default),
             "asr_model_name": asr.get("model_name", cls.model_fields["asr_model_name"].default),
             "llm_backend": llm.get("backend", cls.model_fields["llm_backend"].default),
+            "llm_command": llm.get("command", cls.model_fields["llm_command"].default),
             "send_person_names": llm.get("send_person_names", cls.model_fields["send_person_names"].default),
             "send_speaker_labels": llm.get("send_speaker_labels", cls.model_fields["send_speaker_labels"].default),
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),

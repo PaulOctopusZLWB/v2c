@@ -44,6 +44,7 @@ target_sample_format = "s16"
 
 [llm]
 backend = "rule_based"
+command = "python scripts/llm_wrapper.py"
 send_person_names = false
 send_speaker_labels = false
 max_chunk_tokens = 4096
@@ -86,6 +87,7 @@ stable_seconds = 10
     assert config.audio.target_channels == 1
     assert config.audio.target_sample_format == "s16"
     assert config.llm_backend == "rule_based"
+    assert config.llm_command == "python scripts/llm_wrapper.py"
     assert config.send_person_names is False
     assert config.send_speaker_labels is False
     assert config.max_chunk_tokens == 4096

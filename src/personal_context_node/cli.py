@@ -945,21 +945,25 @@ def _process_rerun(
 
 @app.command(name="process-run")
 def process_run(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
-    vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str = typer.Option("energy", help="VAD backend: energy, command, or funasr."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    vad_threshold: float | None = typer.Option(None, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
-    max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
-    asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
+    max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
+    asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
+    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
+    llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
 ) -> None:
     _process_run(
+        config_path=config_path,
         data_dir=data_dir,
         obsidian_vault=obsidian_vault,
         vad_threshold=vad_threshold,
@@ -968,27 +972,33 @@ def process_run(
         max_chunk_ms=max_chunk_ms,
         asr_backend="mock" if mock else asr_backend,
         asr_command=asr_command,
+        llm_backend=llm_backend,
+        llm_command=llm_command,
         mock_text=mock_text,
     )
 
 
 @process_app.command(name="run")
 def process_run_group(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
-    vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str = typer.Option("energy", help="VAD backend: energy, command, or funasr."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    vad_threshold: float | None = typer.Option(None, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
-    max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
-    asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
+    max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
+    asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
+    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
+    llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
 ) -> None:
     _process_run(
+        config_path=config_path,
         data_dir=data_dir,
         obsidian_vault=obsidian_vault,
         vad_threshold=vad_threshold,
@@ -997,31 +1007,43 @@ def process_run_group(
         max_chunk_ms=max_chunk_ms,
         asr_backend="mock" if mock else asr_backend,
         asr_command=asr_command,
+        llm_backend=llm_backend,
+        llm_command=llm_command,
         mock_text=mock_text,
     )
 
 
 def _process_run(
     *,
-    data_dir: Path,
-    obsidian_vault: Path,
-    vad_threshold: float,
-    vad_backend: str,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
+    vad_threshold: float | None,
+    vad_backend: str | None,
     vad_command: str | None,
-    max_chunk_ms: int,
-    asr_backend: str,
+    max_chunk_ms: int | None,
+    asr_backend: str | None,
     asr_command: str | None,
+    llm_backend: str | None,
+    llm_command: str | None,
     mock_text: str,
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     vad = _build_vad(
-        vad_backend=vad_backend,
+        vad_backend=vad_backend or config.vad_backend,
         vad_command=vad_command,
-        vad_threshold=vad_threshold,
-        merge_gap_ms=250,
-        min_speech_ms=300,
+        vad_threshold=config.vad_threshold if vad_threshold is None else vad_threshold,
+        merge_gap_ms=config.merge_gap_ms,
+        min_speech_ms=config.min_speech_ms,
     )
-    asr = _build_asr(asr_backend=asr_backend, asr_command=asr_command, mock_text=mock_text)
+    asr = _build_asr(
+        asr_backend=asr_backend or config.asr_backend,
+        asr_command=asr_command or config.asr_command,
+        mock_text=mock_text,
+        language=config.asr_language,
+        model_name=config.asr_model_name,
+    )
+    llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
     result = record_job_run(
         config=config,
         job_name="process-run",
@@ -1030,7 +1052,8 @@ def _process_run(
             run_id="cli-process-run",
             vad=vad,
             asr=asr,
-            max_chunk_ms=max_chunk_ms,
+            llm=llm,
+            max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
         ),
     ).result
     typer.echo(
@@ -1082,6 +1105,16 @@ def _build_asr(
         command = asr_command.split() if asr_command else ["python3", "scripts/funasr_sensevoice_wrapper.py"]
         return CommandASRAdapter(command=command)
     raise typer.BadParameter("--asr-backend must be 'mock', 'command', or 'funasr'")
+
+
+def _build_llm(*, llm_backend: str, llm_command: str | None):
+    if llm_backend in {"rule_based", "mock"}:
+        return RuleBasedLLMAdapter()
+    if llm_backend == "command":
+        if not llm_command:
+            raise typer.BadParameter("--llm-command is required when --llm-backend command")
+        return CommandLLMAdapter(command=llm_command.split())
+    raise typer.BadParameter("--llm-backend must be 'rule_based', 'mock', or 'command'")
 
 
 @app.command(name="daily-status")
