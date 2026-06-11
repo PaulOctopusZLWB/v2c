@@ -39,6 +39,7 @@ create table if not exists transcript_segments (
   text text not null,
   language text not null,
   speaker text not null,
+  speaker_cluster_id text,
   evidence_id text not null unique,
   confidence real,
   asr_backend text not null default 'mock_first_milestone',
@@ -380,7 +381,7 @@ select
   end as attribution_source
 from transcript_segments ts
 left join segment_person_overrides override on override.segment_id = ts.segment_id
-left join speaker_mappings mapping on mapping.speaker = ts.speaker;
+left join speaker_mappings mapping on mapping.speaker_cluster_id = coalesce(ts.speaker_cluster_id, ts.speaker);
 """
 
 
@@ -406,9 +407,18 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.execute("create index if not exists idx_audio_files_status on audio_files(status)")
     _ensure_column(conn, "transcript_segments", "absolute_start_at", "text")
     _ensure_column(conn, "transcript_segments", "absolute_end_at", "text")
+    _ensure_column(conn, "transcript_segments", "speaker_cluster_id", "text")
     _ensure_column(conn, "transcript_segments", "decode_config_json", "text")
+    conn.execute(
+        """
+        update transcript_segments
+        set speaker_cluster_id = speaker
+        where (speaker_cluster_id is null or speaker_cluster_id = '') and speaker is not null
+        """
+    )
     conn.execute("create index if not exists idx_segments_session_time on transcript_segments(session_id, absolute_start_at)")
     conn.execute("create index if not exists idx_segments_audio_time on transcript_segments(audio_file_id, start_ms, end_ms)")
+    conn.execute("create index if not exists idx_segments_cluster on transcript_segments(speaker_cluster_id)")
     _ensure_column(conn, "audio_chunks", "local_work_path", "text not null default ''")
     _ensure_column(conn, "audio_chunks", "start_ms", "integer not null default 0")
     _ensure_column(conn, "audio_chunks", "end_ms", "integer not null default 0")
@@ -504,6 +514,22 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.execute(
         "insert or ignore into schema_migrations (version, name) values (?, ?)",
         (1, "base_schema"),
+    )
+    conn.execute("drop view if exists v_segment_attribution")
+    conn.execute(
+        """
+        create view v_segment_attribution as
+        select
+          ts.segment_id,
+          coalesce(override.person_id, mapping.person_id) as person_id,
+          case
+            when override.person_id is not null then 'override'
+            when mapping.person_id is not null then 'cluster_mapping'
+          end as attribution_source
+        from transcript_segments ts
+        left join segment_person_overrides override on override.segment_id = ts.segment_id
+        left join speaker_mappings mapping on mapping.speaker_cluster_id = coalesce(ts.speaker_cluster_id, ts.speaker)
+        """
     )
     conn.commit()
 

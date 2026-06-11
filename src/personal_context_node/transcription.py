@@ -51,14 +51,15 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                 absolute_end_ms = min(chunk["source_start_ms"] + segment.end_ms, chunk["source_end_ms"])
                 absolute_start_at = _absolute_time(str(chunk["recorded_at"]), int(absolute_start_ms))
                 absolute_end_at = _absolute_time(str(chunk["recorded_at"]), int(absolute_end_ms))
+                speaker_cluster_id = "self"
                 conn.execute(
                     """
                     insert into transcript_segments (
                       segment_id, audio_file_id, chunk_id, start_ms, end_ms,
                       absolute_start_at, absolute_end_at, text,
-                      language, speaker, evidence_id, confidence, asr_backend,
+                      language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend,
                       model_name, model_version, asr_run_id, is_active, created_at
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         f"seg_{uuid4().hex}",
@@ -70,7 +71,8 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                         absolute_end_at,
                         segment.text,
                         segment.language,
-                        "self",
+                        speaker_cluster_id,
+                        speaker_cluster_id,
                         f"ev_seg_{uuid4().hex}",
                         segment.confidence,
                         asr.__class__.__name__,
@@ -95,6 +97,7 @@ def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
         "chunk_id": "alter table transcript_segments add column chunk_id text",
         "absolute_start_at": "alter table transcript_segments add column absolute_start_at text",
         "absolute_end_at": "alter table transcript_segments add column absolute_end_at text",
+        "speaker_cluster_id": "alter table transcript_segments add column speaker_cluster_id text",
         "confidence": "alter table transcript_segments add column confidence real",
         "asr_backend": "alter table transcript_segments add column asr_backend text not null default 'mock_first_milestone'",
         "model_name": "alter table transcript_segments add column model_name text not null default 'mock'",
@@ -107,8 +110,16 @@ def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
     for column, sql in migrations.items():
         if column not in existing:
             conn.execute(sql)
+    conn.execute(
+        """
+        update transcript_segments
+        set speaker_cluster_id = speaker
+        where (speaker_cluster_id is null or speaker_cluster_id = '') and speaker is not null
+        """
+    )
     conn.execute("create index if not exists idx_segments_session_time on transcript_segments(session_id, absolute_start_at)")
     conn.execute("create index if not exists idx_segments_audio_time on transcript_segments(audio_file_id, start_ms, end_ms)")
+    conn.execute("create index if not exists idx_segments_cluster on transcript_segments(speaker_cluster_id)")
     conn.commit()
 
 

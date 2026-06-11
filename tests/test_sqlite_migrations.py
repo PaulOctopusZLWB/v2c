@@ -128,18 +128,22 @@ def test_initialize_transcript_segments_schema_tracks_absolute_time_and_indexes(
         indexes = fetch_all(conn, "pragma index_list(transcript_segments)")
         session_time = fetch_all(conn, "pragma index_info(idx_segments_session_time)")
         audio_time = fetch_all(conn, "pragma index_info(idx_segments_audio_time)")
+        cluster = fetch_all(conn, "pragma index_info(idx_segments_cluster)")
     finally:
         conn.close()
 
     column_by_name = {row["name"]: row for row in columns}
     assert column_by_name["absolute_start_at"]["type"].lower() == "text"
     assert column_by_name["absolute_end_at"]["type"].lower() == "text"
+    assert column_by_name["speaker_cluster_id"]["type"].lower() == "text"
     assert column_by_name["decode_config_json"]["type"].lower() == "text"
     index_names = {row["name"] for row in indexes}
     assert "idx_segments_session_time" in index_names
     assert "idx_segments_audio_time" in index_names
+    assert "idx_segments_cluster" in index_names
     assert [row["name"] for row in session_time] == ["session_id", "absolute_start_at"]
     assert [row["name"] for row in audio_time] == ["audio_file_id", "start_ms", "end_ms"]
+    assert [row["name"] for row in cluster] == ["speaker_cluster_id"]
 
 
 def test_initialize_audio_chunks_schema_tracks_work_path_absolute_time_and_index(tmp_path) -> None:
