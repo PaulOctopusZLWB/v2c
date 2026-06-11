@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import wave
+from pathlib import Path
+
+from personal_context_node.config import AppConfig
+from personal_context_node.pipeline import run_first_milestone
+from personal_context_node.storage.sqlite import connect, fetch_all
+
+
+def _write_tiny_wav(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16_000)
+        wav.writeframes(b"\0\1" * 16_000)
+
+
+def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mounted_dji"
+    source_wav = source_dir / "TX02_MIC001_20870510_173550_orig.wav"
+    _write_tiny_wav(source_wav)
+
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "PersonalContext",
+        source_device="DJI Mic 3",
+        owner_did="did:key:test-owner",
+    )
+
+    result = run_first_milestone(config=config, source_dir=source_dir, confirm_first_candidate=True)
+
+    assert result.imported_files == 1
+    assert result.transcript_segments >= 1
+    assert result.memory_candidates >= 1
+    assert result.signed_events >= 1
+
+    db = connect(config.database_path)
+    try:
+        audio_files = fetch_all(db, "select source_device, sha256 from audio_files")
+        candidates = fetch_all(db, "select status, evidence_refs_json from memory_candidates")
+        events = fetch_all(db, "select event_type, verified from signed_events")
+    finally:
+        db.close()
+
+    assert audio_files == [{"source_device": "DJI Mic 3", "sha256": audio_files[0]["sha256"]}]
+    assert candidates[0]["status"] == "confirmed"
+    assert "seg_" in candidates[0]["evidence_refs_json"]
+    assert events == [{"event_type": "memory_card.confirmed.v1", "verified": 1}]
+
+    daily_note = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
+    assert daily_note.exists()
+    text = daily_note.read_text(encoding="utf-8")
+    assert "# 2087-05-10 Daily Context" in text
+    assert "## Memory Candidates" in text
+    assert "TX02_MIC001_20870510_173550_orig.wav" in text
