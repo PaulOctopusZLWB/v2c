@@ -113,6 +113,16 @@ uv run pcn launchd-write-plists \
   --archive-root .smoke-nas
 ```
 
+## Configuration
+
+Copy `config/local.example.toml` to `config/local.toml` and adjust local paths/backends. The archive command can read this file directly:
+
+```bash
+uv run pcn archive --config config/local.toml
+```
+
+Explicit CLI options override config-file paths where supported.
+
 Expected first milestone smoke output:
 
 ```text

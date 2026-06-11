@@ -4,6 +4,7 @@
 .smoke-vault/
 .smoke-nas/
 .smoke-launchd/
+.smoke-config.toml
 data/
 build/
 __pycache__/

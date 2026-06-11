@@ -209,18 +209,20 @@ def sync_speaker_review_cmd(
 
 @app.command()
 def archive(
-    archive_root: Path = typer.Option(..., help="NAS or local archive root."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path = typer.Option(
         Path("/Users/paul/Documents/Obsidian/PersonalContext"),
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     require_existing_root: bool = typer.Option(False, help="Treat a missing archive root as unavailable."),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    archive_target = archive_root or config.nas_archive_root
     result = archive_completed_audio(
         config=config,
-        archive=LocalFilesystemArchiveAdapter(root=archive_root, require_existing_root=require_existing_root),
+        archive=LocalFilesystemArchiveAdapter(root=archive_target, require_existing_root=require_existing_root),
     )
     typer.echo(
         " ".join(
@@ -229,6 +231,20 @@ def archive(
                 f"files_pending={result.files_pending}",
             ]
         )
+    )
+
+
+def _load_config(
+    *,
+    config_path: Path | None,
+    data_dir: Path | None = None,
+    obsidian_vault: Path | None = None,
+) -> AppConfig:
+    if config_path:
+        return AppConfig.from_toml(config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    return AppConfig(
+        data_dir=data_dir or Path("data"),
+        obsidian_vault=obsidian_vault or Path("/Users/paul/Documents/Obsidian/PersonalContext"),
     )
 
 

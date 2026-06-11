@@ -1,0 +1,16 @@
+[paths]
+data_dir = "data"
+obsidian_vault = "/Users/paul/Documents/Obsidian/PersonalContext"
+nas_archive_root = "/Volumes/NAS/PersonalContext"
+
+[vad]
+backend = "energy"
+threshold = 0.03
+max_chunk_ms = 30000
+
+[asr]
+backend = "mock"
+# command = "python3 scripts/asr_wrapper_example.py"
+
+[llm]
+backend = "rule_based"
