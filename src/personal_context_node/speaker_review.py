@@ -74,8 +74,11 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
         return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
 
     text = review_path.read_text(encoding="utf-8")
-    mappings = _parse_mappings(text)
-    raw_overrides = _parse_overrides(text)
+    mapping_block = _speaker_mapping_block(text)
+    if mapping_block is None:
+        return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
+    mappings = _parse_mappings(mapping_block)
+    raw_overrides = _parse_overrides(mapping_block)
     overrides = {
         segment_id: person
         for segment_id, (speaker, person) in raw_overrides.items()
@@ -165,6 +168,17 @@ def _parse_mappings(text: str) -> dict[str, str]:
         if match:
             mappings[match.group(1).strip()] = match.group(2).strip()
     return mappings
+
+
+def _speaker_mapping_block(text: str) -> str | None:
+    match = re.search(
+        r'<!--\s*pcn:speaker_mapping start\b[^>]*-->(?P<body>.*?)<!--\s*pcn:speaker_mapping end\b[^>]*-->',
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return None
+    return match.group("body")
 
 
 def _person_id_for_label(label: str) -> str:

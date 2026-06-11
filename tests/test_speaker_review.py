@@ -91,6 +91,37 @@ def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_p
     assert by_segment["seg_guest"]["attribution_source"] == "override"
 
 
+def test_speaker_review_sync_ignores_text_outside_mapping_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_segments(config.database_path)
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    edited = "\n".join(
+        [
+            text.replace("- spk_self: self", "- spk_self: Paul"),
+            "",
+            "- spk_self: Free Text Person",
+            "<!-- segment_id: seg_guest -->",
+            "spk_self -> Free Text Override: 这行不在协议块里。",
+        ]
+    )
+    review_path.write_text(edited, encoding="utf-8")
+
+    result = sync_speaker_review(config=config, day="2087-05-10")
+
+    assert result.mappings_upserted == 1
+    assert result.segment_overrides_upserted == 0
+    conn = connect(config.database_path)
+    try:
+        mappings = fetch_all(conn, "select speaker, person_label from speaker_mappings")
+        overrides = fetch_all(conn, "select segment_id, person_label from segment_person_overrides")
+    finally:
+        conn.close()
+
+    assert mappings == [{"speaker": "spk_self", "person_label": "Paul"}]
+    assert overrides == []
+
+
 def _insert_segments(database_path: Path) -> None:
     conn = connect(database_path)
     try:
