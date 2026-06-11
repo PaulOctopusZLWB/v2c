@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import struct
 import wave
@@ -10,6 +11,7 @@ from typer.testing import CliRunner
 
 from personal_context_node.cli import app
 from personal_context_node.config import AppConfig
+from personal_context_node.ingest import import_audio_files
 from personal_context_node.storage.sqlite import connect, fetch_all
 
 
@@ -244,6 +246,43 @@ def test_ingest_import_records_source_file_metadata(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert audio_files == [{"source_size_bytes": stat.st_size, "source_mtime_ns": stat.st_mtime_ns}]
+
+
+def test_ingest_import_identity_includes_source_size_mtime_and_hash(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    audio_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    _write_tiny_wav(audio_path)
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    first = import_audio_files(config=config, source_dir=source)
+    original_stat = audio_path.stat()
+    changed_mtime_ns = original_stat.st_mtime_ns + 1_000_000
+    os.utime(audio_path, ns=(changed_mtime_ns, changed_mtime_ns))
+    second = import_audio_files(config=config, source_dir=source)
+
+    assert first.imported_files == 1
+    assert second.imported_files == 1
+    conn = connect(config.database_path)
+    try:
+        audio_files = fetch_all(
+            conn,
+            """
+            select source_path, source_size_bytes, source_mtime_ns, sha256, local_raw_path
+            from audio_files
+            order by source_mtime_ns
+            """,
+        )
+        tasks = fetch_all(conn, "select task_type, target_id from tasks order by created_at")
+    finally:
+        conn.close()
+    assert [row["source_path"] for row in audio_files] == [str(audio_path), str(audio_path)]
+    assert [row["source_size_bytes"] for row in audio_files] == [original_stat.st_size, original_stat.st_size]
+    assert [row["source_mtime_ns"] for row in audio_files] == [original_stat.st_mtime_ns, changed_mtime_ns]
+    assert audio_files[0]["sha256"] == audio_files[1]["sha256"]
+    assert audio_files[0]["local_raw_path"] != audio_files[1]["local_raw_path"]
+    assert Path(str(audio_files[0]["local_raw_path"])).exists()
+    assert Path(str(audio_files[1]["local_raw_path"])).exists()
+    assert len(tasks) == 2
 
 
 def test_ingest_fix_metadata_rewrites_bwf_fields(tmp_path: Path) -> None:

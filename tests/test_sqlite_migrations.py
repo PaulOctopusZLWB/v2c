@@ -28,7 +28,7 @@ def test_initialize_does_not_duplicate_schema_migration_rows(tmp_path) -> None:
     assert migrations == [{"version": 1, "name": "base_schema"}]
 
 
-def test_initialize_audio_files_indexes_source_identity_time_and_status(tmp_path) -> None:
+def test_initialize_audio_files_indexes_source_snapshot_identity_time_and_status(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:
         initialize(conn)
@@ -45,10 +45,10 @@ def test_initialize_audio_files_indexes_source_identity_time_and_status(tmp_path
     assert "idx_audio_files_recorded_at" in index_names
     assert "idx_audio_files_status" in index_names
     assert [row["name"] for row in source_identity] == [
-        "source_device",
         "source_path",
         "source_size_bytes",
         "source_mtime_ns",
+        "sha256",
     ]
     assert [row["name"] for row in recorded_at] == ["recorded_at"]
     assert [row["name"] for row in status] == ["status"]

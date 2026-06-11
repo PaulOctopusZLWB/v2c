@@ -100,8 +100,15 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
         source_stat = source_path.stat()
         sha256 = _sha256(source_path)
         existing = conn.execute(
-            "select 1 from audio_files where source_path = ? and sha256 = ?",
-            (str(source_path), sha256),
+            """
+            select 1
+            from audio_files
+            where source_path = ?
+              and source_size_bytes = ?
+              and source_mtime_ns = ?
+              and sha256 = ?
+            """,
+            (str(source_path), source_stat.st_size, source_stat.st_mtime_ns, sha256),
         ).fetchone()
         if existing:
             continue
@@ -109,10 +116,10 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
         recorded_date = recorded_at[:10]
         local_dir = config.raw_audio_dir / recorded_date
         local_dir.mkdir(parents=True, exist_ok=True)
-        local_path = local_dir / source_path.name
+        audio_file_id = f"aud_{uuid4().hex}"
+        local_path = _raw_store_path(local_dir=local_dir, source_path=source_path, audio_file_id=audio_file_id)
         shutil.copy2(source_path, local_path)
         _repair_wav_file_metadata(local_path, recorded_at)
-        audio_file_id = f"aud_{uuid4().hex}"
         conn.execute(
             """
             insert into audio_files (
@@ -175,11 +182,26 @@ def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: Ap
 
 
 def _raw_audio_exists(conn: sqlite3.Connection, raw_audio: ImportedRawAudio) -> bool:
+    source = raw_audio.source.source
     existing = conn.execute(
-        "select 1 from audio_files where source_path = ? and sha256 = ?",
-        (str(raw_audio.source.source.source_path), raw_audio.sha256),
+        """
+        select 1
+        from audio_files
+        where source_path = ?
+          and source_size_bytes = ?
+          and source_mtime_ns = ?
+          and sha256 = ?
+        """,
+        (str(source.source_path), source.size_bytes, source.mtime_ns, raw_audio.sha256),
     ).fetchone()
     return existing is not None
+
+
+def _raw_store_path(*, local_dir: Path, source_path: Path, audio_file_id: str) -> Path:
+    target = local_dir / source_path.name
+    if not target.exists():
+        return target
+    return local_dir / f"{source_path.stem}_{audio_file_id}{source_path.suffix}"
 
 
 def is_file_stable(path: Path, *, settle_seconds: float = 0.1) -> bool:

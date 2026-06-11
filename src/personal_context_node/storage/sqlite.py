@@ -24,7 +24,7 @@ create table if not exists audio_files (
   recorded_at text not null,
   imported_at text not null,
   status text not null,
-  unique(source_path, sha256)
+  unique(source_path, source_size_bytes, source_mtime_ns, sha256)
 );
 
 create table if not exists transcript_segments (
@@ -389,10 +389,12 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "audio_files", "source_size_bytes", "integer not null default 0")
     _ensure_column(conn, "audio_files", "source_mtime_ns", "integer not null default 0")
+    _relax_audio_files_source_identity(conn)
+    conn.execute("drop index if exists idx_audio_files_source_identity")
     conn.execute(
         """
         create unique index if not exists idx_audio_files_source_identity
-        on audio_files(source_device, source_path, source_size_bytes, source_mtime_ns)
+        on audio_files(source_path, source_size_bytes, source_mtime_ns, sha256)
         """
     )
     conn.execute("create index if not exists idx_audio_files_recorded_at on audio_files(recorded_at)")
@@ -539,6 +541,48 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"alter table {table} add column {column} {definition}")
+
+
+def _relax_audio_files_source_identity(conn: sqlite3.Connection) -> None:
+    table = conn.execute("select sql from sqlite_master where type = 'table' and name = 'audio_files'").fetchone()
+    if table is None or "unique(source_path, sha256)" not in str(table["sql"]).lower():
+        return
+    conn.execute("pragma foreign_keys = off")
+    conn.execute("pragma legacy_alter_table = on")
+    conn.execute("alter table audio_files rename to audio_files_legacy_identity")
+    conn.execute(
+        """
+        create table audio_files (
+          audio_file_id text primary key,
+          source_device text not null,
+          source_path text not null,
+          source_size_bytes integer not null default 0,
+          source_mtime_ns integer not null default 0,
+          local_raw_path text not null,
+          sha256 text not null,
+          duration_ms integer not null,
+          recorded_at text not null,
+          imported_at text not null,
+          status text not null,
+          unique(source_path, source_size_bytes, source_mtime_ns, sha256)
+        )
+        """
+    )
+    conn.execute(
+        """
+        insert into audio_files (
+          audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+          local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+        )
+        select
+          audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+          local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+        from audio_files_legacy_identity
+        """
+    )
+    conn.execute("drop table audio_files_legacy_identity")
+    conn.execute("pragma legacy_alter_table = off")
+    conn.execute("pragma foreign_keys = on")
 
 
 def _relax_archive_records_audio_file_id(conn: sqlite3.Connection) -> None:
