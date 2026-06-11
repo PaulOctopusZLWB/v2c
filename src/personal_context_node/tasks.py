@@ -246,6 +246,11 @@ def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id
             (task_type, target_type, target_id),
         ).fetchone()
         if existing:
+            if task_type == "asr" and target_type == "audio_chunk":
+                conn.execute(
+                    "update audio_chunks set status = 'pending_asr' where chunk_id = ?",
+                    (target_id,),
+                )
             conn.execute(
                 """
                 update tasks
