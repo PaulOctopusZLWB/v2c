@@ -27,11 +27,24 @@ def test_speaker_review_mapping_and_segment_override_are_materialized(tmp_path: 
         "generated_by: personal-context-node\n"
     )
     assert "\npcn_managed: true\n---\n" in text
-    assert "- spk_self: self" in text
-    assert "<!-- segment_id: seg_guest -->" in text
+    assert "```yaml\nmappings:\n  spk_self: per_self\n" in text
+    assert "persons:\n  per_self:\n    display_name: self\n    is_self: true\n" in text
+    assert "segment_overrides: {}\n" in text
 
-    edited = text.replace("- spk_self: self", "- spk_self: Paul")
-    edited = edited.replace("<!-- segment_id: seg_guest -->\nspk_self -> self:", "<!-- segment_id: seg_guest -->\nspk_self -> Guest:")
+    edited = text.replace("  spk_self: per_self", "  spk_self: per_paul")
+    edited = edited.replace("segment_overrides: {}", "segment_overrides:\n  seg_guest: per_guest")
+    edited = edited.replace(
+        "  per_self:\n    display_name: self\n    is_self: true",
+        "  per_self:\n"
+        "    display_name: self\n"
+        "    is_self: true\n"
+        "  per_paul:\n"
+        "    display_name: Paul\n"
+        "    is_self: false\n"
+        "  per_guest:\n"
+        "    display_name: Guest\n"
+        "    is_self: false",
+    )
     review_path.write_text(edited, encoding="utf-8")
 
     result = sync_speaker_review(config=config, day="2087-05-10")
@@ -62,8 +75,20 @@ def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_p
     _insert_segments(config.database_path)
     review_path = publish_speaker_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
-    edited = text.replace("- spk_self: self", "- spk_self: Paul")
-    edited = edited.replace("<!-- segment_id: seg_guest -->\nspk_self -> self:", "<!-- segment_id: seg_guest -->\nspk_self -> Guest:")
+    edited = text.replace("  spk_self: per_self", "  spk_self: per_paul")
+    edited = edited.replace("segment_overrides: {}", "segment_overrides:\n  seg_guest: per_guest")
+    edited = edited.replace(
+        "  per_self:\n    display_name: self\n    is_self: true",
+        "  per_self:\n"
+        "    display_name: self\n"
+        "    is_self: true\n"
+        "  per_paul:\n"
+        "    display_name: Paul\n"
+        "    is_self: false\n"
+        "  per_guest:\n"
+        "    display_name: Guest\n"
+        "    is_self: false",
+    )
     review_path.write_text(edited, encoding="utf-8")
 
     sync_speaker_review(config=config, day="2087-05-10")
@@ -99,14 +124,72 @@ def test_speaker_review_sync_populates_person_cluster_and_attribution_view(tmp_p
     assert by_segment["seg_guest"]["attribution_source"] == "override"
 
 
+def test_speaker_review_sync_reads_yaml_mapping_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_segments(config.database_path)
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    review_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "pcn_schema: markdown_note.v1",
+                "note_type: speaker_review",
+                "date_key: 2087-05-10",
+                "generated_by: personal-context-node",
+                "generated_at: 2087-05-10T00:00:00+00:00",
+                "pcn_managed: true",
+                "---",
+                "",
+                '<!-- pcn:speaker_mapping start date_key="2087-05-10" version="1" -->',
+                "```yaml",
+                "mappings:",
+                "  spk_self: per_paul",
+                "persons:",
+                "  per_paul:",
+                "    display_name: Paul",
+                "    is_self: false",
+                "  per_guest:",
+                "    display_name: Guest",
+                "    is_self: false",
+                "segment_overrides:",
+                "  seg_guest: per_guest",
+                "```",
+                '<!-- pcn:speaker_mapping end date_key="2087-05-10" -->',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = sync_speaker_review(config=config, day="2087-05-10")
+
+    assert result.mappings_upserted == 1
+    assert result.segment_overrides_upserted == 1
+    materialized = materialized_transcript_segments(config=config, day="2087-05-10")
+    by_id = {row["segment_id"]: row for row in materialized}
+    assert by_id["seg_self"]["person_id"] == "per_paul"
+    assert by_id["seg_self"]["effective_person"] == "Paul"
+    assert by_id["seg_guest"]["person_id"] == "per_guest"
+    assert by_id["seg_guest"]["effective_person"] == "Guest"
+
+
 def test_speaker_review_sync_ignores_text_outside_mapping_block(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_segments(config.database_path)
     review_path = publish_speaker_review(config=config, day="2087-05-10")
     text = review_path.read_text(encoding="utf-8")
+    yaml_edit = text.replace("  spk_self: per_self", "  spk_self: per_paul").replace(
+        "  per_self:\n    display_name: self\n    is_self: true",
+        "  per_self:\n"
+        "    display_name: self\n"
+        "    is_self: true\n"
+        "  per_paul:\n"
+        "    display_name: Paul\n"
+        "    is_self: false",
+    )
     edited = "\n".join(
         [
-            text.replace("- spk_self: self", "- spk_self: Paul"),
+            yaml_edit,
             "",
             "- spk_self: Free Text Person",
             "<!-- segment_id: seg_guest -->",

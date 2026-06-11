@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -14,6 +16,20 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 class SpeakerReviewSyncResult:
     mappings_upserted: int
     segment_overrides_upserted: int
+
+
+@dataclass(frozen=True)
+class SpeakerPerson:
+    person_id: str
+    display_name: str
+    is_self: bool = False
+
+
+@dataclass(frozen=True)
+class ParsedSpeakerReview:
+    mappings: dict[str, str]
+    persons: dict[str, SpeakerPerson]
+    segment_overrides: dict[str, str]
 
 
 def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | None = None) -> Path:
@@ -62,18 +78,30 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
         f"# {day} Speaker Review",
         "",
         f'<!-- pcn:speaker_mapping start date_key="{day}" version="1" -->',
-        "## Speaker Mapping",
-        "",
+        "```yaml",
+        "mappings:",
     ]
     for row in speakers:
-        default_person = "self" if row["speaker"] in {"self", "spk_self"} else "unknown"
-        lines.append(f"- {row['speaker']}: {default_person}")
-    lines.extend(["", "## Segment Overrides", ""])
+        lines.append(f"  {row['speaker']}: {_default_person_id(str(row['speaker']))}")
+    lines.extend(
+        [
+            "persons:",
+            "  per_self:",
+            "    display_name: self",
+            "    is_self: true",
+            "  per_unknown:",
+            "    display_name: unknown",
+            "    is_self: false",
+            "segment_overrides: {}",
+            "```",
+            f'<!-- pcn:speaker_mapping end date_key="{day}" -->',
+            "",
+            "## Segments",
+            "",
+        ]
+    )
     for row in segments:
-        default_person = "self" if row["speaker"] in {"self", "spk_self"} else "unknown"
-        lines.append(f"<!-- segment_id: {row['segment_id']} -->")
-        lines.append(f"{row['speaker']} -> {default_person}: {row['text']}")
-    lines.extend(["", f'<!-- pcn:speaker_mapping end date_key="{day}" -->'])
+        lines.append(f"- {row['segment_id']} | {row['speaker']} | {row['text']}")
     review_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return review_path
 
@@ -87,21 +115,17 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
     mapping_block = _speaker_mapping_block(text)
     if mapping_block is None:
         return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
-    mappings = _parse_mappings(mapping_block)
-    raw_overrides = _parse_overrides(mapping_block)
-    overrides = {
-        segment_id: person
-        for segment_id, (speaker, person) in raw_overrides.items()
-        if person not in {"self", "unknown"} and mappings.get(speaker, speaker) != person
-    }
+    parsed = _parse_speaker_review(mapping_block)
+    mappings = {speaker: person_id for speaker, person_id in parsed.mappings.items() if person_id in parsed.persons}
+    overrides = {segment_id: person_id for segment_id, person_id in parsed.segment_overrides.items() if person_id in parsed.persons}
     now = datetime.now(timezone.utc).isoformat()
 
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        for speaker, person in mappings.items():
-            person_id = _person_id_for_label(person)
-            _upsert_person(conn, person_id=person_id, display_name=person, now=now)
+        for speaker, person_id in mappings.items():
+            person = parsed.persons[person_id]
+            _upsert_person(conn, person=person, now=now)
             _upsert_speaker_cluster(conn, speaker=speaker, now=now)
             conn.execute(
                 """
@@ -119,11 +143,11 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
                   source = excluded.source,
                   updated_at = excluded.updated_at
                 """,
-                (speaker, f"spmap_{speaker}", person, speaker, person_id, 1.0, "speaker_review", now, now),
+                (speaker, f"spmap_{speaker}", person.display_name, speaker, person.person_id, 1.0, "speaker_review", now, now),
             )
-        for segment_id, person in overrides.items():
-            person_id = _person_id_for_label(person)
-            _upsert_person(conn, person_id=person_id, display_name=person, now=now)
+        for segment_id, person_id in overrides.items():
+            person = parsed.persons[person_id]
+            _upsert_person(conn, person=person, now=now)
             conn.execute(
                 """
                 insert into segment_person_overrides (segment_id, person_label, updated_at, person_id)
@@ -133,7 +157,7 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
                   updated_at = excluded.updated_at,
                   person_id = excluded.person_id
                 """,
-                (segment_id, person, now, person_id),
+                (segment_id, person.display_name, now, person.person_id),
             )
         conn.commit()
     finally:
@@ -155,6 +179,7 @@ def materialized_transcript_segments(*, config: AppConfig, day: str) -> list[dic
               ts.segment_id,
               ts.speaker,
               coalesce(override.person_label, mapping.person_label, ts.speaker) as effective_person,
+              coalesce(override.person_id, mapping.person_id) as person_id,
               ts.text,
               ts.start_ms,
               ts.end_ms
@@ -180,6 +205,62 @@ def _parse_mappings(text: str) -> dict[str, str]:
     return mappings
 
 
+def _parse_speaker_review(text: str) -> ParsedSpeakerReview:
+    yaml_data = _speaker_mapping_yaml(text)
+    if yaml_data is not None:
+        return _parse_yaml_speaker_review(yaml_data)
+    mappings_by_label = _parse_mappings(text)
+    raw_overrides = _parse_overrides(text)
+    persons: dict[str, SpeakerPerson] = {}
+    mappings: dict[str, str] = {}
+    for speaker, label in mappings_by_label.items():
+        person_id = _person_id_for_label(label)
+        persons[person_id] = SpeakerPerson(person_id=person_id, display_name=label, is_self=person_id == "per_self")
+        mappings[speaker] = person_id
+    segment_overrides: dict[str, str] = {}
+    for segment_id, (speaker, label) in raw_overrides.items():
+        if label in {"self", "unknown"} or mappings_by_label.get(speaker, speaker) == label:
+            continue
+        person_id = _person_id_for_label(label)
+        persons[person_id] = SpeakerPerson(person_id=person_id, display_name=label, is_self=person_id == "per_self")
+        segment_overrides[segment_id] = person_id
+    return ParsedSpeakerReview(mappings=mappings, persons=persons, segment_overrides=segment_overrides)
+
+
+def _speaker_mapping_yaml(text: str) -> dict[str, object] | None:
+    match = re.search(r"```yaml\n(?P<body>.*?)\n```", text, flags=re.DOTALL)
+    if not match:
+        return None
+    loaded = yaml.safe_load(match.group("body"))
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _parse_yaml_speaker_review(data: dict[str, object]) -> ParsedSpeakerReview:
+    persons: dict[str, SpeakerPerson] = {}
+    raw_persons = data.get("persons")
+    if isinstance(raw_persons, dict):
+        for person_id, raw_person in raw_persons.items():
+            if not isinstance(person_id, str) or not isinstance(raw_person, dict):
+                continue
+            display_name = raw_person.get("display_name")
+            if not isinstance(display_name, str) or not display_name:
+                continue
+            persons[person_id] = SpeakerPerson(
+                person_id=person_id,
+                display_name=display_name,
+                is_self=bool(raw_person.get("is_self", False)),
+            )
+    mappings = _string_map(data.get("mappings"))
+    segment_overrides = _string_map(data.get("segment_overrides"))
+    return ParsedSpeakerReview(mappings=mappings, persons=persons, segment_overrides=segment_overrides)
+
+
+def _string_map(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str) and isinstance(item, str)}
+
+
 def _speaker_mapping_block(text: str) -> str | None:
     match = re.search(
         r'<!--\s*pcn:speaker_mapping start\b[^>]*-->(?P<body>.*?)<!--\s*pcn:speaker_mapping end\b[^>]*-->',
@@ -198,7 +279,11 @@ def _person_id_for_label(label: str) -> str:
     return f"per_{digest}"
 
 
-def _upsert_person(conn, *, person_id: str, display_name: str, now: str) -> None:
+def _default_person_id(speaker: str) -> str:
+    return "per_self" if speaker in {"self", "spk_self"} else "per_unknown"
+
+
+def _upsert_person(conn, *, person: SpeakerPerson, now: str) -> None:
     conn.execute(
         """
         insert into persons (person_id, display_name, person_type, is_self, public_identity_id, created_at, updated_at)
@@ -207,7 +292,15 @@ def _upsert_person(conn, *, person_id: str, display_name: str, now: str) -> None
           display_name = excluded.display_name,
           updated_at = excluded.updated_at
         """,
-        (person_id, display_name, "self" if person_id == "per_self" else "local", 1 if person_id == "per_self" else 0, None, now, now),
+        (
+            person.person_id,
+            person.display_name,
+            "self" if person.is_self else "local",
+            1 if person.is_self else 0,
+            None,
+            now,
+            now,
+        ),
     )
 
 
