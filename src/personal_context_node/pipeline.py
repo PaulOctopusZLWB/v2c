@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -57,7 +57,7 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
     rows = fetch_all(
         conn,
         """
-        select audio_file_id, local_raw_path
+        select audio_file_id, local_raw_path, recorded_at
         from audio_files
         where audio_file_id not in (select audio_file_id from transcript_segments)
         order by local_raw_path
@@ -67,11 +67,14 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
         source_name = Path(row["local_raw_path"]).name
         segment_id = f"seg_{uuid4().hex}"
         chunk_id = f"chk_{segment_id}"
+        absolute_start_at = _absolute_time(str(row["recorded_at"]), 0)
+        absolute_end_at = _absolute_time(str(row["recorded_at"]), 3000)
         conn.execute(
             """
             insert into transcript_segments (
-              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text, language, speaker, evidence_id
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms,
+              absolute_start_at, absolute_end_at, text, language, speaker, evidence_id
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 segment_id,
@@ -79,6 +82,8 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
                 chunk_id,
                 0,
                 3000,
+                absolute_start_at,
+                absolute_end_at,
                 f"模拟转写：{source_name} 需要生成本地上下文和记忆候选。",
                 "zh",
                 "self",
@@ -86,6 +91,10 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
             ),
         )
     conn.commit()
+
+
+def _absolute_time(recorded_at: str, offset_ms: int) -> str:
+    return (datetime.fromisoformat(recorded_at) + timedelta(milliseconds=offset_ms)).isoformat()
 
 
 def _create_memory_candidates(conn: sqlite3.Connection) -> None:
