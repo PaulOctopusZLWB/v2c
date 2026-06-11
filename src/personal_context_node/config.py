@@ -7,6 +7,16 @@ import tomllib
 from pydantic import BaseModel, ConfigDict
 
 
+class DeviceDiscoveryConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = True
+    root_path: Path | None = None
+    volume_name_patterns: tuple[str, ...] = ("DJI*",)
+    audio_globs: tuple[str, ...] = ("**/*.WAV", "**/*.wav")
+    stable_seconds: int = 10
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -30,6 +40,7 @@ class AppConfig(BaseModel):
     send_speaker_labels: bool = True
     max_chunk_tokens: int = 6000
     edit_grace_seconds: int = 120
+    dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
 
     @classmethod
     def from_toml(cls, path: Path, **overrides: Any) -> "AppConfig":
@@ -41,6 +52,8 @@ class AppConfig(BaseModel):
         llm = raw.get("llm", {})
         obsidian = raw.get("obsidian", {})
         identity = raw.get("identity", {})
+        device = raw.get("device", {})
+        dji_mic_3 = device.get("dji_mic_3", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
             "raw_audio_path": _optional_resolve_path(base_dir, paths.get("raw_audio_dir")),
@@ -61,6 +74,7 @@ class AppConfig(BaseModel):
             "send_speaker_labels": llm.get("send_speaker_labels", cls.model_fields["send_speaker_labels"].default),
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
             "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
+            "dji_mic_3": _device_config(base_dir, dji_mic_3),
         }
         values.update({key: value for key, value in overrides.items() if value is not None})
         return cls(**values)
@@ -109,3 +123,13 @@ def _optional_resolve_path(base_dir: Path, value: object | None) -> Path | None:
     if value is None:
         return None
     return _resolve_path(base_dir, value)
+
+
+def _device_config(base_dir: Path, raw: dict[str, Any]) -> DeviceDiscoveryConfig:
+    return DeviceDiscoveryConfig(
+        enabled=raw.get("enabled", DeviceDiscoveryConfig.model_fields["enabled"].default),
+        root_path=_optional_resolve_path(base_dir, raw.get("root_path")),
+        volume_name_patterns=tuple(raw.get("volume_name_patterns", DeviceDiscoveryConfig.model_fields["volume_name_patterns"].default)),
+        audio_globs=tuple(raw.get("audio_globs", DeviceDiscoveryConfig.model_fields["audio_globs"].default)),
+        stable_seconds=raw.get("stable_seconds", DeviceDiscoveryConfig.model_fields["stable_seconds"].default),
+    )

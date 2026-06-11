@@ -106,5 +106,22 @@ def _config_text(config: AppConfig) -> str:
             f"send_speaker_labels = {str(config.send_speaker_labels).lower()}",
             f"max_chunk_tokens = {config.max_chunk_tokens}",
             "",
+            "[device.dji_mic_3]",
+            f"enabled = {str(config.dji_mic_3.enabled).lower()}",
+            _optional_toml_path("root_path", config.dji_mic_3.root_path),
+            f"volume_name_patterns = {_toml_string_list(config.dji_mic_3.volume_name_patterns)}",
+            f"audio_globs = {_toml_string_list(config.dji_mic_3.audio_globs)}",
+            f"stable_seconds = {config.dji_mic_3.stable_seconds}",
+            "",
         ]
     )
+
+
+def _optional_toml_path(key: str, value: Path | None) -> str:
+    if value is None:
+        return f"# {key} = \"/Volumes/DJI_MIC\""
+    return f'{key} = "{value}"'
+
+
+def _toml_string_list(values: tuple[str, ...]) -> str:
+    return "[" + ", ".join(f'"{value}"' for value in values) + "]"

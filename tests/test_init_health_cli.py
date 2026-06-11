@@ -45,6 +45,11 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert "[identity]" in config_text
     assert 'owner_did = "did:key:local-owner"' in config_text
     assert 'signing_key_path = "' in config_text
+    assert "[device.dji_mic_3]" in config_text
+    assert "enabled = true" in config_text
+    assert 'volume_name_patterns = ["DJI*"]' in config_text
+    assert 'audio_globs = ["**/*.WAV", "**/*.wav"]' in config_text
+    assert "stable_seconds = 10" in config_text
 
 
 def test_health_cli_reports_ok_for_initialized_workspace(tmp_path) -> None:

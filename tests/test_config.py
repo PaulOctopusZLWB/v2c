@@ -40,6 +40,13 @@ max_chunk_tokens = 4096
 
 [obsidian]
 edit_grace_seconds = 45
+
+[device.dji_mic_3]
+enabled = true
+root_path = "fixtures/fake_dji"
+volume_name_patterns = ["DJI*", "MIC*"]
+audio_globs = ["**/*.WAV", "**/*.wav"]
+stable_seconds = 10
 """.strip(),
         encoding="utf-8",
     )
@@ -65,6 +72,11 @@ edit_grace_seconds = 45
     assert config.send_speaker_labels is False
     assert config.max_chunk_tokens == 4096
     assert config.edit_grace_seconds == 45
+    assert config.dji_mic_3.enabled is True
+    assert config.dji_mic_3.root_path == tmp_path / "config" / "fixtures" / "fake_dji"
+    assert config.dji_mic_3.volume_name_patterns == ("DJI*", "MIC*")
+    assert config.dji_mic_3.audio_globs == ("**/*.WAV", "**/*.wav")
+    assert config.dji_mic_3.stable_seconds == 10
 
 
 def test_app_config_with_overrides_keeps_explicit_paths(tmp_path: Path) -> None:
