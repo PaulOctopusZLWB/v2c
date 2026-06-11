@@ -6,7 +6,8 @@ from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft, SessionSummary
-from personal_context_node.process_runner import process_once
+import personal_context_node.process_runner as process_runner
+from personal_context_node.process_runner import PipelineEdge, process_once
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import enqueue_task, process_status_rows
 
@@ -120,6 +121,45 @@ def test_process_once_daily_generate_uses_injected_llm_adapter(tmp_path: Path) -
             "status": "pending_review",
         }
     ]
+
+
+def test_process_once_rolls_back_success_when_downstream_registration_fails(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_transcript(config.database_path)
+    task = enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id="2087-05-10")
+    llm = RecordingLLM()
+
+    monkeypatch.setattr(
+        process_runner,
+        "PIPELINE",
+        (
+            PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
+            PipelineEdge("daily_generate", None, "date_key", lambda _conn, _config, target_id: [target_id]),
+        ),
+    )
+
+    try:
+        process_once(
+            config=config,
+            run_id="run_daily_atomic",
+            vad=EnergyVadAdapter(),
+            asr=MockASRAdapter(),
+            llm=llm,
+        )
+    except Exception as exc:
+        assert "NOT NULL" in str(exc).upper()
+    else:
+        raise AssertionError("process_once should surface downstream registration failure")
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select status from tasks where task_id = ?", (task.task_id,))
+        publish_tasks = fetch_all(conn, "select task_id from tasks where task_type = 'obsidian_publish'")
+    finally:
+        conn.close()
+
+    assert rows == [{"status": "failed_retryable"}]
+    assert publish_tasks == []
 
 
 def _insert_session_and_transcript(database_path: Path) -> None:
