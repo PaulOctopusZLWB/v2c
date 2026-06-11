@@ -317,6 +317,7 @@ def test_initialize_archive_records_schema_tracks_targets_and_status(tmp_path) -
     assert column_by_name["target_type"]["notnull"] == 1
     assert column_by_name["target_id"]["type"].lower() == "text"
     assert column_by_name["target_id"]["notnull"] == 1
+    assert column_by_name["audio_file_id"]["notnull"] == 0
     assert column_by_name["status"]["notnull"] == 1
     assert column_by_name["last_error"]["type"].lower() == "text"
     assert column_by_name["created_at"]["notnull"] == 1

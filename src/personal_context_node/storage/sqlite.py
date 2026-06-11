@@ -269,7 +269,7 @@ create table if not exists archive_records (
   archive_record_id text primary key,
   target_type text not null default '',
   target_id text not null default '',
-  audio_file_id text not null references audio_files(audio_file_id),
+  audio_file_id text references audio_files(audio_file_id),
   source_path text not null,
   archive_path text not null,
   sha256 text not null,
@@ -480,6 +480,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "archive_records", "last_error", "text")
     _ensure_column(conn, "archive_records", "created_at", "text not null default ''")
     _ensure_column(conn, "archive_records", "updated_at", "text not null default ''")
+    _relax_archive_records_audio_file_id(conn)
     conn.execute("update archive_records set target_type = 'audio_file' where target_type = ''")
     conn.execute("update archive_records set target_id = audio_file_id where target_id = ''")
     conn.execute(
@@ -534,6 +535,49 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"alter table {table} add column {column} {definition}")
+
+
+def _relax_archive_records_audio_file_id(conn: sqlite3.Connection) -> None:
+    columns = {row["name"]: row for row in conn.execute("pragma table_info(archive_records)").fetchall()}
+    audio_column = columns.get("audio_file_id")
+    if audio_column is None or int(audio_column["notnull"]) == 0:
+        return
+    conn.execute("drop index if exists idx_archive_records_target_archive")
+    conn.execute("alter table archive_records rename to archive_records_strict_audio")
+    conn.execute(
+        """
+        create table archive_records (
+          archive_record_id text primary key,
+          target_type text not null default '',
+          target_id text not null default '',
+          audio_file_id text references audio_files(audio_file_id),
+          source_path text not null,
+          archive_path text not null,
+          sha256 text not null,
+          status text not null default 'verified',
+          verified integer not null,
+          archived_at text not null,
+          last_error text,
+          created_at text not null default '',
+          updated_at text not null default ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        insert into archive_records (
+          archive_record_id, target_type, target_id, audio_file_id,
+          source_path, archive_path, sha256, status, verified, archived_at,
+          last_error, created_at, updated_at
+        )
+        select
+          archive_record_id, target_type, target_id, audio_file_id,
+          source_path, archive_path, sha256, status, verified, archived_at,
+          last_error, created_at, updated_at
+        from archive_records_strict_audio
+        """
+    )
+    conn.execute("drop table archive_records_strict_audio")
 
 
 def _remove_speech_ranges_storage(conn: sqlite3.Connection) -> None:
