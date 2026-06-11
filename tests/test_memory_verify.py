@@ -57,6 +57,52 @@ def test_confirmed_candidate_materializes_memory_card(tmp_path: Path) -> None:
     assert cards[0]["source_event_hash"].startswith("sha256:")
 
 
+def test_memory_card_temporal_bounds_materialize_from_signed_event(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    card = MemoryCard(
+        card_id="mem_temporal_test",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Memory cards carry temporal bounds.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_temporal_test",
+                source_type="transcript_segment",
+                source_id="seg_temporal_test",
+                quote="Memory cards carry temporal bounds.",
+            )
+        ],
+        observed_at="2087-05-10T09:30:00Z",
+        valid_from="2087-05-10",
+        valid_until="2087-06-10",
+    )
+    event, public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+    )
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        insert_signed_event(conn, event=event, public_key=public_key)
+        rows = fetch_all(
+            conn,
+            "select observed_at, valid_from, valid_until from memory_cards where card_id = ?",
+            (card.card_id,),
+        )
+    finally:
+        conn.close()
+
+    assert rows == [
+        {
+            "observed_at": "2087-05-10T09:30:00Z",
+            "valid_from": "2087-05-10",
+            "valid_until": "2087-06-10",
+        }
+    ]
+
+
 def test_memory_verify_detects_materialized_card_mismatch(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
     _insert_candidate(config.database_path)

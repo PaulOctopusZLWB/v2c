@@ -54,3 +54,18 @@ def test_initialize_memory_cards_schema_includes_confidence(tmp_path) -> None:
     column_by_name = {row["name"]: row for row in columns}
     assert column_by_name["confidence"]["type"].lower() == "real"
     assert column_by_name["confidence"]["notnull"] == 0
+
+
+def test_initialize_memory_cards_schema_includes_temporal_bounds(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(memory_cards)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["observed_at"]["type"].lower() == "text"
+    assert column_by_name["valid_from"]["type"].lower() == "text"
+    assert column_by_name["valid_until"]["type"].lower() == "text"

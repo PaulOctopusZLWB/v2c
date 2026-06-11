@@ -65,6 +65,9 @@ class MemoryCard(BaseModel):
     source_type: MemoryCardSourceType = "confirmed_generated"
     candidate_claim: str | None = None
     confidence: float | None = None
+    observed_at: str | None = None
+    valid_from: str | None = None
+    valid_until: str | None = None
     visibility: Visibility = Field(default_factory=Visibility)
     tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

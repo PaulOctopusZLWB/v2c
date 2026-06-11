@@ -94,6 +94,9 @@ create table if not exists memory_cards (
   claim text not null,
   source_type text not null default 'confirmed_generated',
   confidence real,
+  observed_at text,
+  valid_from text,
+  valid_until text,
   subject_json text not null,
   evidence_refs_json text not null,
   candidate_claim text,
@@ -335,6 +338,9 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "sessions", "exclude_from_memory", "integer not null default 0")
     _ensure_column(conn, "memory_cards", "source_type", "text not null default 'confirmed_generated'")
     _ensure_column(conn, "memory_cards", "confidence", "real")
+    _ensure_column(conn, "memory_cards", "observed_at", "text")
+    _ensure_column(conn, "memory_cards", "valid_from", "text")
+    _ensure_column(conn, "memory_cards", "valid_until", "text")
     _ensure_column(conn, "memory_cards", "visibility_json", "text not null default '{\"type\":\"private\"}'")
     _ensure_column(conn, "memory_cards", "tags_json", "text not null default '[]'")
     _ensure_column(conn, "memory_cards", "updated_at", "text not null default ''")

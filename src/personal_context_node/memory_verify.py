@@ -450,7 +450,8 @@ def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[s
     actual_rows = fetch_all(
         conn,
         """
-        select card_id, owner_did, claim_type, claim, source_type, confidence, visibility_json, tags_json, status, source_event_hash
+        select card_id, owner_did, claim_type, claim, source_type, confidence,
+               observed_at, valid_from, valid_until, visibility_json, tags_json, status, source_event_hash
         from memory_cards
         order by card_id
         """,
@@ -515,6 +516,9 @@ def _card_projection(card: MemoryCard, *, source_event_hash: str, status: str) -
         "claim": card.claim,
         "source_type": card.source_type,
         "confidence": card.confidence,
+        "observed_at": card.observed_at,
+        "valid_from": card.valid_from,
+        "valid_until": card.valid_until,
         "visibility_json": json.dumps(card.visibility.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True),
         "tags_json": json.dumps(card.tags, ensure_ascii=False, sort_keys=True),
         "status": status,
@@ -556,6 +560,9 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
           claim text not null,
           source_type text not null default 'confirmed_generated',
           confidence real,
+          observed_at text,
+          valid_from text,
+          valid_until text,
           subject_json text not null,
           evidence_refs_json text not null,
           candidate_claim text,
@@ -572,6 +579,9 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
     card_column_migrations = {
         "source_type": "alter table memory_cards add column source_type text not null default 'confirmed_generated'",
         "confidence": "alter table memory_cards add column confidence real",
+        "observed_at": "alter table memory_cards add column observed_at text",
+        "valid_from": "alter table memory_cards add column valid_from text",
+        "valid_until": "alter table memory_cards add column valid_until text",
         "visibility_json": "alter table memory_cards add column visibility_json text not null default '{\"type\":\"private\"}'",
         "tags_json": "alter table memory_cards add column tags_json text not null default '[]'",
         "updated_at": "alter table memory_cards add column updated_at text not null default ''",
