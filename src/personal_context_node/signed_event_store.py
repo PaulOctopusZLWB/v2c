@@ -21,14 +21,14 @@ from personal_context_node.core.protocols.memory import (
 )
 
 
-SUPPORTED_EVENT_TYPES = {
-    "memory_card.created",
-    "memory_card.revoked",
-    "memory_card.superseded",
-    "identity_profile.published",
-    "identity_key.rotated",
-    "memory_annotation.created",
-    "memory_annotation.revoked",
+SUPPORTED_EVENT_PAYLOAD_TYPES = {
+    "memory_card.created": "memory_card.v1",
+    "memory_card.revoked": "memory_card_revocation.v1",
+    "memory_card.superseded": "memory_card_supersession.v1",
+    "identity_profile.published": "identity_profile.v1",
+    "identity_key.rotated": "identity_key_rotation.v1",
+    "memory_annotation.created": "memory_annotation.v1",
+    "memory_annotation.revoked": "memory_annotation_revocation.v1",
 }
 
 
@@ -147,7 +147,7 @@ def trust_status_for_event(*, event: SignedEvent, verified: bool) -> str:
         return "rejected"
     if event.payload_encoding != "plain":
         return "unsupported"
-    if event.event_type not in SUPPORTED_EVENT_TYPES:
+    if SUPPORTED_EVENT_PAYLOAD_TYPES.get(event.event_type) != event.payload_type:
         return "unsupported"
     return "trusted"
 

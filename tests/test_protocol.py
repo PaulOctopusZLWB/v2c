@@ -361,3 +361,49 @@ def test_verified_encrypted_payload_event_is_stored_as_unsupported(tmp_path) -> 
         }
     ]
     assert cards == []
+
+
+def test_verified_unknown_payload_version_is_stored_as_unsupported(tmp_path) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    event_body = {
+        "envelope_version": "signed_event.v1",
+        "event_type": "memory_card.created",
+        "object_id": "mem_v2_001",
+        "object_version": 1,
+        "owner_id": "did:key:test-owner",
+        "owner_sequence": 1,
+        "prev_event_hash": None,
+        "payload_type": "memory_card.v2",
+        "payload_encoding": "plain",
+        "payload": {"card_id": "mem_v2_001", "schema_version": "memory_card.v2", "claim": "future"},
+        "created_at": "2087-05-10T00:00:00Z",
+    }
+    signature = private_key.sign(canonical_json_bytes(event_body))
+    event = SignedEvent(
+        **event_body,
+        signature=EventSignature(
+            public_key_id="did:key:test-owner",
+            value=base64.urlsafe_b64encode(signature).decode("ascii").rstrip("="),
+        ),
+    )
+    public_key = base64.urlsafe_b64encode(
+        private_key.public_key().public_bytes_raw()
+    ).decode("ascii")
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        insert_signed_event(conn, event=event, public_key=public_key)
+
+        rows = fetch_all(conn, "select event_type, payload_type, trust_status from signed_events")
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert rows == [
+        {
+            "event_type": "memory_card.created",
+            "payload_type": "memory_card.v2",
+            "trust_status": "unsupported",
+        }
+    ]
+    assert cards == []
