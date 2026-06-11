@@ -511,6 +511,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "memory_cards", "tags_json", "text not null default '[]'")
     _ensure_column(conn, "memory_cards", "updated_at", "text not null default ''")
     conn.execute("create index if not exists idx_memory_cards_owner on memory_cards(owner_id, status)")
+    conn.execute("create index if not exists idx_memory_cards_subject on memory_cards(claim_type, status)")
     conn.execute(
         "insert or ignore into schema_migrations (version, name) values (?, ?)",
         (1, "base_schema"),

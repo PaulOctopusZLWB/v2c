@@ -443,6 +443,8 @@ def test_initialize_migrates_legacy_memory_cards_owner_id_before_owner_index(tmp
 
         columns = fetch_all(conn, "pragma table_info(memory_cards)")
         indexes = fetch_all(conn, "pragma index_list(memory_cards)")
+        owner_index = fetch_all(conn, "pragma index_info(idx_memory_cards_owner)")
+        subject_index = fetch_all(conn, "pragma index_info(idx_memory_cards_subject)")
     finally:
         conn.close()
 
@@ -450,6 +452,9 @@ def test_initialize_migrates_legacy_memory_cards_owner_id_before_owner_index(tmp
     index_names = {row["name"] for row in indexes}
     assert column_by_name["owner_id"]["notnull"] == 1
     assert "idx_memory_cards_owner" in index_names
+    assert "idx_memory_cards_subject" in index_names
+    assert [row["name"] for row in owner_index] == ["owner_id", "status"]
+    assert [row["name"] for row in subject_index] == ["claim_type", "status"]
 
 
 def test_initialize_memory_cards_schema_includes_confidence(tmp_path) -> None:
