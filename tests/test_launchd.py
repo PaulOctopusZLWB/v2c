@@ -50,7 +50,8 @@ def test_write_launchd_plists_dry_run_writes_project_files(tmp_path) -> None:
         "com.personal-context-node.process.plist",
     ]
     process = plistlib.loads((output_dir / "com.personal-context-node.process.plist").read_bytes())
-    assert "preprocess" in process["ProgramArguments"]
+    assert "process-run" in process["ProgramArguments"]
+    assert "preprocess" not in process["ProgramArguments"]
     assert "transcribe" not in process["ProgramArguments"]
 
 

@@ -80,7 +80,7 @@ def write_launchd_plists(
                 "uv",
                 "run",
                 "pcn",
-                "preprocess",
+                "process-run",
                 "--data-dir",
                 data_dir,
                 "--obsidian-vault",
