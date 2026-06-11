@@ -113,6 +113,11 @@ def _config_text(config: AppConfig) -> str:
             f"audio_globs = {_toml_string_list(config.dji_mic_3.audio_globs)}",
             f"stable_seconds = {config.dji_mic_3.stable_seconds}",
             "",
+            "[audio]",
+            f"target_sample_rate_hz = {config.audio.target_sample_rate_hz}",
+            f"target_channels = {config.audio.target_channels}",
+            f'target_sample_format = "{config.audio.target_sample_format}"',
+            "",
         ]
     )
 

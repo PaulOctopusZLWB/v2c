@@ -111,21 +111,91 @@ def _split_range(speech_range: SpeechRange, *, max_chunk_ms: int) -> list[Speech
 
 
 def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, start_ms: int, end_ms: int) -> Path:
+    if config.audio.target_sample_format != "s16":
+        raise ValueError(f"unsupported target sample format: {config.audio.target_sample_format}")
     chunk_dir = config.work_audio_dir / recorded_day
     chunk_dir.mkdir(parents=True, exist_ok=True)
     chunk_path = chunk_dir / f"{source_path.stem}_{start_ms:09d}_{end_ms:09d}.wav"
     with wave.open(str(source_path), "rb") as source:
         sample_rate = source.getframerate()
+        channels = source.getnchannels()
+        sample_width = source.getsampwidth()
         start_frame = int(start_ms * sample_rate / 1000)
         frame_count = int((end_ms - start_ms) * sample_rate / 1000)
         source.setpos(start_frame)
         frames = source.readframes(frame_count)
+        frames = _convert_pcm_frames(
+            frames,
+            source_sample_rate=sample_rate,
+            source_channels=channels,
+            source_sample_width=sample_width,
+            target_sample_rate=config.audio.target_sample_rate_hz,
+            target_channels=config.audio.target_channels,
+            target_sample_width=2,
+        )
         with wave.open(str(chunk_path), "wb") as target:
-            target.setnchannels(source.getnchannels())
-            target.setsampwidth(source.getsampwidth())
-            target.setframerate(sample_rate)
+            target.setnchannels(config.audio.target_channels)
+            target.setsampwidth(2)
+            target.setframerate(config.audio.target_sample_rate_hz)
             target.writeframes(frames)
     return chunk_path
+
+
+def _convert_pcm_frames(
+    frames: bytes,
+    *,
+    source_sample_rate: int,
+    source_channels: int,
+    source_sample_width: int,
+    target_sample_rate: int,
+    target_channels: int,
+    target_sample_width: int,
+) -> bytes:
+    if target_sample_width != 2:
+        raise ValueError(f"unsupported target sample width: {target_sample_width}")
+    if source_channels not in (1, 2) or target_channels not in (1, 2):
+        raise ValueError(f"unsupported channel conversion: {source_channels} -> {target_channels}")
+
+    source_frames = _decode_pcm_frames(frames, sample_width=source_sample_width, channels=source_channels)
+    if not source_frames:
+        return b""
+    target_frame_count = max(1, round(len(source_frames) * target_sample_rate / source_sample_rate))
+    converted = bytearray()
+    for target_index in range(target_frame_count):
+        source_index = min(len(source_frames) - 1, int(target_index * source_sample_rate / target_sample_rate))
+        samples = source_frames[source_index]
+        if target_channels == 1:
+            output_samples = [round(sum(samples) / len(samples))]
+        elif len(samples) == 1:
+            output_samples = [samples[0], samples[0]]
+        else:
+            output_samples = samples[:2]
+        for sample in output_samples:
+            converted.extend(_to_s16(sample))
+    return bytes(converted)
+
+
+def _decode_pcm_frames(frames: bytes, *, sample_width: int, channels: int) -> list[list[int]]:
+    frame_width = sample_width * channels
+    decoded: list[list[int]] = []
+    for frame_start in range(0, len(frames) - frame_width + 1, frame_width):
+        samples: list[int] = []
+        for channel in range(channels):
+            sample_start = frame_start + channel * sample_width
+            raw = frames[sample_start : sample_start + sample_width]
+            sample = int.from_bytes(raw, byteorder="little", signed=True)
+            if sample_width > 2:
+                sample >>= (sample_width - 2) * 8
+            elif sample_width < 2:
+                sample <<= (2 - sample_width) * 8
+            samples.append(sample)
+        decoded.append(samples)
+    return decoded
+
+
+def _to_s16(sample: int) -> bytes:
+    clipped = max(-(2**15), min(2**15 - 1, sample))
+    return clipped.to_bytes(2, byteorder="little", signed=True)
 
 
 def _absolute_time(recorded_at: str, offset_ms: int) -> str:

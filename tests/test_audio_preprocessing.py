@@ -144,3 +144,44 @@ nas_archive_root = "{tmp_path / "nas"}"
     assert Path(audio_file["local_raw_path"]).is_relative_to(config.raw_audio_dir)
     assert all(Path(chunk["local_chunk_path"]).is_relative_to(config.work_audio_dir) for chunk in chunks)
     assert all(Path(chunk["local_chunk_path"]).exists() for chunk in chunks)
+
+
+def test_preprocess_writes_chunks_using_configured_audio_format(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    _write_stereo_wav(wav_path, [(0.60, 10_000)], sample_rate=8_000)
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    import_audio_files(config=config, source_dir=source)
+    result = preprocess_imported_audio(
+        config=config,
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        max_chunk_ms=1_000,
+    )
+
+    assert result.audio_chunks_created == 1
+    conn = connect(config.database_path)
+    try:
+        chunk_path = Path(fetch_all(conn, "select local_chunk_path from audio_chunks")[0]["local_chunk_path"])
+    finally:
+        conn.close()
+    with wave.open(str(chunk_path), "rb") as chunk:
+        assert chunk.getframerate() == config.audio.target_sample_rate_hz
+        assert chunk.getnchannels() == config.audio.target_channels
+        assert chunk.getsampwidth() == 2
+
+
+def _write_stereo_wav(path: Path, segments: list[tuple[float, int]], sample_rate: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        frames = bytearray()
+        for seconds, amplitude in segments:
+            for index in range(int(seconds * sample_rate)):
+                sample = int(amplitude * math.sin(2 * math.pi * 440 * index / sample_rate))
+                sample_bytes = sample.to_bytes(2, byteorder="little", signed=True)
+                frames.extend(sample_bytes)
+                frames.extend(sample_bytes)
+        wav.writeframes(bytes(frames))

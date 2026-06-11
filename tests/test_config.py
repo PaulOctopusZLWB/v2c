@@ -32,6 +32,11 @@ backend = "energy"
 threshold = 0.02
 max_chunk_ms = 45000
 
+[audio]
+target_sample_rate_hz = 16000
+target_channels = 1
+target_sample_format = "s16"
+
 [llm]
 backend = "rule_based"
 send_person_names = false
@@ -67,6 +72,9 @@ stable_seconds = 10
     assert config.vad_backend == "energy"
     assert config.vad_threshold == 0.02
     assert config.max_chunk_ms == 45000
+    assert config.audio.target_sample_rate_hz == 16000
+    assert config.audio.target_channels == 1
+    assert config.audio.target_sample_format == "s16"
     assert config.llm_backend == "rule_based"
     assert config.send_person_names is False
     assert config.send_speaker_labels is False

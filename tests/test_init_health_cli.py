@@ -50,6 +50,10 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert 'volume_name_patterns = ["DJI*"]' in config_text
     assert 'audio_globs = ["**/*.WAV", "**/*.wav"]' in config_text
     assert "stable_seconds = 10" in config_text
+    assert "[audio]" in config_text
+    assert "target_sample_rate_hz = 16000" in config_text
+    assert "target_channels = 1" in config_text
+    assert 'target_sample_format = "s16"' in config_text
 
 
 def test_health_cli_reports_ok_for_initialized_workspace(tmp_path) -> None:

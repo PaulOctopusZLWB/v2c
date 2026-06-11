@@ -17,6 +17,14 @@ class DeviceDiscoveryConfig(BaseModel):
     stable_seconds: int = 10
 
 
+class AudioProcessingConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    target_sample_rate_hz: int = 16_000
+    target_channels: int = 1
+    target_sample_format: str = "s16"
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -41,6 +49,7 @@ class AppConfig(BaseModel):
     max_chunk_tokens: int = 6000
     edit_grace_seconds: int = 120
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
+    audio: AudioProcessingConfig = AudioProcessingConfig()
 
     @classmethod
     def from_toml(cls, path: Path, **overrides: Any) -> "AppConfig":
@@ -54,6 +63,7 @@ class AppConfig(BaseModel):
         identity = raw.get("identity", {})
         device = raw.get("device", {})
         dji_mic_3 = device.get("dji_mic_3", {})
+        audio = raw.get("audio", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
             "raw_audio_path": _optional_resolve_path(base_dir, paths.get("raw_audio_dir")),
@@ -75,6 +85,7 @@ class AppConfig(BaseModel):
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
             "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
             "dji_mic_3": _device_config(base_dir, dji_mic_3),
+            "audio": _audio_config(audio),
         }
         values.update({key: value for key, value in overrides.items() if value is not None})
         return cls(**values)
@@ -132,4 +143,12 @@ def _device_config(base_dir: Path, raw: dict[str, Any]) -> DeviceDiscoveryConfig
         volume_name_patterns=tuple(raw.get("volume_name_patterns", DeviceDiscoveryConfig.model_fields["volume_name_patterns"].default)),
         audio_globs=tuple(raw.get("audio_globs", DeviceDiscoveryConfig.model_fields["audio_globs"].default)),
         stable_seconds=raw.get("stable_seconds", DeviceDiscoveryConfig.model_fields["stable_seconds"].default),
+    )
+
+
+def _audio_config(raw: dict[str, Any]) -> AudioProcessingConfig:
+    return AudioProcessingConfig(
+        target_sample_rate_hz=raw.get("target_sample_rate_hz", AudioProcessingConfig.model_fields["target_sample_rate_hz"].default),
+        target_channels=raw.get("target_channels", AudioProcessingConfig.model_fields["target_channels"].default),
+        target_sample_format=raw.get("target_sample_format", AudioProcessingConfig.model_fields["target_sample_format"].default),
     )
