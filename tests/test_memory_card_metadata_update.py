@@ -53,7 +53,7 @@ def test_memory_card_metadata_updated_event_updates_metadata_without_changing_cl
         rows = fetch_all(
             conn,
             """
-            select card_id, claim, visibility_json, tags_json, status, source_event_hash
+            select card_id, current_version, claim, visibility_json, tags_json, status, source_event_hash
             from memory_cards
             """,
         )
@@ -63,6 +63,7 @@ def test_memory_card_metadata_updated_event_updates_metadata_without_changing_cl
     assert rows == [
         {
             "card_id": "mem_test_001",
+            "current_version": 2,
             "claim": "Use signed events.",
             "visibility_json": json.dumps({"type": "public"}, ensure_ascii=False, sort_keys=True),
             "tags_json": json.dumps(["asr", "local-first"], ensure_ascii=False, sort_keys=True),

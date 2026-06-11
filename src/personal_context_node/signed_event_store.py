@@ -328,12 +328,13 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
     conn.execute(
         """
         insert into memory_cards (
-          card_id, owner_did, claim_type, claim, source_type, confidence,
+          card_id, current_version, owner_did, claim_type, claim, source_type, confidence,
           observed_at, valid_from, valid_until, subject_json, evidence_refs_json,
           candidate_claim, visibility_json, tags_json, status, source_event_hash,
           created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(card_id) do update set
+          current_version = excluded.current_version,
           owner_did = excluded.owner_did,
           claim_type = excluded.claim_type,
           claim = excluded.claim,
@@ -354,6 +355,7 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
         """,
         (
             card.card_id,
+            event.object_version,
             card.owner_did,
             card.claim_type,
             card.claim,
@@ -380,13 +382,15 @@ def _update_memory_card_metadata(conn: sqlite3.Connection, *, event: SignedEvent
     conn.execute(
         """
         update memory_cards
-        set visibility_json = ?,
+        set current_version = ?,
+            visibility_json = ?,
             tags_json = ?,
             source_event_hash = ?,
             updated_at = ?
         where card_id = ?
         """,
         (
+            event.object_version,
             json.dumps(update.visibility.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True),
             json.dumps(update.tags, ensure_ascii=False, sort_keys=True),
             event.event_hash,
@@ -427,11 +431,12 @@ def _revoke_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
     conn.execute(
         """
         update memory_cards
-        set status = 'revoked',
+        set current_version = ?,
+            status = 'revoked',
             source_event_hash = ?
         where card_id = ?
         """,
-        (event.event_hash, revocation.card_id),
+        (event.object_version, event.event_hash, revocation.card_id),
     )
 
 
@@ -440,11 +445,12 @@ def _supersede_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> N
     conn.execute(
         """
         update memory_cards
-        set status = 'superseded',
+        set current_version = ?,
+            status = 'superseded',
             source_event_hash = ?
         where card_id = ?
         """,
-        (event.event_hash, supersession.card_id),
+        (event.object_version, event.event_hash, supersession.card_id),
     )
 
 

@@ -40,7 +40,10 @@ def test_confirmed_candidate_materializes_memory_card(tmp_path: Path) -> None:
 
     conn = connect(config.database_path)
     try:
-        cards = fetch_all(conn, "select claim, claim_type, source_type, confidence, status, source_event_hash from memory_cards")
+        cards = fetch_all(
+            conn,
+            "select claim, claim_type, current_version, source_type, confidence, status, source_event_hash from memory_cards",
+        )
     finally:
         conn.close()
 
@@ -48,6 +51,7 @@ def test_confirmed_candidate_materializes_memory_card(tmp_path: Path) -> None:
         {
             "claim": "用户要求音频本地处理。",
             "claim_type": "requirement",
+            "current_version": 1,
             "source_type": "confirmed_generated",
             "confidence": 0.95,
             "status": "active",

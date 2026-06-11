@@ -419,12 +419,18 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
     for event in trusted_events:
         if event.event_type == "memory_card.created":
             card = MemoryCard.model_validate(event.payload)
-            expected[card.card_id] = _card_projection(card, source_event_hash=event.event_hash, status="active")
+            expected[card.card_id] = _card_projection(
+                card,
+                current_version=event.object_version,
+                source_event_hash=event.event_hash,
+                status="active",
+            )
     for event in trusted_events:
         if event.event_type == "memory_card.revoked":
             revocation = MemoryCardRevocation.model_validate(event.payload)
             if revocation.card_id in expected:
                 expected[revocation.card_id]["status"] = "revoked"
+                expected[revocation.card_id]["current_version"] = event.object_version
                 expected[revocation.card_id]["source_event_hash"] = event.event_hash
         if event.event_type == "memory_card.metadata_updated":
             update = MemoryCardMetadataUpdate.model_validate(event.payload)
@@ -435,11 +441,13 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
                     sort_keys=True,
                 )
                 expected[update.card_id]["tags_json"] = json.dumps(update.tags, ensure_ascii=False, sort_keys=True)
+                expected[update.card_id]["current_version"] = event.object_version
                 expected[update.card_id]["source_event_hash"] = event.event_hash
         if event.event_type == "memory_card.superseded":
             supersession = MemoryCardSupersession.model_validate(event.payload)
             if supersession.card_id in expected:
                 expected[supersession.card_id]["status"] = "superseded"
+                expected[supersession.card_id]["current_version"] = event.object_version
                 expected[supersession.card_id]["source_event_hash"] = event.event_hash
     mismatches = _memory_card_mismatches(conn, expected)
     mismatches += _memory_annotation_mismatches(conn, trusted_events, card_ids=set(expected))
@@ -450,7 +458,7 @@ def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[s
     actual_rows = fetch_all(
         conn,
         """
-        select card_id, owner_did, claim_type, claim, source_type, confidence,
+        select card_id, current_version, owner_did, claim_type, claim, source_type, confidence,
                observed_at, valid_from, valid_until, visibility_json, tags_json, status, source_event_hash
         from memory_cards
         order by card_id
@@ -508,9 +516,16 @@ def _memory_annotation_mismatches(
     return mismatches
 
 
-def _card_projection(card: MemoryCard, *, source_event_hash: str, status: str) -> dict[str, object]:
+def _card_projection(
+    card: MemoryCard,
+    *,
+    current_version: int,
+    source_event_hash: str,
+    status: str,
+) -> dict[str, object]:
     return {
         "card_id": card.card_id,
+        "current_version": current_version,
         "owner_did": card.owner_did,
         "claim_type": card.claim_type,
         "claim": card.claim,
@@ -555,6 +570,7 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
         """
         create table if not exists memory_cards (
           card_id text primary key,
+          current_version integer not null default 1,
           owner_did text not null,
           claim_type text not null,
           claim text not null,
@@ -577,6 +593,7 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
     )
     existing_card_columns = {row["name"] for row in conn.execute("pragma table_info(memory_cards)").fetchall()}
     card_column_migrations = {
+        "current_version": "alter table memory_cards add column current_version integer not null default 1",
         "source_type": "alter table memory_cards add column source_type text not null default 'confirmed_generated'",
         "confidence": "alter table memory_cards add column confidence real",
         "observed_at": "alter table memory_cards add column observed_at text",
