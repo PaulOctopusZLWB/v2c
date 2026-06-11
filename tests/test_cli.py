@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import wave
 from pathlib import Path
 
@@ -15,6 +16,20 @@ def _write_tiny_wav(path: Path) -> None:
         wav.setsampwidth(2)
         wav.setframerate(16_000)
         wav.writeframes(b"\0\1" * 16_000)
+
+
+def _write_tone_wav(path: Path, *, seconds: float, amplitude: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sample_rate = 16_000
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        frames = bytearray()
+        for index in range(int(seconds * sample_rate)):
+            sample = int(amplitude * math.sin(2 * math.pi * 440 * index / sample_rate))
+            frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
+        wav.writeframes(bytes(frames))
 
 
 def test_run_first_milestone_cli_writes_daily_note(tmp_path: Path) -> None:
@@ -121,6 +136,51 @@ print(json.dumps({"ranges": [{"start_ms": 0, "end_ms": 500}]}))
 
     assert preprocess_result.exit_code == 0, preprocess_result.output
     assert "audio_chunks_created=2" in preprocess_result.output
+
+
+def test_preprocess_cli_uses_vad_settings_from_config(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tone_wav(source / "TX02_MIC001_20870510_173550_orig.wav", seconds=0.30, amplitude=10_000)
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data}"
+obsidian_vault = "{vault}"
+
+[vad]
+backend = "energy"
+threshold = 0.05
+min_speech_ms = 500
+merge_gap_ms = 100
+max_chunk_ms = 1000
+chunk_overlap_ms = 0
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    import_result = runner.invoke(
+        app,
+        [
+            "ingest-import",
+            "--source-dir",
+            str(source),
+            "--data-dir",
+            str(data),
+            "--obsidian-vault",
+            str(vault),
+        ],
+    )
+    assert import_result.exit_code == 0, import_result.output
+
+    preprocess_result = runner.invoke(app, ["preprocess", "--config", str(config_path)])
+
+    assert preprocess_result.exit_code == 0, preprocess_result.output
+    assert "audio_files_processed=1" in preprocess_result.output
+    assert "audio_chunks_created=0" in preprocess_result.output
 
 
 def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:

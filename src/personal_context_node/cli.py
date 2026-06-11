@@ -254,22 +254,30 @@ def ingest_fix_metadata(
 
 @app.command()
 def preprocess(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
         Path("/Users/paul/Documents/Obsidian/PersonalContext"),
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
-    vad_threshold: float = typer.Option(0.03, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str = typer.Option("energy", help="VAD backend: energy, command, or funasr."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    vad_threshold: float | None = typer.Option(None, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
-    max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
+    max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    vad = _build_vad(vad_backend=vad_backend, vad_command=vad_command, vad_threshold=vad_threshold)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    resolved_vad_backend = vad_backend or config.vad_backend
+    vad = _build_vad(
+        vad_backend=resolved_vad_backend,
+        vad_command=vad_command,
+        vad_threshold=vad_threshold if vad_threshold is not None else config.vad_threshold,
+        merge_gap_ms=config.merge_gap_ms,
+        min_speech_ms=config.min_speech_ms,
+    )
     result = preprocess_imported_audio(
         config=config,
         vad=vad,
-        max_chunk_ms=max_chunk_ms,
+        max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
     )
     typer.echo(
         " ".join(
@@ -998,7 +1006,13 @@ def _process_run(
     mock_text: str,
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    vad = _build_vad(vad_backend=vad_backend, vad_command=vad_command, vad_threshold=vad_threshold)
+    vad = _build_vad(
+        vad_backend=vad_backend,
+        vad_command=vad_command,
+        vad_threshold=vad_threshold,
+        merge_gap_ms=250,
+        min_speech_ms=300,
+    )
     asr = _build_asr(asr_backend=asr_backend, asr_command=asr_command, mock_text=mock_text)
     result = record_job_run(
         config=config,
@@ -1022,9 +1036,16 @@ def _process_run(
     )
 
 
-def _build_vad(*, vad_backend: str, vad_command: str | None, vad_threshold: float):
+def _build_vad(
+    *,
+    vad_backend: str,
+    vad_command: str | None,
+    vad_threshold: float,
+    merge_gap_ms: int = 250,
+    min_speech_ms: int = 300,
+):
     if vad_backend == "energy":
-        return EnergyVadAdapter(threshold=vad_threshold)
+        return EnergyVadAdapter(threshold=vad_threshold, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
     if vad_backend == "command":
         if not vad_command:
             raise typer.BadParameter("--vad-command is required when --vad-backend command")

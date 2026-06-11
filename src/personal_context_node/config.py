@@ -40,7 +40,10 @@ class AppConfig(BaseModel):
     identity_key_path: Path | None = None
     vad_backend: str = "energy"
     vad_threshold: float = 0.03
-    max_chunk_ms: int = 30_000
+    min_speech_ms: int = 300
+    merge_gap_ms: int = 800
+    max_chunk_ms: int = 900_000
+    chunk_overlap_ms: int = 1_000
     asr_backend: str = "mock"
     asr_command: str | None = None
     llm_backend: str = "rule_based"
@@ -76,7 +79,10 @@ class AppConfig(BaseModel):
             "identity_key_path": _optional_resolve_path(base_dir, identity.get("signing_key_path")),
             "vad_backend": vad.get("backend", cls.model_fields["vad_backend"].default),
             "vad_threshold": vad.get("threshold", cls.model_fields["vad_threshold"].default),
+            "min_speech_ms": vad.get("min_speech_ms", cls.model_fields["min_speech_ms"].default),
+            "merge_gap_ms": vad.get("merge_gap_ms", cls.model_fields["merge_gap_ms"].default),
             "max_chunk_ms": vad.get("max_chunk_ms", cls.model_fields["max_chunk_ms"].default),
+            "chunk_overlap_ms": vad.get("chunk_overlap_ms", cls.model_fields["chunk_overlap_ms"].default),
             "asr_backend": asr.get("backend", cls.model_fields["asr_backend"].default),
             "asr_command": asr.get("command", cls.model_fields["asr_command"].default),
             "llm_backend": llm.get("backend", cls.model_fields["llm_backend"].default),

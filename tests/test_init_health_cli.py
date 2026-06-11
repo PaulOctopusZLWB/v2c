@@ -42,6 +42,9 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert "send_person_names = true" in config_text
     assert "send_speaker_labels = true" in config_text
     assert "max_chunk_tokens = 6000" in config_text
+    assert "min_speech_ms = 300" in config_text
+    assert "merge_gap_ms = 800" in config_text
+    assert "chunk_overlap_ms = 1000" in config_text
     assert "[identity]" in config_text
     assert 'owner_did = "did:key:local-owner"' in config_text
     assert 'signing_key_path = "' in config_text

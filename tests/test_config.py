@@ -30,7 +30,10 @@ command = "python scripts/funasr_wrapper.py"
 [vad]
 backend = "energy"
 threshold = 0.02
+min_speech_ms = 250
+merge_gap_ms = 750
 max_chunk_ms = 45000
+chunk_overlap_ms = 500
 
 [audio]
 target_sample_rate_hz = 16000
@@ -71,7 +74,10 @@ stable_seconds = 10
     assert config.asr_command == "python scripts/funasr_wrapper.py"
     assert config.vad_backend == "energy"
     assert config.vad_threshold == 0.02
+    assert config.min_speech_ms == 250
+    assert config.merge_gap_ms == 750
     assert config.max_chunk_ms == 45000
+    assert config.chunk_overlap_ms == 500
     assert config.audio.target_sample_rate_hz == 16000
     assert config.audio.target_channels == 1
     assert config.audio.target_sample_format == "s16"
