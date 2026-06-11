@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
+    MemoryAnnotation,
+    MemoryAnnotationRevocation,
     MemoryCard,
     MemoryCardRevocation,
     MemoryCardSupersession,
@@ -181,6 +183,12 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
             if supersession.card_id in expected:
                 expected[supersession.card_id]["status"] = "superseded"
                 expected[supersession.card_id]["source_event_hash"] = event.event_hash
+    mismatches = _memory_card_mismatches(conn, expected)
+    mismatches += _memory_annotation_mismatches(conn, trusted_events, card_ids=set(expected))
+    return mismatches
+
+
+def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[str, object]]) -> int:
     actual_rows = fetch_all(
         conn,
         """
@@ -193,6 +201,48 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
     mismatches = 0
     for card_id, expected_row in expected.items():
         actual_row = actual.pop(card_id, None)
+        if actual_row != expected_row:
+            mismatches += 1
+    mismatches += len(actual)
+    return mismatches
+
+
+def _memory_annotation_mismatches(
+    conn: sqlite3.Connection,
+    trusted_events: list[SignedEvent],
+    *,
+    card_ids: set[str],
+) -> int:
+    expected: dict[str, dict[str, object]] = {}
+    for event in trusted_events:
+        if event.event_type == "memory_annotation.created":
+            annotation = MemoryAnnotation.model_validate(event.payload)
+            expected[annotation.annotation_id] = {
+                "annotation_id": annotation.annotation_id,
+                "target_card_id": annotation.target_card_id,
+                "author_did": annotation.author,
+                "annotation_type": annotation.annotation_type,
+                "body": annotation.body,
+                "status": "active" if annotation.target_card_id in card_ids else "dangling",
+                "source_event_hash": event.event_hash,
+            }
+        if event.event_type == "memory_annotation.revoked":
+            revocation = MemoryAnnotationRevocation.model_validate(event.payload)
+            if revocation.annotation_id in expected:
+                expected[revocation.annotation_id]["status"] = "revoked"
+                expected[revocation.annotation_id]["source_event_hash"] = event.event_hash
+    actual_rows = fetch_all(
+        conn,
+        """
+        select annotation_id, target_card_id, author_did, annotation_type, body, status, source_event_hash
+        from memory_annotations
+        order by annotation_id
+        """,
+    )
+    actual = {str(row["annotation_id"]): row for row in actual_rows}
+    mismatches = 0
+    for annotation_id, expected_row in expected.items():
+        actual_row = actual.pop(annotation_id, None)
         if actual_row != expected_row:
             mismatches += 1
     mismatches += len(actual)

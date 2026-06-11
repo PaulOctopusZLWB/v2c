@@ -65,6 +65,7 @@ It also implements the human review boundary:
 18. Verified non-plain payload encodings, including `encrypted`, are retained as `unsupported` and are not materialized.
 19. Trusted `memory_card.revoked` events mark the local materialized card as `revoked` so default active views can exclude it.
 20. Trusted `memory_card.superseded` events mark the old card as `superseded` while the replacement card remains independently active.
+21. Trusted `memory_annotation.revoked` events mark annotations as `revoked`, preserving history without keeping them active.
 
 It also implements the speaker review boundary:
 

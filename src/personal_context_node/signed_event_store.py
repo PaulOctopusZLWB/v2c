@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from personal_context_node.core.protocols.memory import (
     IdentityProfile,
     MemoryAnnotation,
+    MemoryAnnotationRevocation,
     MemoryCard,
     MemoryCardRevocation,
     MemoryCardSupersession,
@@ -25,6 +26,7 @@ SUPPORTED_EVENT_TYPES = {
     "memory_card.superseded",
     "identity_profile.published",
     "memory_annotation.created",
+    "memory_annotation.revoked",
 }
 
 
@@ -110,6 +112,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         _supersede_memory_card(conn, event=event)
     if event.event_type == "memory_annotation.created" and trust_status == "trusted":
         _upsert_memory_annotation(conn, event=event)
+    if event.event_type == "memory_annotation.revoked" and trust_status == "trusted":
+        _revoke_memory_annotation(conn, event=event)
     if event.event_type == "identity_profile.published" and trust_status == "trusted":
         _upsert_identity_profile(conn, event=event)
 
@@ -218,6 +222,19 @@ def _upsert_memory_annotation(conn: sqlite3.Connection, *, event: SignedEvent) -
             event.event_hash,
             str(annotation.created_at),
         ),
+    )
+
+
+def _revoke_memory_annotation(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    revocation = MemoryAnnotationRevocation.model_validate(event.payload)
+    conn.execute(
+        """
+        update memory_annotations
+        set status = 'revoked',
+            source_event_hash = ?
+        where annotation_id = ?
+        """,
+        (event.event_hash, revocation.annotation_id),
     )
 
 

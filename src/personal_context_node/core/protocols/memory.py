@@ -75,6 +75,16 @@ class MemoryAnnotation(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class MemoryAnnotationRevocation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: Literal["memory_annotation_revocation.v1"] = "memory_annotation_revocation.v1"
+    annotation_id: str
+    revoked_by: str
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MemoryCardRevocation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
