@@ -66,15 +66,17 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
     for row in rows:
         source_name = Path(row["local_raw_path"]).name
         segment_id = f"seg_{uuid4().hex}"
+        chunk_id = f"chk_{segment_id}"
         conn.execute(
             """
             insert into transcript_segments (
-              segment_id, audio_file_id, start_ms, end_ms, text, language, speaker, evidence_id
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text, language, speaker, evidence_id
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 segment_id,
                 row["audio_file_id"],
+                chunk_id,
                 0,
                 3000,
                 f"模拟转写：{source_name} 需要生成本地上下文和记忆候选。",
