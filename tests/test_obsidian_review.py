@@ -109,6 +109,45 @@ def test_publish_candidate_review_only_includes_candidates_for_requested_date_ke
     ]
 
 
+def test_sync_review_ignores_candidates_from_other_date_keys(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="当天候选。", date_key="2087-05-10")
+    _insert_candidate(config.database_path, candidate_id="cand_test_002", claim="次日候选。", date_key="2087-05-11")
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / "2087-05-10.md"
+    review_path.write_text(
+        """
+# 2087-05-10 Memory Candidate Review
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_002" version="1" -->
+```yaml
+action: confirm
+claim: "次日候选。"
+claim_type: requirement
+```
+<!-- pcn:review end candidate_id="cand_test_002" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 0
+    assert result.signed_events_created == 0
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select candidate_id, status from memory_candidates order by candidate_id")
+        events = fetch_all(conn, "select event_type from signed_events")
+    finally:
+        conn.close()
+    assert candidates == [
+        {"candidate_id": "cand_test_001", "status": "pending_review"},
+        {"candidate_id": "cand_test_002", "status": "pending_review"},
+    ]
+    assert events == []
+
+
 def test_sync_review_parses_review_block_and_ignores_checked_free_text(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path, candidate_id="cand_test_001", claim="用户要求音频本地处理。")

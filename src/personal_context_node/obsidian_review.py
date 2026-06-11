@@ -169,8 +169,9 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 select candidate_id, candidate_claim, claim_type, subject_json, confidence, evidence_refs_json, status
                 from memory_candidates
                 where candidate_id = ?
+                  and date_key = ?
                 """,
-                (candidate_id,),
+                (candidate_id, day),
             ).fetchone()
             if row is None or row["status"] != "pending_review":
                 continue
