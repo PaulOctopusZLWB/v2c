@@ -9,7 +9,8 @@ from typer.testing import CliRunner
 
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
-from personal_context_node.cli import app
+from personal_context_node.adapters.asr.command import CommandASRAdapter
+from personal_context_node.cli import _build_asr, app
 from personal_context_node.config import AppConfig
 from personal_context_node.pipeline import run_first_milestone
 
@@ -57,6 +58,20 @@ print(json.dumps({
     assert result.exit_code == 0, result.output
     assert "chunks_transcribed=1" in result.output
     assert "segments_created=1" in result.output
+
+
+def test_build_asr_accepts_funasr_backend() -> None:
+    adapter = _build_asr(asr_backend="funasr", asr_command=None, mock_text="unused")
+
+    assert isinstance(adapter, CommandASRAdapter)
+    assert adapter.command[:2] == ["python3", "scripts/funasr_sensevoice_wrapper.py"]
+
+
+def test_build_asr_allows_funasr_command_override() -> None:
+    adapter = _build_asr(asr_backend="funasr", asr_command="uv run python scripts/funasr_sensevoice_wrapper.py --model local", mock_text="unused")
+
+    assert isinstance(adapter, CommandASRAdapter)
+    assert adapter.command == ["uv", "run", "python", "scripts/funasr_sensevoice_wrapper.py", "--model", "local"]
 
 
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:

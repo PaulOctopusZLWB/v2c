@@ -266,18 +266,11 @@ def transcribe(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by the mock ASR adapter."),
-    asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
-    asr_command: str | None = typer.Option(None, help="Command ASR wrapper, e.g. 'python scripts/funasr_wrapper.py'."),
+    asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
+    asr_command: str | None = typer.Option(None, help="Command ASR wrapper, e.g. 'python scripts/funasr_sensevoice_wrapper.py'."),
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    if asr_backend == "mock":
-        asr = MockASRAdapter(text=mock_text)
-    elif asr_backend == "command":
-        if not asr_command:
-            raise typer.BadParameter("--asr-command is required when --asr-backend command")
-        asr = CommandASRAdapter(command=asr_command.split())
-    else:
-        raise typer.BadParameter("--asr-backend must be 'mock' or 'command'")
+    asr = _build_asr(asr_backend=asr_backend, asr_command=asr_command, mock_text=mock_text)
     result = transcribe_pending_chunks(config=config, asr=asr)
     typer.echo(
         " ".join(
@@ -921,7 +914,7 @@ def process_run(
     vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
-    asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
+    asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
@@ -950,7 +943,7 @@ def process_run_group(
     vad_backend: str = typer.Option("energy", help="VAD backend: energy or command."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int = typer.Option(30_000, min=100, help="Maximum ASR chunk duration in milliseconds."),
-    asr_backend: str = typer.Option("mock", help="ASR backend: mock or command."),
+    asr_backend: str = typer.Option("mock", help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
@@ -982,14 +975,7 @@ def _process_run(
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     vad = _build_vad(vad_backend=vad_backend, vad_command=vad_command, vad_threshold=vad_threshold)
-    if asr_backend == "mock":
-        asr = MockASRAdapter(text=mock_text)
-    elif asr_backend == "command":
-        if not asr_command:
-            raise typer.BadParameter("--asr-command is required when --asr-backend command")
-        asr = CommandASRAdapter(command=asr_command.split())
-    else:
-        raise typer.BadParameter("--asr-backend must be 'mock' or 'command'")
+    asr = _build_asr(asr_backend=asr_backend, asr_command=asr_command, mock_text=mock_text)
     result = record_job_run(
         config=config,
         job_name="process-run",
@@ -1020,6 +1006,19 @@ def _build_vad(*, vad_backend: str, vad_command: str | None, vad_threshold: floa
             raise typer.BadParameter("--vad-command is required when --vad-backend command")
         return CommandVADAdapter(command=vad_command.split())
     raise typer.BadParameter("--vad-backend must be 'energy' or 'command'")
+
+
+def _build_asr(*, asr_backend: str, asr_command: str | None, mock_text: str):
+    if asr_backend == "mock":
+        return MockASRAdapter(text=mock_text)
+    if asr_backend == "command":
+        if not asr_command:
+            raise typer.BadParameter("--asr-command is required when --asr-backend command")
+        return CommandASRAdapter(command=asr_command.split())
+    if asr_backend == "funasr":
+        command = asr_command.split() if asr_command else ["python3", "scripts/funasr_sensevoice_wrapper.py"]
+        return CommandASRAdapter(command=command)
+    raise typer.BadParameter("--asr-backend must be 'mock', 'command', or 'funasr'")
 
 
 @app.command(name="daily-status")
