@@ -31,7 +31,7 @@ It also implements the LLM text-processing boundary before provider integration:
 
 1. `LLMPort` as the core-owned text-only context generation interface.
 2. A deterministic `RuleBasedLLMAdapter` for local smoke tests.
-3. `daily_summaries` storage for summary, todos, facts, and inferences.
+3. Legacy `daily_summaries` storage plus formal `summaries` rows using `daily_summary.v1`.
 4. `pcn summarize` to generate daily context and memory candidates from transcript text only.
 5. `CommandLLMAdapter` for local or cloud wrapper commands that receive transcript JSON on stdin and emit normalized daily context JSON.
 

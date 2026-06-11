@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
@@ -102,12 +103,30 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
     conn = connect(config.database_path)
     try:
         summaries = fetch_all(conn, "select day, summary, todos_json, facts_json, inferences_json from daily_summaries")
+        formal_summaries = fetch_all(
+            conn,
+            """
+            select summary_type, target_type, target_id, prompt_version, content_json
+            from summaries
+            where summary_type = 'daily'
+            """,
+        )
         candidates = fetch_all(conn, "select candidate_claim, claim_type, evidence_refs_json, status from memory_candidates")
     finally:
         conn.close()
 
     assert summaries[0]["day"] == "2087-05-10"
     assert "本地上下文系统" in summaries[0]["summary"]
+    assert formal_summaries[0]["target_type"] == "date_key"
+    assert formal_summaries[0]["target_id"] == "2087-05-10"
+    assert formal_summaries[0]["prompt_version"] == "llm_port.daily_summary.v1"
+    content = json.loads(str(formal_summaries[0]["content_json"]))
+    assert content["schema_version"] == "daily_summary.v1"
+    assert content["date_key"] == "2087-05-10"
+    assert content["headline"] == "今天讨论了本地上下文系统。"
+    assert content["todos_rollup"] == [
+        {"text": "继续接入真实 ASR", "owner": "self", "session_id": None, "evidence_refs": ["ev_test"]}
+    ]
     assert candidates[0]["claim_type"] == "requirement"
     assert candidates[0]["status"] == "pending_review"
     assert "ev_test" in candidates[0]["evidence_refs_json"]

@@ -34,9 +34,11 @@ def test_summarize_cli_generates_daily_context_from_transcripts(tmp_path: Path) 
     conn = connect(config.database_path)
     try:
         summaries = fetch_all(conn, "select day from daily_summaries")
+        formal_summaries = fetch_all(conn, "select summary_type, target_id from summaries where summary_type = 'daily'")
     finally:
         conn.close()
     assert summaries == [{"day": "2087-05-10"}]
+    assert formal_summaries == [{"summary_type": "daily", "target_id": "2087-05-10"}]
 
 
 def _insert_transcript(database_path: Path) -> None:

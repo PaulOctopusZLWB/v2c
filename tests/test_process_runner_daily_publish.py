@@ -40,6 +40,13 @@ def test_process_runner_generates_daily_and_publishes_obsidian(tmp_path: Path) -
 
     assert publish.task_type == "obsidian_publish"
     assert publish.status == "succeeded"
+    daily_note = config.obsidian_vault / "10_Daily" / "2087-05-10.md"
+    assert daily_note.exists()
+    daily_text = daily_note.read_text(encoding="utf-8")
+    assert "<!-- pcn:managed start type=\"daily_headline\" date_key=\"2087-05-10\" -->" in daily_text
+    assert "<!-- pcn:managed start type=\"daily_sessions\" date_key=\"2087-05-10\" -->" in daily_text
+    assert "- [[20_Conversations/2087-05-10/ses_test|ses_test]]" in daily_text
+    assert "<!-- pcn:managed start type=\"daily_decisions\" date_key=\"2087-05-10\" -->" in daily_text
     assert (config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md").exists()
     assert (config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md").exists()
     assert (config.obsidian_vault / "90_System" / "Speaker_Review" / "2087-05-10.md").exists()
