@@ -162,6 +162,7 @@ create table if not exists sessions (
   segment_count integer not null,
   active_speech_ms integer not null,
   first_segment_id text not null unique,
+  exclude_from_memory integer not null default 0,
   created_at text not null,
   updated_at text not null
 );
@@ -314,6 +315,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
     _ensure_column(conn, "memory_candidates", "date_key", "text")
     _ensure_column(conn, "memory_candidates", "normalized_claim_hash", "text")
+    _ensure_column(conn, "sessions", "exclude_from_memory", "integer not null default 0")
     conn.execute(
         "insert or ignore into schema_migrations (version, name) values (?, ?)",
         (1, "base_schema"),

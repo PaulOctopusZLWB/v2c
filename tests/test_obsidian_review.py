@@ -118,6 +118,38 @@ def test_sync_review_defers_candidate_without_side_effects(tmp_path: Path) -> No
     assert events == []
 
 
+def test_sync_review_marks_evidence_session_excluded_from_memory(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_session_with_segment(config.database_path)
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(
+        text.replace(
+            "- [ ] cand_test_001 | requirement | 用户要求音频本地处理。",
+            "- [x] cand_test_001 | requirement | 用户要求音频本地处理。 | exclude_from_memory",
+        ),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 0
+    assert result.signed_events_created == 0
+    receipt = review_path.read_text(encoding="utf-8")
+    assert "action=exclude_from_memory" in receipt
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select status, memory_card_id from memory_candidates")
+        sessions = fetch_all(conn, "select exclude_from_memory from sessions where session_id = 'ses_test'")
+        events = fetch_all(conn, "select event_type from signed_events")
+    finally:
+        conn.close()
+    assert candidates == [{"status": "excluded_from_memory", "memory_card_id": None}]
+    assert sessions == [{"exclude_from_memory": 1}]
+    assert events == []
+
+
 def test_sync_review_edits_claim_while_preserving_candidate_claim(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)
@@ -277,6 +309,78 @@ def _insert_candidate(
                 ),
                 "pending_review",
                 None,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_session_with_segment(database_path: Path) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_test",
+                "DJI Mic 3",
+                "/source.wav",
+                "/local.wav",
+                "sha256:test",
+                1000,
+                "2087-05-10T00:00:00+08:00",
+                "2087-05-10T00:10:00+08:00",
+                "imported",
+            ),
+        )
+        conn.execute(
+            """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ses_test",
+                "2087-05-10",
+                "2087-05-10T08:00:00+08:00",
+                "2087-05-10T08:10:00+08:00",
+                "derived_from_segments",
+                1,
+                1000,
+                "seg_test",
+                "2087-05-10T09:00:00+08:00",
+                "2087-05-10T09:00:00+08:00",
+            ),
+        )
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "seg_test",
+                "aud_test",
+                "chk_test",
+                "ses_test",
+                0,
+                1000,
+                "音频必须本地处理。",
+                "zh",
+                "self",
+                "ev_test",
+                0.99,
+                "MockASRAdapter",
+                "mock-asr",
+                "test",
             ),
         )
         conn.commit()

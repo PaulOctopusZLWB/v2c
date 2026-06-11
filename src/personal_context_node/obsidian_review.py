@@ -117,6 +117,14 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             if action == "defer":
                 receipts[candidate_id] = {"action": "defer", "card_id": None}
                 continue
+            if action == "exclude_from_memory":
+                _mark_evidence_sessions_excluded(conn, evidence_refs_json=str(row["evidence_refs_json"]))
+                conn.execute(
+                    "update memory_candidates set status = 'excluded_from_memory' where candidate_id = ?",
+                    (candidate_id,),
+                )
+                receipts[candidate_id] = {"action": "exclude_from_memory", "card_id": None}
+                continue
             card = MemoryCard(
                 card_id=f"mem_{uuid4().hex}",
                 owner_did=config.owner_did,
@@ -154,6 +162,31 @@ def _within_edit_grace(path: Path, *, edit_grace_seconds: int) -> bool:
     if edit_grace_seconds <= 0:
         return False
     return time.time() - path.stat().st_mtime < edit_grace_seconds
+
+
+def _mark_evidence_sessions_excluded(conn, *, evidence_refs_json: str) -> None:
+    source_ids = [
+        str(item["source_id"])
+        for item in json.loads(evidence_refs_json)
+        if item.get("source_type") == "transcript_segment" and item.get("source_id")
+    ]
+    if not source_ids:
+        return
+    placeholders = ",".join("?" for _ in source_ids)
+    conn.execute(
+        f"""
+        update sessions
+        set exclude_from_memory = 1,
+            updated_at = ?
+        where session_id in (
+          select session_id
+          from transcript_segments
+          where segment_id in ({placeholders})
+            and session_id is not null
+        )
+        """,
+        (datetime.now(timezone.utc).isoformat(), *source_ids),
+    )
 
 
 def _checked_candidate_actions(path: Path) -> list[ReviewAction]:
