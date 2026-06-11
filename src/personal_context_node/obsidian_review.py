@@ -60,6 +60,21 @@ def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
     for row in rows:
         lines.append(f"- [ ] {row['candidate_id']} | {row['claim_type']} | {row['candidate_claim']}")
     review_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            update memory_candidates
+            set review_note_path = ?, updated_at = ?
+            where status = 'pending_review'
+            """,
+            (str(review_path), now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     set_daily_report_status(config=config, day=day, status="review_pending")
     return review_path
 
@@ -109,10 +124,11 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             ).fetchone()
             if row is None or row["status"] != "pending_review":
                 continue
+            reviewed_at = datetime.now(timezone.utc).isoformat()
             if action == "reject":
                 conn.execute(
-                    "update memory_candidates set status = 'rejected' where candidate_id = ?",
-                    (candidate_id,),
+                    "update memory_candidates set status = 'rejected', reviewed_at = ?, updated_at = ? where candidate_id = ?",
+                    (reviewed_at, reviewed_at, candidate_id),
                 )
                 receipts[candidate_id] = {"action": "reject", "card_id": None}
                 continue
@@ -122,8 +138,14 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             if action == "exclude_from_memory":
                 _mark_evidence_sessions_excluded(conn, evidence_refs_json=str(row["evidence_refs_json"]))
                 conn.execute(
-                    "update memory_candidates set status = 'excluded_from_memory' where candidate_id = ?",
-                    (candidate_id,),
+                    """
+                    update memory_candidates
+                    set status = 'excluded_from_memory',
+                        reviewed_at = ?,
+                        updated_at = ?
+                    where candidate_id = ?
+                    """,
+                    (reviewed_at, reviewed_at, candidate_id),
                 )
                 receipts[candidate_id] = {"action": "exclude_from_memory", "card_id": None}
                 continue
@@ -147,8 +169,24 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             )
             insert_signed_event(conn, event=event, public_key=public_key)
             conn.execute(
-                "update memory_candidates set status = 'confirmed', memory_card_id = ? where candidate_id = ?",
-                (card.card_id, candidate_id),
+                """
+                update memory_candidates
+                set status = 'confirmed',
+                    memory_card_id = ?,
+                    created_card_id = ?,
+                    edited_claim = ?,
+                    reviewed_at = ?,
+                    updated_at = ?
+                where candidate_id = ?
+                """,
+                (
+                    card.card_id,
+                    card.card_id,
+                    review_action.edited_claim,
+                    reviewed_at,
+                    reviewed_at,
+                    candidate_id,
+                ),
             )
             receipts[candidate_id] = {"action": action, "card_id": card.card_id}
             confirmed += 1

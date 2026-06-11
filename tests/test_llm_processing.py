@@ -193,7 +193,13 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
             where summary_type = 'daily'
             """,
         )
-        candidates = fetch_all(conn, "select candidate_claim, claim_type, evidence_refs_json, status from memory_candidates")
+        candidates = fetch_all(
+            conn,
+            """
+            select candidate_claim, claim_type, source_type, evidence_refs_json, status, created_at, updated_at
+            from memory_candidates
+            """,
+        )
         evidence_refs = fetch_all(
             conn,
             "select evidence_id, source_type, source_id, source_ref, owner_id, summary, quote, created_at from evidence_refs",
@@ -214,7 +220,10 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
         {"text": "继续接入真实 ASR", "owner": "self", "session_id": None, "evidence_refs": ["ev_test"]}
     ]
     assert candidates[0]["claim_type"] == "requirement"
+    assert candidates[0]["source_type"] == "llm_daily_context"
     assert candidates[0]["status"] == "pending_review"
+    assert candidates[0]["created_at"]
+    assert candidates[0]["updated_at"]
     assert "ev_test" in candidates[0]["evidence_refs_json"]
     assert evidence_refs == [
         {

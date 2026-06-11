@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -99,6 +100,7 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
         """,
     )
     for row in rows:
+        now = datetime.now(timezone.utc).isoformat()
         evidence = [
             {
                 "evidence_id": row["evidence_id"],
@@ -110,12 +112,13 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
         conn.execute(
             """
             insert into memory_candidates (
-              candidate_id, candidate_claim, claim_type, subject_json,
-              confidence, evidence_refs_json, status, memory_card_id
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+              candidate_id, source_type, candidate_claim, claim_type, subject_json,
+              confidence, evidence_refs_json, status, memory_card_id, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"cand_{uuid4().hex}",
+                "mock_first_milestone",
                 "用户正在建设 Personal Context Node 的本地音频上下文系统。",
                 "observation",
                 json.dumps(
@@ -127,6 +130,8 @@ def _create_memory_candidates(conn: sqlite3.Connection) -> None:
                 json.dumps(evidence, ensure_ascii=False, sort_keys=True),
                 "pending_review",
                 None,
+                now,
+                now,
             ),
         )
     conn.commit()
@@ -164,9 +169,18 @@ def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> Non
         private_key=load_or_create_signing_key(config),
     )
     insert_signed_event(conn, event=event, public_key=public_key)
+    reviewed_at = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        "update memory_candidates set status = 'confirmed', memory_card_id = ? where candidate_id = ?",
-        (card.card_id, row["candidate_id"]),
+        """
+        update memory_candidates
+        set status = 'confirmed',
+            memory_card_id = ?,
+            created_card_id = ?,
+            reviewed_at = ?,
+            updated_at = ?
+        where candidate_id = ?
+        """,
+        (card.card_id, card.card_id, reviewed_at, reviewed_at, row["candidate_id"]),
     )
     conn.commit()
 

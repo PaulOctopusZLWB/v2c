@@ -237,16 +237,18 @@ def _persist_candidates(
             claim_type=candidate.claim_type,
             normalized_claim_hash=normalized_claim_hash,
         )
+        now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
             insert into memory_candidates (
-              candidate_id, candidate_claim, claim_type, subject_json,
+              candidate_id, source_type, candidate_claim, claim_type, subject_json,
               confidence, evidence_refs_json, status, memory_card_id,
-              date_key, normalized_claim_hash
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              date_key, normalized_claim_hash, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"cand_{uuid4().hex}",
+                "llm_daily_context",
                 candidate.candidate_claim,
                 candidate.claim_type,
                 json.dumps(
@@ -260,6 +262,8 @@ def _persist_candidates(
                 None,
                 context.day,
                 normalized_claim_hash,
+                now,
+                now,
             ),
         )
         created += 1

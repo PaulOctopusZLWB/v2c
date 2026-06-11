@@ -18,6 +18,12 @@ def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
     assert review_path == config.obsidian_vault / "30_Memory_Candidates" / "2087-05-10.md"
     text = review_path.read_text(encoding="utf-8")
     assert "- [ ] cand_test_001 | requirement | 用户要求音频本地处理。" in text
+    conn = connect(config.database_path)
+    try:
+        published = fetch_all(conn, "select review_note_path from memory_candidates")
+    finally:
+        conn.close()
+    assert published == [{"review_note_path": str(review_path)}]
 
     review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
     result = confirm_checked_candidates(config=config, day="2087-05-10")
@@ -27,13 +33,15 @@ def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
 
     conn = connect(config.database_path)
     try:
-        candidates = fetch_all(conn, "select status, memory_card_id from memory_candidates")
+        candidates = fetch_all(conn, "select status, memory_card_id, created_card_id, reviewed_at from memory_candidates")
         events = fetch_all(conn, "select event_type, payload_json, trust_status from signed_events")
     finally:
         conn.close()
 
     assert candidates[0]["status"] == "confirmed"
     assert candidates[0]["memory_card_id"].startswith("mem_")
+    assert candidates[0]["created_card_id"] == candidates[0]["memory_card_id"]
+    assert candidates[0]["reviewed_at"]
     assert events[0]["event_type"] == "memory_card.created"
     assert json.loads(events[0]["payload_json"])["source_type"] == "confirmed_generated"
     assert events[0]["trust_status"] == "trusted"
@@ -176,9 +184,13 @@ def test_sync_review_edits_claim_while_preserving_candidate_claim(tmp_path: Path
     conn = connect(config.database_path)
     try:
         cards = fetch_all(conn, "select claim, candidate_claim from memory_cards")
+        candidates = fetch_all(conn, "select edited_claim, created_card_id, reviewed_at from memory_candidates")
     finally:
         conn.close()
     assert cards == [{"claim": edited_claim, "candidate_claim": "用户要求音频本地处理。"}]
+    assert candidates[0]["edited_claim"] == edited_claim
+    assert candidates[0]["created_card_id"]
+    assert candidates[0]["reviewed_at"]
 
 
 def test_sync_review_logs_empty_edit_claim_without_side_effects(tmp_path: Path) -> None:

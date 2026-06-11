@@ -168,6 +168,30 @@ def test_initialize_archive_records_schema_tracks_targets_and_status(tmp_path) -
     assert [row["name"] for row in index_columns] == ["target_type", "target_id", "archive_path"]
 
 
+def test_initialize_memory_candidates_schema_tracks_review_lifecycle(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(memory_candidates)")
+        indexes = fetch_all(conn, "pragma index_list(memory_candidates)")
+        index_columns = fetch_all(conn, "pragma index_info(idx_candidates_status)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["source_type"]["notnull"] == 1
+    assert column_by_name["edited_claim"]["type"].lower() == "text"
+    assert column_by_name["review_note_path"]["type"].lower() == "text"
+    assert column_by_name["reviewed_at"]["type"].lower() == "text"
+    assert column_by_name["created_card_id"]["type"].lower() == "text"
+    assert column_by_name["created_at"]["notnull"] == 1
+    assert column_by_name["updated_at"]["notnull"] == 1
+    index_names = {row["name"] for row in indexes}
+    assert "idx_candidates_status" in index_names
+    assert [row["name"] for row in index_columns] == ["status"]
+
+
 def test_initialize_migrates_legacy_daily_reports_day_to_date_key(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

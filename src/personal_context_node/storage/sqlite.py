@@ -69,16 +69,26 @@ create table if not exists audio_chunks (
 
 create table if not exists memory_candidates (
   candidate_id text primary key,
+  source_type text not null default 'llm_daily_context',
   candidate_claim text not null,
+  edited_claim text,
   claim_type text not null,
   subject_json text not null,
   confidence real not null,
   evidence_refs_json text not null,
   status text not null,
   memory_card_id text,
+  review_note_path text,
+  reviewed_at text,
+  created_card_id text,
   date_key text,
-  normalized_claim_hash text
+  normalized_claim_hash text,
+  created_at text not null default '',
+  updated_at text not null default ''
 );
+
+create index if not exists idx_candidates_status
+on memory_candidates(status);
 
 create table if not exists evidence_refs (
   evidence_id text primary key,
@@ -355,8 +365,16 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "speaker_mappings", "speaker_cluster_id", "text")
     _ensure_column(conn, "speaker_mappings", "person_id", "text")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
+    _ensure_column(conn, "memory_candidates", "source_type", "text not null default 'llm_daily_context'")
+    _ensure_column(conn, "memory_candidates", "edited_claim", "text")
+    _ensure_column(conn, "memory_candidates", "review_note_path", "text")
+    _ensure_column(conn, "memory_candidates", "reviewed_at", "text")
+    _ensure_column(conn, "memory_candidates", "created_card_id", "text")
     _ensure_column(conn, "memory_candidates", "date_key", "text")
     _ensure_column(conn, "memory_candidates", "normalized_claim_hash", "text")
+    _ensure_column(conn, "memory_candidates", "created_at", "text not null default ''")
+    _ensure_column(conn, "memory_candidates", "updated_at", "text not null default ''")
+    conn.execute("create index if not exists idx_candidates_status on memory_candidates(status)")
     _ensure_column(conn, "sessions", "exclude_from_memory", "integer not null default 0")
     _ensure_column(conn, "daily_reports", "date_key", "text")
     _ensure_column(conn, "daily_reports", "note_path", "text")
