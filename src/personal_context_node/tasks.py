@@ -32,6 +32,17 @@ class RetryTaskResult:
     status: str
 
 
+ALLOWED_TASK_TYPES = {
+    "vad",
+    "asr",
+    "session_derive",
+    "summarize_session",
+    "daily_generate",
+    "obsidian_publish",
+    "archive",
+}
+
+
 def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str) -> EnqueueTaskResult:
     conn = connect(config.database_path)
     try:
@@ -50,6 +61,7 @@ def enqueue_task_in_conn(
     target_type: str,
     target_id: str,
 ) -> EnqueueTaskResult:
+    _validate_task_type(task_type)
     existing = conn.execute(
         "select task_id from tasks where task_type = ? and target_type = ? and target_id = ?",
         (task_type, target_type, target_id),
@@ -214,6 +226,7 @@ def retry_task(*, config: AppConfig, task_id: str) -> RetryTaskResult:
 
 
 def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str) -> EnqueueTaskResult:
+    _validate_task_type(task_type)
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -278,3 +291,8 @@ def _update_task(*, config: AppConfig, task_id: str, **fields: object) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _validate_task_type(task_type: str) -> None:
+    if task_type not in ALLOWED_TASK_TYPES:
+        raise ValueError(f"unknown task_type: {task_type}")

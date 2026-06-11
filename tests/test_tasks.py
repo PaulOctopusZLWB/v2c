@@ -51,6 +51,25 @@ def test_task_lifecycle_deduplicates_and_tracks_claims(tmp_path) -> None:
     ]
 
 
+def test_enqueue_task_rejects_unknown_task_type(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    try:
+        enqueue_task(config=config, task_type="unknown", target_type="audio_file", target_id="aud_1")
+    except ValueError as exc:
+        assert "unknown task_type" in str(exc)
+    else:
+        raise AssertionError("enqueue_task accepted an unknown task_type")
+
+
+def test_enqueue_task_accepts_declared_archive_task_type(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    result = enqueue_task(config=config, task_type="archive", target_type="audio_file", target_id="aud_1")
+
+    assert result.created is True
+
+
 def test_claim_next_task_uses_available_at_and_priority_with_lease(tmp_path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)

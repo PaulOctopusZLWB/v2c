@@ -155,8 +155,8 @@ def test_process_once_rolls_back_success_when_downstream_registration_fails(tmp_
             asr=MockASRAdapter(),
             llm=llm,
         )
-    except Exception as exc:
-        assert "NOT NULL" in str(exc).upper()
+    except ValueError as exc:
+        assert "unknown task_type" in str(exc)
     else:
         raise AssertionError("process_once should surface downstream registration failure")
 
