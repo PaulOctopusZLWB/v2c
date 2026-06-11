@@ -28,13 +28,15 @@ def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
     conn = connect(config.database_path)
     try:
         candidates = fetch_all(conn, "select status, memory_card_id from memory_candidates")
-        events = fetch_all(conn, "select event_type, trust_status from signed_events")
+        events = fetch_all(conn, "select event_type, payload_json, trust_status from signed_events")
     finally:
         conn.close()
 
     assert candidates[0]["status"] == "confirmed"
     assert candidates[0]["memory_card_id"].startswith("mem_")
-    assert events == [{"event_type": "memory_card.created", "trust_status": "trusted"}]
+    assert events[0]["event_type"] == "memory_card.created"
+    assert json.loads(events[0]["payload_json"])["source_type"] == "confirmed_generated"
+    assert events[0]["trust_status"] == "trusted"
 
 
 def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_path: Path) -> None:

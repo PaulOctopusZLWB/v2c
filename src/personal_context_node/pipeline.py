@@ -152,6 +152,7 @@ def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> Non
         claim=row["candidate_claim"],
         subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
         evidence_refs=evidence_refs,
+        source_type="confirmed_generated",
         candidate_claim=row["candidate_claim"],
     )
     event, public_key = create_chained_event(

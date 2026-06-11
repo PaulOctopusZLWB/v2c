@@ -134,6 +134,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 claim=review_action.edited_claim or row["candidate_claim"],
                 subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
                 evidence_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs_json"])],
+                source_type="confirmed_generated",
                 candidate_claim=row["candidate_claim"],
             )
             event, public_key = create_chained_event(

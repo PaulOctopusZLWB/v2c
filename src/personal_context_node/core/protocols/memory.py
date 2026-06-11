@@ -9,7 +9,7 @@ from typing import Literal
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ClaimType = Literal[
@@ -23,6 +23,7 @@ ClaimType = Literal[
     "relationship",
 ]
 AnnotationType = Literal["confirm", "dispute", "comment", "supersede_reference"]
+MemoryCardSourceType = Literal["confirmed_generated", "manual"]
 SUPPORTED_VISIBILITY_TYPES = {"private", "public", "direct", "group"}
 
 
@@ -61,6 +62,7 @@ class MemoryCard(BaseModel):
     claim: str
     subject: SubjectRef
     evidence_refs: list[EvidenceRef]
+    source_type: MemoryCardSourceType = "confirmed_generated"
     candidate_claim: str | None = None
     visibility: Visibility = Field(default_factory=Visibility)
     tags: list[str] = Field(default_factory=list)
@@ -76,12 +78,11 @@ class MemoryCard(BaseModel):
         data["visibility"] = _normalize_visibility(raw_visibility)
         return data
 
-    @field_validator("evidence_refs")
-    @classmethod
-    def require_evidence(cls, value: list[EvidenceRef]) -> list[EvidenceRef]:
-        if not value:
+    @model_validator(mode="after")
+    def require_generated_evidence(self) -> "MemoryCard":
+        if self.source_type == "confirmed_generated" and not self.evidence_refs:
             raise ValueError("generated memory cards require at least one evidence reference")
-        return value
+        return self
 
 
 def _normalize_visibility(value: object) -> dict[str, str]:
