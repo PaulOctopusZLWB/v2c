@@ -112,6 +112,10 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
             """,
         )
         candidates = fetch_all(conn, "select candidate_claim, claim_type, evidence_refs_json, status from memory_candidates")
+        evidence_refs = fetch_all(
+            conn,
+            "select evidence_id, source_type, source_id, quote from evidence_refs",
+        )
     finally:
         conn.close()
 
@@ -130,3 +134,11 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
     assert candidates[0]["claim_type"] == "requirement"
     assert candidates[0]["status"] == "pending_review"
     assert "ev_test" in candidates[0]["evidence_refs_json"]
+    assert evidence_refs == [
+        {
+            "evidence_id": "ev_test",
+            "source_type": "transcript_segment",
+            "source_id": "seg_test",
+            "quote": "我要求音频和转写处理保持本地。",
+        }
+    ]

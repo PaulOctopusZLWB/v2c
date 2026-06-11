@@ -186,6 +186,17 @@ def _persist_candidates(conn: sqlite3.Connection, *, context: DailyContext, segm
                     "quote": source["text"],
                 }
             )
+            conn.execute(
+                """
+                insert into evidence_refs (evidence_id, source_type, source_id, quote)
+                values (?, ?, ?, ?)
+                on conflict(evidence_id) do update set
+                  source_type = excluded.source_type,
+                  source_id = excluded.source_id,
+                  quote = excluded.quote
+                """,
+                (source["evidence_id"], "transcript_segment", source["segment_id"], source["text"]),
+            )
         if not evidence_refs:
             raise ValueError("LLM memory candidates require evidence refs")
         conn.execute(

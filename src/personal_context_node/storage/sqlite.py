@@ -78,6 +78,13 @@ create table if not exists memory_candidates (
   memory_card_id text
 );
 
+create table if not exists evidence_refs (
+  evidence_id text primary key,
+  source_type text not null,
+  source_id text not null,
+  quote text not null
+);
+
 create table if not exists memory_cards (
   card_id text primary key,
   owner_did text not null,
