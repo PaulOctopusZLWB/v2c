@@ -181,6 +181,44 @@ def test_memory_card_updated_at_is_signed_payload_field() -> None:
     assert verify_signed_event(event, public_key)
 
 
+def test_memory_card_evidence_refs_preserve_shareable_metadata() -> None:
+    card = MemoryCard(
+        card_id="mem_evidence_metadata_test",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Shared memory cards carry evidence metadata.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_evidence_metadata_test",
+                source_type="transcript_segment",
+                source_id="seg_evidence_metadata_test",
+                quote="Shared memory cards carry evidence metadata.",
+                visibility="private",
+                summary="Derived from local transcript on 2087-05-10.",
+            )
+        ],
+    )
+
+    event, public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+    )
+
+    assert event.payload["evidence_refs"] == [
+        {
+            "evidence_id": "ev_evidence_metadata_test",
+            "source_type": "transcript_segment",
+            "source_id": "seg_evidence_metadata_test",
+            "quote": "Shared memory cards carry evidence metadata.",
+            "visibility": "private",
+            "summary": "Derived from local transcript on 2087-05-10.",
+        }
+    ]
+    assert verify_signed_event(event, public_key)
+
+
 def test_memory_card_visibility_defaults_to_private_object() -> None:
     card = MemoryCard(
         card_id="mem_test_001",

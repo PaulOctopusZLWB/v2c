@@ -42,6 +42,8 @@ class EvidenceRef(BaseModel):
     source_type: str
     source_id: str
     quote: str
+    visibility: str | None = None
+    summary: str | None = None
 
 
 class Visibility(BaseModel):
