@@ -37,6 +37,34 @@ def test_archive_cli_archives_imported_audio(tmp_path: Path) -> None:
     assert (archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav").exists()
 
 
+def test_archive_run_group_cli_archives_imported_audio(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(b"raw audio bytes")
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path))
+    archive_root = tmp_path / "nas" / "PersonalContext"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "archive",
+            "run",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--archive-root",
+            str(archive_root),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "files_archived=1" in result.output
+    assert "files_pending=0" in result.output
+    assert (archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav").exists()
+
+
 def _insert_audio(database_path: Path, raw_path: Path, sha256: str) -> None:
     conn = connect(database_path)
     try:

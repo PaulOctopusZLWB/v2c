@@ -63,7 +63,7 @@ It also implements the archive boundary:
 1. `ArchivePort` as the core-owned archive interface.
 2. A local filesystem archive adapter that can target a mounted NAS path.
 3. Hash verification before `audio_files.status` becomes `archived`.
-4. `pcn archive` for raw audio archive smoke tests.
+4. `pcn archive run` for raw audio archive smoke tests.
 
 It also implements launchd template generation and controlled install/uninstall:
 
@@ -164,7 +164,7 @@ uv run pcn obsidian publish \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --date 2087-05-10
-uv run pcn archive \
+uv run pcn archive run \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --archive-root .smoke-nas
@@ -182,7 +182,7 @@ uv run pcn launchd-write-plists \
 Copy `config/local.example.toml` to `config/local.toml` and adjust local paths/backends. The archive command can read this file directly:
 
 ```bash
-uv run pcn archive --config config/local.toml
+uv run pcn archive run --config config/local.toml
 ```
 
 Explicit CLI options override config-file paths where supported.

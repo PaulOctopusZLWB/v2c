@@ -42,6 +42,8 @@ obsidian_app = typer.Typer(help="Obsidian publish and review commands.")
 app.add_typer(obsidian_app, name="obsidian")
 memory_app = typer.Typer(help="Memory protocol commands.")
 app.add_typer(memory_app, name="memory")
+archive_app = typer.Typer(help="Archive commands.")
+app.add_typer(archive_app, name="archive")
 
 
 @app.callback()
@@ -417,8 +419,9 @@ def sync_speaker_review_cmd(
     )
 
 
-@app.command()
+@archive_app.callback(invoke_without_command=True)
 def archive(
+    ctx: typer.Context,
     archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
@@ -427,6 +430,45 @@ def archive(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     require_existing_root: bool = typer.Option(False, help="Treat a missing archive root as unavailable."),
+) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    _archive_run(
+        archive_root=archive_root,
+        config_path=config_path,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+        require_existing_root=require_existing_root,
+    )
+
+
+@archive_app.command(name="run")
+def archive_run_group(
+    archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    require_existing_root: bool = typer.Option(False, help="Treat a missing archive root as unavailable."),
+) -> None:
+    _archive_run(
+        archive_root=archive_root,
+        config_path=config_path,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+        require_existing_root=require_existing_root,
+    )
+
+
+def _archive_run(
+    *,
+    archive_root: Path | None,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path,
+    require_existing_root: bool,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     archive_target = archive_root or config.nas_archive_root
