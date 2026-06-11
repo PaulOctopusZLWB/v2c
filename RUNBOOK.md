@@ -374,6 +374,20 @@ uv run pcn memory export \
 events_exported=1 output_path=.smoke-memory/events.jsonl
 ```
 
+Import external memory events from JSONL by providing the Ed25519 public key that verifies those events:
+
+```bash
+uv run pcn memory import \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --input-path .smoke-memory/events.jsonl \
+  --public-key "$EXTERNAL_EVENT_PUBLIC_KEY"
+```
+
+```text
+events_imported=1 trusted_events=1 rejected_events=0 unsupported_events=0
+```
+
 Expected job status output shape:
 
 ```text

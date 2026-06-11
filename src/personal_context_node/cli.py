@@ -22,6 +22,7 @@ from personal_context_node.ingest import import_audio_files, scan_audio_files
 from personal_context_node.launchd import install_launchd_plists, uninstall_launchd_plists, write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_export import export_memory_events
+from personal_context_node.memory_import import import_memory_events
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
@@ -640,6 +641,32 @@ def memory_export_group(
     _memory_export(since=since, output_path=output_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
+@app.command(name="memory-import")
+def memory_import(
+    input_path: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL signed event import path."),
+    public_key: str = typer.Option(..., help="Base64url Ed25519 public key for verifying imported events."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _memory_import(input_path=input_path, public_key=public_key, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@memory_app.command(name="import")
+def memory_import_group(
+    input_path: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL signed event import path."),
+    public_key: str = typer.Option(..., help="Base64url Ed25519 public key for verifying imported events."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _memory_import(input_path=input_path, public_key=public_key, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
 @memory_app.command(name="confirm-sync")
 def memory_confirm_sync_group(
     date: str = typer.Option(..., "--date", help="Review date in YYYY-MM-DD format."),
@@ -656,6 +683,21 @@ def _memory_export(*, since: str, output_path: Path, data_dir: Path, obsidian_va
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = export_memory_events(config=config, output_path=output_path, since=since)
     typer.echo(f"events_exported={result.events_exported} output_path={result.output_path}")
+
+
+def _memory_import(*, input_path: Path, public_key: str, data_dir: Path, obsidian_vault: Path) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = import_memory_events(config=config, input_path=input_path, public_key=public_key)
+    typer.echo(
+        " ".join(
+            [
+                f"events_imported={result.events_imported}",
+                f"trusted_events={result.trusted_events}",
+                f"rejected_events={result.rejected_events}",
+                f"unsupported_events={result.unsupported_events}",
+            ]
+        )
+    )
 
 
 @app.command(name="job-status")
