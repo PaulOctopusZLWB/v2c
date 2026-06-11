@@ -118,13 +118,14 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         for review_action in checked_actions:
             candidate_id = review_action.candidate_id
             action = review_action.action
-            if action == "edit" and not review_action.edited_claim:
+            if action in {"confirm", "edit"} and review_action.edited_claim is not None and not review_action.edited_claim.strip():
+                empty_message = "empty edit claim" if action == "edit" else "empty claim"
                 _insert_sync_log(
                     conn,
                     source="memory_candidate_review",
                     target_id=candidate_id,
                     status="failed",
-                    message=f"empty edit claim: {candidate_id}",
+                    message=f"{empty_message}: {candidate_id}",
                 )
                 continue
             row = conn.execute(
@@ -283,7 +284,7 @@ def _review_block_actions(text: str) -> list[ReviewAction]:
         action = values.get("action", "pending")
         if action == "pending":
             continue
-        edited_claim = values.get("claim") if action in {"confirm", "edit"} else None
+        edited_claim = values.get("claim", "") if action in {"confirm", "edit"} else None
         actions.append(ReviewAction(match.group("candidate_id"), action, edited_claim))
     return actions
 
