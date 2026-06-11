@@ -11,6 +11,7 @@ from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.archive import archive_completed_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.launchd import write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
@@ -216,3 +217,27 @@ def archive(
             ]
         )
     )
+
+
+@app.command(name="launchd-write-plists")
+def launchd_write_plists(
+    output_dir: Path = typer.Option(Path("build/launchd"), help="Directory to write plist templates."),
+    working_directory: Path = typer.Option(Path.cwd(), help="Repository working directory."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    source_dir: Path = typer.Option(Path("/Volumes/DJI"), help="Mounted DJI source directory."),
+    archive_root: Path = typer.Option(Path("/Volumes/NAS/PersonalContext"), help="NAS archive root."),
+) -> None:
+    paths = write_launchd_plists(
+        output_dir=output_dir,
+        working_directory=str(working_directory),
+        data_dir=str(data_dir),
+        obsidian_vault=str(obsidian_vault),
+        source_dir=str(source_dir),
+        archive_root=str(archive_root),
+        dry_run=True,
+    )
+    typer.echo(f"plists_written={len(paths)} output_dir={output_dir}")

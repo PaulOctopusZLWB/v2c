@@ -3,6 +3,8 @@
 .smoke-data/
 .smoke-vault/
 .smoke-nas/
+.smoke-launchd/
 data/
+build/
 __pycache__/
 *.py[cod]

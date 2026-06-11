@@ -53,7 +53,13 @@ It also implements the archive boundary:
 3. Hash verification before `audio_files.status` becomes `archived`.
 4. `pcn archive` for raw audio archive smoke tests.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchd jobs are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, review, and archive boundaries testable before model integration.
+It also implements launchd template generation:
+
+1. `pcn launchd-write-plists` writes ingest, process, daily, and archive plist templates.
+2. Templates use `uv run pcn ...` commands and per-job log paths.
+3. The command writes project files only; it does not call `launchctl` or install into `~/Library/LaunchAgents`.
+
+Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, review, archive, and scheduling boundaries testable before model integration.
 
 ## Local uv Run
 
@@ -89,6 +95,13 @@ uv run pcn publish-speaker-review \
 uv run pcn archive \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
+  --archive-root .smoke-nas
+uv run pcn launchd-write-plists \
+  --output-dir .smoke-launchd \
+  --working-directory "$PWD" \
+  --data-dir data \
+  --obsidian-vault /Users/paul/Documents/Obsidian/PersonalContext \
+  --source-dir sample_data \
   --archive-root .smoke-nas
 ```
 
@@ -152,6 +165,12 @@ Expected archive smoke output with the sample data:
 
 ```text
 files_archived=7 files_pending=0
+```
+
+Expected launchd template output:
+
+```text
+plists_written=4 output_dir=.smoke-launchd
 ```
 
 ## Docker Run
