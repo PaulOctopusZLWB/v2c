@@ -14,6 +14,7 @@ from personal_context_node.tasks import (
     start_task,
     succeed_task,
 )
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
 def test_task_lifecycle_deduplicates_and_tracks_claims(tmp_path) -> None:
@@ -50,6 +51,54 @@ def test_task_lifecycle_deduplicates_and_tracks_claims(tmp_path) -> None:
     ]
 
 
+def test_claim_next_task_uses_available_at_and_priority_with_lease(tmp_path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        for task_id, target_id, priority, available_at in [
+            ("task_low", "chk_low", 100, now),
+            ("task_high", "chk_high", 10, now),
+            ("task_future", "chk_future", 1, future),
+        ]:
+            conn.execute(
+                """
+                insert into tasks (
+                  task_id, task_type, target_type, target_id, status, priority,
+                  available_at, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (task_id, "asr", "audio_chunk", target_id, "pending", priority, available_at, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    claimed = claim_next_task(config=config, task_type="asr", run_id="run_1", lease_seconds=60)
+
+    assert claimed is not None
+    assert claimed.task_id == "task_high"
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            """
+            select task_id, retry_count, attempt_count, claimed_by_run_id, lease_expires_at
+            from tasks
+            where task_id = ?
+            """,
+            ("task_high",),
+        )
+    finally:
+        conn.close()
+    assert rows[0]["retry_count"] == 1
+    assert rows[0]["attempt_count"] == 1
+    assert rows[0]["claimed_by_run_id"] == "run_1"
+    assert rows[0]["lease_expires_at"]
+
+
 def test_failed_retryable_and_lease_reclaim(tmp_path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     task = enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
@@ -57,7 +106,7 @@ def test_failed_retryable_and_lease_reclaim(tmp_path) -> None:
     assert claimed is not None
 
     fail_task(config=config, task_id=task.task_id, error="model unavailable", terminal=False)
-    retry = claim_next_task(config=config, task_type="asr", run_id="run_2")
+    retry = claim_next_task(config=config, task_type="asr", run_id="run_2", lease_seconds=60)
 
     assert retry is not None
     assert retry.status == "claimed"

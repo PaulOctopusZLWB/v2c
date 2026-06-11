@@ -54,6 +54,32 @@ def test_initialize_audio_files_indexes_source_identity_time_and_status(tmp_path
     assert [row["name"] for row in status] == ["status"]
 
 
+def test_initialize_tasks_schema_tracks_claim_priority_and_retry_metadata(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(tasks)")
+        indexes = fetch_all(conn, "pragma index_list(tasks)")
+        claim_index = fetch_all(conn, "pragma index_info(idx_tasks_claim)")
+        target_index = fetch_all(conn, "pragma index_info(idx_tasks_target)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["priority"]["type"].lower() == "integer"
+    assert column_by_name["retry_count"]["type"].lower() == "integer"
+    assert column_by_name["max_retries"]["type"].lower() == "integer"
+    assert column_by_name["available_at"]["type"].lower() == "text"
+    assert column_by_name["lease_expires_at"]["type"].lower() == "text"
+    assert column_by_name["updated_at"]["type"].lower() == "text"
+    index_names = {row["name"] for row in indexes}
+    assert "idx_tasks_claim" in index_names
+    assert "idx_tasks_target" in index_names
+    assert [row["name"] for row in claim_index] == ["status", "available_at", "priority"]
+    assert [row["name"] for row in target_index] == ["target_type", "target_id"]
+
+
 def test_initialize_sessions_schema_tracks_primary_person_and_date_index(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

@@ -314,13 +314,19 @@ create table if not exists tasks (
   target_type text not null,
   target_id text not null,
   status text not null,
+  priority integer not null default 100,
+  retry_count integer not null default 0,
+  max_retries integer not null default 3,
   attempt_count integer not null default 0,
   claimed_by_run_id text,
   claimed_at text,
+  lease_expires_at text,
   started_at text,
   finished_at text,
   last_error text,
+  available_at text not null default '',
   created_at text not null,
+  updated_at text not null default '',
   unique(task_type, target_type, target_id)
 );
 
@@ -432,6 +438,17 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
     _ensure_column(conn, "sessions", "primary_person_id", "text")
     conn.execute("create index if not exists idx_sessions_date on sessions(date_key, started_at)")
+    _ensure_column(conn, "tasks", "priority", "integer not null default 100")
+    _ensure_column(conn, "tasks", "retry_count", "integer not null default 0")
+    _ensure_column(conn, "tasks", "max_retries", "integer not null default 3")
+    _ensure_column(conn, "tasks", "lease_expires_at", "text")
+    _ensure_column(conn, "tasks", "available_at", "text not null default ''")
+    _ensure_column(conn, "tasks", "updated_at", "text not null default ''")
+    conn.execute("update tasks set retry_count = attempt_count where retry_count = 0 and attempt_count > 0")
+    conn.execute("update tasks set available_at = created_at where available_at = ''")
+    conn.execute("update tasks set updated_at = created_at where updated_at = ''")
+    conn.execute("create index if not exists idx_tasks_claim on tasks(status, available_at, priority)")
+    conn.execute("create index if not exists idx_tasks_target on tasks(target_type, target_id)")
     _ensure_column(conn, "memory_candidates", "source_type", "text not null default 'llm_daily_context'")
     _ensure_column(conn, "memory_candidates", "edited_claim", "text")
     _ensure_column(conn, "memory_candidates", "review_note_path", "text")
