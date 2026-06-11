@@ -84,6 +84,26 @@ def test_archive_unavailable_does_not_mark_audio_archived(tmp_path: Path) -> Non
     assert records == []
 
 
+def test_local_filesystem_archive_adapter_verifies_existing_archive(tmp_path: Path) -> None:
+    archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(b"raw audio bytes")
+    expected_sha256 = _sha256(archive_path)
+    adapter = LocalFilesystemArchiveAdapter(root=archive_root)
+
+    ok = adapter.verify_file(archive_path=archive_path, expected_sha256=expected_sha256)
+    mismatch = adapter.verify_file(archive_path=archive_path, expected_sha256="sha256:bad")
+    missing = adapter.verify_file(archive_path=archive_root / "missing.wav", expected_sha256=expected_sha256)
+
+    assert ok.verified is True
+    assert ok.archive_path == archive_path
+    assert mismatch.verified is False
+    assert mismatch.reason == "hash mismatch"
+    assert missing.verified is False
+    assert missing.reason == "archive file missing"
+
+
 def test_archive_completed_audio_exports_signed_events_jsonl(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"

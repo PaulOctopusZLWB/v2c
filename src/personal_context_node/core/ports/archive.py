@@ -15,3 +15,6 @@ class ArchiveResult:
 class ArchivePort(Protocol):
     def archive_file(self, *, source_path: Path, relative_path: Path, expected_sha256: str) -> ArchiveResult:
         """Copy a durable artifact to archive storage and verify its hash."""
+
+    def verify_file(self, *, archive_path: Path, expected_sha256: str) -> ArchiveResult:
+        """Verify an existing archived artifact by hash."""

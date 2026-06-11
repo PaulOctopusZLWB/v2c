@@ -18,10 +18,15 @@ class LocalFilesystemArchiveAdapter:
         target_path = self.root / relative_path
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, target_path)
-        actual_sha256 = _sha256(target_path)
+        return self.verify_file(archive_path=target_path, expected_sha256=expected_sha256)
+
+    def verify_file(self, *, archive_path: Path, expected_sha256: str) -> ArchiveResult:
+        if not archive_path.exists():
+            return ArchiveResult(archive_path=archive_path, verified=False, reason="archive file missing")
+        actual_sha256 = _sha256(archive_path)
         if actual_sha256 != expected_sha256:
-            return ArchiveResult(archive_path=target_path, verified=False, reason="hash mismatch")
-        return ArchiveResult(archive_path=target_path, verified=True)
+            return ArchiveResult(archive_path=archive_path, verified=False, reason="hash mismatch")
+        return ArchiveResult(archive_path=archive_path, verified=True)
 
 
 def _sha256(path: Path) -> str:
