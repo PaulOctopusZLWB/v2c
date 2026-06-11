@@ -24,6 +24,12 @@ class ArchiveCompletedAudioResult:
     summaries_pending: int = 0
 
 
+@dataclass(frozen=True)
+class CleanupArchivedAudioResult:
+    files_removed: int
+    files_pending: int
+
+
 def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> ArchiveCompletedAudioResult:
     conn = connect(config.database_path)
     try:
@@ -33,7 +39,7 @@ def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> Archi
             """
             select audio_file_id, local_raw_path, sha256
             from audio_files
-            where status != 'archived'
+            where status = 'imported'
             order by imported_at
             """,
         )
@@ -121,6 +127,65 @@ def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> Archi
             summaries_archived=summaries_archived,
             summaries_pending=summaries_pending,
         )
+    finally:
+        conn.close()
+
+
+def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_before: datetime) -> CleanupArchivedAudioResult:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            """
+            select af.audio_file_id, af.local_raw_path, ar.archive_path, ar.sha256
+            from audio_files af
+            join archive_records ar
+              on ar.target_type = 'audio_file'
+             and ar.target_id = af.audio_file_id
+             and ar.verified = 1
+             and ar.status = 'verified'
+            where af.status = 'archived'
+              and ar.archived_at < ?
+            order by ar.archived_at, af.audio_file_id
+            """,
+            (archived_before.isoformat(),),
+        )
+        removed = 0
+        now = datetime.now(timezone.utc).isoformat()
+        for row in rows:
+            archive_result = archive.verify_file(
+                archive_path=Path(row["archive_path"]),
+                expected_sha256=str(row["sha256"]),
+            )
+            if not archive_result.verified:
+                continue
+            local_path = Path(row["local_raw_path"])
+            conn.execute(
+                "update audio_files set status = 'cleanup_eligible' where audio_file_id = ?",
+                (row["audio_file_id"],),
+            )
+            if local_path.exists():
+                local_path.unlink()
+            conn.execute(
+                "update audio_files set status = 'locally_removed' where audio_file_id = ?",
+                (row["audio_file_id"],),
+            )
+            conn.execute(
+                """
+                update archive_records
+                set status = 'locally_removed',
+                    updated_at = ?
+                where target_type = 'audio_file'
+                  and target_id = ?
+                  and archive_path = ?
+                """,
+                (now, row["audio_file_id"], row["archive_path"]),
+            )
+            removed += 1
+        pending_rows = fetch_all(conn, "select count(*) as count from audio_files where status = 'archived'")
+        conn.commit()
+        return CleanupArchivedAudioResult(files_removed=removed, files_pending=int(pending_rows[0]["count"]))
     finally:
         conn.close()
 

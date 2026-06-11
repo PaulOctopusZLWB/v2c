@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
-from personal_context_node.archive import archive_completed_audio
+from personal_context_node.archive import archive_completed_audio, cleanup_archived_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef, create_signed_event
 from personal_context_node.signed_event_store import insert_signed_event
@@ -84,6 +85,28 @@ def test_archive_unavailable_does_not_mark_audio_archived(tmp_path: Path) -> Non
     assert records == []
 
 
+def test_archive_completed_audio_only_processes_imported_audio(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    removed_raw = _write_raw(config, "removed.wav", b"removed local audio")
+    imported_raw = _write_raw(config, "imported.wav", b"imported local audio")
+    removed_sha256 = _sha256(removed_raw)
+    imported_sha256 = _sha256(imported_raw)
+    removed_raw.unlink()
+    _insert_audio(config.database_path, removed_raw, removed_sha256, status="locally_removed", audio_file_id="aud_removed")
+    _insert_audio(config.database_path, imported_raw, imported_sha256, status="imported", audio_file_id="aud_imported")
+    archive_root = tmp_path / "nas" / "PersonalContext"
+
+    result = archive_completed_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+    )
+
+    assert result.files_archived == 1
+    assert result.files_pending == 0
+    assert (archive_root / "audio" / "raw" / "2087-05-10" / "imported.wav").exists()
+    assert not (archive_root / "audio" / "raw" / "2087-05-10" / "removed.wav").exists()
+
+
 def test_local_filesystem_archive_adapter_verifies_existing_archive(tmp_path: Path) -> None:
     archive_root = tmp_path / "nas" / "PersonalContext"
     archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav"
@@ -102,6 +125,43 @@ def test_local_filesystem_archive_adapter_verifies_existing_archive(tmp_path: Pa
     assert mismatch.reason == "hash mismatch"
     assert missing.verified is False
     assert missing.reason == "archive file missing"
+
+
+def test_cleanup_archived_audio_removes_only_verified_retained_local_files(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas" / "PersonalContext"
+    old_raw = _write_raw(config, "old.wav", b"old raw audio")
+    recent_raw = _write_raw(config, "recent.wav", b"recent raw audio")
+    imported_raw = _write_raw(config, "imported.wav", b"imported raw audio")
+    _insert_audio(config.database_path, old_raw, _sha256(old_raw), status="archived", audio_file_id="aud_old")
+    _insert_audio(config.database_path, recent_raw, _sha256(recent_raw), status="archived", audio_file_id="aud_recent")
+    _insert_audio(config.database_path, imported_raw, _sha256(imported_raw), status="imported", audio_file_id="aud_imported")
+    old_archive = _copy_archive(archive_root, old_raw)
+    recent_archive = _copy_archive(archive_root, recent_raw)
+    _insert_archive_record(config.database_path, audio_file_id="aud_old", source_path=old_raw, archive_path=old_archive, sha256=_sha256(old_archive), archived_at="2087-05-01T00:00:00+00:00")
+    _insert_archive_record(config.database_path, audio_file_id="aud_recent", source_path=recent_raw, archive_path=recent_archive, sha256=_sha256(recent_archive), archived_at="2087-05-09T00:00:00+00:00")
+
+    result = cleanup_archived_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime(2087, 5, 5, tzinfo=timezone.utc),
+    )
+
+    assert result.files_removed == 1
+    assert result.files_pending == 1
+    assert not old_raw.exists()
+    assert recent_raw.exists()
+    assert imported_raw.exists()
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select audio_file_id, status from audio_files order by audio_file_id")
+    finally:
+        conn.close()
+    assert rows == [
+        {"audio_file_id": "aud_imported", "status": "imported"},
+        {"audio_file_id": "aud_old", "status": "locally_removed"},
+        {"audio_file_id": "aud_recent", "status": "archived"},
+    ]
 
 
 def test_archive_completed_audio_exports_signed_events_jsonl(tmp_path: Path) -> None:
@@ -167,7 +227,7 @@ def test_archive_completed_audio_exports_transcripts_and_summaries_jsonl(tmp_pat
     assert {"target_type": "summaries", "target_id": "all", "archive_path": str(summaries_path), "verified": 1} in records
 
 
-def _insert_audio(database_path: Path, raw_path: Path, sha256: str, *, status: str) -> None:
+def _insert_audio(database_path: Path, raw_path: Path, sha256: str, *, status: str, audio_file_id: str = "aud_test") -> None:
     conn = connect(database_path)
     try:
         initialize(conn)
@@ -179,9 +239,9 @@ def _insert_audio(database_path: Path, raw_path: Path, sha256: str, *, status: s
             ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                "aud_test",
+                audio_file_id,
                 "DJI Mic 3",
-                "/source.wav",
+                f"/{raw_path.name}",
                 str(raw_path),
                 sha256,
                 1000,
@@ -197,6 +257,60 @@ def _insert_audio(database_path: Path, raw_path: Path, sha256: str, *, status: s
 
 def _sha256(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_raw(config: AppConfig, filename: str, content: bytes) -> Path:
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / filename
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_bytes(content)
+    return raw_path
+
+
+def _copy_archive(archive_root: Path, source_path: Path) -> Path:
+    archive_path = archive_root / "audio" / "raw" / "2087-05-10" / source_path.name
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    archive_path.write_bytes(source_path.read_bytes())
+    return archive_path
+
+
+def _insert_archive_record(
+    database_path: Path,
+    *,
+    audio_file_id: str,
+    source_path: Path,
+    archive_path: Path,
+    sha256: str,
+    archived_at: str,
+) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into archive_records (
+              archive_record_id, target_type, target_id, audio_file_id,
+              source_path, archive_path, sha256, status, verified, archived_at,
+              created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"arc_{audio_file_id}",
+                "audio_file",
+                audio_file_id,
+                audio_file_id,
+                str(source_path),
+                str(archive_path),
+                sha256,
+                "verified",
+                1,
+                archived_at,
+                archived_at,
+                archived_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _insert_signed_memory_event(database_path: Path) -> None:
