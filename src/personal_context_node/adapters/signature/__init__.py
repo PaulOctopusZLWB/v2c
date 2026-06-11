@@ -1,0 +1,1 @@
+"""Signature adapter implementations."""
