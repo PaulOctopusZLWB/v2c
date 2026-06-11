@@ -19,6 +19,7 @@ from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.init_health import check_health, initialize_workspace
 from personal_context_node.launchd import install_launchd_plists, uninstall_launchd_plists, write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
+from personal_context_node.memory_export import export_memory_events
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.obsidian_sessions import publish_session_notes
@@ -423,6 +424,21 @@ def memory_verify(
             ]
         )
     )
+
+
+@app.command(name="memory-export")
+def memory_export(
+    since: str = typer.Option(..., help="Inclusive created_at lower bound, e.g. 2026-06-01."),
+    output_path: Path = typer.Option(Path("build/memory-events.jsonl"), help="JSONL export path."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = export_memory_events(config=config, output_path=output_path, since=since)
+    typer.echo(f"events_exported={result.events_exported} output_path={result.output_path}")
 
 
 @app.command(name="job-status")

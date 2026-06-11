@@ -45,7 +45,8 @@ It also implements the human review boundary:
 3. `pcn confirm-review` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
 4. `pcn memory-verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
 5. `pcn memory-verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
-6. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
+6. `pcn memory-export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
+7. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
 
 It also implements the speaker review boundary:
 
@@ -309,6 +310,20 @@ Expected memory verification output after confirmation:
 
 ```text
 total_events=1 valid_events=1 invalid_events=0 materialization_mismatches=0
+```
+
+Expected memory export output:
+
+```bash
+uv run pcn memory-export \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --since 2000-01-01 \
+  --output-path .smoke-memory/events.jsonl
+```
+
+```text
+events_exported=1 output_path=.smoke-memory/events.jsonl
 ```
 
 Expected job status output shape:
