@@ -119,6 +119,40 @@ claim_type: requirement
     ]
 
 
+def test_sync_review_confirm_uses_claim_from_review_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path, claim="原始候选声明。")
+    review_dir = config.obsidian_vault / "30_Memory_Candidates"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    review_path = review_dir / "2087-05-10.md"
+    review_path.write_text(
+        """
+# 2087-05-10 Memory Candidate Review
+
+<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_001" version="1" -->
+```yaml
+action: confirm
+claim: "用户确认后的声明。"
+claim_type: requirement
+```
+<!-- pcn:review end candidate_id="cand_test_001" -->
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = confirm_checked_candidates(config=config, day="2087-05-10")
+
+    assert result.candidates_confirmed == 1
+    conn = connect(config.database_path)
+    try:
+        cards = fetch_all(conn, "select claim, candidate_claim from memory_cards")
+        candidates = fetch_all(conn, "select edited_claim, status from memory_candidates")
+    finally:
+        conn.close()
+    assert cards == [{"claim": "用户确认后的声明。", "candidate_claim": "原始候选声明。"}]
+    assert candidates == [{"edited_claim": "用户确认后的声明。", "status": "confirmed"}]
+
+
 def test_sync_review_rejects_candidate_without_signed_event(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)

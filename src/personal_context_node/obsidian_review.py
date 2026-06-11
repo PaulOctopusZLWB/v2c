@@ -283,7 +283,7 @@ def _review_block_actions(text: str) -> list[ReviewAction]:
         action = values.get("action", "pending")
         if action == "pending":
             continue
-        edited_claim = values.get("claim") if action == "edit" else None
+        edited_claim = values.get("claim") if action in {"confirm", "edit"} else None
         actions.append(ReviewAction(match.group("candidate_id"), action, edited_claim))
     return actions
 
