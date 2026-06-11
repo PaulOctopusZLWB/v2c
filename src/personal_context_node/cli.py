@@ -40,6 +40,8 @@ process_app = typer.Typer(help="Task processing commands.")
 app.add_typer(process_app, name="process")
 obsidian_app = typer.Typer(help="Obsidian publish and review commands.")
 app.add_typer(obsidian_app, name="obsidian")
+memory_app = typer.Typer(help="Memory protocol commands.")
+app.add_typer(memory_app, name="memory")
 
 
 @app.callback()
@@ -536,6 +538,21 @@ def memory_verify(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
+    _memory_verify(data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@memory_app.command(name="verify")
+def memory_verify_group(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _memory_verify(data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+def _memory_verify(*, data_dir: Path, obsidian_vault: Path) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     job_run = record_job_run(
         config=config,
@@ -565,6 +582,35 @@ def memory_export(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
+    _memory_export(since=since, output_path=output_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@memory_app.command(name="export")
+def memory_export_group(
+    since: str = typer.Option(..., help="Inclusive created_at lower bound, e.g. 2026-06-01."),
+    output_path: Path = typer.Option(Path("build/memory-events.jsonl"), help="JSONL export path."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _memory_export(since=since, output_path=output_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+@memory_app.command(name="confirm-sync")
+def memory_confirm_sync_group(
+    date: str = typer.Option(..., "--date", help="Review date in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    _sync_candidate_review(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
+
+
+def _memory_export(*, since: str, output_path: Path, data_dir: Path, obsidian_vault: Path) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = export_memory_events(config=config, output_path=output_path, since=since)
     typer.echo(f"events_exported={result.events_exported} output_path={result.output_path}")

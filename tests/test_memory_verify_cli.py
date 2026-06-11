@@ -35,6 +35,31 @@ def test_memory_verify_cli_reports_valid_events(tmp_path: Path) -> None:
     assert "invalid_events=0" in result.output
 
 
+def test_memory_verify_group_cli_reports_valid_events(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    confirm_checked_candidates(config=config, day="2087-05-10")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "memory",
+            "verify",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "total_events=1" in result.output
+    assert "valid_events=1" in result.output
+    assert "invalid_events=0" in result.output
+
+
 def _insert_candidate(database_path: Path) -> None:
     conn = connect(database_path)
     try:

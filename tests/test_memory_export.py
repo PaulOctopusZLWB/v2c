@@ -62,6 +62,35 @@ def test_memory_export_cli_writes_jsonl(tmp_path: Path) -> None:
     assert output_path.exists()
 
 
+def test_memory_export_group_cli_writes_jsonl(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    confirm_checked_candidates(config=config, day="2087-05-10")
+    output_path = tmp_path / "events.jsonl"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "memory",
+            "export",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--since",
+            "2000-01-01",
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "events_exported=1" in result.output
+    assert output_path.exists()
+
+
 def _insert_candidate(database_path: Path) -> None:
     conn = connect(database_path)
     try:

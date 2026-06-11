@@ -46,9 +46,9 @@ It also implements the human review boundary:
 1. `pcn obsidian publish --date ...` writes daily notes, session notes, pending memory candidates, and speaker review artifacts.
 2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
 3. `pcn obsidian sync-review --date ...` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
-4. `pcn memory-verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
-5. `pcn memory-verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
-6. `pcn memory-export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
+4. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
+5. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
+6. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
 7. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
 
 It also implements the speaker review boundary:
@@ -76,7 +76,7 @@ It also implements launchd template generation and controlled install/uninstall:
 It also implements a minimal diagnostics boundary:
 
 1. `job_runs` records run id, job name, status, timestamps, and error text.
-2. `pcn memory-verify` records a job run.
+2. `pcn memory verify` records a job run.
 3. `pcn job-status` lists recent job runs for launchd/manual diagnostics.
 
 It also implements the task lifecycle foundation:
@@ -301,7 +301,7 @@ uv run pcn obsidian sync-review \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --date 2087-05-10
-uv run pcn memory-verify \
+uv run pcn memory verify \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
 uv run pcn job-status \
@@ -332,7 +332,7 @@ total_events=1 valid_events=1 invalid_events=0 materialization_mismatches=0
 Expected memory export output:
 
 ```bash
-uv run pcn memory-export \
+uv run pcn memory export \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --since 2000-01-01 \
