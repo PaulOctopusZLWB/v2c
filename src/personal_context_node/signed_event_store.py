@@ -10,6 +10,7 @@ from personal_context_node.core.protocols.memory import (
     MemoryAnnotation,
     MemoryCard,
     MemoryCardRevocation,
+    MemoryCardSupersession,
     SignedEvent,
     canonical_signing_body_hash,
     create_signed_event,
@@ -21,6 +22,7 @@ from personal_context_node.core.protocols.memory import (
 SUPPORTED_EVENT_TYPES = {
     "memory_card.created",
     "memory_card.revoked",
+    "memory_card.superseded",
     "identity_profile.published",
     "memory_annotation.created",
 }
@@ -104,6 +106,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
         _activate_dangling_annotations(conn, target_card_id=event.object_id)
     if event.event_type == "memory_card.revoked" and trust_status == "trusted":
         _revoke_memory_card(conn, event=event)
+    if event.event_type == "memory_card.superseded" and trust_status == "trusted":
+        _supersede_memory_card(conn, event=event)
     if event.event_type == "memory_annotation.created" and trust_status == "trusted":
         _upsert_memory_annotation(conn, event=event)
     if event.event_type == "identity_profile.published" and trust_status == "trusted":
@@ -164,6 +168,19 @@ def _revoke_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
         where card_id = ?
         """,
         (event.event_hash, revocation.card_id),
+    )
+
+
+def _supersede_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None:
+    supersession = MemoryCardSupersession.model_validate(event.payload)
+    conn.execute(
+        """
+        update memory_cards
+        set status = 'superseded',
+            source_event_hash = ?
+        where card_id = ?
+        """,
+        (event.event_hash, supersession.card_id),
     )
 
 

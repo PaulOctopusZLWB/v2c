@@ -8,6 +8,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import (
     MemoryCard,
     MemoryCardRevocation,
+    MemoryCardSupersession,
     SignedEvent,
     canonical_signing_body_hash,
     verify_signed_event,
@@ -175,6 +176,11 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
             if revocation.card_id in expected:
                 expected[revocation.card_id]["status"] = "revoked"
                 expected[revocation.card_id]["source_event_hash"] = event.event_hash
+        if event.event_type == "memory_card.superseded":
+            supersession = MemoryCardSupersession.model_validate(event.payload)
+            if supersession.card_id in expected:
+                expected[supersession.card_id]["status"] = "superseded"
+                expected[supersession.card_id]["source_event_hash"] = event.event_hash
     actual_rows = fetch_all(
         conn,
         """
