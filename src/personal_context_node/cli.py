@@ -18,6 +18,7 @@ from personal_context_node.launchd import write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
+from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.process_runner import process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
@@ -152,6 +153,20 @@ def publish_review(
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
     review_path = publish_candidate_review(config=config, day=day)
     typer.echo(f"review_path={review_path}")
+
+
+@app.command(name="publish-session-notes")
+def publish_session_notes_cmd(
+    day: str = typer.Option(..., help="Session day in YYYY-MM-DD format."),
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = publish_session_notes(config=config, day=day)
+    typer.echo(f"notes_written={result.notes_written}")
 
 
 @app.command()

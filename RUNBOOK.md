@@ -82,6 +82,7 @@ It also implements session derivation:
 2. Sessions are split by deterministic time gap, defaulting to 20 minutes.
 3. Re-derivation reuses an existing `session_id` when the first segment is unchanged.
 4. ASR task fan-in registers one `session_derive` task for the affected `date_key` when all chunks for an audio file are transcribed.
+5. `pcn publish-session-notes` writes `20_Conversations/YYYY-MM-DD/ses_*.md` notes without embedding full transcripts.
 
 Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, session, context-generation, review, archive, and scheduling boundaries testable before model integration.
 
@@ -113,6 +114,10 @@ uv run pcn publish-review \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
 uv run pcn publish-speaker-review \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --day 2087-05-10
+uv run pcn publish-session-notes \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
