@@ -92,6 +92,19 @@ def test_initialize_evidence_refs_enforces_unique_source_ref(tmp_path) -> None:
     assert type(error).__name__ == "IntegrityError"
 
 
+def test_initialize_signed_events_trust_status_defaults_unverified(tmp_path) -> None:
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(signed_events)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["trust_status"]["dflt_value"] == "'unverified'"
+
+
 def test_initialize_memory_cards_schema_includes_current_version(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

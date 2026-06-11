@@ -565,7 +565,7 @@ def _ensure_signed_event_columns(conn: sqlite3.Connection) -> None:
         "signature_algorithm": "alter table signed_events add column signature_algorithm text",
         "public_key_id": "alter table signed_events add column public_key_id text",
         "signature_value": "alter table signed_events add column signature_value text",
-        "trust_status": "alter table signed_events add column trust_status text not null default 'trusted'",
+        "trust_status": "alter table signed_events add column trust_status text not null default 'unverified'",
     }
     for column, sql in migrations.items():
         if column not in existing:

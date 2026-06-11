@@ -294,7 +294,7 @@ create table if not exists signed_events (
   signature_algorithm text,
   public_key_id text,
   signature_value text,
-  trust_status text not null default 'trusted',
+  trust_status text not null default 'unverified',
   event_json text not null default '{}',
   signature text not null,
   public_key text not null,
