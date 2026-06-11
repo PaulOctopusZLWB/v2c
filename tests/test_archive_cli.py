@@ -34,6 +34,9 @@ def test_archive_cli_archives_imported_audio(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "files_archived=1" in result.output
     assert "files_pending=0" in result.output
+    assert "events_archived=0" in result.output
+    assert "transcripts_archived=0" in result.output
+    assert "summaries_archived=0" in result.output
     assert (archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav").exists()
 
 
@@ -62,6 +65,9 @@ def test_archive_run_group_cli_archives_imported_audio(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "files_archived=1" in result.output
     assert "files_pending=0" in result.output
+    assert "events_archived=0" in result.output
+    assert "transcripts_archived=0" in result.output
+    assert "summaries_archived=0" in result.output
     assert (archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav").exists()
 
 

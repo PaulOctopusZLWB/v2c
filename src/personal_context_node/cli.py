@@ -483,6 +483,12 @@ def _archive_run(
             [
                 f"files_archived={result.files_archived}",
                 f"files_pending={result.files_pending}",
+                f"events_archived={result.events_archived}",
+                f"events_pending={result.events_pending}",
+                f"transcripts_archived={result.transcripts_archived}",
+                f"transcripts_pending={result.transcripts_pending}",
+                f"summaries_archived={result.summaries_archived}",
+                f"summaries_pending={result.summaries_pending}",
             ]
         )
     )
