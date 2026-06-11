@@ -77,7 +77,7 @@ def process_once(
         elif task.task_type == "asr":
             transcribe_pending_chunks(config=config, asr=asr, chunk_id=task.target_id)
         elif task.task_type == "session_derive":
-            derive_sessions_for_day(config=config, day=task.target_id)
+            derive_sessions_for_day(config=config, day=task.target_id, session_gap_minutes=config.session_gap_minutes)
         elif task.task_type == "summarize_session":
             summarize_session(config=config, session_id=task.target_id, llm=llm_adapter)
             _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)

@@ -56,6 +56,10 @@ edit_grace_seconds = 45
 lease_seconds = 120
 max_retries = 2
 
+[session]
+session_gap_minutes = 45
+cross_midnight_policy = "start_date"
+
 [device.dji_mic_3]
 enabled = true
 root_path = "fixtures/fake_dji"
@@ -98,6 +102,8 @@ stable_seconds = 10
     assert config.edit_grace_seconds == 45
     assert config.task_lease_seconds == 120
     assert config.task_max_retries == 2
+    assert config.session_gap_minutes == 45
+    assert config.session_cross_midnight_policy == "start_date"
     assert config.dji_mic_3.enabled is True
     assert config.dji_mic_3.root_path == tmp_path / "config" / "fixtures" / "fake_dji"
     assert config.dji_mic_3.volume_name_patterns == ("DJI*", "MIC*")

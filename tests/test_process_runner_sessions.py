@@ -10,8 +10,8 @@ from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import DailyContext, SessionSummary
 from personal_context_node.pipeline import run_first_milestone
 from personal_context_node.process_runner import process_once
-from personal_context_node.storage.sqlite import connect, fetch_all
-from personal_context_node.tasks import process_status_rows
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+from personal_context_node.tasks import enqueue_task, process_status_rows
 
 
 class RecordingSessionLLM:
@@ -86,6 +86,38 @@ def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
         and row["status"] == "pending"
         for row in process_status_rows(config=config)
     )
+
+
+def test_process_once_session_derive_uses_configured_gap_minutes(tmp_path: Path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        session_gap_minutes=40,
+    )
+    _insert_audio_with_active_segments(
+        config=config,
+        segments=[
+            ("seg_1", 0, 10_000),
+            ("seg_2", 30 * 60 * 1000, 30 * 60 * 1000 + 10_000),
+        ],
+    )
+    enqueue_task(config=config, task_type="session_derive", target_type="date_key", target_id="2087-05-10")
+
+    result = process_once(
+        config=config,
+        run_id="run_session",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="本地任务转写"),
+        max_chunk_ms=1000,
+    )
+
+    assert result.task_type == "session_derive"
+    conn = connect(config.database_path)
+    try:
+        sessions = fetch_all(conn, "select segment_count from sessions")
+    finally:
+        conn.close()
+    assert sessions == [{"segment_count": 2}]
 
 
 def test_summarize_session_success_fans_in_to_daily_generate(tmp_path: Path) -> None:
@@ -170,3 +202,56 @@ def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000
             sample = int(10_000 * math.sin(2 * math.pi * 440 * index / sample_rate))
             frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
         wav.writeframes(bytes(frames))
+
+
+def _insert_audio_with_active_segments(*, config: AppConfig, segments: list[tuple[str, int, int]]) -> None:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_test",
+                "DJI Mic 3",
+                "/source.wav",
+                "/local.wav",
+                "sha256:test",
+                2_000_000,
+                "2087-05-10T08:00:00+08:00",
+                "2087-05-10T08:00:00+08:00",
+                "imported",
+            ),
+        )
+        for segment_id, start_ms, end_ms in segments:
+            conn.execute(
+                """
+                insert into transcript_segments (
+                  segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+                  language, speaker, evidence_id, confidence, asr_backend, model_name, model_version, is_active
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    segment_id,
+                    "aud_test",
+                    f"chk_{segment_id}",
+                    start_ms,
+                    end_ms,
+                    "测试片段",
+                    "zh",
+                    "self",
+                    f"ev_{segment_id}",
+                    0.99,
+                    "MockASRAdapter",
+                    "mock-asr",
+                    "test",
+                    1,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()

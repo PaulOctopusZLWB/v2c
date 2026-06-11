@@ -56,6 +56,8 @@ class AppConfig(BaseModel):
     edit_grace_seconds: int = 120
     task_lease_seconds: int = 1800
     task_max_retries: int = 3
+    session_gap_minutes: int = 20
+    session_cross_midnight_policy: str = "start_date"
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
     audio: AudioProcessingConfig = AudioProcessingConfig()
 
@@ -73,6 +75,7 @@ class AppConfig(BaseModel):
         dji_mic_3 = device.get("dji_mic_3", {})
         audio = raw.get("audio", {})
         tasks = raw.get("tasks", {})
+        session = raw.get("session", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
             "raw_audio_path": _optional_resolve_path(base_dir, paths.get("raw_audio_dir")),
@@ -101,6 +104,11 @@ class AppConfig(BaseModel):
             "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
             "task_lease_seconds": tasks.get("lease_seconds", cls.model_fields["task_lease_seconds"].default),
             "task_max_retries": tasks.get("max_retries", cls.model_fields["task_max_retries"].default),
+            "session_gap_minutes": session.get("session_gap_minutes", cls.model_fields["session_gap_minutes"].default),
+            "session_cross_midnight_policy": session.get(
+                "cross_midnight_policy",
+                cls.model_fields["session_cross_midnight_policy"].default,
+            ),
             "dji_mic_3": _device_config(base_dir, dji_mic_3),
             "audio": _audio_config(audio),
         }
