@@ -14,7 +14,7 @@ class PublishSessionNotesResult:
     notes_written: int
 
 
-def publish_session_notes(*, config: AppConfig, day: str) -> PublishSessionNotesResult:
+def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | None = None) -> PublishSessionNotesResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -43,11 +43,11 @@ def publish_session_notes(*, config: AppConfig, day: str) -> PublishSessionNotes
     for session in sessions:
         note_path = output_dir / f"{session['session_id']}.md"
         existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
-        note_path.write_text(_session_note_text(session, existing_text=existing_text), encoding="utf-8")
+        note_path.write_text(_session_note_text(session, existing_text=existing_text, source_run_id=source_run_id), encoding="utf-8")
     return PublishSessionNotesResult(notes_written=len(sessions))
 
 
-def _session_note_text(session: dict[str, object], *, existing_text: str | None = None) -> str:
+def _session_note_text(session: dict[str, object], *, existing_text: str | None = None, source_run_id: str | None = None) -> str:
     session_id = str(session["session_id"])
     summary_json = session.get("summary_json")
     summary = json.loads(str(summary_json)) if summary_json else None
@@ -63,6 +63,7 @@ def _session_note_text(session: dict[str, object], *, existing_text: str | None 
             f"session_id: {session_id}",
             "generated_by: personal-context-node",
             f"generated_at: {datetime.now(timezone.utc).isoformat()}",
+            *([f"source_run_id: {source_run_id}"] if source_run_id else []),
             "pcn_managed: true",
             "---",
             "",

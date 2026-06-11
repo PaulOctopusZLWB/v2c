@@ -38,7 +38,7 @@ class ReviewAction:
 ALLOWED_REVIEW_ACTIONS = {"confirm", "edit", "reject", "defer", "exclude_from_memory"}
 
 
-def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
+def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str | None = None) -> Path:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -63,6 +63,7 @@ def publish_candidate_review(*, config: AppConfig, day: str) -> Path:
         f"date_key: {day}",
         "generated_by: personal-context-node",
         f"generated_at: {datetime.now(timezone.utc).isoformat()}",
+        *([f"source_run_id: {source_run_id}"] if source_run_id else []),
         "pcn_managed: true",
         "---",
         "",

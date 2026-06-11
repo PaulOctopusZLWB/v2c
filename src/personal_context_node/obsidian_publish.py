@@ -19,12 +19,12 @@ class ObsidianPublishResult:
     confirmed_memory_written: int
 
 
-def publish_obsidian_day(*, config: AppConfig, day: str) -> ObsidianPublishResult:
-    daily_result = publish_daily_note(config=config, day=day)
-    session_result = publish_session_notes(config=config, day=day)
-    confirmed_memory_result = publish_confirmed_memory_note(config=config, day=day)
-    publish_candidate_review(config=config, day=day)
-    publish_speaker_review(config=config, day=day)
+def publish_obsidian_day(*, config: AppConfig, day: str, source_run_id: str | None = None) -> ObsidianPublishResult:
+    daily_result = publish_daily_note(config=config, day=day, source_run_id=source_run_id)
+    session_result = publish_session_notes(config=config, day=day, source_run_id=source_run_id)
+    confirmed_memory_result = publish_confirmed_memory_note(config=config, day=day, source_run_id=source_run_id)
+    publish_candidate_review(config=config, day=day, source_run_id=source_run_id)
+    publish_speaker_review(config=config, day=day, source_run_id=source_run_id)
     return ObsidianPublishResult(
         daily_notes_written=daily_result.notes_written,
         session_notes_written=session_result.notes_written,

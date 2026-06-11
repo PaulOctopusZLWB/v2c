@@ -14,7 +14,7 @@ class PublishDailyNoteResult:
     notes_written: int
 
 
-def publish_daily_note(*, config: AppConfig, day: str) -> PublishDailyNoteResult:
+def publish_daily_note(*, config: AppConfig, day: str, source_run_id: str | None = None) -> PublishDailyNoteResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -52,7 +52,14 @@ def publish_daily_note(*, config: AppConfig, day: str) -> PublishDailyNoteResult
     note_path = output_dir / f"{day}.md"
     existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
     note_path.write_text(
-        _daily_note_text(day=day, summary=summary, sessions=sessions, metrics=metrics, existing_text=existing_text),
+        _daily_note_text(
+            day=day,
+            summary=summary,
+            sessions=sessions,
+            metrics=metrics,
+            existing_text=existing_text,
+            source_run_id=source_run_id,
+        ),
         encoding="utf-8",
     )
     return PublishDailyNoteResult(notes_written=1)
@@ -83,6 +90,7 @@ def _daily_note_text(
     sessions: list[dict[str, object]],
     metrics: dict[str, object],
     existing_text: str | None = None,
+    source_run_id: str | None = None,
 ) -> str:
     user_notes = _existing_user_notes(existing_text)
     return "\n".join(
@@ -93,6 +101,7 @@ def _daily_note_text(
             f"date_key: {day}",
             "generated_by: personal-context-node",
             f"generated_at: {datetime.now(timezone.utc).isoformat()}",
+            *([f"source_run_id: {source_run_id}"] if source_run_id else []),
             "pcn_managed: true",
             "---",
             "",

@@ -15,7 +15,7 @@ class PublishConfirmedMemoryResult:
     note_path: Path
 
 
-def publish_confirmed_memory_note(*, config: AppConfig, day: str) -> PublishConfirmedMemoryResult:
+def publish_confirmed_memory_note(*, config: AppConfig, day: str, source_run_id: str | None = None) -> PublishConfirmedMemoryResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -48,11 +48,11 @@ def publish_confirmed_memory_note(*, config: AppConfig, day: str) -> PublishConf
     note_path = output_dir / f"{day}.md"
     if not rows:
         return PublishConfirmedMemoryResult(notes_written=0, note_path=note_path)
-    note_path.write_text(_confirmed_memory_note_text(day=day, rows=rows), encoding="utf-8")
+    note_path.write_text(_confirmed_memory_note_text(day=day, rows=rows, source_run_id=source_run_id), encoding="utf-8")
     return PublishConfirmedMemoryResult(notes_written=1, note_path=note_path)
 
 
-def _confirmed_memory_note_text(*, day: str, rows: list[dict[str, object]]) -> str:
+def _confirmed_memory_note_text(*, day: str, rows: list[dict[str, object]], source_run_id: str | None = None) -> str:
     lines = [
         "---",
         "pcn_schema: markdown_note.v1",
@@ -60,6 +60,7 @@ def _confirmed_memory_note_text(*, day: str, rows: list[dict[str, object]]) -> s
         f"date_key: {day}",
         "generated_by: personal-context-node",
         f"generated_at: {datetime.now(timezone.utc).isoformat()}",
+        *([f"source_run_id: {source_run_id}"] if source_run_id else []),
         "pcn_managed: true",
         "---",
         "",

@@ -84,7 +84,7 @@ def process_once(
         elif task.task_type == "daily_generate":
             generate_daily_context(config=config, day=task.target_id, llm=llm_adapter)
         elif task.task_type == "obsidian_publish":
-            publish_obsidian_day(config=config, day=task.target_id)
+            publish_obsidian_day(config=config, day=task.target_id, source_run_id=run_id)
         else:
             raise ValueError(f"unsupported task type: {task.task_type}")
         _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
