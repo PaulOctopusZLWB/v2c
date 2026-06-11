@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
@@ -48,7 +49,11 @@ def publish_daily_note(*, config: AppConfig, day: str) -> PublishDailyNoteResult
     output_dir = config.obsidian_vault / "10_Daily"
     output_dir.mkdir(parents=True, exist_ok=True)
     note_path = output_dir / f"{day}.md"
-    note_path.write_text(_daily_note_text(day=day, summary=summary, sessions=sessions, metrics=metrics), encoding="utf-8")
+    existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
+    note_path.write_text(
+        _daily_note_text(day=day, summary=summary, sessions=sessions, metrics=metrics, existing_text=existing_text),
+        encoding="utf-8",
+    )
     return PublishDailyNoteResult(notes_written=1)
 
 
@@ -76,7 +81,9 @@ def _daily_note_text(
     summary: dict[str, object],
     sessions: list[dict[str, object]],
     metrics: dict[str, object],
+    existing_text: str | None = None,
 ) -> str:
+    user_notes = _existing_user_notes(existing_text)
     return "\n".join(
         [
             f"# {day}",
@@ -108,8 +115,22 @@ def _daily_note_text(
             "",
             "## User Notes",
             "",
+            '<!-- pcn:user start type="user_notes" -->',
+            user_notes,
+            '<!-- pcn:user end type="user_notes" -->',
         ]
     )
+
+
+def _existing_user_notes(existing_text: str | None) -> str:
+    if not existing_text:
+        return ""
+    match = re.search(
+        r'<!-- pcn:user start type="user_notes" -->\n?(.*?)\n?<!-- pcn:user end type="user_notes" -->',
+        existing_text,
+        flags=re.DOTALL,
+    )
+    return match.group(1).rstrip("\n") if match else ""
 
 
 def _session_lines(*, day: str, sessions: list[dict[str, object]]) -> list[str]:

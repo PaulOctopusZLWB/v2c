@@ -50,33 +50,34 @@ It also implements the LLM text-processing boundary before provider integration:
 It also implements the human review boundary:
 
 1. `pcn obsidian publish --date ...` writes daily notes, session notes, pending memory candidates, and speaker review artifacts.
-2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
-3. `pcn obsidian sync-review --date ...` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
-4. Checked candidate lines ending with `| edit: ...` create confirmed memory cards using the edited claim while preserving the original `candidate_claim`.
-5. Checked candidate lines ending with `| reject` update local status to `rejected` without creating signed events.
-6. Checked candidate lines ending with `| defer` are consumed without changing candidate status or creating signed events.
-7. Empty edit claims are rejected with a `sync_logs` failure row and no side effects.
-8. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
-9. Review sync skips files modified within `edit_grace_seconds` (default 120) and records a `sync_logs` skipped row to avoid reading a file while the user is still editing.
-10. Checked candidate lines ending with `| exclude_from_memory` mark evidence-linked sessions as excluded from long-term memory and move the candidate to `excluded_from_memory` without creating signed events.
-11. Daily LLM context generation skips transcript segments attached to sessions marked `exclude_from_memory`.
-10. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
-11. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
-12. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
-13. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
-14. Trusted `identity_profile.published` events materialize `identity_profile.v1` display names and predecessor references into `identity_profiles`.
-15. Trusted `memory_annotation.created` events materialize `memory_annotation.v1` rows; annotations for unknown cards remain `dangling` until the target card arrives.
-16. Verified but unsupported event types are retained in `signed_events` with `trust_status='unsupported'` and do not enter materialized current views.
-17. `pcn memory verify` rejects all branches of an `owner_id + owner_sequence` fork instead of allowing any conflicting branch into the trusted view.
-18. Verified non-plain payload encodings, including `encrypted`, are retained as `unsupported` and are not materialized.
-19. Verified unknown payload versions, such as `memory_card.v2`, are retained as `unsupported` and are not materialized.
-20. Trusted `memory_card.revoked` events mark the local materialized card as `revoked` so default active views can exclude it.
-21. Trusted `memory_card.superseded` events mark the old card as `superseded` while the replacement card remains independently active.
-22. Trusted `memory_annotation.revoked` events mark annotations as `revoked`, preserving history without keeping them active.
-23. Memory card `visibility` is always serialized as an object; scalar `private`/`public` inputs are normalized, and unknown visibility types fail closed to `private`.
-24. Trusted `memory_card.metadata_updated` events update materialized visibility/tags metadata without changing claim text.
-25. Trusted card successor events (`metadata_updated`, `revoked`, `superseded`) are replayed when a referenced card arrives later, keeping materialization independent of arrival order.
-26. Trusted `identity_key.rotated` events close the old owner chain; later events from that owner are rejected and not materialized.
+2. Re-publishing daily and session notes rewrites managed blocks while preserving each note's `user_notes` block.
+3. The user confirms a candidate by changing `- [ ]` to `- [x]`.
+4. `pcn obsidian sync-review --date ...` parses checked candidates, creates confirmed memory cards, and emits signed `memory_card.created` events.
+5. Checked candidate lines ending with `| edit: ...` create confirmed memory cards using the edited claim while preserving the original `candidate_claim`.
+6. Checked candidate lines ending with `| reject` update local status to `rejected` without creating signed events.
+7. Checked candidate lines ending with `| defer` are consumed without changing candidate status or creating signed events.
+8. Empty edit claims are rejected with a `sync_logs` failure row and no side effects.
+9. Successfully synced checked candidates are rewritten as managed read-only receipt blocks.
+10. Review sync skips files modified within `edit_grace_seconds` (default 120) and records a `sync_logs` skipped row to avoid reading a file while the user is still editing.
+11. Checked candidate lines ending with `| exclude_from_memory` mark evidence-linked sessions as excluded from long-term memory and move the candidate to `excluded_from_memory` without creating signed events.
+12. Daily LLM context generation skips transcript segments attached to sessions marked `exclude_from_memory`.
+13. `pcn memory verify` rechecks stored signed events, canonical signing body hashes, and owner hash-chain links.
+14. `pcn memory verify` also rebuilds the trusted materialized memory card view and diffs it against `memory_cards`.
+15. `pcn memory export --since ...` writes trusted `raw_event_json` rows as JSONL for exchange/backup.
+16. `signed_events` stores `event_hash`, `owner_sequence`, `prev_event_hash`, `raw_event_json`, `signing_body_json`, and `trust_status`.
+17. Trusted `identity_profile.published` events materialize `identity_profile.v1` display names and predecessor references into `identity_profiles`.
+18. Trusted `memory_annotation.created` events materialize `memory_annotation.v1` rows; annotations for unknown cards remain `dangling` until the target card arrives.
+19. Verified but unsupported event types are retained in `signed_events` with `trust_status='unsupported'` and do not enter materialized current views.
+20. `pcn memory verify` rejects all branches of an `owner_id + owner_sequence` fork instead of allowing any conflicting branch into the trusted view.
+21. Verified non-plain payload encodings, including `encrypted`, are retained as `unsupported` and are not materialized.
+22. Verified unknown payload versions, such as `memory_card.v2`, are retained as `unsupported` and are not materialized.
+23. Trusted `memory_card.revoked` events mark the local materialized card as `revoked` so default active views can exclude it.
+24. Trusted `memory_card.superseded` events mark the old card as `superseded` while the replacement card remains independently active.
+25. Trusted `memory_annotation.revoked` events mark annotations as `revoked`, preserving history without keeping them active.
+26. Memory card `visibility` is always serialized as an object; scalar `private`/`public` inputs are normalized, and unknown visibility types fail closed to `private`.
+27. Trusted `memory_card.metadata_updated` events update materialized visibility/tags metadata without changing claim text.
+28. Trusted card successor events (`metadata_updated`, `revoked`, `superseded`) are replayed when a referenced card arrives later, keeping materialization independent of arrival order.
+29. Trusted `identity_key.rotated` events close the old owner chain; later events from that owner are rejected and not materialized.
 
 It also implements the speaker review boundary:
 
