@@ -38,6 +38,7 @@ def generate_daily_context(*, config: AppConfig, day: str, llm: LLMPort) -> Dail
         )
         if not stored_segments:
             return DailyContextGenerationResult(summaries_created=0, memory_candidates_created=0)
+        _persist_segment_evidence_refs(conn, segments=stored_segments, owner_id=config.owner_did)
         llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in stored_segments]
         context = llm.generate_daily_context(day=day, transcript_segments=llm_segments)
         _persist_legacy_summary(conn, context)
@@ -217,28 +218,6 @@ def _persist_candidates(
             if source is None:
                 raise ValueError(f"unknown evidence_id: {source_id}")
             evidence_refs.append(str(source["evidence_id"]))
-            conn.execute(
-                """
-                insert into evidence_refs (
-                  evidence_id, source_type, source_ref, source_id, owner_id, quote, created_at
-                ) values (?, ?, ?, ?, ?, ?, ?)
-                on conflict(evidence_id) do update set
-                  source_type = excluded.source_type,
-                  source_ref = excluded.source_ref,
-                  source_id = excluded.source_id,
-                  owner_id = excluded.owner_id,
-                  quote = excluded.quote
-                """,
-                (
-                    source["evidence_id"],
-                    "transcript_segment",
-                    source["segment_id"],
-                    source["segment_id"],
-                    owner_id,
-                    source["text"],
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
         if not evidence_refs:
             raise ValueError("LLM memory candidates require evidence refs")
         normalized_claim_hash = _normalized_claim_hash(candidate.candidate_claim)
@@ -278,6 +257,37 @@ def _persist_candidates(
         )
         created += 1
     return created
+
+
+def _persist_segment_evidence_refs(
+    conn: sqlite3.Connection,
+    *,
+    segments: list[dict[str, object]],
+    owner_id: str,
+) -> None:
+    for source in segments:
+        conn.execute(
+            """
+            insert into evidence_refs (
+              evidence_id, source_type, source_ref, source_id, owner_id, quote, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?)
+            on conflict(evidence_id) do update set
+              source_type = excluded.source_type,
+              source_ref = excluded.source_ref,
+              source_id = excluded.source_id,
+              owner_id = excluded.owner_id,
+              quote = excluded.quote
+            """,
+            (
+                source["evidence_id"],
+                "transcript_segment",
+                source["segment_id"],
+                source["segment_id"],
+                owner_id,
+                source["text"],
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
 
 
 def _segment_by_llm_ref(segments: list[dict[str, object]]) -> dict[str, dict[str, object]]:

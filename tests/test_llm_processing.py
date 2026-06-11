@@ -120,6 +120,18 @@ class MissingInferenceConfidenceLLM:
         )
 
 
+class SummaryOnlyLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=["系统需要保持音频本地处理"],
+            inferences=[],
+            memory_candidates=[],
+        )
+
+
 class DuplicateDailyCandidateLLM:
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
         return DailyContext(
@@ -501,6 +513,37 @@ def test_generate_daily_context_rejects_structured_inference_without_confidence(
     assert candidates == []
     assert summaries == []
     assert legacy_summaries == []
+
+
+def test_generate_daily_context_mints_evidence_refs_before_candidate_extraction(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+
+    result = generate_daily_context(config=config, day="2087-05-10", llm=SummaryOnlyLLM())
+
+    assert result.summaries_created == 1
+    assert result.memory_candidates_created == 0
+    conn = connect(config.database_path)
+    try:
+        evidence_refs = fetch_all(
+            conn,
+            """
+            select evidence_id, source_type, source_id, source_ref, owner_id, quote
+            from evidence_refs
+            """,
+        )
+    finally:
+        conn.close()
+    assert evidence_refs == [
+        {
+            "evidence_id": "ev_test",
+            "source_type": "transcript_segment",
+            "source_id": "seg_test",
+            "source_ref": "seg_test",
+            "owner_id": "did:key:local-owner",
+            "quote": "我要求音频和转写处理保持本地。",
+        }
+    ]
 
 
 def test_generate_daily_context_merges_duplicate_candidates_within_day(tmp_path: Path) -> None:
