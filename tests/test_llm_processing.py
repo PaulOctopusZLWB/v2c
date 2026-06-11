@@ -26,7 +26,7 @@ class RecordingLLM:
                     candidate_claim="用户要求音频和转写处理保持本地。",
                     claim_type="requirement",
                     confidence=0.91,
-                    evidence_source_ids=[transcript_segments[0]["segment_id"]],
+                    evidence_source_ids=[transcript_segments[0]["evidence_id"]],
                 )
             ],
         )
@@ -84,6 +84,25 @@ class UnknownEvidenceLLM:
                     claim_type="requirement",
                     confidence=0.91,
                     evidence_source_ids=["ev_missing"],
+                )
+            ],
+        )
+
+
+class SegmentIdRefLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=[],
+            inferences=[],
+            memory_candidates=[
+                MemoryCandidateDraft(
+                    candidate_claim="用户要求音频和转写处理保持本地。",
+                    claim_type="requirement",
+                    confidence=0.91,
+                    evidence_source_ids=[transcript_segments[0]["segment_id"]],
                 )
             ],
         )
@@ -335,6 +354,29 @@ def test_generate_daily_context_rejects_unknown_llm_evidence_refs_without_side_e
         assert "unknown evidence_id: ev_missing" in str(exc)
     else:
         raise AssertionError("unknown LLM evidence reference was accepted")
+
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select candidate_id from memory_candidates")
+        summaries = fetch_all(conn, "select summary_id from summaries")
+        legacy_summaries = fetch_all(conn, "select day from daily_summaries")
+    finally:
+        conn.close()
+    assert candidates == []
+    assert summaries == []
+    assert legacy_summaries == []
+
+
+def test_generate_daily_context_rejects_segment_id_llm_refs_without_side_effects(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+
+    try:
+        generate_daily_context(config=config, day="2087-05-10", llm=SegmentIdRefLLM())
+    except ValueError as exc:
+        assert "unknown evidence_id: seg_test" in str(exc)
+    else:
+        raise AssertionError("segment_id LLM reference was accepted")
 
     conn = connect(config.database_path)
     try:

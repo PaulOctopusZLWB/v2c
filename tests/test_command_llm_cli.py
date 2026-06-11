@@ -19,7 +19,7 @@ def test_summarize_cli_uses_command_llm_backend(tmp_path: Path) -> None:
 import json
 import sys
 payload = json.loads(sys.stdin.read())
-first = payload["transcript_segments"][0]["segment_id"]
+first = payload["transcript_segments"][0]["evidence_id"]
 print(json.dumps({
   "summary": "命令式 LLM 摘要",
   "todos": [],
@@ -29,7 +29,7 @@ print(json.dumps({
     "candidate_claim": "命令式 LLM 候选",
     "claim_type": "observation",
     "confidence": 0.7,
-    "evidence_source_ids": [first]
+    "evidence_refs": [first]
   }]
 }, ensure_ascii=False))
 """.strip(),

@@ -26,7 +26,7 @@ class RecordingLLM:
                     candidate_claim="用户要求音频本地处理。",
                     claim_type="requirement",
                     confidence=0.9,
-                    evidence_source_ids=[transcript_segments[0]["segment_id"]],
+                    evidence_source_ids=[transcript_segments[0]["evidence_id"]],
                 )
             ],
         )

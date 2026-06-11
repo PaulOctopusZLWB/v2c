@@ -271,11 +271,7 @@ def _persist_candidates(
 
 
 def _segment_by_llm_ref(segments: list[dict[str, object]]) -> dict[str, dict[str, object]]:
-    return {
-        ref: segment
-        for segment in segments
-        for ref in (str(segment["segment_id"]), str(segment["evidence_id"]))
-    }
+    return {str(segment["evidence_id"]): segment for segment in segments}
 
 
 def _merge_daily_duplicate_candidates(candidates: list[MemoryCandidateDraft]) -> list[MemoryCandidateDraft]:
