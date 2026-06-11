@@ -372,7 +372,7 @@ def _upsert_memory_card(conn: sqlite3.Connection, *, event: SignedEvent) -> None
             "active",
             event.event_hash,
             str(card.created_at),
-            str(card.created_at),
+            card.updated_at or str(card.created_at),
         ),
     )
 

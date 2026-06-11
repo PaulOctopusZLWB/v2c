@@ -107,6 +107,44 @@ def test_memory_card_temporal_bounds_materialize_from_signed_event(tmp_path: Pat
     ]
 
 
+def test_memory_card_updated_at_materializes_from_signed_event_payload(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    card = MemoryCard(
+        card_id="mem_updated_at_test",
+        owner_did="did:key:test-owner",
+        claim_type="decision",
+        claim="Memory cards carry updated_at.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_updated_at_test",
+                source_type="transcript_segment",
+                source_id="seg_updated_at_test",
+                quote="Memory cards carry updated_at.",
+            )
+        ],
+        updated_at="2087-05-11T10:00:00Z",
+    )
+    event, public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+    )
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        insert_signed_event(conn, event=event, public_key=public_key)
+        rows = fetch_all(
+            conn,
+            "select updated_at from memory_cards where card_id = ?",
+            (card.card_id,),
+        )
+    finally:
+        conn.close()
+
+    assert rows == [{"updated_at": "2087-05-11T10:00:00Z"}]
+
+
 def test_memory_verify_detects_materialized_card_mismatch(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner")
     _insert_candidate(config.database_path)

@@ -71,6 +71,7 @@ class MemoryCard(BaseModel):
     visibility: Visibility = Field(default_factory=Visibility)
     tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: str | None = None
 
     @model_validator(mode="before")
     @classmethod

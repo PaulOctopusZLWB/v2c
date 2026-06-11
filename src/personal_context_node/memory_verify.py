@@ -443,6 +443,7 @@ def _materialization_mismatches(conn: sqlite3.Connection, trusted_events: list[S
                 expected[update.card_id]["tags_json"] = json.dumps(update.tags, ensure_ascii=False, sort_keys=True)
                 expected[update.card_id]["current_version"] = event.object_version
                 expected[update.card_id]["source_event_hash"] = event.event_hash
+                expected[update.card_id]["updated_at"] = str(update.created_at)
         if event.event_type == "memory_card.superseded":
             supersession = MemoryCardSupersession.model_validate(event.payload)
             if supersession.card_id in expected:
@@ -459,7 +460,8 @@ def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[s
         conn,
         """
         select card_id, current_version, owner_did, claim_type, claim, source_type, confidence,
-               observed_at, valid_from, valid_until, visibility_json, tags_json, status, source_event_hash
+               observed_at, valid_from, valid_until, visibility_json, tags_json, status,
+               source_event_hash, updated_at
         from memory_cards
         order by card_id
         """,
@@ -538,6 +540,7 @@ def _card_projection(
         "tags_json": json.dumps(card.tags, ensure_ascii=False, sort_keys=True),
         "status": status,
         "source_event_hash": source_event_hash,
+        "updated_at": card.updated_at or str(card.created_at),
     }
 
 
