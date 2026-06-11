@@ -443,6 +443,22 @@ def _sync_candidate_review(*, day: str, data_dir: Path, obsidian_vault: Path) ->
     )
 
 
+def _confirm_sync_reviews(*, day: str, data_dir: Path, obsidian_vault: Path) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    candidate_result = confirm_checked_candidates(config=config, day=day)
+    speaker_result = sync_speaker_review(config=config, day=day)
+    typer.echo(
+        " ".join(
+            [
+                f"candidates_confirmed={candidate_result.candidates_confirmed}",
+                f"signed_events_created={candidate_result.signed_events_created}",
+                f"speaker_mappings_upserted={speaker_result.mappings_upserted}",
+                f"segment_overrides_upserted={speaker_result.segment_overrides_upserted}",
+            ]
+        )
+    )
+
+
 @app.command(name="publish-speaker-review")
 def publish_speaker_review_cmd(
     day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
@@ -836,7 +852,7 @@ def memory_confirm_sync_group(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _sync_candidate_review(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _confirm_sync_reviews(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 def _memory_export(*, since: str, output_path: Path, data_dir: Path, obsidian_vault: Path) -> None:
