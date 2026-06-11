@@ -61,6 +61,12 @@ It also implements launchd template generation:
 2. Templates use `uv run pcn ...` commands and per-job log paths.
 3. The command writes project files only; it does not call `launchctl` or install into `~/Library/LaunchAgents`.
 
+It also implements a minimal diagnostics boundary:
+
+1. `job_runs` records run id, job name, status, timestamps, and error text.
+2. `pcn memory-verify` records a job run.
+3. `pcn job-status` lists recent job runs for launchd/manual diagnostics.
+
 Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, rsync/restic-specific NAS behavior, and launchctl install/uninstall are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, context-generation, review, archive, and scheduling boundaries testable before model integration.
 
 ## Local uv Run
@@ -171,6 +177,9 @@ uv run pcn confirm-review \
 uv run pcn memory-verify \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
+uv run pcn job-status \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault
 ```
 
 Expected confirmation output:
@@ -183,6 +192,12 @@ Expected memory verification output after confirmation:
 
 ```text
 total_events=1 valid_events=1 invalid_events=0
+```
+
+Expected job status output shape:
+
+```text
+run_id=run_... job_name=memory-verify status=succeeded error=
 ```
 
 After editing `.smoke-vault/90_System/Speaker_Review/2087-05-10.md`, sync speaker mappings:

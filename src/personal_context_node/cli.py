@@ -12,6 +12,7 @@ from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.archive import archive_completed_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.launchd import write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_verify import verify_memory_events
@@ -264,7 +265,12 @@ def memory_verify(
     ),
 ) -> None:
     config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
-    result = verify_memory_events(config=config)
+    job_run = record_job_run(
+        config=config,
+        job_name="memory-verify",
+        operation=lambda: verify_memory_events(config=config),
+    )
+    result = job_run.result
     typer.echo(
         " ".join(
             [
@@ -274,3 +280,27 @@ def memory_verify(
             ]
         )
     )
+
+
+@app.command(name="job-status")
+def job_status(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    limit: int = typer.Option(20, min=1, help="Maximum rows to print."),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    rows = job_status_rows(config=config, limit=limit)
+    for row in rows:
+        typer.echo(
+            " ".join(
+                [
+                    f"run_id={row['run_id']}",
+                    f"job_name={row['job_name']}",
+                    f"status={row['status']}",
+                    f"error={row['error'] or ''}",
+                ]
+            )
+        )

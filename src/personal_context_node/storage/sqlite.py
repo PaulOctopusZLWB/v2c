@@ -98,6 +98,15 @@ create table if not exists archive_records (
   archived_at text not null
 );
 
+create table if not exists job_runs (
+  run_id text primary key,
+  job_name text not null,
+  status text not null,
+  started_at text not null,
+  finished_at text,
+  error text
+);
+
 create table if not exists signed_events (
   event_id text primary key,
   event_type text not null,
