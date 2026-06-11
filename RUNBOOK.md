@@ -45,6 +45,7 @@ It also implements the LLM text-processing boundary before provider integration:
 8. Duplicate memory candidates within the same daily generation are merged by claim type and normalized claim, preserving all evidence references.
 9. Cross-day duplicate memory candidates are marked `possible_duplicate` instead of being sent directly to normal review.
 10. LLM text-boundary config includes `send_person_names`, `send_speaker_labels`, and `max_chunk_tokens` in both TOML loading and generated config templates.
+11. Session summary generation uses `max_chunk_tokens` to create in-memory chunk summaries before the final session summary; chunk summaries are not stored in `summaries` or written to notes.
 
 It also implements the human review boundary:
 
@@ -129,7 +130,8 @@ It also implements session derivation:
 3. Re-derivation reuses an existing `session_id` when the first segment is unchanged.
 4. ASR task fan-in registers one `session_derive` task for the affected `date_key` when all chunks for an audio file are transcribed.
 5. `summaries` stores `session_summary.v1` JSON for each session.
-6. `pcn publish-session-notes` writes `20_Conversations/YYYY-MM-DD/ses_*.md` notes without embedding full transcripts.
+6. Long sessions are reduced through in-memory chunk summaries before the final `session_summary.v1` row is stored.
+7. `pcn publish-session-notes` writes `20_Conversations/YYYY-MM-DD/ses_*.md` notes without embedding full transcripts.
 
 It also implements active transcript semantics:
 

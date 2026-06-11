@@ -36,7 +36,12 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
         if not segments:
             return SessionSummaryResult(summaries_created=0)
         llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in segments]
-        summary = llm.generate_session_summary(session_id=session_id, transcript_segments=llm_segments)
+        summary = _generate_session_summary_with_budget(
+            llm=llm,
+            session_id=session_id,
+            transcript_segments=llm_segments,
+            max_chunk_tokens=config.max_chunk_tokens,
+        )
         _persist_session_summary(conn, summary)
         conn.commit()
         return SessionSummaryResult(summaries_created=1)
@@ -73,6 +78,65 @@ def _persist_session_summary(conn: sqlite3.Connection, summary: SessionSummary) 
             now,
         ),
     )
+
+
+def _generate_session_summary_with_budget(
+    *,
+    llm: LLMPort,
+    session_id: str,
+    transcript_segments: list[dict[str, object]],
+    max_chunk_tokens: int,
+) -> SessionSummary:
+    if max_chunk_tokens <= 0 or _segment_tokens(transcript_segments) <= max_chunk_tokens:
+        return llm.generate_session_summary(session_id=session_id, transcript_segments=transcript_segments)
+    chunks = _segment_chunks(transcript_segments, max_chunk_tokens=max_chunk_tokens)
+    chunk_summary_segments: list[dict[str, object]] = []
+    for index, chunk in enumerate(chunks, start=1):
+        chunk_summary = llm.generate_session_summary(
+            session_id=f"{session_id}:chunk:{index}",
+            transcript_segments=chunk,
+        )
+        summary_segment = {
+            "segment_id": f"{session_id}_chunk_{index}",
+            "start_ms": chunk[0]["start_ms"],
+            "end_ms": chunk[-1]["end_ms"],
+            "text": chunk_summary.summary,
+            "evidence_id": chunk[0]["evidence_id"],
+        }
+        if "speaker" in chunk[0]:
+            summary_segment["speaker"] = "summary"
+        chunk_summary_segments.append(summary_segment)
+    return llm.generate_session_summary(session_id=session_id, transcript_segments=chunk_summary_segments)
+
+
+def _segment_chunks(
+    transcript_segments: list[dict[str, object]],
+    *,
+    max_chunk_tokens: int,
+) -> list[list[dict[str, object]]]:
+    chunks: list[list[dict[str, object]]] = []
+    current: list[dict[str, object]] = []
+    current_tokens = 0
+    for segment in transcript_segments:
+        segment_tokens = _text_tokens(str(segment["text"]))
+        if current and current_tokens + segment_tokens > max_chunk_tokens:
+            chunks.append(current)
+            current = []
+            current_tokens = 0
+        current.append(segment)
+        current_tokens += segment_tokens
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _segment_tokens(transcript_segments: list[dict[str, object]]) -> int:
+    return sum(_text_tokens(str(segment["text"])) for segment in transcript_segments)
+
+
+def _text_tokens(text: str) -> int:
+    words = text.split()
+    return len(words) if words else len(text)
 
 
 def _llm_segment(row: dict[str, object], *, include_speaker: bool) -> dict[str, object]:

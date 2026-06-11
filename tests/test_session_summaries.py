@@ -5,6 +5,7 @@ from pathlib import Path
 
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.llm import SessionSummary
 from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.session_summaries import summarize_session
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -19,6 +20,23 @@ class RecordingSessionLLM:
         return RuleBasedLLMAdapter().generate_session_summary(
             session_id=session_id,
             transcript_segments=transcript_segments,
+        )
+
+
+class ChunkRecordingSessionLLM:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[dict[str, object]]]] = []
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        self.calls.append((session_id, transcript_segments))
+        return SessionSummary(
+            session_id=session_id,
+            headline=f"headline {session_id}",
+            summary=" / ".join(str(segment["text"]) for segment in transcript_segments),
+            topics=[],
+            decisions=[],
+            todos=[],
+            open_questions=[],
         )
 
 
@@ -94,7 +112,69 @@ def test_summarize_session_omits_speaker_labels_when_disabled(tmp_path: Path) ->
     ]
 
 
-def _insert_session_and_segments(database_path: Path) -> None:
+def test_summarize_session_uses_chunk_summaries_when_text_exceeds_budget(tmp_path: Path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        max_chunk_tokens=5,
+        send_speaker_labels=False,
+    )
+    _insert_session_and_segments(
+        config.database_path,
+        segments=[
+            ("seg_1", "alpha beta gamma", "ev_1"),
+            ("seg_2", "delta epsilon zeta", "ev_2"),
+            ("seg_3", "eta theta", "ev_3"),
+        ],
+    )
+
+    llm = ChunkRecordingSessionLLM()
+    result = summarize_session(config=config, session_id="ses_test", llm=llm)
+
+    assert result.summaries_created == 1
+    assert [call[0] for call in llm.calls] == [
+        "ses_test:chunk:1",
+        "ses_test:chunk:2",
+        "ses_test",
+    ]
+    assert [segment["segment_id"] for segment in llm.calls[0][1]] == ["seg_1"]
+    assert [segment["segment_id"] for segment in llm.calls[1][1]] == ["seg_2", "seg_3"]
+    assert llm.calls[2][1] == [
+        {
+            "segment_id": "ses_test_chunk_1",
+            "start_ms": 0,
+            "end_ms": 1000,
+            "text": "alpha beta gamma",
+            "evidence_id": "ev_1",
+        },
+        {
+            "segment_id": "ses_test_chunk_2",
+            "start_ms": 1000,
+            "end_ms": 3000,
+            "text": "delta epsilon zeta / eta theta",
+            "evidence_id": "ev_2",
+        },
+    ]
+
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(conn, "select summary_type, target_id, content_json from summaries")
+    finally:
+        conn.close()
+    assert len(summaries) == 1
+    assert summaries[0]["summary_type"] == "session"
+    assert summaries[0]["target_id"] == "ses_test"
+
+
+def _insert_session_and_segments(
+    database_path: Path,
+    *,
+    segments: list[tuple[str, str, str]] | None = None,
+) -> None:
+    segments = segments or [
+        ("seg_1", "我决定继续接入真实 ASR，需要保持音频本地处理。", "ev_1"),
+        ("seg_2", "faster-whisper 备选是否需要提前装好", "ev_2"),
+    ]
     conn = connect(database_path)
     try:
         initialize(conn)
@@ -137,10 +217,7 @@ def _insert_session_and_segments(database_path: Path) -> None:
                 "2087-05-10T09:00:00+08:00",
             ),
         )
-        for segment_id, text, evidence_id in [
-            ("seg_1", "我决定继续接入真实 ASR，需要保持音频本地处理。", "ev_1"),
-            ("seg_2", "faster-whisper 备选是否需要提前装好", "ev_2"),
-        ]:
+        for index, (segment_id, text, evidence_id) in enumerate(segments):
             conn.execute(
                 """
                 insert into transcript_segments (
@@ -153,8 +230,8 @@ def _insert_session_and_segments(database_path: Path) -> None:
                     "aud_test",
                     f"chk_{segment_id}",
                     "ses_test",
-                    0 if segment_id == "seg_1" else 1000,
-                    1000 if segment_id == "seg_1" else 2000,
+                    index * 1000,
+                    (index + 1) * 1000,
                     text,
                     "zh",
                     "self",
