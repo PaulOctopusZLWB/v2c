@@ -3,11 +3,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import base64
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
 from personal_context_node.config import AppConfig
-from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef, create_signed_event
+from personal_context_node.core.protocols.memory import (
+    EvidenceRef,
+    EventSignature,
+    MemoryCard,
+    SubjectRef,
+    canonical_json_bytes,
+    create_signed_event,
+)
 from personal_context_node.memory_import import import_memory_events
 from personal_context_node.storage.sqlite import connect, fetch_all
 
@@ -98,6 +107,54 @@ def test_import_memory_events_rejects_invalid_signatures_without_materializing(t
         conn.close()
     assert events == [{"event_type": "memory_card.created", "trust_status": "rejected"}]
     assert cards == []
+
+
+def test_import_memory_events_preserves_signed_unknown_top_level_fields(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    private_key = Ed25519PrivateKey.generate()
+    card = MemoryCard(
+        card_id="mem_future_field_import",
+        owner_did="did:key:external-owner",
+        claim_type="decision",
+        claim="Future signed fields must survive import and export.",
+        subject=SubjectRef(type="project", id="personal_context_node", label="Personal Context Node"),
+        evidence_refs=[
+            EvidenceRef(
+                evidence_id="ev_future_field_import",
+                source_type="transcript_segment",
+                source_id="seg_future_field_import",
+                quote="future field quote",
+            )
+        ],
+    )
+    event, public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=card,
+        signer_did=card.owner_did,
+        private_key=private_key,
+    )
+    raw = event.model_dump(mode="json")
+    raw["future_extension"] = {"retention_policy": "preserve"}
+    body = {key: value for key, value in raw.items() if key != "signature"}
+    signature = private_key.sign(canonical_json_bytes(body))
+    raw["signature"] = EventSignature(
+        public_key_id=card.owner_did,
+        value=base64.urlsafe_b64encode(signature).decode("ascii").rstrip("="),
+    ).model_dump(mode="json")
+    input_path = tmp_path / "events.jsonl"
+    input_path.write_text(json.dumps(raw, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = import_memory_events(config=config, input_path=input_path, public_key=public_key)
+
+    assert result.events_imported == 1
+    assert result.trusted_events == 1
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select raw_event_json from signed_events")
+    finally:
+        conn.close()
+    stored_event = json.loads(rows[0]["raw_event_json"])
+    assert stored_event["future_extension"] == {"retention_policy": "preserve"}
 
 
 def test_memory_import_cli_imports_jsonl(tmp_path: Path) -> None:

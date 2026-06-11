@@ -212,7 +212,7 @@ class EventSignature(BaseModel):
 
 
 class SignedEvent(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     envelope_version: Literal["signed_event.v1"] = "signed_event.v1"
     event_type: str
