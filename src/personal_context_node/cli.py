@@ -14,6 +14,7 @@ from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.launchd import write_launchd_plists
 from personal_context_node.llm_processing import generate_daily_context
+from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
@@ -252,3 +253,24 @@ def launchd_write_plists(
         dry_run=True,
     )
     typer.echo(f"plists_written={len(paths)} output_dir={output_dir}")
+
+
+@app.command(name="memory-verify")
+def memory_verify(
+    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
+    obsidian_vault: Path = typer.Option(
+        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = verify_memory_events(config=config)
+    typer.echo(
+        " ".join(
+            [
+                f"total_events={result.total_events}",
+                f"valid_events={result.valid_events}",
+                f"invalid_events={result.invalid_events}",
+            ]
+        )
+    )

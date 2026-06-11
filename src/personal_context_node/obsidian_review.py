@@ -92,14 +92,17 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
             conn.execute(
                 """
                 insert into signed_events (
-                  event_id, event_type, signer_did, payload_json, signature, public_key, verified
-                ) values (?, ?, ?, ?, ?, ?, ?)
+                  event_id, event_type, signer_did, created_at, payload_json,
+                  event_json, signature, public_key, verified
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.event_id,
                     event.event_type,
                     event.signer_did,
+                    event.created_at.isoformat(),
                     json.dumps(event.payload, ensure_ascii=False, sort_keys=True),
+                    event.model_dump_json(),
                     event.signature,
                     public_key,
                     1 if verify_signed_event(event, public_key) else 0,

@@ -39,6 +39,7 @@ It also implements the human review boundary:
 1. `pcn publish-review` writes pending memory candidates into `30_Memory_Candidates/YYYY-MM-DD.md`.
 2. The user confirms a candidate by changing `- [ ]` to `- [x]`.
 3. `pcn confirm-review` parses checked candidates, creates confirmed memory cards, and emits signed events.
+4. `pcn memory-verify` rechecks stored signed events and flags tampered payloads.
 
 It also implements the speaker review boundary:
 
@@ -167,12 +168,21 @@ uv run pcn confirm-review \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --day 2087-05-10
+uv run pcn memory-verify \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault
 ```
 
 Expected confirmation output:
 
 ```text
 candidates_confirmed=1 signed_events_created=1
+```
+
+Expected memory verification output after confirmation:
+
+```text
+total_events=1 valid_events=1 invalid_events=0
 ```
 
 After editing `.smoke-vault/90_System/Speaker_Review/2087-05-10.md`, sync speaker mappings:

@@ -102,7 +102,9 @@ create table if not exists signed_events (
   event_id text primary key,
   event_type text not null,
   signer_did text not null,
+  created_at text not null default '',
   payload_json text not null,
+  event_json text not null default '{}',
   signature text not null,
   public_key text not null,
   verified integer not null
