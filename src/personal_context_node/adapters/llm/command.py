@@ -16,6 +16,7 @@ from personal_context_node.core.ports.llm import (
 
 
 ALLOWED_CLAIM_TYPES = set(get_args(ClaimType))
+RAW_AUDIO_PATH_FIELDS = {"audio_path", "local_raw_path", "raw_audio_path", "source_path", "work_audio_path"}
 
 
 class CommandLLMAdapter:
@@ -27,7 +28,9 @@ class CommandLLMAdapter:
         self.command = command
 
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
-        payload = self._run_json({"task": "daily_context", "day": day, "transcript_segments": transcript_segments})
+        payload = self._run_json(
+            {"task": "daily_context", "day": day, "transcript_segments": _text_only_segments(transcript_segments)}
+        )
         _validate_daily_context_payload(payload)
         return DailyContext(
             day=day,
@@ -40,7 +43,11 @@ class CommandLLMAdapter:
 
     def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
         payload = self._run_json(
-            {"task": "session_summary", "session_id": session_id, "transcript_segments": transcript_segments}
+            {
+                "task": "session_summary",
+                "session_id": session_id,
+                "transcript_segments": _text_only_segments(transcript_segments),
+            }
         )
         _validate_session_summary_payload(payload)
         return SessionSummary(
@@ -70,6 +77,13 @@ class CommandLLMAdapter:
         if not isinstance(decoded, dict):
             raise TerminalPortError("LLM output must be an object")
         return decoded
+
+
+def _text_only_segments(transcript_segments: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {key: value for key, value in segment.items() if key not in RAW_AUDIO_PATH_FIELDS}
+        for segment in transcript_segments
+    ]
 
 
 def _validate_daily_context_payload(payload: object) -> None:

@@ -59,6 +59,49 @@ print(json.dumps({{
     assert ".wav" not in json.dumps(sent).lower()
 
 
+def test_command_llm_adapter_strips_raw_audio_paths_from_input(tmp_path: Path) -> None:
+    capture = tmp_path / "input.json"
+    script = tmp_path / "fake_llm.py"
+    script.write_text(
+        f"""
+import json
+import sys
+payload = json.loads(sys.stdin.read())
+open({str(capture)!r}, "w").write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+print(json.dumps({{
+  "summary": "命令式 LLM 摘要",
+  "todos": [],
+  "facts": [],
+  "inferences": [],
+  "memory_candidates": []
+}}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    adapter.generate_daily_context(
+        day="2087-05-10",
+        transcript_segments=[
+            {
+                "segment_id": "seg_1",
+                "evidence_id": "ev_1",
+                "text": "音频必须本地处理。",
+                "local_raw_path": "/private/audio/TX02_MIC001_20870510_173550_orig.wav",
+                "raw_audio_path": "/private/audio/raw.wav",
+                "audio_path": "/private/audio/work.wav",
+            }
+        ],
+    )
+
+    sent = json.loads(capture.read_text(encoding="utf-8"))
+    serialized = json.dumps(sent, ensure_ascii=False)
+    assert "raw_audio_path" not in serialized
+    assert "local_raw_path" not in serialized
+    assert "audio_path" not in serialized
+    assert ".wav" not in serialized.lower()
+
+
 def test_command_llm_adapter_accepts_design_evidence_refs_field(tmp_path: Path) -> None:
     script = tmp_path / "fake_llm.py"
     script.write_text(
