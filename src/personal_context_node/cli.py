@@ -1030,29 +1030,31 @@ def _process_status(*, data_dir: Path, obsidian_vault: Path) -> None:
 @app.command(name="process-retry")
 def process_retry(
     task_id: str = typer.Option(..., help="Task id to reset to pending."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _process_retry(task_id=task_id, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _process_retry(task_id=task_id, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 @process_app.command(name="retry")
 def process_retry_group(
     task_id: str = typer.Option(..., help="Task id to reset to pending."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _process_retry(task_id=task_id, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _process_retry(task_id=task_id, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
-def _process_retry(*, task_id: str, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _process_retry(*, task_id: str, config_path: Path | None, data_dir: Path | None, obsidian_vault: Path | None) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = retry_task(config=config, task_id=task_id)
     typer.echo(f"task_id={result.task_id} status={result.status}")
 
@@ -1062,9 +1064,10 @@ def process_rerun(
     task_type: str = typer.Option(..., help="Task type to rerun, e.g. asr."),
     target_type: str = typer.Option(..., help="Task target type, e.g. audio_chunk."),
     target_id: str = typer.Option(..., help="Task target id."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
@@ -1072,6 +1075,7 @@ def process_rerun(
         task_type=task_type,
         target_type=target_type,
         target_id=target_id,
+        config_path=config_path,
         data_dir=data_dir,
         obsidian_vault=obsidian_vault,
     )
@@ -1082,9 +1086,10 @@ def process_rerun_group(
     task_type: str = typer.Option(..., help="Task type to rerun, e.g. asr."),
     target_type: str = typer.Option(..., help="Task target type, e.g. audio_chunk."),
     target_id: str = typer.Option(..., help="Task target id."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
@@ -1092,6 +1097,7 @@ def process_rerun_group(
         task_type=task_type,
         target_type=target_type,
         target_id=target_id,
+        config_path=config_path,
         data_dir=data_dir,
         obsidian_vault=obsidian_vault,
     )
@@ -1102,10 +1108,11 @@ def _process_rerun(
     task_type: str,
     target_type: str,
     target_id: str,
-    data_dir: Path,
-    obsidian_vault: Path,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = rerun_task(config=config, task_type=task_type, target_type=target_type, target_id=target_id)
     typer.echo(f"task_id={result.task_id} created={result.created} status=pending")
 
