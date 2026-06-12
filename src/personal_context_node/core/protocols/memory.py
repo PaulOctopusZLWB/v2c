@@ -97,6 +97,10 @@ class MemoryCard(BaseModel):
     def reject_local_person_subject_id(self) -> "MemoryCard":
         if self.subject.type == "person" and self.subject.id.startswith("per_"):
             raise ValueError("shared memory cards cannot expose local person id in subject")
+        if self.subject.type == "person" and not (
+            self.subject.id.startswith("did:key:") or self.subject.id.startswith("alias_")
+        ):
+            raise ValueError("shared memory cards require an indirect person reference")
         return self
 
     @model_validator(mode="after")

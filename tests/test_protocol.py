@@ -94,6 +94,29 @@ def test_memory_card_rejects_local_person_subject_id() -> None:
         raise AssertionError("MemoryCard accepted a local per_* person id in shared subject")
 
 
+def test_memory_card_rejects_opaque_person_subject_id() -> None:
+    try:
+        MemoryCard(
+            card_id="mem_opaque_person_subject",
+            owner_did="did:key:test-owner",
+            claim_type="fact",
+            claim="Person A prefers async status updates.",
+            subject=SubjectRef(type="person", id="person_external_123", label="Person A"),
+            evidence_refs=[
+                EvidenceRef(
+                    evidence_id="ev_opaque_person_subject",
+                    source_type="transcript_segment",
+                    source_id="seg_opaque_person_subject",
+                    quote="Person A prefers async status updates.",
+                )
+            ],
+        )
+    except ValueError as exc:
+        assert "indirect person reference" in str(exc)
+    else:
+        raise AssertionError("MemoryCard accepted a non-DID, non-alias person subject id")
+
+
 def test_memory_card_rejects_local_person_token_in_claim() -> None:
     try:
         MemoryCard(
