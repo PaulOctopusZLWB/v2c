@@ -134,31 +134,31 @@ def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> Archi
                 expected_sha256=row["sha256"],
             )
             if not result.verified:
+                _upsert_archive_record(
+                    conn,
+                    target_type="audio_file",
+                    target_id=str(row["audio_file_id"]),
+                    audio_file_id=str(row["audio_file_id"]),
+                    source_path=source_path,
+                    archive_path=result.archive_path,
+                    sha256=str(row["sha256"]),
+                    status="pending",
+                    verified=0,
+                    last_error=result.reason or "archive verification failed",
+                )
                 pending += 1
                 continue
-            archived_at = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                """
-                insert into archive_records (
-                  archive_record_id, target_type, target_id, audio_file_id,
-                  source_path, archive_path, sha256, status, verified, archived_at,
-                  created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    f"arc_{uuid4().hex}",
-                    "audio_file",
-                    row["audio_file_id"],
-                    row["audio_file_id"],
-                    str(source_path),
-                    str(result.archive_path),
-                    row["sha256"],
-                    "verified",
-                    1,
-                    archived_at,
-                    archived_at,
-                    archived_at,
-                ),
+            _upsert_archive_record(
+                conn,
+                target_type="audio_file",
+                target_id=str(row["audio_file_id"]),
+                audio_file_id=str(row["audio_file_id"]),
+                source_path=source_path,
+                archive_path=result.archive_path,
+                sha256=str(row["sha256"]),
+                status="verified",
+                verified=1,
+                last_error=None,
             )
             conn.execute("update audio_files set status = 'archived' where audio_file_id = ?", (row["audio_file_id"],))
             archived += 1
@@ -392,9 +392,13 @@ def _upsert_archive_record(
     *,
     target_type: str,
     target_id: str,
+    audio_file_id: str | None = None,
     source_path: Path,
     archive_path: Path,
     sha256: str,
+    status: str = "verified",
+    verified: int = 1,
+    last_error: str | None = None,
 ) -> None:
     archived_at = datetime.now(timezone.utc).isoformat()
     conn.execute(
@@ -402,12 +406,13 @@ def _upsert_archive_record(
         insert into archive_records (
           archive_record_id, target_type, target_id, audio_file_id,
           source_path, archive_path, sha256, status, verified, archived_at,
-          created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          last_error, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(target_type, target_id, archive_path) do update set
           sha256 = excluded.sha256,
           status = excluded.status,
           verified = excluded.verified,
+          last_error = excluded.last_error,
           archived_at = excluded.archived_at,
           updated_at = excluded.updated_at
         """,
@@ -415,13 +420,14 @@ def _upsert_archive_record(
             f"arc_{uuid4().hex}",
             target_type,
             target_id,
-            None,
+            audio_file_id,
             str(source_path),
             str(archive_path),
             sha256,
-            "verified",
-            1,
+            status,
+            verified,
             archived_at,
+            last_error,
             archived_at,
             archived_at,
         ),

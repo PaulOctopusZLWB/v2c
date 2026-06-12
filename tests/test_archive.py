@@ -9,6 +9,7 @@ from personal_context_node.adapters.archive.local_filesystem import LocalFilesys
 from personal_context_node.archive import archive_completed_audio, cleanup_archived_audio, mark_cleanup_eligible_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef, create_signed_event
+from personal_context_node.core.ports.archive import ArchiveResult
 from personal_context_node.signed_event_store import insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -78,11 +79,67 @@ def test_archive_unavailable_does_not_mark_audio_archived(tmp_path: Path) -> Non
     conn = connect(config.database_path)
     try:
         audio = fetch_all(conn, "select status from audio_files")
-        records = fetch_all(conn, "select verified from archive_records")
+        records = fetch_all(conn, "select status, verified, last_error from archive_records")
     finally:
         conn.close()
     assert audio == [{"status": "imported"}]
-    assert records == []
+    assert records == [{"status": "pending", "verified": 0, "last_error": "archive root unavailable"}]
+
+
+def test_archive_completed_audio_records_pending_error_when_archive_rejects_file(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(b"raw audio bytes")
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="imported")
+
+    result = archive_completed_audio(config=config, archive=RejectingArchive(root=tmp_path / "nas"))
+
+    assert result.files_archived == 0
+    assert result.files_pending == 1
+    conn = connect(config.database_path)
+    try:
+        audio = fetch_all(conn, "select status from audio_files")
+        records = fetch_all(
+            conn,
+            "select target_type, target_id, archive_path, status, verified, last_error from archive_records",
+        )
+    finally:
+        conn.close()
+    assert audio == [{"status": "imported"}]
+    assert records == [
+        {
+            "target_type": "audio_file",
+            "target_id": "aud_test",
+            "archive_path": str(tmp_path / "nas" / "audio" / "raw" / "2087-05-10" / "sample.wav"),
+            "status": "pending",
+            "verified": 0,
+            "last_error": "permission denied",
+        }
+    ]
+
+
+def test_archive_completed_audio_retries_pending_audio_record_to_verified(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(b"raw audio bytes")
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="imported")
+    archive_root = tmp_path / "nas"
+
+    first = archive_completed_audio(config=config, archive=RejectingArchive(root=archive_root))
+    second = archive_completed_audio(config=config, archive=LocalFilesystemArchiveAdapter(root=archive_root))
+
+    assert first.files_pending == 1
+    assert second.files_archived == 1
+    conn = connect(config.database_path)
+    try:
+        audio = fetch_all(conn, "select status from audio_files")
+        records = fetch_all(conn, "select status, verified, last_error from archive_records")
+    finally:
+        conn.close()
+    assert audio == [{"status": "archived"}]
+    assert records == [{"status": "verified", "verified": 1, "last_error": None}]
 
 
 def test_archive_completed_audio_only_processes_imported_audio(tmp_path: Path) -> None:
@@ -125,6 +182,24 @@ def test_local_filesystem_archive_adapter_verifies_existing_archive(tmp_path: Pa
     assert mismatch.reason == "hash mismatch"
     assert missing.verified is False
     assert missing.reason == "archive file missing"
+
+
+def test_local_filesystem_archive_adapter_returns_unverified_on_copy_error(tmp_path: Path) -> None:
+    archive_root = tmp_path / "archive-root-file"
+    archive_root.write_text("not a directory", encoding="utf-8")
+    source = tmp_path / "sample.wav"
+    source.write_bytes(b"raw audio bytes")
+    adapter = LocalFilesystemArchiveAdapter(root=archive_root)
+
+    result = adapter.archive_file(
+        source_path=source,
+        relative_path=Path("audio/raw/sample.wav"),
+        expected_sha256=_sha256(source),
+    )
+
+    assert result.verified is False
+    assert result.archive_path == archive_root / "audio" / "raw" / "sample.wav"
+    assert result.reason
 
 
 def test_cleanup_archived_audio_removes_only_verified_retained_local_files(tmp_path: Path) -> None:
@@ -328,6 +403,17 @@ def _write_raw(config: AppConfig, filename: str, content: bytes) -> Path:
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path.write_bytes(content)
     return raw_path
+
+
+class RejectingArchive:
+    def __init__(self, *, root: Path) -> None:
+        self.root = root
+
+    def archive_file(self, *, source_path: Path, relative_path: Path, expected_sha256: str) -> ArchiveResult:
+        return ArchiveResult(archive_path=self.root / relative_path, verified=False, reason="permission denied")
+
+    def verify_file(self, *, archive_path: Path, expected_sha256: str) -> ArchiveResult:
+        return ArchiveResult(archive_path=archive_path, verified=False, reason="permission denied")
 
 
 def _copy_archive(archive_root: Path, source_path: Path) -> Path:

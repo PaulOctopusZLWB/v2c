@@ -16,9 +16,12 @@ class LocalFilesystemArchiveAdapter:
         if self.require_existing_root and not self.root.exists():
             return ArchiveResult(archive_path=self.root / relative_path, verified=False, reason="archive root unavailable")
         target_path = self.root / relative_path
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, target_path)
-        return self.verify_file(archive_path=target_path, expected_sha256=expected_sha256)
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, target_path)
+            return self.verify_file(archive_path=target_path, expected_sha256=expected_sha256)
+        except OSError as exc:
+            return ArchiveResult(archive_path=target_path, verified=False, reason=str(exc))
 
     def verify_file(self, *, archive_path: Path, expected_sha256: str) -> ArchiveResult:
         if not archive_path.exists():
