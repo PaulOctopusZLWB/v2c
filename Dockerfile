@@ -9,6 +9,6 @@ COPY config ./config
 COPY SYSTEM_DESIGN_CN.md ARCHITECTURE.md IMPLEMENTATION_PLAN.md ./
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
-RUN if [ "$PCN_INSTALL_FUNASR" = "true" ]; then uv pip install --python .venv/bin/python funasr modelscope; fi
+RUN if [ "$PCN_INSTALL_FUNASR" = "true" ]; then uv sync --frozen --no-dev --extra funasr; fi
 
 ENTRYPOINT ["uv", "run", "--frozen", "--no-dev", "pcn"]

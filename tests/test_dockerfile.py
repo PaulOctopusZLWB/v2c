@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 
 def test_dockerfile_includes_wrapper_scripts() -> None:
@@ -15,7 +16,17 @@ def test_dockerfile_can_optionally_install_funasr_runtime() -> None:
 
     assert "ARG PCN_INSTALL_FUNASR=false" in dockerfile
     assert 'if [ "$PCN_INSTALL_FUNASR" = "true" ]' in dockerfile
-    assert "uv pip install --python .venv/bin/python funasr modelscope" in dockerfile
+    assert "uv sync --frozen --no-dev --extra funasr" in dockerfile
+    assert "uv pip install" not in dockerfile
+
+
+def test_pyproject_declares_funasr_optional_extra() -> None:
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+
+    assert pyproject["project"]["optional-dependencies"]["funasr"] == [
+        "funasr>=1.2.0",
+        "modelscope>=1.14.0",
+    ]
 
 
 def test_compose_exposes_funasr_build_arg() -> None:
