@@ -145,14 +145,15 @@ def doctor_cmd(
 @app.command()
 def run_first_milestone(
     source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     confirm_first_candidate: bool = typer.Option(False, help="Confirm the first generated candidate for smoke tests."),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = run_first_milestone_pipeline(
         config=config,
         source_dir=source_dir,

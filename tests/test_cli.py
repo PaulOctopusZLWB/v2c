@@ -58,6 +58,33 @@ def test_run_first_milestone_cli_writes_daily_note(tmp_path: Path) -> None:
     assert (vault / "10_Daily" / "2025-06-10.md").exists()
 
 
+def test_run_first_milestone_cli_uses_config_path(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    data = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-first-milestone",
+            "--config",
+            str(config_path),
+            "--source-dir",
+            str(source),
+            "--confirm-first-candidate",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "imported_files=1" in result.output
+    assert (vault / "10_Daily" / "2025-06-10.md").exists()
+    assert (data / "db" / "personal_context.sqlite").exists()
+
+
 def test_preprocess_cli_creates_audio_chunks(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
