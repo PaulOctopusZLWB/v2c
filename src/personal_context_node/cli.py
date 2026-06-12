@@ -11,6 +11,7 @@ from personal_context_node.adapters.asr.command import CommandASRAdapter
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.file_import.local_directory import LocalDirectoryFileImportAdapter
 from personal_context_node.adapters.llm.command import CommandLLMAdapter
+from personal_context_node.adapters.llm.mock import MockLLMAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.command import CommandVADAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
@@ -1308,8 +1309,10 @@ def _build_asr(
 
 
 def _build_llm(*, llm_backend: str, llm_command: str | None):
-    if llm_backend in {"rule_based", "mock"}:
+    if llm_backend == "rule_based":
         return RuleBasedLLMAdapter()
+    if llm_backend == "mock":
+        return MockLLMAdapter()
     if llm_backend == "command":
         if not llm_command:
             raise typer.BadParameter("--llm-command is required when --llm-backend command")

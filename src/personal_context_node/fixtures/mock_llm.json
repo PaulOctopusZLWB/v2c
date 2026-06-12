@@ -1,0 +1,38 @@
+{
+  "daily_context": {
+    "summary": "fixture 模拟 LLM 日报",
+    "todos": ["fixture 待办"],
+    "facts": ["fixture 事实"],
+    "inferences": [
+      {
+        "type": "inference",
+        "text": "fixture 推断",
+        "confidence": 0.72
+      }
+    ],
+    "memory_candidates": [
+      {
+        "candidate_claim": "fixture 模拟 LLM 记忆候选",
+        "claim_type": "observation",
+        "confidence": 0.88
+      }
+    ]
+  },
+  "session_summary": {
+    "headline": "fixture 模拟 LLM session headline",
+    "summary": "fixture 模拟 LLM session summary",
+    "topics": ["fixture"],
+    "decisions": [
+      {
+        "text": "fixture decision"
+      }
+    ],
+    "todos": [
+      {
+        "text": "fixture todo",
+        "owner": "self"
+      }
+    ],
+    "open_questions": []
+  }
+}
