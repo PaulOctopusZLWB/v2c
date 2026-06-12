@@ -8,6 +8,7 @@ import personal_context_node.core.protocols.memory as protocol
 from personal_context_node.core.protocols.memory import (
     EvidenceRef,
     EventSignature,
+    MemoryAnnotation,
     MemoryCard,
     SignedEvent,
     SubjectRef,
@@ -91,6 +92,68 @@ def test_memory_card_rejects_local_person_subject_id() -> None:
         assert "local person id" in str(exc)
     else:
         raise AssertionError("MemoryCard accepted a local per_* person id in shared subject")
+
+
+def test_memory_card_rejects_local_person_token_in_claim() -> None:
+    try:
+        MemoryCard(
+            card_id="mem_local_person_claim",
+            owner_did="did:key:test-owner",
+            claim_type="fact",
+            claim="per_local_guest prefers async status updates.",
+            subject=SubjectRef(type="person", id="alias_mem_local_person_claim_p1", label="Person A"),
+            evidence_refs=[
+                EvidenceRef(
+                    evidence_id="ev_local_person_claim",
+                    source_type="transcript_segment",
+                    source_id="seg_local_person_claim",
+                    quote="Person A prefers async status updates.",
+                )
+            ],
+        )
+    except ValueError as exc:
+        assert "local person token" in str(exc)
+    else:
+        raise AssertionError("MemoryCard accepted a local per_* token in claim")
+
+
+def test_memory_card_rejects_local_person_token_in_evidence_summary() -> None:
+    try:
+        MemoryCard(
+            card_id="mem_local_person_summary",
+            owner_did="did:key:test-owner",
+            claim_type="fact",
+            claim="Person A prefers async status updates.",
+            subject=SubjectRef(type="person", id="alias_mem_local_person_summary_p1", label="Person A"),
+            evidence_refs=[
+                EvidenceRef(
+                    evidence_id="ev_local_person_summary",
+                    source_type="transcript_segment",
+                    source_id="seg_local_person_summary",
+                    quote="Person A prefers async status updates.",
+                    summary="Derived from per_local_guest transcript.",
+                )
+            ],
+        )
+    except ValueError as exc:
+        assert "local person token" in str(exc)
+    else:
+        raise AssertionError("MemoryCard accepted a local per_* token in evidence summary")
+
+
+def test_memory_annotation_rejects_local_person_token_in_body() -> None:
+    try:
+        MemoryAnnotation(
+            annotation_id="ann_local_person_body",
+            target_card_id="mem_local_person_body",
+            author="did:key:test-owner",
+            annotation_type="comment",
+            body="per_local_guest disputed this wording.",
+        )
+    except ValueError as exc:
+        assert "local person token" in str(exc)
+    else:
+        raise AssertionError("MemoryAnnotation accepted a local per_* token in body")
 
 
 def test_manual_memory_card_allows_empty_evidence() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -25,6 +26,7 @@ ClaimType = Literal[
 AnnotationType = Literal["confirm", "dispute", "comment", "supersede_reference"]
 MemoryCardSourceType = Literal["confirmed_generated", "manual"]
 SUPPORTED_VISIBILITY_TYPES = {"private", "public", "direct", "group"}
+LOCAL_PERSON_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])per_[A-Za-z0-9_]+(?![A-Za-z0-9])")
 
 
 class SubjectRef(BaseModel):
@@ -97,6 +99,13 @@ class MemoryCard(BaseModel):
             raise ValueError("shared memory cards cannot expose local person id in subject")
         return self
 
+    @model_validator(mode="after")
+    def reject_local_person_tokens(self) -> "MemoryCard":
+        _reject_local_person_token(self.claim, "claim")
+        for evidence_ref in self.evidence_refs:
+            _reject_local_person_token(evidence_ref.summary, "evidence summary")
+        return self
+
 
 def _normalize_visibility(value: object) -> dict[str, str]:
     if isinstance(value, str):
@@ -128,6 +137,16 @@ class MemoryAnnotation(BaseModel):
     annotation_type: AnnotationType
     body: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @model_validator(mode="after")
+    def reject_local_person_tokens(self) -> "MemoryAnnotation":
+        _reject_local_person_token(self.body, "annotation body")
+        return self
+
+
+def _reject_local_person_token(value: str | None, field_name: str) -> None:
+    if value and LOCAL_PERSON_TOKEN_RE.search(value):
+        raise ValueError(f"shared protocol {field_name} cannot expose local person token")
 
 
 class MemoryAnnotationRevocation(BaseModel):
