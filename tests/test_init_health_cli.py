@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
@@ -87,6 +89,33 @@ def test_health_cli_reports_ok_for_initialized_workspace(tmp_path) -> None:
             str(vault),
         ],
     )
+
+    assert result.exit_code == 0, result.output
+    assert "status=ok" in result.output
+    assert "database=ok" in result.output
+    assert "obsidian_vault=ok" in result.output
+
+
+def test_health_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    runner = CliRunner()
+    init_result = runner.invoke(
+        app,
+        [
+            "init",
+            "--data-dir",
+            str(data_dir),
+            "--obsidian-vault",
+            str(vault),
+            "--config-path",
+            str(config_path),
+        ],
+    )
+    assert init_result.exit_code == 0, init_result.output
+
+    result = runner.invoke(app, ["health", "--config", str(config_path)])
 
     assert result.exit_code == 0, result.output
     assert "status=ok" in result.output

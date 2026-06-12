@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
@@ -67,3 +69,47 @@ def test_doctor_cli_reports_warning_when_failed_tasks_exist(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "status=warning" in result.output
     assert "failed_tasks=1" in result.output
+
+
+def test_doctor_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    source_dir = tmp_path / "sample_data"
+    archive_root = tmp_path / "archive"
+    config_path = tmp_path / "config" / "local.toml"
+    source_dir.mkdir()
+    archive_root.mkdir()
+    runner = CliRunner()
+    init_result = runner.invoke(
+        app,
+        [
+            "init",
+            "--data-dir",
+            str(data_dir),
+            "--obsidian-vault",
+            str(vault),
+            "--config-path",
+            str(config_path),
+        ],
+    )
+    assert init_result.exit_code == 0, init_result.output
+
+    result = runner.invoke(
+        app,
+        [
+            "doctor",
+            "--config",
+            str(config_path),
+            "--source-dir",
+            str(source_dir),
+            "--archive-root",
+            str(archive_root),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "status=ok" in result.output
+    assert "database=ok" in result.output
+    assert "obsidian_vault=ok" in result.output
+    assert "source_dir=ok" in result.output
+    assert "archive_root=ok" in result.output
