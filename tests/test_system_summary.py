@@ -57,6 +57,23 @@ def test_system_summary_cli_prints_daily_operational_summary(tmp_path) -> None:
     assert "signed_events=1" in result.output
 
 
+def test_system_summary_cli_uses_config_path(tmp_path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    _insert_summary_inputs(config)
+
+    result = CliRunner().invoke(app, ["system-summary", "--config", str(config_path), "--day", "2087-05-10"])
+
+    assert result.exit_code == 0, result.output
+    assert "day=2087-05-10" in result.output
+    assert "jobs_total=2" in result.output
+    assert "signed_events=1" in result.output
+
+
 def test_daily_system_summary_counts_audio_files_by_recorded_day_not_import_day(tmp_path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)

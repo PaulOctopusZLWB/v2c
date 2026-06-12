@@ -591,30 +591,32 @@ def archive_mark_cleanup_eligible_group(
 
 @app.command(name="archive-status")
 def archive_status(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     limit: int = typer.Option(20, min=1, help="Maximum rows to print."),
 ) -> None:
-    _archive_status(data_dir=data_dir, obsidian_vault=obsidian_vault, limit=limit)
+    _archive_status(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault, limit=limit)
 
 
 @archive_app.command(name="status")
 def archive_status_group(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     limit: int = typer.Option(20, min=1, help="Maximum rows to print."),
 ) -> None:
-    _archive_status(data_dir=data_dir, obsidian_vault=obsidian_vault, limit=limit)
+    _archive_status(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault, limit=limit)
 
 
-def _archive_status(*, data_dir: Path, obsidian_vault: Path, limit: int) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _archive_status(*, config_path: Path | None, data_dir: Path | None, obsidian_vault: Path | None, limit: int) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     for row in archive_status_rows(config=config, limit=limit):
         typer.echo(
             " ".join(
@@ -933,14 +935,15 @@ def _memory_import(
 
 @app.command(name="job-status")
 def job_status(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     limit: int = typer.Option(20, min=1, help="Maximum rows to print."),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     rows = job_status_rows(config=config, limit=limit)
     for row in rows:
         typer.echo(
@@ -958,14 +961,15 @@ def job_status(
 
 @app.command(name="system-summary")
 def system_summary(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     day: str = typer.Option(..., help="Day to summarize, formatted as YYYY-MM-DD."),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     summary = daily_system_summary(config=config, day=day)
     typer.echo(
         " ".join(
@@ -988,28 +992,30 @@ def system_summary(
 
 @app.command(name="process-status")
 def process_status(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _process_status(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _process_status(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 @process_app.command(name="status")
 def process_status_group(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _process_status(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _process_status(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
-def _process_status(*, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _process_status(*, config_path: Path | None, data_dir: Path | None, obsidian_vault: Path | None) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     for row in process_status_rows(config=config):
         typer.echo(
             " ".join(
@@ -1298,11 +1304,12 @@ def _build_llm(*, llm_backend: str, llm_command: str | None):
 @app.command(name="daily-status")
 def daily_status(
     day: str = typer.Option(..., help="Daily report day in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     typer.echo(f"day={day} status={get_daily_report_status(config=config, day=day)}")

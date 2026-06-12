@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
@@ -179,3 +181,19 @@ def test_process_status_group_cli_lists_tasks(tmp_path) -> None:
     assert "task_type=vad" in result.output
     assert "target_id=aud_1" in result.output
     assert "status=pending" in result.output
+
+
+def test_process_status_group_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    enqueue_task(config=config, task_type="vad", target_type="audio_file", target_id="aud_configured")
+
+    result = CliRunner().invoke(app, ["process", "status", "--config", str(config_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "task_type=vad" in result.output
+    assert "target_id=aud_configured" in result.output

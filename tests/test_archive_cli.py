@@ -238,6 +238,35 @@ def test_archive_status_group_cli_lists_archived_records(tmp_path: Path) -> None
     assert "status=verified" in result.output
 
 
+def test_archive_status_group_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(b"raw audio bytes")
+    archive_path = tmp_path / "nas" / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(raw_path.read_bytes())
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="archived")
+    _insert_archive_record(
+        config.database_path,
+        source_path=raw_path,
+        archive_path=archive_path,
+        sha256=_sha256(archive_path),
+        archived_at="2087-05-01T00:00:00+00:00",
+    )
+
+    result = CliRunner().invoke(app, ["archive", "status", "--config", str(config_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "archive_record_id=arc_test" in result.output
+    assert "status=verified" in result.output
+
+
 def _insert_audio(database_path: Path, raw_path: Path, sha256: str, *, status: str = "imported") -> None:
     conn = connect(database_path)
     try:
