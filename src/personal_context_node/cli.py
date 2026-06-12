@@ -522,8 +522,8 @@ def archive(
     archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     require_existing_root: bool = typer.Option(False, help="Treat a missing archive root as unavailable."),
@@ -544,8 +544,8 @@ def archive_run_group(
     archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     require_existing_root: bool = typer.Option(False, help="Treat a missing archive root as unavailable."),
@@ -565,8 +565,8 @@ def archive_cleanup_group(
     archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
@@ -586,8 +586,8 @@ def archive_mark_cleanup_eligible_group(
     archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
@@ -651,7 +651,7 @@ def _archive_run(
     archive_root: Path | None,
     config_path: Path | None,
     data_dir: Path | None,
-    obsidian_vault: Path,
+    obsidian_vault: Path | None,
     require_existing_root: bool,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)

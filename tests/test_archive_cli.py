@@ -42,6 +42,27 @@ def test_archive_cli_archives_imported_audio(tmp_path: Path) -> None:
     assert (archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav").exists()
 
 
+def test_archive_cli_does_not_override_config_vault_when_no_vault_option(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"[paths]\ndata_dir = '{tmp_path / 'data'}'\nobsidian_vault = '{tmp_path / 'vault'}'\n",
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_archive_run(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("personal_context_node.cli._archive_run", fake_archive_run)
+
+    result = CliRunner().invoke(app, ["archive", "--config", str(config_path)])
+
+    assert result.exit_code == 0, result.output
+    assert captured["config_path"] == config_path
+    assert captured["obsidian_vault"] is None
+
+
 def test_archive_run_group_cli_archives_imported_audio(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
