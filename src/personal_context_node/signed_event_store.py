@@ -77,6 +77,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     verified = verify_signed_event(event, public_key)
     trust_status = _trusted_or_rejected_status(conn, event=event, public_key=public_key)
     event_hash = event.event_hash
+    if trust_status == "trusted" and _reject_owner_sequence_fork(conn, event=event):
+        trust_status = "rejected"
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
     conn.execute(
@@ -121,6 +123,50 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     if trust_status == "trusted":
         _apply_trusted_event(conn, event=event)
         _promote_dangling_successors(conn, predecessor=event)
+
+
+def _reject_owner_sequence_fork(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
+    existing = conn.execute(
+        """
+        select event_hash
+        from signed_events
+        where owner_id = ?
+          and owner_sequence = ?
+          and trust_status = 'trusted'
+          and event_hash != ?
+        """,
+        (event.owner_id, event.owner_sequence, event.event_hash),
+    ).fetchone()
+    if existing is None:
+        return False
+    conn.execute(
+        """
+        update signed_events
+        set trust_status = 'rejected'
+        where owner_id = ?
+          and owner_sequence = ?
+          and trust_status = 'trusted'
+        """,
+        (event.owner_id, event.owner_sequence),
+    )
+    _rebuild_materialized_views(conn)
+    return True
+
+
+def _rebuild_materialized_views(conn: sqlite3.Connection) -> None:
+    conn.execute("delete from memory_annotations")
+    conn.execute("delete from memory_cards")
+    conn.execute("delete from identity_profiles")
+    rows = conn.execute(
+        """
+        select raw_event_json
+        from signed_events
+        where trust_status = 'trusted'
+        order by owner_sequence, event_hash
+        """,
+    ).fetchall()
+    for row in rows:
+        _apply_trusted_event(conn, event=SignedEvent.model_validate_json(str(row["raw_event_json"])))
 
 
 def _apply_trusted_event(conn: sqlite3.Connection, *, event: SignedEvent) -> None:

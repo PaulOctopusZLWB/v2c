@@ -315,6 +315,39 @@ def test_memory_verify_rejects_owner_sequence_forks(tmp_path: Path) -> None:
     assert cards == []
 
 
+def test_insert_signed_event_rejects_owner_sequence_forks_without_materializing(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    first = _memory_card("mem_live_fork_001", "Use signed events.")
+    second = _memory_card("mem_live_fork_002", "Use hash chains.")
+    first_event, first_public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=first,
+        signer_did=first.owner_did,
+        owner_sequence=1,
+    )
+    second_event, second_public_key = create_signed_event(
+        event_type="memory_card.created",
+        payload=second,
+        signer_did=second.owner_did,
+        owner_sequence=1,
+    )
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        insert_signed_event(conn, event=first_event, public_key=first_public_key)
+        insert_signed_event(conn, event=second_event, public_key=second_public_key)
+        conn.commit()
+        rows = fetch_all(conn, "select event_hash, trust_status from signed_events order by event_hash")
+        cards = fetch_all(conn, "select card_id from memory_cards order by card_id")
+    finally:
+        conn.close()
+
+    assert {row["event_hash"] for row in rows} == {first_event.event_hash, second_event.event_hash}
+    assert {row["trust_status"] for row in rows} == {"rejected"}
+    assert cards == []
+
+
 def test_memory_verify_keeps_broken_hash_chain_dangling(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
