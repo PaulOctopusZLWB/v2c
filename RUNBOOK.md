@@ -177,6 +177,10 @@ uv run pcn ingest import \
   --source-dir sample_data \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
+uv run pcn ingest import \
+  --config config/local.example.toml \
+  --data-dir .mic-data \
+  --obsidian-vault .mic-vault
 uv run pcn process status \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault
@@ -214,6 +218,8 @@ uv run pcn launchd-write-plists \
   --source-dir sample_data \
   --archive-root .smoke-nas
 ```
+
+The second `ingest import` command auto-discovers mounted devices under `/Volumes` using `[device.dji_mic_3].volume_name_patterns`. The currently verified DJI Mic storage can mount as `/Volumes/NO NAME`; hidden macOS system directories such as `.Trashes` and `.Spotlight-V100` are skipped during recursive audio discovery.
 
 ## Configuration
 

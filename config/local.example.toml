@@ -24,3 +24,11 @@ backend = "mock"
 [archive]
 backend = "filesystem"
 # command = "rsync -a {source_path} {archive_path}"
+
+[device.dji_mic_3]
+enabled = true
+volume_root = "/Volumes"
+# DJI Mic storage may mount as "NO NAME" on macOS.
+volume_name_patterns = ["DJI*", "MIC*", "NO NAME"]
+audio_globs = ["**/*.WAV", "**/*.wav"]
+stable_seconds = 10

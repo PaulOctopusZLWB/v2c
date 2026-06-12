@@ -11,8 +11,9 @@ class DeviceDiscoveryConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = True
+    volume_root: Path = Path("/Volumes")
     root_path: Path | None = None
-    volume_name_patterns: tuple[str, ...] = ("DJI*",)
+    volume_name_patterns: tuple[str, ...] = ("DJI*", "MIC*", "NO NAME")
     audio_globs: tuple[str, ...] = ("**/*.WAV", "**/*.wav")
     stable_seconds: int = 10
 
@@ -179,6 +180,7 @@ def _optional_resolve_path(base_dir: Path, value: object | None) -> Path | None:
 def _device_config(base_dir: Path, raw: dict[str, Any]) -> DeviceDiscoveryConfig:
     return DeviceDiscoveryConfig(
         enabled=raw.get("enabled", DeviceDiscoveryConfig.model_fields["enabled"].default),
+        volume_root=_resolve_path(base_dir, raw.get("volume_root", DeviceDiscoveryConfig.model_fields["volume_root"].default)),
         root_path=_optional_resolve_path(base_dir, raw.get("root_path")),
         volume_name_patterns=tuple(raw.get("volume_name_patterns", DeviceDiscoveryConfig.model_fields["volume_name_patterns"].default)),
         audio_globs=tuple(raw.get("audio_globs", DeviceDiscoveryConfig.model_fields["audio_globs"].default)),

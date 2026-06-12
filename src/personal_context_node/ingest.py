@@ -15,7 +15,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from personal_context_node.config import AppConfig
-from personal_context_node.core.ports.file_import import FileImportPort, ImportedRawAudio
+from personal_context_node.core.ports.file_import import FileImportPort, ImportedRawAudio, SourceAudioFile
 from personal_context_node.storage.sqlite import connect, initialize
 from personal_context_node.tasks import enqueue_task_in_conn
 
@@ -150,6 +150,8 @@ def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: Ap
     imported = 0
     for device in importer.discover_devices():
         for source in importer.discover_audio_files(device):
+            if _source_audio_exists(conn, source):
+                continue
             stable_source = importer.wait_until_stable(source, stable_seconds=config.dji_mic_3.stable_seconds)
             raw_audio = importer.copy_to_raw_store(stable_source, config.raw_audio_dir)
             if _raw_audio_exists(conn, raw_audio):
@@ -180,6 +182,20 @@ def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: Ap
             enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
             imported += 1
     return imported
+
+
+def _source_audio_exists(conn: sqlite3.Connection, source: SourceAudioFile) -> bool:
+    existing = conn.execute(
+        """
+        select 1
+        from audio_files
+        where source_path = ?
+          and source_size_bytes = ?
+          and source_mtime_ns = ?
+        """,
+        (str(source.source_path), source.size_bytes, source.mtime_ns),
+    ).fetchone()
+    return existing is not None
 
 
 def _raw_audio_exists(conn: sqlite3.Connection, raw_audio: ImportedRawAudio) -> bool:

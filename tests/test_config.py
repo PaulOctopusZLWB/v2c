@@ -70,6 +70,7 @@ cross_midnight_policy = "start_date"
 
 [device.dji_mic_3]
 enabled = true
+volume_root = "Volumes"
 root_path = "fixtures/fake_dji"
 volume_name_patterns = ["DJI*", "MIC*"]
 audio_globs = ["**/*.WAV", "**/*.wav"]
@@ -119,6 +120,7 @@ stable_seconds = 10
     assert config.session_gap_minutes == 45
     assert config.session_cross_midnight_policy == "start_date"
     assert config.dji_mic_3.enabled is True
+    assert config.dji_mic_3.volume_root == tmp_path / "config" / "Volumes"
     assert config.dji_mic_3.root_path == tmp_path / "config" / "fixtures" / "fake_dji"
     assert config.dji_mic_3.volume_name_patterns == ("DJI*", "MIC*")
     assert config.dji_mic_3.audio_globs == ("**/*.WAV", "**/*.wav")
@@ -145,3 +147,4 @@ def test_app_config_defaults_match_mock_first_slice() -> None:
     assert config.vad_backend == "mock"
     assert config.asr_backend == "mock"
     assert config.llm_backend == "mock"
+    assert "NO NAME" in config.dji_mic_3.volume_name_patterns

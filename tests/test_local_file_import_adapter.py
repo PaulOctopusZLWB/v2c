@@ -62,6 +62,44 @@ def test_local_directory_file_import_adapter_filters_devices_by_volume_name_patt
     assert [device.root_path for device in devices] == [dji_root]
 
 
+def test_local_directory_file_import_adapter_discovers_devices_from_volume_root(tmp_path: Path) -> None:
+    volume_root = tmp_path / "Volumes"
+    mic_root = volume_root / "NO NAME"
+    other_root = volume_root / "USB_DRIVE"
+    mic_root.mkdir(parents=True)
+    other_root.mkdir()
+    adapter = LocalDirectoryFileImportAdapter(
+        device_roots=[],
+        device_label="DJI Mic 3",
+        volume_name_patterns=["NO NAME"],
+        volume_root=volume_root,
+    )
+
+    devices = adapter.discover_devices()
+
+    assert [device.root_path for device in devices] == [mic_root]
+
+
+def test_local_directory_file_import_adapter_skips_hidden_system_audio_directories(tmp_path: Path) -> None:
+    device_root = tmp_path / "NO NAME"
+    real_audio = device_root / "TX_MIC001" / "TX02_MIC013_20870511_190910_orig.wav"
+    trash_audio = device_root / ".Trashes" / "501" / "TX02_MIC014_20870511_191010_orig.wav"
+    spotlight_audio = device_root / ".Spotlight-V100" / "TX02_MIC015_20870511_192010_orig.wav"
+    _write_tiny_wav(real_audio)
+    _write_tiny_wav(trash_audio)
+    _write_tiny_wav(spotlight_audio)
+    adapter = LocalDirectoryFileImportAdapter(
+        device_roots=[device_root],
+        device_label="DJI Mic 3",
+        audio_globs=["**/*.wav"],
+        volume_name_patterns=["NO NAME"],
+    )
+
+    sources = adapter.discover_audio_files(adapter.discover_devices()[0])
+
+    assert [source.source_path for source in sources] == [real_audio]
+
+
 def _write_tiny_wav(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:

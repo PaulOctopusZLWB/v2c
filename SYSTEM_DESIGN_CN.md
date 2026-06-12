@@ -1881,7 +1881,8 @@ identity_dir = "~/.personal-context-node"
 
 [device.dji_mic_3]
 enabled = true
-volume_name_patterns = ["DJI*", "MIC*"]
+volume_root = "/Volumes"
+volume_name_patterns = ["DJI*", "MIC*", "NO NAME"]
 audio_globs = ["**/*.WAV", "**/*.wav"]
 stable_seconds = 10
 
@@ -1968,8 +1969,8 @@ pcn memory verify
 
 | 项 | 核实方法 | 影响 |
 | --- | --- | --- |
-| 挂载卷名 | 插入设备后记录 `/Volumes` | S1 设备发现 |
-| 文件目录结构 | `find /Volumes/...` | audio glob |
+| 挂载卷名 | 已核实 macOS 下当前设备挂载为 `/Volumes/NO NAME` | S1 设备发现 |
+| 文件目录结构 | 已核实录音位于 `/Volumes/NO NAME/TX_MIC001_20870510_173550/*.wav`，`.Trashes` 下存在回收站副本必须跳过 | audio glob |
 | 文件格式 | `ffprobe` | 音频预处理 |
 | 采样率/位深/声道 | `ffprobe` | 转码参数 |
 | 长录音切分规则 | 连续录音测试 | session 归组 |

@@ -121,6 +121,7 @@ def _config_text(config: AppConfig) -> str:
             "",
             "[device.dji_mic_3]",
             f"enabled = {str(config.dji_mic_3.enabled).lower()}",
+            f'volume_root = "{config.dji_mic_3.volume_root}"',
             _optional_toml_path("root_path", config.dji_mic_3.root_path),
             f"volume_name_patterns = {_toml_string_list(config.dji_mic_3.volume_name_patterns)}",
             f"audio_globs = {_toml_string_list(config.dji_mic_3.audio_globs)}",

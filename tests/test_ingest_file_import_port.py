@@ -58,6 +58,32 @@ def test_import_audio_files_from_port_registers_stable_sources_and_enqueues_vad(
     assert tasks == [{"task_type": "vad", "target_type": "audio_file", "status": "pending"}]
 
 
+def test_import_audio_files_from_port_skips_existing_source_snapshot_before_copy(tmp_path: Path) -> None:
+    device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
+    source = SourceAudioFile(
+        device=device,
+        source_path=device.root_path / "TX02_MIC001_20870510_173550_orig.wav",
+        size_bytes=1024,
+        mtime_ns=123456789,
+    )
+    importer = RecordingFileImporter(device=device, source=source)
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        dji_mic_3=DeviceDiscoveryConfig(root_path=device.root_path, stable_seconds=7),
+    )
+    assert import_audio_files_from_port(config=config, importer=importer).imported_files == 1
+    importer.calls.clear()
+
+    result = import_audio_files_from_port(config=config, importer=importer)
+
+    assert result.imported_files == 0
+    assert importer.calls == [
+        "discover_devices",
+        "discover_audio_files:dev_dji",
+    ]
+
+
 class RecordingFileImporter:
     def __init__(self, *, device: MountedDevice, source: SourceAudioFile) -> None:
         self.device = device

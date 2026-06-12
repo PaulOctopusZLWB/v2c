@@ -54,7 +54,8 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert 'signing_key_path = "' in config_text
     assert "[device.dji_mic_3]" in config_text
     assert "enabled = true" in config_text
-    assert 'volume_name_patterns = ["DJI*"]' in config_text
+    assert 'volume_root = "/Volumes"' in config_text
+    assert 'volume_name_patterns = ["DJI*", "MIC*", "NO NAME"]' in config_text
     assert 'audio_globs = ["**/*.WAV", "**/*.wav"]' in config_text
     assert "stable_seconds = 10" in config_text
     assert "[audio]" in config_text
