@@ -1,0 +1,26 @@
+[paths]
+data_dir = "/data"
+obsidian_vault = "/obsidian"
+nas_archive_root = "/archive"
+
+[vad]
+backend = "funasr"
+model_id = "fsmn-vad"
+threshold = 0.03
+min_speech_ms = 300
+merge_gap_ms = 800
+max_chunk_ms = 30000
+chunk_overlap_ms = 1000
+
+[asr]
+backend = "funasr"
+language = "zh"
+model_name = "sensevoice"
+model_id = "iic/SenseVoiceSmall"
+model_version = "funasr-sensevoice-local"
+
+[llm]
+backend = "mock"
+
+[obsidian]
+edit_grace_seconds = 0

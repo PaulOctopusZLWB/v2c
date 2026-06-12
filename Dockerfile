@@ -5,6 +5,7 @@ ARG PCN_INSTALL_FUNASR=false
 
 COPY src ./src
 COPY scripts ./scripts
+COPY config ./config
 COPY SYSTEM_DESIGN_CN.md ARCHITECTURE.md IMPLEMENTATION_PLAN.md ./
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev

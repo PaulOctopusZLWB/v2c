@@ -492,7 +492,7 @@ The default Docker image keeps the mock-first runtime lightweight and does not i
 
 ```bash
 PCN_INSTALL_FUNASR=true docker compose build
-PCN_INSTALL_FUNASR=true docker compose run --rm personal-context-node doctor --data-dir /data --obsidian-vault /obsidian
+PCN_INSTALL_FUNASR=true docker compose run --rm personal-context-node doctor --config config/funasr.example.toml
 ```
 
 The FunASR build path installs `funasr` and `modelscope` into the project `.venv`; model files are still downloaded by the wrapper/runtime according to the model id configuration.
