@@ -106,6 +106,62 @@ def test_process_run_group_cli_accepts_explicit_mock_flag(tmp_path: Path) -> Non
     assert "status=succeeded" in result.output
 
 
+def test_process_run_group_mock_flag_overrides_vad_asr_and_llm_config(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data}"
+obsidian_vault = "{vault}"
+
+[device.dji_mic_3]
+root_path = "{source}"
+volume_name_patterns = ["*"]
+stable_seconds = 0
+
+[vad]
+backend = "energy"
+threshold = 1.0
+max_chunk_ms = 1000
+chunk_overlap_ms = 0
+
+[asr]
+backend = "command"
+command = "python3 missing_asr.py"
+
+[llm]
+backend = "rule_based"
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    ingest_result = runner.invoke(app, ["ingest", "import", "--config", str(config_path)])
+    assert ingest_result.exit_code == 0, ingest_result.output
+    outputs = []
+    for _ in range(10):
+        result = runner.invoke(app, ["process", "run", "--mock", "--config", str(config_path)])
+        assert result.exit_code == 0, result.output
+        outputs.append(result.output)
+        if "status=no_task" in result.output:
+            break
+
+    assert any("task_type=daily_generate" in output for output in outputs)
+    conn = connect(AppConfig.from_toml(config_path).database_path)
+    try:
+        chunks = fetch_all(conn, "select vad_backend from audio_chunks")
+        summaries = fetch_all(conn, "select content_json from summaries where summary_type = 'daily'")
+    finally:
+        conn.close()
+    assert chunks == [{"vad_backend": "MockVADAdapter"}]
+    assert "fixture 模拟 LLM 日报" in summaries[0]["content_json"]
+
+
 def test_process_run_cli_uses_command_vad_backend(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
