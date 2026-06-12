@@ -15,6 +15,7 @@ from personal_context_node.adapters.llm.mock import MockLLMAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.command import CommandVADAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
+from personal_context_node.adapters.vad.mock import MockVADAdapter
 from personal_context_node.archive import (
     archive_completed_audio,
     archive_status_rows,
@@ -272,7 +273,7 @@ def preprocess(
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     vad_threshold: float | None = typer.Option(None, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, command, or funasr."),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, mock, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
 ) -> None:
@@ -1151,7 +1152,7 @@ def process_run(
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     vad_threshold: float | None = typer.Option(None, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, command, or funasr."),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, mock, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
     asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
@@ -1186,7 +1187,7 @@ def process_run_group(
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     vad_threshold: float | None = typer.Option(None, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
-    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, command, or funasr."),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, mock, command, or funasr."),
     vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
     max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
     asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
@@ -1278,6 +1279,8 @@ def _build_vad(
 ):
     if vad_backend == "energy":
         return EnergyVadAdapter(threshold=vad_threshold, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
+    if vad_backend == "mock":
+        return MockVADAdapter()
     if vad_backend == "command":
         if not vad_command:
             raise typer.BadParameter("--vad-command is required when --vad-backend command")
@@ -1285,7 +1288,7 @@ def _build_vad(
     if vad_backend == "funasr":
         command = vad_command.split() if vad_command else ["python3", "scripts/funasr_vad_wrapper.py"]
         return CommandVADAdapter(command=command)
-    raise typer.BadParameter("--vad-backend must be 'energy', 'command', or 'funasr'")
+    raise typer.BadParameter("--vad-backend must be 'energy', 'mock', 'command', or 'funasr'")
 
 
 def _build_asr(
