@@ -80,10 +80,15 @@ class CommandLLMAdapter:
 
 
 def _text_only_segments(transcript_segments: list[dict[str, object]]) -> list[dict[str, object]]:
-    return [
-        {key: value for key, value in segment.items() if key not in RAW_AUDIO_PATH_FIELDS}
-        for segment in transcript_segments
-    ]
+    return [_strip_raw_audio_paths(segment) for segment in transcript_segments]
+
+
+def _strip_raw_audio_paths(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _strip_raw_audio_paths(item) for key, item in value.items() if key not in RAW_AUDIO_PATH_FIELDS}
+    if isinstance(value, list):
+        return [_strip_raw_audio_paths(item) for item in value]
+    return value
 
 
 def _validate_daily_context_payload(payload: object) -> None:

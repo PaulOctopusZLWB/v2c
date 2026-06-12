@@ -90,6 +90,10 @@ print(json.dumps({{
                 "local_raw_path": "/private/audio/TX02_MIC001_20870510_173550_orig.wav",
                 "raw_audio_path": "/private/audio/raw.wav",
                 "audio_path": "/private/audio/work.wav",
+                "metadata": {
+                    "source_path": "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav",
+                    "nested": {"work_audio_path": "/private/work/chk_1.wav"},
+                },
             }
         ],
     )
@@ -99,6 +103,8 @@ print(json.dumps({{
     assert "raw_audio_path" not in serialized
     assert "local_raw_path" not in serialized
     assert "audio_path" not in serialized
+    assert "source_path" not in serialized
+    assert "work_audio_path" not in serialized
     assert ".wav" not in serialized.lower()
 
 
