@@ -125,13 +125,16 @@ def _inference(item: object) -> object:
     if isinstance(item, dict):
         if "text" not in item:
             raise TerminalPortError("LLM inference missing required field: text")
+        inference_type = str(item.get("type", "inference"))
+        if inference_type != "inference":
+            raise TerminalPortError(f"LLM inference type must be inference: {inference_type}")
         if "confidence" not in item:
             raise TerminalPortError("LLM inference missing required field: confidence")
         try:
             confidence = float(item["confidence"])
         except (TypeError, ValueError) as exc:
             raise TerminalPortError("LLM inference confidence must be numeric") from exc
-        return {"type": str(item.get("type", "inference")), "text": str(item["text"]), "confidence": confidence}
+        return {"type": inference_type, "text": str(item["text"]), "confidence": confidence}
     return str(item)
 
 

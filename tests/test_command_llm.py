@@ -116,6 +116,31 @@ print(json.dumps({
     assert context.inferences == [{"type": "inference", "text": "用户关注证据链", "confidence": 0.72}]
 
 
+def test_command_llm_adapter_rejects_non_inference_structured_inference(tmp_path: Path) -> None:
+    script = tmp_path / "bad_inference_type.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "summary": "bad",
+  "todos": [],
+  "facts": [],
+  "inferences": [{"type": "fact", "text": "用户关注证据链", "confidence": 0.72}],
+  "memory_candidates": []
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "inference type" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted a structured inference with non-inference type")
+
+
 def test_command_llm_adapter_generates_session_summary(tmp_path: Path) -> None:
     capture = tmp_path / "session_input.json"
     script = tmp_path / "fake_session_llm.py"
