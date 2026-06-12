@@ -922,6 +922,10 @@ def system_summary(
                 f"tasks_pending={summary.tasks_pending}",
                 f"tasks_failed={summary.tasks_failed}",
                 f"archived_records={summary.archived_records}",
+                f"audio_files_imported={summary.audio_files_imported}",
+                f"transcript_segments={summary.transcript_segments}",
+                f"memory_candidates={summary.memory_candidates}",
+                f"signed_events={summary.signed_events}",
             ]
         )
     )
