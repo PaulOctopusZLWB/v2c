@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
+from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
+from personal_context_node.archive import archive_completed_audio
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.errors import TerminalPortError
@@ -71,6 +73,8 @@ def process_once(
     if task is None:
         task = claim_next_task(config=config, task_type="obsidian_publish", run_id=run_id, lease_seconds=config.task_lease_seconds)
     if task is None:
+        task = claim_next_task(config=config, task_type="archive", run_id=run_id, lease_seconds=config.task_lease_seconds)
+    if task is None:
         return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
 
     try:
@@ -92,6 +96,11 @@ def process_once(
             generate_daily_context(config=config, day=task.target_id, llm=llm_adapter)
         elif task.task_type == "obsidian_publish":
             publish_obsidian_day(config=config, day=task.target_id, source_run_id=run_id)
+        elif task.task_type == "archive":
+            archive_completed_audio(
+                config=config,
+                archive=LocalFilesystemArchiveAdapter(root=config.nas_archive_root),
+            )
         else:
             raise ValueError(f"unsupported task type: {task.task_type}")
         _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)

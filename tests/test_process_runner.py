@@ -10,7 +10,7 @@ from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
 from personal_context_node.pipeline import run_first_milestone
 from personal_context_node.process_runner import process_once
-from personal_context_node.tasks import process_status_rows
+from personal_context_node.tasks import enqueue_task, process_status_rows
 from personal_context_node.storage.sqlite import connect
 
 
@@ -105,6 +105,52 @@ def test_process_once_enqueues_downstream_tasks_with_configured_max_retries(tmp_
     finally:
         conn.close()
     assert [(row["task_type"], row["max_retries"]) for row in rows] == [("asr", 2)]
+
+
+def test_process_once_runs_archive_task(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    _write_voice_wav(source_path)
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        nas_archive_root=tmp_path / "nas" / "PersonalContext",
+    )
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+    conn = connect(config.database_path)
+    try:
+        conn.execute("delete from tasks")
+        conn.commit()
+    finally:
+        conn.close()
+    enqueue_task(config=config, task_type="archive", target_type="archive_scope", target_id="all")
+
+    result = process_once(
+        config=config,
+        run_id="run_archive",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="本地任务转写"),
+        max_chunk_ms=1000,
+    )
+
+    assert result.task_type == "archive"
+    assert result.status == "succeeded"
+    archived_path = config.nas_archive_root / "audio" / "raw" / "2025-06-10" / source_path.name
+    assert archived_path.exists()
+    conn = connect(config.database_path)
+    try:
+        rows = conn.execute(
+            """
+            select af.status, ar.target_type, ar.status as archive_status, ar.verified
+            from audio_files af
+            join archive_records ar on ar.target_id = af.audio_file_id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [(row["status"], row["target_type"], row["archive_status"], row["verified"]) for row in rows] == [
+        ("archived", "audio_file", "verified", 1)
+    ]
 
 
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:
