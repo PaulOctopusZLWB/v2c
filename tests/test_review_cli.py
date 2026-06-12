@@ -55,6 +55,50 @@ def test_review_cli_publishes_and_confirms_checked_candidate(tmp_path: Path) -> 
     assert "signed_events_created=1" in confirm_result.output
 
 
+def test_review_cli_uses_config_path_for_publish_and_confirm(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    _insert_candidate(config.database_path)
+    runner = CliRunner()
+
+    publish_result = runner.invoke(
+        app,
+        [
+            "publish-review",
+            "--config",
+            str(config_path),
+            "--day",
+            "2087-05-10",
+        ],
+    )
+
+    assert publish_result.exit_code == 0, publish_result.output
+    review_path = vault / "30_Memory_Candidates" / "2087-05-10.md"
+    assert str(review_path) in publish_result.output
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+    _mark_review_stable(review_path)
+
+    confirm_result = runner.invoke(
+        app,
+        [
+            "confirm-review",
+            "--config",
+            str(config_path),
+            "--day",
+            "2087-05-10",
+        ],
+    )
+
+    assert confirm_result.exit_code == 0, confirm_result.output
+    assert "candidates_confirmed=1" in confirm_result.output
+    assert "signed_events_created=1" in confirm_result.output
+
+
 def test_obsidian_sync_review_group_cli_confirms_checked_candidate(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_candidate(config.database_path)

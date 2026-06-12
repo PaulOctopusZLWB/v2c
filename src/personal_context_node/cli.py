@@ -360,13 +360,14 @@ def summarize(
 @app.command()
 def publish_review(
     day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     review_path = publish_candidate_review(config=config, day=day)
     typer.echo(f"review_path={review_path}")
 
@@ -413,13 +414,14 @@ def publish_session_notes_cmd(
 @app.command()
 def confirm_review(
     day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _sync_candidate_review(day=day, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _sync_candidate_review(day=day, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 @obsidian_app.command(name="sync-review")
@@ -435,8 +437,14 @@ def obsidian_sync_review_group(
     _confirm_sync_reviews(day=date, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
-def _sync_candidate_review(*, day: str, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _sync_candidate_review(
+    *,
+    day: str,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = confirm_checked_candidates(config=config, day=day)
     typer.echo(
         " ".join(
