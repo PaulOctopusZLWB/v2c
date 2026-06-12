@@ -805,52 +805,80 @@ def _memory_verify(*, config_path: Path | None, data_dir: Path | None, obsidian_
 def memory_export(
     since: str = typer.Option(..., help="Inclusive created_at lower bound, e.g. 2026-06-01."),
     output_path: Path = typer.Option(Path("build/memory-events.jsonl"), help="JSONL export path."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _memory_export(since=since, output_path=output_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _memory_export(
+        since=since,
+        output_path=output_path,
+        config_path=config_path,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+    )
 
 
 @memory_app.command(name="export")
 def memory_export_group(
     since: str = typer.Option(..., help="Inclusive created_at lower bound, e.g. 2026-06-01."),
     output_path: Path = typer.Option(Path("build/memory-events.jsonl"), help="JSONL export path."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _memory_export(since=since, output_path=output_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _memory_export(
+        since=since,
+        output_path=output_path,
+        config_path=config_path,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+    )
 
 
 @app.command(name="memory-import")
 def memory_import(
     input_path: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL signed event import path."),
     public_key: str = typer.Option(..., help="Base64url Ed25519 public key for verifying imported events."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _memory_import(input_path=input_path, public_key=public_key, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _memory_import(
+        input_path=input_path,
+        public_key=public_key,
+        config_path=config_path,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+    )
 
 
 @memory_app.command(name="import")
 def memory_import_group(
     input_path: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL signed event import path."),
     public_key: str = typer.Option(..., help="Base64url Ed25519 public key for verifying imported events."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _memory_import(input_path=input_path, public_key=public_key, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _memory_import(
+        input_path=input_path,
+        public_key=public_key,
+        config_path=config_path,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+    )
 
 
 @memory_app.command(name="confirm-sync")
@@ -866,14 +894,28 @@ def memory_confirm_sync_group(
     _confirm_sync_reviews(day=date, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
-def _memory_export(*, since: str, output_path: Path, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _memory_export(
+    *,
+    since: str,
+    output_path: Path,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = export_memory_events(config=config, output_path=output_path, since=since)
     typer.echo(f"events_exported={result.events_exported} output_path={result.output_path}")
 
 
-def _memory_import(*, input_path: Path, public_key: str, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _memory_import(
+    *,
+    input_path: Path,
+    public_key: str,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = import_memory_events(config=config, input_path=input_path, public_key=public_key)
     typer.echo(
         " ".join(

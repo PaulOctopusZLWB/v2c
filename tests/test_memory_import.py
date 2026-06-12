@@ -249,6 +249,39 @@ def test_memory_import_group_cli_imports_jsonl(tmp_path: Path) -> None:
     assert "trusted_events=1" in result.output
 
 
+def test_memory_import_group_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    input_path, public_key = _write_import_event(tmp_path, owner_did="did:key:configured-import")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "memory",
+            "import",
+            "--config",
+            str(config_path),
+            "--input-path",
+            str(input_path),
+            "--public-key",
+            public_key,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "events_imported=1" in result.output
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    conn = connect(config.database_path)
+    try:
+        events = fetch_all(conn, "select event_type, trust_status from signed_events")
+    finally:
+        conn.close()
+    assert events == [{"event_type": "memory_card.created", "trust_status": "trusted"}]
+
+
 def _write_import_event(tmp_path: Path, *, owner_did: str) -> tuple[Path, str]:
     card = MemoryCard(
         card_id=f"mem_{owner_did.rsplit(':', 1)[-1].replace('-', '_')}",

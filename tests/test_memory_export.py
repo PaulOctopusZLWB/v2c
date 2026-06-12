@@ -146,6 +146,39 @@ def test_memory_export_group_cli_writes_jsonl(tmp_path: Path) -> None:
     assert output_path.exists()
 
 
+def test_memory_export_group_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    review_path.write_text(review_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+    _mark_review_stable(review_path)
+    confirm_checked_candidates(config=config, day="2087-05-10")
+    output_path = tmp_path / "configured-events.jsonl"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "memory",
+            "export",
+            "--config",
+            str(config_path),
+            "--since",
+            "2000-01-01",
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "events_exported=1" in result.output
+    assert output_path.exists()
+
+
 def _insert_candidate(database_path: Path) -> None:
     conn = connect(database_path)
     try:
