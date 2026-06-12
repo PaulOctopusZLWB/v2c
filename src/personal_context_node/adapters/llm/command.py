@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import get_args
 
@@ -17,6 +18,7 @@ from personal_context_node.core.ports.llm import (
 
 ALLOWED_CLAIM_TYPES = set(get_args(ClaimType))
 RAW_AUDIO_PATH_FIELDS = {"audio_path", "local_raw_path", "raw_audio_path", "source_path", "work_audio_path"}
+RAW_AUDIO_PATH_VALUE_RE = re.compile(r"[/\\][^\s\"']+\.(?:wav|wave|m4a|mp3|flac|aac)\b", re.IGNORECASE)
 
 
 class CommandLLMAdapter:
@@ -88,6 +90,8 @@ def _strip_raw_audio_paths(value: object) -> object:
         return {key: _strip_raw_audio_paths(item) for key, item in value.items() if key not in RAW_AUDIO_PATH_FIELDS}
     if isinstance(value, list):
         return [_strip_raw_audio_paths(item) for item in value]
+    if isinstance(value, str) and RAW_AUDIO_PATH_VALUE_RE.search(value):
+        return RAW_AUDIO_PATH_VALUE_RE.sub("[redacted]", value)
     return value
 
 

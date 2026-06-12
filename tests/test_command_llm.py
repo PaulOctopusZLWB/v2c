@@ -93,6 +93,7 @@ print(json.dumps({{
                 "metadata": {
                     "source_path": "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav",
                     "nested": {"work_audio_path": "/private/work/chk_1.wav"},
+                    "note": "copied from /private/audio/hidden.wav",
                 },
             }
         ],
@@ -223,6 +224,11 @@ print(json.dumps({{
                 "end_ms": 1000,
                 "text": "继续本地 ASR。",
                 "evidence_id": "ev_1",
+                "local_raw_path": "/private/audio/TX02_MIC001_20870510_173550_orig.wav",
+                "metadata": {
+                    "raw_audio_path": "/private/audio/raw.wav",
+                    "nested": {"source_path": "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav"},
+                },
             }
         ],
     )
@@ -240,8 +246,11 @@ print(json.dumps({{
     sent = json.loads(capture.read_text(encoding="utf-8"))
     assert sent["task"] == "session_summary"
     assert sent["session_id"] == "ses_1"
-    assert "local_raw_path" not in json.dumps(sent)
-    assert ".wav" not in json.dumps(sent).lower()
+    serialized = json.dumps(sent, ensure_ascii=False)
+    assert "local_raw_path" not in serialized
+    assert "raw_audio_path" not in serialized
+    assert "source_path" not in serialized
+    assert ".wav" not in serialized.lower()
 
 
 def test_command_llm_adapter_rejects_incomplete_session_summary(tmp_path: Path) -> None:
