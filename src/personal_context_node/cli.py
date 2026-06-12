@@ -43,7 +43,7 @@ from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
-from personal_context_node.process_runner import process_once
+from personal_context_node.process_runner import preview_next_process_task, process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
 from personal_context_node.system_summary import daily_system_summary
 from personal_context_node.tasks import process_status_rows, rerun_task, retry_task
@@ -1161,6 +1161,7 @@ def process_run(
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
     mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use mock VAD, ASR, and LLM backends."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the next runnable task without mutating state."),
 ) -> None:
     _process_run(
         config_path=config_path,
@@ -1175,6 +1176,7 @@ def process_run(
         llm_backend="mock" if mock and llm_backend is None else llm_backend,
         llm_command=llm_command,
         mock_text=mock_text,
+        dry_run=dry_run,
     )
 
 
@@ -1196,6 +1198,7 @@ def process_run_group(
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
     mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use mock VAD, ASR, and LLM backends."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the next runnable task without mutating state."),
 ) -> None:
     _process_run(
         config_path=config_path,
@@ -1210,6 +1213,7 @@ def process_run_group(
         llm_backend="mock" if mock and llm_backend is None else llm_backend,
         llm_command=llm_command,
         mock_text=mock_text,
+        dry_run=dry_run,
     )
 
 
@@ -1227,8 +1231,21 @@ def _process_run(
     llm_backend: str | None,
     llm_command: str | None,
     mock_text: str | None,
+    dry_run: bool,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    if dry_run:
+        result = preview_next_process_task(config=config)
+        typer.echo(
+            " ".join(
+                [
+                    f"task_id={result.task_id or ''}",
+                    f"task_type={result.task_type or ''}",
+                    f"status={result.status}",
+                ]
+            )
+        )
+        return
     vad = _build_vad(
         vad_backend=vad_backend or config.vad_backend,
         vad_command=vad_command,

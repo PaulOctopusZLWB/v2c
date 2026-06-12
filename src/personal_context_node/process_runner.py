@@ -48,6 +48,15 @@ PIPELINE = (
     PipelineEdge("summarize_session", "daily_generate", "date_key", lambda conn, config, target_id: _ready_daily_generate_dates_in_conn(conn, session_id=target_id)),
     PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
 )
+PROCESS_TASK_ORDER = (
+    "vad",
+    "asr",
+    "session_derive",
+    "summarize_session",
+    "daily_generate",
+    "obsidian_publish",
+    "archive",
+)
 
 
 def process_once(
@@ -61,19 +70,11 @@ def process_once(
 ) -> ProcessOnceResult:
     llm_adapter = llm or RuleBasedLLMAdapter()
     reclaim_expired_tasks(config=config, lease_seconds=config.task_lease_seconds)
-    task = claim_next_task(config=config, task_type="vad", run_id=run_id, lease_seconds=config.task_lease_seconds)
-    if task is None:
-        task = claim_next_task(config=config, task_type="asr", run_id=run_id, lease_seconds=config.task_lease_seconds)
-    if task is None:
-        task = claim_next_task(config=config, task_type="session_derive", run_id=run_id, lease_seconds=config.task_lease_seconds)
-    if task is None:
-        task = claim_next_task(config=config, task_type="summarize_session", run_id=run_id, lease_seconds=config.task_lease_seconds)
-    if task is None:
-        task = claim_next_task(config=config, task_type="daily_generate", run_id=run_id, lease_seconds=config.task_lease_seconds)
-    if task is None:
-        task = claim_next_task(config=config, task_type="obsidian_publish", run_id=run_id, lease_seconds=config.task_lease_seconds)
-    if task is None:
-        task = claim_next_task(config=config, task_type="archive", run_id=run_id, lease_seconds=config.task_lease_seconds)
+    task = None
+    for task_type in PROCESS_TASK_ORDER:
+        task = claim_next_task(config=config, task_type=task_type, run_id=run_id, lease_seconds=config.task_lease_seconds)
+        if task is not None:
+            break
     if task is None:
         return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
 
@@ -110,6 +111,34 @@ def process_once(
             set_daily_report_status(config=config, day=task.target_id, status="failed", error=str(exc))
         fail_task(config=config, task_id=task.task_id, error=str(exc), terminal=isinstance(exc, TerminalPortError))
         raise
+
+
+def preview_next_process_task(*, config: AppConfig) -> ProcessOnceResult:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        for task_type in PROCESS_TASK_ORDER:
+            row = conn.execute(
+                """
+                select task_id, task_type
+                from tasks
+                where task_type = ?
+                  and (
+                    status = 'pending'
+                    or (status = 'failed_retryable' and retry_count < max_retries)
+                  )
+                  and available_at <= ?
+                order by available_at, priority, created_at
+                limit 1
+                """,
+                (task_type, now),
+            ).fetchone()
+            if row is not None:
+                return ProcessOnceResult(task_id=row["task_id"], task_type=row["task_type"], status="dry_run")
+        return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
+    finally:
+        conn.close()
 
 
 def _succeed_task_and_enqueue_downstream(

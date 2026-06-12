@@ -106,6 +106,43 @@ def test_process_run_group_cli_accepts_explicit_mock_flag(tmp_path: Path) -> Non
     assert "status=succeeded" in result.output
 
 
+def test_process_run_group_cli_dry_run_reports_next_task_without_mutating_state(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "process",
+            "run",
+            "--dry-run",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "task_type=vad" in result.output
+    assert "status=dry_run" in result.output
+
+    conn = connect(config.database_path)
+    try:
+        job_rows = fetch_all(conn, "select run_id from job_runs where job_name = 'process-run'")
+        task_rows = fetch_all(
+            conn,
+            "select status, attempt_count, claimed_by_run_id from tasks where task_type = 'vad'",
+        )
+    finally:
+        conn.close()
+
+    assert job_rows == []
+    assert task_rows == [{"status": "pending", "attempt_count": 0, "claimed_by_run_id": None}]
+
+
 def test_process_run_group_mock_flag_overrides_vad_asr_and_llm_config(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
