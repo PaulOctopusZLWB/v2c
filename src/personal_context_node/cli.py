@@ -339,6 +339,63 @@ def transcribe(
     )
 
 
+@app.command(name="model-smoke")
+def model_smoke(
+    audio_path: Path = typer.Option(
+        ...,
+        "--audio-path",
+        exists=True,
+        dir_okay=False,
+        help="Audio file to smoke through configured VAD and ASR adapters.",
+    ),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, mock, command, or funasr."),
+    vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
+    asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
+    asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
+    mock_text: str | None = typer.Option(None, help="Text emitted by the mock ASR adapter."),
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    vad = _build_vad(
+        vad_backend=vad_backend or config.vad_backend,
+        vad_command=vad_command or config.vad_command,
+        vad_threshold=config.vad_threshold,
+        merge_gap_ms=config.merge_gap_ms,
+        min_speech_ms=config.min_speech_ms,
+        model_id=config.vad_model_id,
+        model_revision=config.vad_model_revision,
+    )
+    asr = _build_asr(
+        asr_backend=asr_backend or config.asr_backend,
+        asr_command=asr_command or config.asr_command,
+        mock_text=mock_text,
+        language=config.asr_language,
+        model_name=config.asr_model_name,
+        model_id=config.asr_model_id,
+        model_version=config.asr_model_version,
+    )
+    vad_result = vad.detect(audio_path)
+    asr_result = asr.transcribe(audio_path)
+    typer.echo(
+        " ".join(
+            [
+                "status=ok",
+                f"vad_backend={vad_result.backend}",
+                f"speech_ranges={len(vad_result.ranges)}",
+                f"asr_backend={asr_result.backend}",
+                f"model_name={asr_result.model_name}",
+                f"model_version={asr_result.model_version}",
+                f"transcript_segments={len(asr_result.segments)}",
+            ]
+        )
+    )
+
+
 @app.command()
 def summarize(
     day: str = typer.Option(..., help="Recording day in YYYY-MM-DD format."),

@@ -39,6 +39,7 @@ class AppConfig(BaseModel):
     owner_did: str = "did:key:local-owner"
     identity_key_path: Path | None = None
     vad_backend: str = "mock"
+    vad_command: str | None = None
     vad_threshold: float = 0.03
     vad_model_id: str = "fsmn-vad"
     vad_model_revision: str | None = None
@@ -91,6 +92,7 @@ class AppConfig(BaseModel):
             "owner_did": identity.get("owner_did", cls.model_fields["owner_did"].default),
             "identity_key_path": _optional_resolve_path(base_dir, identity.get("signing_key_path")),
             "vad_backend": vad.get("backend", cls.model_fields["vad_backend"].default),
+            "vad_command": vad.get("command", cls.model_fields["vad_command"].default),
             "vad_threshold": vad.get("threshold", cls.model_fields["vad_threshold"].default),
             "vad_model_id": vad.get("model_id", cls.model_fields["vad_model_id"].default),
             "vad_model_revision": vad.get("model_revision", cls.model_fields["vad_model_revision"].default),

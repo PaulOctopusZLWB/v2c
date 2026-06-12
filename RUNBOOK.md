@@ -314,6 +314,27 @@ uv run pcn transcribe \
 
 The wrapper lazy-loads `funasr.AutoModel` and emits the same normalized JSON contract consumed by `CommandASRAdapter`. Core pipeline code does not import FunASR directly.
 
+To smoke both configured model adapters against one real recording before queueing jobs:
+
+```bash
+uv run pcn model-smoke \
+  --audio-path sample_data/TX01_MIC001_20260607_155539_orig.wav \
+  --data-dir .smoke-data \
+  --obsidian-vault .smoke-vault \
+  --vad-backend mock \
+  --asr-backend mock
+```
+
+With the FunASR runtime installed, use the example config:
+
+```bash
+uv run pcn model-smoke \
+  --config config/funasr.example.toml \
+  --audio-path sample_data/TX01_MIC001_20260607_155539_orig.wav
+```
+
+Expected output includes `status=ok`, `speech_ranges=<n>`, `model_name=<name>`, and `transcript_segments=<n>`.
+
 Before running real FunASR jobs, run `pcn doctor --config config/local.toml`. When either `[vad].backend` or `[asr].backend` is `funasr`, the output includes `funasr_runtime=ok` only if the active uv/Docker Python environment can import `funasr`; otherwise it reports `funasr_runtime=missing` and returns `status=warning`.
 
 Expected rule-based summary smoke output after mock ASR:
