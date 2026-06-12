@@ -79,6 +79,8 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
     event_hash = event.event_hash
     if trust_status == "trusted" and _reject_owner_sequence_fork(conn, event=event):
         trust_status = "rejected"
+    if trust_status == "trusted" and _reject_object_version_fork(conn, event=event):
+        trust_status = "rejected"
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
     conn.execute(
@@ -148,6 +150,34 @@ def _reject_owner_sequence_fork(conn: sqlite3.Connection, *, event: SignedEvent)
           and trust_status = 'trusted'
         """,
         (event.owner_id, event.owner_sequence),
+    )
+    _rebuild_materialized_views(conn)
+    return True
+
+
+def _reject_object_version_fork(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
+    existing = conn.execute(
+        """
+        select event_hash
+        from signed_events
+        where object_id = ?
+          and object_version = ?
+          and trust_status = 'trusted'
+          and event_hash != ?
+        """,
+        (event.object_id, event.object_version, event.event_hash),
+    ).fetchone()
+    if existing is None:
+        return False
+    conn.execute(
+        """
+        update signed_events
+        set trust_status = 'rejected'
+        where object_id = ?
+          and object_version = ?
+          and trust_status = 'trusted'
+        """,
+        (event.object_id, event.object_version),
     )
     _rebuild_materialized_views(conn)
     return True
