@@ -98,7 +98,6 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
         if not is_file_stable(source_path):
             continue
         source_stat = source_path.stat()
-        sha256 = _sha256(source_path)
         existing = conn.execute(
             """
             select 1
@@ -106,9 +105,8 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
             where source_path = ?
               and source_size_bytes = ?
               and source_mtime_ns = ?
-              and sha256 = ?
             """,
-            (str(source_path), source_stat.st_size, source_stat.st_mtime_ns, sha256),
+            (str(source_path), source_stat.st_size, source_stat.st_mtime_ns),
         ).fetchone()
         if existing:
             continue
@@ -120,6 +118,7 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
         local_path = _raw_store_path(local_dir=local_dir, source_path=source_path, audio_file_id=audio_file_id)
         shutil.copy2(source_path, local_path)
         _repair_wav_file_metadata(local_path, recorded_at)
+        sha256 = _sha256(local_path)
         mark_raw_evidence_read_only(local_path)
         conn.execute(
             """

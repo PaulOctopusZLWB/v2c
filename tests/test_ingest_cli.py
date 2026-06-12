@@ -352,9 +352,34 @@ def test_ingest_import_repairs_copied_raw_metadata(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     local_path = config.raw_audio_dir / "2025-06-11" / "TX02_MIC013_20870511_190910_orig.wav"
     bext_date, bext_time, ixml_date = _read_wav_metadata_tags(local_path)
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select sha256 from audio_files")
+    finally:
+        conn.close()
     assert bext_date == "2025-06-11"
     assert bext_time == "19:09:10"
     assert ixml_date == "2025-06-11"
+    assert rows == [{"sha256": ingest_module._sha256(local_path)}]
+
+
+def test_ingest_import_does_not_duplicate_repaired_source_snapshot(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    source_audio = source / "TX02_MIC013_20870511_190910_orig.wav"
+    _write_test_wav_with_bwf_metadata(source_audio)
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    first = import_audio_files(config=config, source_dir=source)
+    second = import_audio_files(config=config, source_dir=source)
+
+    assert first.imported_files == 1
+    assert second.imported_files == 0
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select count(*) as n from audio_files")
+    finally:
+        conn.close()
+    assert rows == [{"n": 1}]
 
 
 def test_ingest_import_accepts_ieee_float_wav_duration(tmp_path: Path) -> None:
