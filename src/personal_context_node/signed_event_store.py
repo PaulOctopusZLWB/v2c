@@ -238,6 +238,10 @@ def _promote_dangling_successors(conn: sqlite3.Connection, *, predecessor: Signe
         public_key = str(row["public_key"])
         verified = verify_signed_event(event, public_key)
         trust_status = _trusted_or_rejected_status(conn, event=event, public_key=public_key)
+        if trust_status == "trusted" and _reject_owner_sequence_fork(conn, event=event):
+            trust_status = "rejected"
+        if trust_status == "trusted" and _reject_object_version_fork(conn, event=event):
+            trust_status = "rejected"
         conn.execute(
             "update signed_events set trust_status = ?, verified = ? where event_hash = ?",
             (trust_status, 1 if verified else 0, event.event_hash),
