@@ -120,6 +120,18 @@ class MissingInferenceConfidenceLLM:
         )
 
 
+class NonInferenceTypeLLM:
+    def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
+        return DailyContext(
+            day=day,
+            summary="summary",
+            todos=[],
+            facts=[],
+            inferences=[{"type": "fact", "text": "用户关注证据链", "confidence": 0.72}],
+            memory_candidates=[],
+        )
+
+
 class SummaryOnlyLLM:
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, str]]) -> DailyContext:
         return DailyContext(
@@ -514,6 +526,29 @@ def test_generate_daily_context_rejects_structured_inference_without_confidence(
         assert "LLM inference missing confidence" in str(exc)
     else:
         raise AssertionError("structured inference without confidence was accepted")
+
+    conn = connect(config.database_path)
+    try:
+        candidates = fetch_all(conn, "select candidate_id from memory_candidates")
+        summaries = fetch_all(conn, "select summary_id from summaries")
+        legacy_summaries = fetch_all(conn, "select day from daily_summaries")
+    finally:
+        conn.close()
+    assert candidates == []
+    assert summaries == []
+    assert legacy_summaries == []
+
+
+def test_generate_daily_context_rejects_non_inference_structured_inference(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_transcript(config.database_path)
+
+    try:
+        generate_daily_context(config=config, day="2087-05-10", llm=NonInferenceTypeLLM())
+    except ValueError as exc:
+        assert "LLM inference type" in str(exc)
+    else:
+        raise AssertionError("structured inference with non-inference type was accepted")
 
     conn = connect(config.database_path)
     try:

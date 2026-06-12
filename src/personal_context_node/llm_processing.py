@@ -186,6 +186,9 @@ def _inference_items(inferences: list[object]) -> list[dict[str, object]]:
     for inference in inferences:
         if isinstance(inference, dict):
             text = str(inference.get("text") or inference.get("claim") or "").strip()
+            inference_type = str(inference.get("type", "inference"))
+            if inference_type != "inference":
+                raise ValueError(f"LLM inference type must be inference: {inference_type}")
             if "confidence" not in inference:
                 raise ValueError("LLM inference missing confidence")
             confidence = float(inference["confidence"])
