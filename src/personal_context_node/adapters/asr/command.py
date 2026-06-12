@@ -58,4 +58,5 @@ def _asr_segment(segment: object) -> ASRSegment:
         end_ms=int(segment["end_ms"]),
         confidence=None if segment.get("confidence") is None else float(segment["confidence"]),
         language=str(segment.get("language", "zh") or "zh"),
+        tags=[str(tag) for tag in segment.get("tags", [])],
     )

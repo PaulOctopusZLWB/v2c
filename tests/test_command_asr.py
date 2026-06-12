@@ -70,6 +70,30 @@ print(json.dumps({
     assert result.segments[0].language == "zh"
 
 
+def test_command_asr_adapter_preserves_segment_tags_from_model_wrappers(tmp_path: Path) -> None:
+    chunk = tmp_path / "chunk.wav"
+    chunk.write_bytes(b"fake wav")
+    script = tmp_path / "tagged_asr.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "model_name": "sensevoice",
+  "model_version": "local-test",
+  "segments": [
+    {"text": "Yeah.", "start_ms": 0, "end_ms": 800, "language": "zh", "tags": ["yue", "EMO_UNKNOWN", "Speech", "withitn"]}
+  ]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CommandASRAdapter(command=["python3", str(script)]).transcribe(chunk)
+
+    assert result.segments[0].text == "Yeah."
+    assert result.segments[0].tags == ["yue", "EMO_UNKNOWN", "Speech", "withitn"]
+
+
 def test_command_asr_adapter_reports_invalid_output(tmp_path: Path) -> None:
     chunk = tmp_path / "chunk.wav"
     chunk.write_bytes(b"fake wav")

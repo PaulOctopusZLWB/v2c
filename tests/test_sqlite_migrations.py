@@ -151,6 +151,7 @@ def test_initialize_transcript_segments_schema_tracks_absolute_time_and_indexes(
     assert column_by_name["absolute_end_at"]["type"].lower() == "text"
     assert column_by_name["speaker_cluster_id"]["type"].lower() == "text"
     assert column_by_name["decode_config_json"]["type"].lower() == "text"
+    assert column_by_name["asr_tags_json"]["type"].lower() == "text"
     index_names = {row["name"] for row in indexes}
     assert "idx_segments_session_time" in index_names
     assert "idx_segments_audio_time" in index_names

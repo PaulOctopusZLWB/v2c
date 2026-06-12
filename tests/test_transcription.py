@@ -9,6 +9,7 @@ from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.asr import ASRResult, ASRSegment
 from personal_context_node.pipeline import run_first_milestone
 from personal_context_node.storage.sqlite import connect, fetch_all
 from personal_context_node.transcription import transcribe_pending_chunks
@@ -86,3 +87,54 @@ def test_mock_asr_default_output_comes_from_fixture(tmp_path: Path) -> None:
 
     assert result.segments[0].text == fixture["text"]
     assert result.language == fixture["language"]
+
+
+def test_transcribe_pending_chunks_persists_asr_segment_tags(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+    preprocess_imported_audio(
+        config=config,
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        max_chunk_ms=300,
+    )
+
+    result = transcribe_pending_chunks(config=config, asr=TaggedASRAdapter())
+
+    assert result.segments_created == 3
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            """
+            select text, asr_tags_json
+            from transcript_segments
+            where asr_backend = 'TaggedASRAdapter'
+            order by start_ms
+            """,
+        )
+    finally:
+        conn.close()
+    assert rows[0] == {"text": "Yeah.", "asr_tags_json": '["yue", "EMO_UNKNOWN", "Speech", "withitn"]'}
+
+
+class TaggedASRAdapter:
+    model_name = "tagged-asr"
+    model_version = "test"
+
+    def transcribe(self, audio_path: Path) -> ASRResult:
+        return ASRResult(
+            segments=[
+                ASRSegment(
+                    text="Yeah.",
+                    start_ms=0,
+                    end_ms=300,
+                    language="zh",
+                    tags=["yue", "EMO_UNKNOWN", "Speech", "withitn"],
+                )
+            ],
+            backend=self.__class__.__name__,
+            model_name=self.model_name,
+            model_version=self.model_version,
+        )

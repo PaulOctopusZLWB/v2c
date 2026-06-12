@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -65,11 +66,12 @@ def _normalize_segments(raw_result: Any) -> list[dict[str, object]]:
                 if isinstance(sentence, dict):
                     segments.append(_normalize_sentence(sentence, fallback_text=str(record.get("text", ""))))
         else:
-            text = str(record.get("text", "")).strip()
+            text, tags = _split_text_tags(record.get("text", ""))
             if text:
                 segments.append(
                     {
                         "text": text,
+                        "tags": tags,
                         "start_ms": int(record.get("start", 0) or 0),
                         "end_ms": int(record.get("end", record.get("duration", 0)) or 0),
                         "confidence": _confidence(record),
@@ -82,8 +84,10 @@ def _normalize_segments(raw_result: Any) -> list[dict[str, object]]:
 
 def _normalize_sentence(sentence: dict[str, Any], *, fallback_text: str) -> dict[str, object]:
     start_ms, end_ms = _time_bounds(sentence)
+    text, tags = _split_text_tags(sentence.get("text", fallback_text))
     return {
-        "text": str(sentence.get("text", fallback_text)).strip(),
+        "text": text,
+        "tags": tags,
         "start_ms": start_ms,
         "end_ms": end_ms,
         "confidence": _confidence(sentence),
@@ -103,6 +107,12 @@ def _confidence(record: dict[str, Any]) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _split_text_tags(value: object) -> tuple[str, list[str]]:
+    text = str(value)
+    tags = re.findall(r"<\|([^|>]+)\|>", text)
+    return re.sub(r"<\|[^|>]+\|>", "", text).strip(), tags
 
 
 if __name__ == "__main__":

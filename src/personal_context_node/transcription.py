@@ -65,8 +65,9 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                       segment_id, audio_file_id, chunk_id, start_ms, end_ms,
                       absolute_start_at, absolute_end_at, text,
                       language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend,
-                      model_name, model_version, decode_config_json, asr_run_id, is_active, created_at
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      model_name, model_version, decode_config_json, asr_tags_json,
+                      asr_run_id, is_active, created_at
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         f"seg_{uuid4().hex}",
@@ -86,6 +87,7 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
                         asr_result.model_name,
                         asr_result.model_version,
                         decode_config_json,
+                        json.dumps(segment.tags, ensure_ascii=False, sort_keys=True),
                         asr_run_id,
                         1,
                         datetime.now(timezone.utc).isoformat(),
@@ -111,6 +113,7 @@ def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
         "model_name": "alter table transcript_segments add column model_name text not null default 'mock'",
         "model_version": "alter table transcript_segments add column model_version text not null default 'mock'",
         "decode_config_json": "alter table transcript_segments add column decode_config_json text",
+        "asr_tags_json": "alter table transcript_segments add column asr_tags_json text not null default '[]'",
         "asr_run_id": "alter table transcript_segments add column asr_run_id text",
         "is_active": "alter table transcript_segments add column is_active integer not null default 1",
         "created_at": "alter table transcript_segments add column created_at text not null default ''",

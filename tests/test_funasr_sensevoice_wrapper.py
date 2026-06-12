@@ -22,10 +22,10 @@ class AutoModel:
     def generate(self, input, **kwargs):
         print("funasr generate noise")
         return [{
-            "text": "完整文本",
+            "text": "<|zh|><|EMO_UNKNOWN|><|Speech|><|withitn|>完整文本",
             "sentence_info": [
-                {"text": "第一句", "start": 0, "end": 1200, "spk": "spk0"},
-                {"text": "第二句", "timestamp": [1200, 2400], "speaker": "spk1"},
+                {"text": "<|zh|><|EMO_UNKNOWN|><|Speech|><|withitn|>第一句", "start": 0, "end": 1200, "spk": "spk0"},
+                {"text": "<|yue|><|EMO_UNKNOWN|><|Speech|><|withitn|>Yeah.", "timestamp": [1200, 2400], "speaker": "spk1"},
             ],
         }]
 """,
@@ -58,6 +58,7 @@ class AutoModel:
         "segments": [
             {
                 "text": "第一句",
+                "tags": ["zh", "EMO_UNKNOWN", "Speech", "withitn"],
                 "start_ms": 0,
                 "end_ms": 1200,
                 "confidence": None,
@@ -65,7 +66,8 @@ class AutoModel:
                 "speaker": "spk0",
             },
             {
-                "text": "第二句",
+                "text": "Yeah.",
+                "tags": ["yue", "EMO_UNKNOWN", "Speech", "withitn"],
                 "start_ms": 1200,
                 "end_ms": 2400,
                 "confidence": None,

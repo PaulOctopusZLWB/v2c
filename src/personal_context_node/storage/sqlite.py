@@ -46,6 +46,7 @@ create table if not exists transcript_segments (
   model_name text not null default 'mock',
   model_version text not null default 'mock',
   decode_config_json text,
+  asr_tags_json text not null default '[]',
   asr_run_id text,
   is_active integer not null default 1,
   created_at text not null default ''
@@ -403,6 +404,7 @@ def initialize(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "transcript_segments", "absolute_end_at", "text")
     _ensure_column(conn, "transcript_segments", "speaker_cluster_id", "text")
     _ensure_column(conn, "transcript_segments", "decode_config_json", "text")
+    _ensure_column(conn, "transcript_segments", "asr_tags_json", "text not null default '[]'")
     conn.execute(
         """
         update transcript_segments

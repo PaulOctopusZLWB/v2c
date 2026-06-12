@@ -12,6 +12,7 @@ class ASRSegment:
     end_ms: int
     confidence: float | None = None
     language: str = "zh"
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
