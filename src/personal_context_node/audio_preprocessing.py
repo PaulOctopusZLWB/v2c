@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from personal_context_node.config import AppConfig
-from personal_context_node.core.ports.vad import SpeechRange, VADPort
+from personal_context_node.core.ports.vad import SpeechRange, VADPort, VADResult
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -51,6 +51,13 @@ def preprocess_imported_audio(
         for audio_file in files:
             local_raw_path = Path(audio_file["local_raw_path"])
             vad_result = vad.detect(local_raw_path)
+            _write_vad_audit(
+                config=config,
+                audio_file_id=str(audio_file["audio_file_id"]),
+                source_path=local_raw_path,
+                recorded_day=str(audio_file["recorded_at"])[:10],
+                vad_result=vad_result,
+            )
             for speech_range in vad_result.ranges:
                 ranges_created += 1
                 for chunk_range in _split_range(speech_range, max_chunk_ms=max_chunk_ms, chunk_overlap_ms=chunk_overlap_ms):
@@ -146,6 +153,23 @@ def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, sta
             target.setframerate(config.audio.target_sample_rate_hz)
             target.writeframes(frames)
     return chunk_path
+
+
+def _write_vad_audit(*, config: AppConfig, audio_file_id: str, source_path: Path, recorded_day: str, vad_result: VADResult) -> Path:
+    audit_dir = config.work_audio_dir / recorded_day
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_path = audit_dir / f"{source_path.stem}.vad.json"
+    payload = {
+        "audio_file_id": audio_file_id,
+        "source_path": str(source_path),
+        "backend": vad_result.backend,
+        "backend_version": vad_result.backend_version,
+        "config": vad_result.config,
+        "warnings": vad_result.warnings,
+        "ranges": [{"start_ms": speech_range.start_ms, "end_ms": speech_range.end_ms} for speech_range in vad_result.ranges],
+    }
+    audit_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return audit_path
 
 
 def _convert_pcm_frames(

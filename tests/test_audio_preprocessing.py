@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import wave
 from datetime import datetime, timedelta
@@ -115,6 +116,17 @@ def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path)
     assert chunks[0]["vad_config_json"] == '{"frame_ms": 50, "merge_gap_ms": 100, "min_speech_ms": 150, "threshold": 0.05}'
     assert chunks[0]["created_at"]
     assert all((tmp_path / "data").joinpath(chunk["local_chunk_path"]).exists() for chunk in chunks)
+    audit_path = config.work_audio_dir / "2025-06-10" / "TX02_MIC001_20870510_173550_orig.vad.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit["audio_file_id"]
+    assert audit["source_path"] == str(config.raw_audio_dir / "2025-06-10" / "TX02_MIC001_20870510_173550_orig.wav")
+    assert audit["backend"] == "EnergyVadAdapter"
+    assert audit["backend_version"] is None
+    assert audit["config"] == {"frame_ms": 50, "merge_gap_ms": 100, "min_speech_ms": 150, "threshold": 0.05}
+    assert audit["warnings"] == []
+    assert len(audit["ranges"]) == 1
+    assert audit["ranges"][0]["start_ms"] >= 150
+    assert audit["ranges"][0]["end_ms"] <= 750
 
 
 def test_configured_audio_storage_paths_are_used_by_ingest_and_preprocess(tmp_path: Path) -> None:
