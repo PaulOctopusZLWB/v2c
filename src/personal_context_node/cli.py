@@ -371,13 +371,14 @@ def publish_review(
 @obsidian_app.command(name="publish")
 def obsidian_publish_group(
     date: str = typer.Option(..., "--date", help="Publish date in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = publish_obsidian_day(config=config, day=date)
     typer.echo(
         " ".join(
@@ -421,13 +422,14 @@ def confirm_review(
 @obsidian_app.command(name="sync-review")
 def obsidian_sync_review_group(
     date: str = typer.Option(..., "--date", help="Review date in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _confirm_sync_reviews(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _confirm_sync_reviews(day=date, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 def _sync_candidate_review(*, day: str, data_dir: Path, obsidian_vault: Path) -> None:
@@ -443,8 +445,14 @@ def _sync_candidate_review(*, day: str, data_dir: Path, obsidian_vault: Path) ->
     )
 
 
-def _confirm_sync_reviews(*, day: str, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _confirm_sync_reviews(
+    *,
+    day: str,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
+    config_path: Path | None = None,
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     candidate_result = confirm_checked_candidates(config=config, day=day)
     speaker_result = sync_speaker_review(config=config, day=day)
     typer.echo(
@@ -749,28 +757,30 @@ def launchd_uninstall(
 
 @app.command(name="memory-verify")
 def memory_verify(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _memory_verify(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _memory_verify(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 @memory_app.command(name="verify")
 def memory_verify_group(
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _memory_verify(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _memory_verify(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
-def _memory_verify(*, data_dir: Path, obsidian_vault: Path) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+def _memory_verify(*, config_path: Path | None, data_dir: Path | None, obsidian_vault: Path | None) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     job_run = record_job_run(
         config=config,
         job_name="memory-verify",
@@ -846,13 +856,14 @@ def memory_import_group(
 @memory_app.command(name="confirm-sync")
 def memory_confirm_sync_group(
     date: str = typer.Option(..., "--date", help="Review date in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    _confirm_sync_reviews(day=date, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    _confirm_sync_reviews(day=date, config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
 
 
 def _memory_export(*, since: str, output_path: Path, data_dir: Path, obsidian_vault: Path) -> None:
