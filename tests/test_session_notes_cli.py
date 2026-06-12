@@ -30,6 +30,31 @@ def test_publish_session_notes_cli(tmp_path: Path) -> None:
     assert "notes_written=1" in result.output
 
 
+def test_publish_session_notes_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    _insert_session(config.database_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "publish-session-notes",
+            "--config",
+            str(config_path),
+            "--day",
+            "2087-05-10",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "notes_written=1" in result.output
+    assert (vault / "20_Conversations" / "2087-05-10" / "ses_test.md").exists()
+
+
 def _insert_session(database_path: Path) -> None:
     conn = connect(database_path)
     try:

@@ -400,13 +400,14 @@ def obsidian_publish_group(
 @app.command(name="publish-session-notes")
 def publish_session_notes_cmd(
     day: str = typer.Option(..., help="Session day in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = publish_session_notes(config=config, day=day)
     typer.echo(f"notes_written={result.notes_written}")
 
@@ -481,13 +482,14 @@ def _confirm_sync_reviews(
 @app.command(name="publish-speaker-review")
 def publish_speaker_review_cmd(
     day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     review_path = publish_speaker_review(config=config, day=day)
     typer.echo(f"review_path={review_path}")
 
@@ -495,13 +497,14 @@ def publish_speaker_review_cmd(
 @app.command(name="sync-speaker-review")
 def sync_speaker_review_cmd(
     day: str = typer.Option(..., help="Review day in YYYY-MM-DD format."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
-    config = AppConfig(data_dir=data_dir, obsidian_vault=obsidian_vault)
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = sync_speaker_review(config=config, day=day)
     typer.echo(
         " ".join(

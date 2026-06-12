@@ -53,6 +53,49 @@ def test_speaker_review_cli_publishes_and_syncs(tmp_path: Path) -> None:
     assert "mappings_upserted=1" in sync.output
 
 
+def test_speaker_review_cli_uses_config_path(tmp_path: Path) -> None:
+    data_dir = tmp_path / "configured-data"
+    vault = tmp_path / "configured-vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(f"[paths]\ndata_dir = '{data_dir}'\nobsidian_vault = '{vault}'\n", encoding="utf-8")
+    config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
+    _insert_segment(config.database_path)
+    runner = CliRunner()
+
+    publish = runner.invoke(
+        app,
+        [
+            "publish-speaker-review",
+            "--config",
+            str(config_path),
+            "--day",
+            "2087-05-10",
+        ],
+    )
+
+    assert publish.exit_code == 0, publish.output
+    review_path = vault / "90_System" / "Speaker_Review" / "2087-05-10.md"
+    assert str(review_path) in publish.output
+    review_path.write_text(review_path.read_text(encoding="utf-8").replace("- spk_self: self", "- spk_self: Paul"), encoding="utf-8")
+    edited_at = time.time() - 121
+    os.utime(review_path, (edited_at, edited_at))
+
+    sync = runner.invoke(
+        app,
+        [
+            "sync-speaker-review",
+            "--config",
+            str(config_path),
+            "--day",
+            "2087-05-10",
+        ],
+    )
+
+    assert sync.exit_code == 0, sync.output
+    assert "mappings_upserted=1" in sync.output
+
+
 def _insert_segment(database_path: Path) -> None:
     conn = connect(database_path)
     try:
