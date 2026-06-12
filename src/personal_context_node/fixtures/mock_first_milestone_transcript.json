@@ -1,0 +1,11 @@
+{
+  "segments": [
+    {
+      "text_template": "fixture 模拟转写片段 {index}: 需要生成本地上下文和记忆候选。",
+      "language": "zh",
+      "speaker": "self",
+      "start_ms": 0,
+      "end_ms": 3000
+    }
+  ]
+}

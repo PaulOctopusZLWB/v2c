@@ -145,6 +145,33 @@ def test_first_milestone_uses_injected_llm_subagent_for_e2e(tmp_path: Path) -> N
     assert "subagent 模拟 LLM 日报" in summaries[0]["content_json"]
 
 
+def test_first_milestone_mock_transcript_comes_from_fixture(tmp_path: Path) -> None:
+    fixture_path = Path("src/personal_context_node/fixtures/mock_first_milestone_transcript.json")
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    source_dir = tmp_path / "mounted_dji"
+    _write_tiny_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "PersonalContext")
+
+    run_first_milestone(config=config, source_dir=source_dir)
+
+    db = connect(config.database_path)
+    try:
+        rows = fetch_all(db, "select text, language, speaker, start_ms, end_ms from transcript_segments")
+    finally:
+        db.close()
+
+    expected = fixture["segments"][0]
+    assert rows == [
+        {
+            "text": expected["text_template"].format(index=1),
+            "language": expected["language"],
+            "speaker": expected["speaker"],
+            "start_ms": expected["start_ms"],
+            "end_ms": expected["end_ms"],
+        }
+    ]
+
+
 def test_first_milestone_default_mock_keeps_one_candidate_per_recording_without_exposing_audio_names(tmp_path: Path) -> None:
     source_dir = tmp_path / "mounted_dji"
     _write_tiny_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")

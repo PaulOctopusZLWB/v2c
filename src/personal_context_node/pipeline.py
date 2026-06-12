@@ -4,6 +4,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from importlib.resources import files
 from pathlib import Path
 from uuid import uuid4
 
@@ -77,6 +78,8 @@ def _transcript_days(conn: sqlite3.Connection) -> list[str]:
 
 
 def _mock_transcribe(conn: sqlite3.Connection) -> None:
+    fixture = _mock_transcript_fixture()
+    segment_fixture = fixture["segments"][0]
     rows = fetch_all(
         conn,
         """
@@ -89,8 +92,10 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
     for index, row in enumerate(rows, start=1):
         segment_id = f"seg_{uuid4().hex}"
         chunk_id = f"chk_{segment_id}"
-        absolute_start_at = _absolute_time(str(row["recorded_at"]), 0)
-        absolute_end_at = _absolute_time(str(row["recorded_at"]), 3000)
+        start_ms = int(segment_fixture["start_ms"])
+        end_ms = int(segment_fixture["end_ms"])
+        absolute_start_at = _absolute_time(str(row["recorded_at"]), start_ms)
+        absolute_end_at = _absolute_time(str(row["recorded_at"]), end_ms)
         conn.execute(
             """
             insert into transcript_segments (
@@ -102,17 +107,22 @@ def _mock_transcribe(conn: sqlite3.Connection) -> None:
                 segment_id,
                 row["audio_file_id"],
                 chunk_id,
-                0,
-                3000,
+                start_ms,
+                end_ms,
                 absolute_start_at,
                 absolute_end_at,
-                f"模拟转写片段 {index}: 需要生成本地上下文和记忆候选。",
-                "zh",
-                "self",
+                str(segment_fixture["text_template"]).format(index=index),
+                str(segment_fixture["language"]),
+                str(segment_fixture["speaker"]),
                 f"ev_{segment_id}",
             ),
         )
     conn.commit()
+
+
+def _mock_transcript_fixture() -> dict[str, object]:
+    fixture_path = files("personal_context_node").joinpath("fixtures/mock_first_milestone_transcript.json")
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
 def _absolute_time(recorded_at: str, offset_ms: int) -> str:
