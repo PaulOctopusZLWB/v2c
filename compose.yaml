@@ -1,6 +1,9 @@
 services:
   personal-context-node:
-    build: .
+    build:
+      context: .
+      args:
+        PCN_INSTALL_FUNASR: ${PCN_INSTALL_FUNASR:-false}
     command:
       - run-first-milestone
       - --source-dir
