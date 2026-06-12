@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import wave
 from pathlib import Path
@@ -73,3 +74,15 @@ def test_transcribe_pending_chunks_persists_segments_with_chunk_evidence(tmp_pat
     assert rows[-1]["end_ms"] == chunks[-1]["source_end_ms"]
     assert rows[-1]["absolute_end_at"]
     assert all(chunk["status"] == "transcribed" for chunk in chunks)
+
+
+def test_mock_asr_default_output_comes_from_fixture(tmp_path: Path) -> None:
+    audio_path = tmp_path / "chunk.wav"
+    _write_voice_wav(audio_path)
+    fixture_path = Path("src/personal_context_node/fixtures/mock_asr_transcript.json")
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    result = MockASRAdapter().transcribe(audio_path)
+
+    assert result.segments[0].text == fixture["text"]
+    assert result.language == fixture["language"]

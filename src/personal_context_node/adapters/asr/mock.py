@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import wave
+from importlib.resources import files
 from pathlib import Path
 
 from personal_context_node.core.ports.asr import ASRResult, ASRSegment
@@ -10,9 +12,10 @@ class MockASRAdapter:
     model_name = "mock-asr"
     model_version = "test"
 
-    def __init__(self, *, text: str = "模拟本地转写", language: str = "zh", model_name: str | None = None) -> None:
-        self.text = text
-        self.language = language
+    def __init__(self, *, text: str | None = None, language: str | None = None, model_name: str | None = None) -> None:
+        fixture = _mock_asr_fixture()
+        self.text = text if text is not None else str(fixture["text"])
+        self.language = language if language is not None else str(fixture["language"])
         if model_name is not None:
             self.model_name = model_name
 
@@ -32,3 +35,8 @@ class MockASRAdapter:
             decode_config={"language": self.language, "text": self.text},
             warnings=[],
         )
+
+
+def _mock_asr_fixture() -> dict[str, object]:
+    fixture_path = files("personal_context_node").joinpath("fixtures/mock_asr_transcript.json")
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
