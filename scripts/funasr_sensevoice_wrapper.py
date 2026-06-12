@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -23,7 +24,8 @@ def main() -> int:
         return 2
 
     try:
-        from funasr import AutoModel
+        with contextlib.redirect_stdout(sys.stderr):
+            from funasr import AutoModel
     except ImportError:
         print(
             "FunASR is not installed. Install it in the uv/Docker runtime that runs this wrapper.",
@@ -34,13 +36,14 @@ def main() -> int:
     model_kwargs: dict[str, Any] = {"model": args.model}
     if args.vad_model:
         model_kwargs["vad_model"] = args.vad_model
-    model = AutoModel(**model_kwargs)
-    raw_result = model.generate(
-        input=str(args.audio_path),
-        language=args.language,
-        use_itn=True,
-        batch_size_s=args.batch_size_s,
-    )
+    with contextlib.redirect_stdout(sys.stderr):
+        model = AutoModel(**model_kwargs)
+        raw_result = model.generate(
+            input=str(args.audio_path),
+            language=args.language,
+            use_itn=True,
+            batch_size_s=args.batch_size_s,
+        )
     payload = {
         "model_name": "sensevoice",
         "model_version": args.model_version,

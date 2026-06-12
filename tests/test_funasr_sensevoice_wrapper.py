@@ -12,11 +12,15 @@ def test_funasr_sensevoice_wrapper_normalizes_sentence_info(tmp_path: Path) -> N
     funasr_dir.mkdir(parents=True)
     (funasr_dir / "__init__.py").write_text(
         """
+print("funasr import noise")
+
 class AutoModel:
     def __init__(self, **kwargs):
+        print("funasr init noise")
         self.kwargs = kwargs
 
     def generate(self, input, **kwargs):
+        print("funasr generate noise")
         return [{
             "text": "完整文本",
             "sentence_info": [
@@ -70,16 +74,21 @@ class AutoModel:
             },
         ],
     }
+    assert result.stderr.splitlines() == ["funasr import noise", "funasr init noise", "funasr generate noise"]
 
 
 def test_funasr_sensevoice_wrapper_reports_missing_dependency(tmp_path: Path) -> None:
+    fake_package = tmp_path / "fake_package"
+    funasr_dir = fake_package / "funasr"
+    funasr_dir.mkdir(parents=True)
+    (funasr_dir / "__init__.py").write_text('raise ImportError("blocked funasr import")\n', encoding="utf-8")
     audio = tmp_path / "chunk.wav"
     audio.write_bytes(b"RIFFfake")
 
     result = subprocess.run(
         [sys.executable, "scripts/funasr_sensevoice_wrapper.py", str(audio)],
         cwd=Path(__file__).resolve().parents[1],
-        env={"PYTHONPATH": str(tmp_path / "empty")},
+        env={"PYTHONPATH": str(fake_package)},
         text=True,
         capture_output=True,
     )

@@ -26,6 +26,8 @@ def test_pyproject_declares_funasr_optional_extra() -> None:
     assert pyproject["project"]["optional-dependencies"]["funasr"] == [
         "funasr>=1.2.0",
         "modelscope>=1.14.0",
+        "torch>=2.2.0",
+        "torchaudio>=2.2.0",
     ]
 
 

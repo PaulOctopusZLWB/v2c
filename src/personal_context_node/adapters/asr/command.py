@@ -39,7 +39,7 @@ class CommandASRAdapter:
         self.model_name = str(payload.get("model_name", self.model_name))
         self.model_version = str(payload.get("model_version", self.model_version))
         return ASRResult(
-            segments=[ASRSegment(**segment) for segment in payload.get("segments", [])],
+            segments=[_asr_segment(segment) for segment in payload.get("segments", [])],
             backend=self.__class__.__name__,
             model_name=self.model_name,
             model_version=self.model_version,
@@ -47,3 +47,15 @@ class CommandASRAdapter:
             decode_config={"command": self.command},
             warnings=[str(item) for item in payload.get("warnings", [])],
         )
+
+
+def _asr_segment(segment: object) -> ASRSegment:
+    if not isinstance(segment, dict):
+        raise TerminalPortError("ASR segment must be an object")
+    return ASRSegment(
+        text=str(segment["text"]),
+        start_ms=int(segment["start_ms"]),
+        end_ms=int(segment["end_ms"]),
+        confidence=None if segment.get("confidence") is None else float(segment["confidence"]),
+        language=str(segment.get("language", "zh") or "zh"),
+    )

@@ -316,7 +316,7 @@ uv run pcn transcribe \
 For a real FunASR/SenseVoice runtime, install FunASR in the uv or Docker environment that executes the wrapper, then use:
 
 ```bash
-uv run pcn transcribe \
+uv run --extra funasr pcn transcribe \
   --data-dir .smoke-data \
   --obsidian-vault .smoke-vault \
   --asr-backend command \
@@ -339,8 +339,10 @@ uv run pcn model-smoke \
 With the FunASR runtime installed, use the example config:
 
 ```bash
-uv run pcn model-smoke \
+uv run --extra funasr pcn model-smoke \
   --config config/funasr.example.toml \
+  --data-dir .tmp/funasr-smoke-data \
+  --obsidian-vault .tmp/funasr-smoke-vault \
   --audio-path sample_data/TX01_MIC001_20260607_155539_orig.wav
 ```
 
@@ -527,7 +529,7 @@ PCN_INSTALL_FUNASR=true docker compose build
 PCN_INSTALL_FUNASR=true docker compose run --rm personal-context-node doctor --config config/funasr.example.toml
 ```
 
-The FunASR build path installs `funasr` and `modelscope` into the project `.venv`; model files are still downloaded by the wrapper/runtime according to the model id configuration.
+The FunASR build path installs `funasr`, `modelscope`, `torch`, and `torchaudio` into the project `.venv`; model files are still downloaded by the wrapper/runtime according to the model id configuration.
 
 The compose run mounts:
 

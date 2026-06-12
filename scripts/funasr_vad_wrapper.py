@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -20,7 +21,8 @@ def main() -> int:
         return 2
 
     try:
-        from funasr import AutoModel
+        with contextlib.redirect_stdout(sys.stderr):
+            from funasr import AutoModel
     except ImportError:
         print(
             "FunASR is not installed. Install it in the uv/Docker runtime that runs this wrapper.",
@@ -31,8 +33,9 @@ def main() -> int:
     model_kwargs: dict[str, Any] = {"model": args.model}
     if args.model_revision:
         model_kwargs["model_revision"] = args.model_revision
-    model = AutoModel(**model_kwargs)
-    raw_result = model.generate(input=str(args.audio_path))
+    with contextlib.redirect_stdout(sys.stderr):
+        model = AutoModel(**model_kwargs)
+        raw_result = model.generate(input=str(args.audio_path))
     print(json.dumps({"ranges": _normalize_ranges(raw_result)}, ensure_ascii=False, sort_keys=True))
     return 0
 

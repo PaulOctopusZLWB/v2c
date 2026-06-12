@@ -44,6 +44,32 @@ print(json.dumps({
     assert result.segments[0].confidence == 0.88
 
 
+def test_command_asr_adapter_ignores_extra_segment_fields_from_model_wrappers(tmp_path: Path) -> None:
+    chunk = tmp_path / "chunk.wav"
+    chunk.write_bytes(b"fake wav")
+    script = tmp_path / "speaker_asr.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "model_name": "sensevoice",
+  "model_version": "local-test",
+  "segments": [
+    {"text": "带 speaker 的输出", "start_ms": 0, "end_ms": 1200, "language": "zh", "speaker": "spk0"}
+  ]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CommandASRAdapter(command=["python3", str(script)]).transcribe(chunk)
+
+    assert result.segments[0].text == "带 speaker 的输出"
+    assert result.segments[0].start_ms == 0
+    assert result.segments[0].end_ms == 1200
+    assert result.segments[0].language == "zh"
+
+
 def test_command_asr_adapter_reports_invalid_output(tmp_path: Path) -> None:
     chunk = tmp_path / "chunk.wav"
     chunk.write_bytes(b"fake wav")
