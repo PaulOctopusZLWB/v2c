@@ -343,7 +343,7 @@ def summarize(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
-    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
+    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based, mock, or command."),
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
@@ -1157,7 +1157,7 @@ def process_run(
     max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
     asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
-    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
+    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based, mock, or command."),
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
     mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
@@ -1192,7 +1192,7 @@ def process_run_group(
     max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
     asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
-    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
+    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based, mock, or command."),
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
     mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),

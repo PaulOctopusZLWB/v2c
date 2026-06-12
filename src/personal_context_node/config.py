@@ -38,7 +38,7 @@ class AppConfig(BaseModel):
     source_device: str = "DJI Mic 3"
     owner_did: str = "did:key:local-owner"
     identity_key_path: Path | None = None
-    vad_backend: str = "energy"
+    vad_backend: str = "mock"
     vad_threshold: float = 0.03
     min_speech_ms: int = 300
     merge_gap_ms: int = 800
@@ -48,7 +48,7 @@ class AppConfig(BaseModel):
     asr_command: str | None = None
     asr_language: str = "zh"
     asr_model_name: str = "sensevoice"
-    llm_backend: str = "rule_based"
+    llm_backend: str = "mock"
     llm_command: str | None = None
     send_person_names: bool = True
     send_speaker_labels: bool = True

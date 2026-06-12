@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import struct
 import wave
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -130,28 +131,38 @@ def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, sta
     chunk_dir = config.work_audio_dir / recorded_day
     chunk_dir.mkdir(parents=True, exist_ok=True)
     chunk_path = chunk_dir / f"{source_path.stem}_{start_ms:09d}_{end_ms:09d}.wav"
-    with wave.open(str(source_path), "rb") as source:
-        sample_rate = source.getframerate()
-        channels = source.getnchannels()
-        sample_width = source.getsampwidth()
-        start_frame = int(start_ms * sample_rate / 1000)
-        frame_count = int((end_ms - start_ms) * sample_rate / 1000)
-        source.setpos(start_frame)
-        frames = source.readframes(frame_count)
-        frames = _convert_pcm_frames(
-            frames,
-            source_sample_rate=sample_rate,
-            source_channels=channels,
-            source_sample_width=sample_width,
+    try:
+        with wave.open(str(source_path), "rb") as source:
+            sample_rate = source.getframerate()
+            channels = source.getnchannels()
+            sample_width = source.getsampwidth()
+            start_frame = int(start_ms * sample_rate / 1000)
+            frame_count = int((end_ms - start_ms) * sample_rate / 1000)
+            source.setpos(start_frame)
+            frames = source.readframes(frame_count)
+            frames = _convert_pcm_frames(
+                frames,
+                source_sample_rate=sample_rate,
+                source_channels=channels,
+                source_sample_width=sample_width,
+                target_sample_rate=config.audio.target_sample_rate_hz,
+                target_channels=config.audio.target_channels,
+                target_sample_width=2,
+            )
+    except wave.Error as exc:
+        frames = _convert_ieee_float_wav_chunk(
+            source_path=source_path,
+            start_ms=start_ms,
+            end_ms=end_ms,
             target_sample_rate=config.audio.target_sample_rate_hz,
             target_channels=config.audio.target_channels,
-            target_sample_width=2,
+            error=exc,
         )
-        with wave.open(str(chunk_path), "wb") as target:
-            target.setnchannels(config.audio.target_channels)
-            target.setsampwidth(2)
-            target.setframerate(config.audio.target_sample_rate_hz)
-            target.writeframes(frames)
+    with wave.open(str(chunk_path), "wb") as target:
+        target.setnchannels(config.audio.target_channels)
+        target.setsampwidth(2)
+        target.setframerate(config.audio.target_sample_rate_hz)
+        target.writeframes(frames)
     return chunk_path
 
 
@@ -188,6 +199,27 @@ def _convert_pcm_frames(
         raise ValueError(f"unsupported channel conversion: {source_channels} -> {target_channels}")
 
     source_frames = _decode_pcm_frames(frames, sample_width=source_sample_width, channels=source_channels)
+    return _convert_decoded_frames(
+        source_frames,
+        source_sample_rate=source_sample_rate,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        target_sample_width=target_sample_width,
+    )
+
+
+def _convert_decoded_frames(
+    source_frames: list[list[int]],
+    *,
+    source_sample_rate: int,
+    target_sample_rate: int,
+    target_channels: int,
+    target_sample_width: int,
+) -> bytes:
+    if target_sample_width != 2:
+        raise ValueError(f"unsupported target sample width: {target_sample_width}")
+    if target_channels not in (1, 2):
+        raise ValueError(f"unsupported target channels: {target_channels}")
     if not source_frames:
         return b""
     target_frame_count = max(1, round(len(source_frames) * target_sample_rate / source_sample_rate))
@@ -204,6 +236,90 @@ def _convert_pcm_frames(
         for sample in output_samples:
             converted.extend(_to_s16(sample))
     return bytes(converted)
+
+
+def _convert_ieee_float_wav_chunk(
+    *,
+    source_path: Path,
+    start_ms: int,
+    end_ms: int,
+    target_sample_rate: int,
+    target_channels: int,
+    error: wave.Error,
+) -> bytes:
+    if "unknown format: 3" not in str(error):
+        raise error
+    metadata = _read_wav_metadata(source_path)
+    if metadata["audio_format"] != 3:
+        raise error
+    if metadata["bits_per_sample"] != 32:
+        raise ValueError(f"unsupported IEEE float WAV bit depth: {metadata['bits_per_sample']}")
+    channels = metadata["channels"]
+    if channels not in (1, 2) or target_channels not in (1, 2):
+        raise ValueError(f"unsupported channel conversion: {channels} -> {target_channels}")
+    sample_rate = metadata["sample_rate"]
+    bytes_per_frame = channels * 4
+    start_frame = int(start_ms * sample_rate / 1000)
+    frame_count = int((end_ms - start_ms) * sample_rate / 1000)
+    data = metadata["data"]
+    segment = data[start_frame * bytes_per_frame : (start_frame + frame_count) * bytes_per_frame]
+    decoded = _decode_ieee_float_frames(segment, channels=channels)
+    return _convert_decoded_frames(
+        decoded,
+        source_sample_rate=sample_rate,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        target_sample_width=2,
+    )
+
+
+def _read_wav_metadata(path: Path) -> dict[str, object]:
+    data = path.read_bytes()
+    if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise ValueError("unsupported WAV container")
+    offset = 12
+    fmt: dict[str, object] | None = None
+    payload = b""
+    while offset + 8 <= len(data):
+        chunk_id = data[offset : offset + 4]
+        chunk_size = struct.unpack_from("<I", data, offset + 4)[0]
+        chunk_start = offset + 8
+        chunk_end = chunk_start + chunk_size
+        chunk_data = data[chunk_start:chunk_end]
+        if chunk_id == b"fmt ":
+            if len(chunk_data) < 16:
+                raise ValueError("invalid WAV fmt chunk")
+            audio_format, channels, sample_rate, _byte_rate, _block_align, bits_per_sample = struct.unpack_from(
+                "<HHIIHH",
+                chunk_data,
+            )
+            fmt = {
+                "audio_format": audio_format,
+                "channels": channels,
+                "sample_rate": sample_rate,
+                "bits_per_sample": bits_per_sample,
+            }
+        elif chunk_id == b"data":
+            payload = chunk_data
+        offset = chunk_end + (chunk_size % 2)
+    if fmt is None or not payload:
+        raise ValueError("invalid WAV file")
+    fmt["data"] = payload
+    return fmt
+
+
+def _decode_ieee_float_frames(frames: bytes, *, channels: int) -> list[list[int]]:
+    frame_width = channels * 4
+    decoded: list[list[int]] = []
+    for frame_start in range(0, len(frames) - frame_width + 1, frame_width):
+        samples: list[int] = []
+        for channel in range(channels):
+            sample_start = frame_start + channel * 4
+            value = struct.unpack_from("<f", frames, sample_start)[0]
+            clipped = max(-1.0, min(1.0, value))
+            samples.append(round(clipped * (2**15 - 1)))
+        decoded.append(samples)
+    return decoded
 
 
 def _decode_pcm_frames(frames: bytes, *, sample_width: int, channels: int) -> list[list[int]]:

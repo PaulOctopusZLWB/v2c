@@ -1,7 +1,7 @@
 {
   "daily_context": {
     "summary": "fixture 模拟 LLM 日报",
-    "todos": ["fixture 待办"],
+    "todos": ["{first_text}"],
     "facts": ["fixture 事实"],
     "inferences": [
       {

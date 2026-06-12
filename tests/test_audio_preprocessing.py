@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import math
+import struct
 import wave
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
+from personal_context_node.adapters.vad.mock import MockVADAdapter
 from personal_context_node.audio_preprocessing import _split_range, preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.vad import SpeechRange
@@ -197,6 +199,28 @@ def test_preprocess_writes_chunks_using_configured_audio_format(tmp_path: Path) 
         assert chunk.getsampwidth() == 2
 
 
+def test_preprocess_normalizes_ieee_float_wav_chunks(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    wav_path = source / "TX01_MIC003_20260607_160317_orig.wav"
+    _write_float_wav(wav_path, seconds=1.2, sample_rate=16_000)
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", chunk_overlap_ms=0)
+
+    import_audio_files(config=config, source_dir=source)
+    result = preprocess_imported_audio(config=config, vad=MockVADAdapter(), max_chunk_ms=1_000)
+
+    assert result.audio_chunks_created == 1
+    conn = connect(config.database_path)
+    try:
+        chunk_path = Path(fetch_all(conn, "select local_chunk_path from audio_chunks")[0]["local_chunk_path"])
+    finally:
+        conn.close()
+    with wave.open(str(chunk_path), "rb") as chunk:
+        assert chunk.getframerate() == config.audio.target_sample_rate_hz
+        assert chunk.getnchannels() == config.audio.target_channels
+        assert chunk.getsampwidth() == 2
+        assert chunk.getnframes() == 16_000
+
+
 def _write_stereo_wav(path: Path, segments: list[tuple[float, int]], sample_rate: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
@@ -211,3 +235,24 @@ def _write_stereo_wav(path: Path, segments: list[tuple[float, int]], sample_rate
                 frames.extend(sample_bytes)
                 frames.extend(sample_bytes)
         wav.writeframes(bytes(frames))
+
+
+def _write_float_wav(path: Path, *, seconds: float, sample_rate: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frames = bytearray()
+    for index in range(int(seconds * sample_rate)):
+        sample = 0.5 * math.sin(2 * math.pi * 440 * index / sample_rate)
+        frames.extend(struct.pack("<f", sample))
+    fmt_chunk = struct.pack("<HHIIHH", 3, 1, sample_rate, sample_rate * 4, 4, 32)
+    payload = (
+        b"RIFF"
+        + struct.pack("<I", 4 + (8 + len(fmt_chunk)) + (8 + len(frames)))
+        + b"WAVE"
+        + b"fmt "
+        + struct.pack("<I", len(fmt_chunk))
+        + fmt_chunk
+        + b"data"
+        + struct.pack("<I", len(frames))
+        + bytes(frames)
+    )
+    path.write_bytes(payload)

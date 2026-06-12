@@ -21,10 +21,11 @@ class MockLLMAdapter:
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
         daily = _object_dict(self.fixture["daily_context"], "daily_context")
         evidence_id = _first_evidence_id(transcript_segments)
+        first_text = _first_text(transcript_segments)
         return DailyContext(
             day=day,
             summary=str(daily["summary"]),
-            todos=[str(item) for item in _object_list(daily["todos"], "daily_context.todos")],
+            todos=[_render_template(str(item), first_text=first_text) for item in _object_list(daily["todos"], "daily_context.todos")],
             facts=[str(item) for item in _object_list(daily["facts"], "daily_context.facts")],
             inferences=_object_list(daily["inferences"], "daily_context.inferences"),
             memory_candidates=[
@@ -76,6 +77,16 @@ def _first_evidence_id(transcript_segments: list[dict[str, object]]) -> str:
     if not transcript_segments:
         return "ev_fixture"
     return str(transcript_segments[0]["evidence_id"])
+
+
+def _first_text(transcript_segments: list[dict[str, object]]) -> str:
+    if not transcript_segments:
+        return ""
+    return str(transcript_segments[0].get("text", ""))
+
+
+def _render_template(value: str, *, first_text: str) -> str:
+    return value.replace("{first_text}", first_text)
 
 
 def _object_dict(value: object, label: str) -> dict[str, object]:

@@ -123,3 +123,11 @@ def test_app_config_with_overrides_keeps_explicit_paths(tmp_path: Path) -> None:
 
     assert config.data_dir == tmp_path / "override-data"
     assert config.obsidian_vault == tmp_path / "override-vault"
+
+
+def test_app_config_defaults_match_mock_first_slice() -> None:
+    config = AppConfig()
+
+    assert config.vad_backend == "mock"
+    assert config.asr_backend == "mock"
+    assert config.llm_backend == "mock"
