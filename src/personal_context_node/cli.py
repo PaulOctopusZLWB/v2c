@@ -309,7 +309,7 @@ def transcribe(
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
-    mock_text: str = typer.Option("模拟本地转写", help="Text emitted by the mock ASR adapter."),
+    mock_text: str | None = typer.Option(None, help="Text emitted by the mock ASR adapter."),
     asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper, e.g. 'python scripts/funasr_sensevoice_wrapper.py'."),
 ) -> None:
@@ -1157,7 +1157,7 @@ def process_run(
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
-    mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
+    mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
 ) -> None:
     _process_run(
@@ -1192,7 +1192,7 @@ def process_run_group(
     asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
     llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based or command."),
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
-    mock_text: str = typer.Option("模拟本地转写", help="Text emitted by mock ASR."),
+    mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use the mock ASR backend."),
 ) -> None:
     _process_run(
@@ -1224,7 +1224,7 @@ def _process_run(
     asr_command: str | None,
     llm_backend: str | None,
     llm_command: str | None,
-    mock_text: str,
+    mock_text: str | None,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     vad = _build_vad(
@@ -1291,7 +1291,7 @@ def _build_asr(
     *,
     asr_backend: str,
     asr_command: str | None,
-    mock_text: str,
+    mock_text: str | None,
     language: str = "zh",
     model_name: str = "mock-asr",
 ):

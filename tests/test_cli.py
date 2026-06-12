@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import wave
 from pathlib import Path
@@ -296,6 +297,44 @@ def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "chunks_transcribed=" in result.output
     assert "segments_created=" in result.output
+
+
+def test_transcribe_cli_default_mock_text_comes_from_fixture(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    fixture = json.loads(Path("src/personal_context_node/fixtures/mock_asr_transcript.json").read_text(encoding="utf-8"))
+    runner = CliRunner()
+    assert runner.invoke(
+        app,
+        ["run-first-milestone", "--source-dir", str(source), "--data-dir", str(data), "--obsidian-vault", str(vault)],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "preprocess",
+            "--data-dir",
+            str(data),
+            "--obsidian-vault",
+            str(vault),
+            "--vad-threshold",
+            "0.0001",
+            "--max-chunk-ms",
+            "300",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(app, ["transcribe", "--data-dir", str(data), "--obsidian-vault", str(vault)])
+
+    assert result.exit_code == 0, result.output
+    conn = connect(data / "db" / "personal_context.sqlite")
+    try:
+        rows = fetch_all(conn, "select text from transcript_segments where is_active = 1 order by start_ms")
+    finally:
+        conn.close()
+    assert rows
+    assert {row["text"] for row in rows} == {fixture["text"]}
 
 
 def test_transcribe_cli_uses_asr_settings_from_config(tmp_path: Path) -> None:
