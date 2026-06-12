@@ -153,6 +153,58 @@ def test_process_once_runs_archive_task(tmp_path: Path) -> None:
     ]
 
 
+def test_process_once_archive_task_uses_configured_command_backend(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    _write_voice_wav(source_path)
+    archive_root = tmp_path / "nas" / "PersonalContext"
+    marker = tmp_path / "archive-command-ran.txt"
+    script = tmp_path / "copy_archive.py"
+    script.write_text(
+        f"""
+from pathlib import Path
+import shutil
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+marker = Path({str(marker)!r})
+target.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy2(source, target)
+marker.write_text("ran", encoding="utf-8")
+""".strip(),
+        encoding="utf-8",
+    )
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        nas_archive_root=archive_root,
+        archive_backend="command",
+        archive_command=f"python3 {script} {{source_path}} {{archive_path}}",
+    )
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+    conn = connect(config.database_path)
+    try:
+        conn.execute("delete from tasks")
+        conn.commit()
+    finally:
+        conn.close()
+    enqueue_task(config=config, task_type="archive", target_type="archive_scope", target_id="all")
+
+    result = process_once(
+        config=config,
+        run_id="run_archive_command",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="本地任务转写"),
+        max_chunk_ms=1000,
+    )
+
+    assert result.task_type == "archive"
+    assert result.status == "succeeded"
+    assert (archive_root / "audio" / "raw" / "2025-06-10" / source_path.name).read_bytes() == source_path.read_bytes()
+    assert marker.read_text(encoding="utf-8") == "ran"
+
+
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:

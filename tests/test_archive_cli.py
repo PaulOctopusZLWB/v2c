@@ -96,6 +96,71 @@ def test_archive_run_group_cli_archives_imported_audio(tmp_path: Path) -> None:
     assert (archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav").exists()
 
 
+def test_archive_run_group_cli_supports_command_backend(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(b"raw audio bytes")
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path))
+    archive_root = tmp_path / "nas" / "PersonalContext"
+    script = tmp_path / "copy_archive.py"
+    script.write_text(
+        """
+from pathlib import Path
+import shutil
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+target.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy2(source, target)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "archive",
+            "run",
+            "--data-dir",
+            str(config.data_dir),
+            "--obsidian-vault",
+            str(config.obsidian_vault),
+            "--archive-root",
+            str(archive_root),
+            "--archive-backend",
+            "command",
+            "--archive-command",
+            f"python3 {script} {{source_path}} {{archive_path}}",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "files_archived=1" in result.output
+    assert "files_pending=0" in result.output
+    assert (archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav").read_bytes() == b"raw audio bytes"
+
+
+def test_archive_run_group_cli_requires_command_for_command_backend(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "archive",
+            "run",
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--obsidian-vault",
+            str(tmp_path / "vault"),
+            "--archive-backend",
+            "command",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--archive-command is required when --archive-backend command" in result.output
+
+
 def test_archive_cleanup_cli_removes_verified_retained_local_audio(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"

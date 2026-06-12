@@ -60,6 +60,10 @@ edit_grace_seconds = 45
 lease_seconds = 120
 max_retries = 2
 
+[archive]
+backend = "command"
+command = "rsync -a {source_path} {archive_path}"
+
 [session]
 session_gap_minutes = 45
 cross_midnight_policy = "start_date"
@@ -110,6 +114,8 @@ stable_seconds = 10
     assert config.edit_grace_seconds == 45
     assert config.task_lease_seconds == 120
     assert config.task_max_retries == 2
+    assert config.archive_backend == "command"
+    assert config.archive_command == "rsync -a {source_path} {archive_path}"
     assert config.session_gap_minutes == 45
     assert config.session_cross_midnight_policy == "start_date"
     assert config.dji_mic_3.enabled is True

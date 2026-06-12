@@ -20,3 +20,7 @@ model_version = "funasr-sensevoice-local"
 
 [llm]
 backend = "mock"
+
+[archive]
+backend = "filesystem"
+# command = "rsync -a {source_path} {archive_path}"

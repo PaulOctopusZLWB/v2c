@@ -58,6 +58,8 @@ class AppConfig(BaseModel):
     send_person_names: bool = True
     send_speaker_labels: bool = True
     max_chunk_tokens: int = 6000
+    archive_backend: str = "filesystem"
+    archive_command: str | None = None
     edit_grace_seconds: int = 120
     task_lease_seconds: int = 1800
     task_max_retries: int = 3
@@ -75,6 +77,7 @@ class AppConfig(BaseModel):
         asr = raw.get("asr", {})
         llm = raw.get("llm", {})
         obsidian = raw.get("obsidian", {})
+        archive = raw.get("archive", {})
         identity = raw.get("identity", {})
         device = raw.get("device", {})
         dji_mic_3 = device.get("dji_mic_3", {})
@@ -111,6 +114,8 @@ class AppConfig(BaseModel):
             "send_person_names": llm.get("send_person_names", cls.model_fields["send_person_names"].default),
             "send_speaker_labels": llm.get("send_speaker_labels", cls.model_fields["send_speaker_labels"].default),
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
+            "archive_backend": archive.get("backend", cls.model_fields["archive_backend"].default),
+            "archive_command": archive.get("command", cls.model_fields["archive_command"].default),
             "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
             "task_lease_seconds": tasks.get("lease_seconds", cls.model_fields["task_lease_seconds"].default),
             "task_max_retries": tasks.get("max_retries", cls.model_fields["task_max_retries"].default),

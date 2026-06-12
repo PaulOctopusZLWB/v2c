@@ -22,6 +22,7 @@ from personal_context_node.archive import (
     cleanup_archived_audio,
     mark_cleanup_eligible_audio,
 )
+from personal_context_node.archive_adapters import build_archive_adapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
@@ -584,6 +585,8 @@ def sync_speaker_review_cmd(
 def archive(
     ctx: typer.Context,
     archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
+    archive_backend: str | None = typer.Option(None, help="Archive backend override: filesystem or command."),
+    archive_command: str | None = typer.Option(None, help="Command archive wrapper, e.g. 'rsync -a {source_path} {archive_path}'."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -596,6 +599,8 @@ def archive(
         return
     _archive_run(
         archive_root=archive_root,
+        archive_backend=archive_backend,
+        archive_command=archive_command,
         config_path=config_path,
         data_dir=data_dir,
         obsidian_vault=obsidian_vault,
@@ -606,6 +611,8 @@ def archive(
 @archive_app.command(name="run")
 def archive_run_group(
     archive_root: Path | None = typer.Option(None, help="NAS or local archive root."),
+    archive_backend: str | None = typer.Option(None, help="Archive backend override: filesystem or command."),
+    archive_command: str | None = typer.Option(None, help="Command archive wrapper, e.g. 'rsync -a {source_path} {archive_path}'."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -616,6 +623,8 @@ def archive_run_group(
 ) -> None:
     _archive_run(
         archive_root=archive_root,
+        archive_backend=archive_backend,
+        archive_command=archive_command,
         config_path=config_path,
         data_dir=data_dir,
         obsidian_vault=obsidian_vault,
@@ -713,6 +722,8 @@ def _archive_status(*, config_path: Path | None, data_dir: Path | None, obsidian
 def _archive_run(
     *,
     archive_root: Path | None,
+    archive_backend: str | None,
+    archive_command: str | None,
     config_path: Path | None,
     data_dir: Path | None,
     obsidian_vault: Path | None,
@@ -720,9 +731,22 @@ def _archive_run(
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     archive_target = archive_root or config.nas_archive_root
+    try:
+        archive_adapter = build_archive_adapter(
+            config=config,
+            archive_backend=archive_backend,
+            archive_command=archive_command,
+            archive_root=archive_target,
+            require_existing_root=require_existing_root,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == "archive command is required when archive backend is command":
+            raise typer.BadParameter("--archive-command is required when --archive-backend command") from exc
+        raise typer.BadParameter(message) from exc
     result = archive_completed_audio(
         config=config,
-        archive=LocalFilesystemArchiveAdapter(root=archive_target, require_existing_root=require_existing_root),
+        archive=archive_adapter,
     )
     typer.echo(
         " ".join(

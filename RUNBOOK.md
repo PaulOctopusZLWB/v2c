@@ -92,8 +92,9 @@ It also implements the archive boundary:
 
 1. `ArchivePort` as the core-owned archive interface.
 2. A local filesystem archive adapter that can target a mounted NAS path.
-3. Hash verification before `audio_files.status` becomes `archived`.
-4. `pcn archive run` for raw audio archive smoke tests.
+3. A command archive adapter for rsync-style NAS copy commands.
+4. Hash verification before `audio_files.status` becomes `archived`.
+5. `pcn archive run` for raw audio archive smoke tests.
 
 It also implements launchd template generation and controlled install/uninstall:
 
@@ -152,7 +153,7 @@ It also implements the daily/publish task DAG:
 5. `obsidian_publish` writes session notes, memory candidate review, and speaker review.
 6. Repeated `pcn process run` calls can now advance VAD -> ASR -> session -> session summary -> daily -> Obsidian publish.
 
-Real FunASR/Silero VAD, FunASR/SenseVoice transcription, cloud/local LLM provider adapters, and rsync/restic-specific NAS behavior are not implemented yet. The energy VAD, mock ASR, and rule-based LLM are not the final production intelligence adapters; they exist to make the chunking, storage, transcript, session, context-generation, review, archive, scheduling, and protocol boundaries testable before model integration.
+Real FunASR/SenseVoice and FunASR VAD are available through command adapters and wrapper scripts, with optional uv/Docker installation support. LLM still defaults to mock/rule-based processing unless a local command wrapper is configured. Archive storage supports mounted filesystem targets and rsync-style command adapters with post-copy sha256 verification.
 
 ## Local uv Run
 
@@ -221,6 +222,16 @@ Copy `config/local.example.toml` to `config/local.toml` and adjust local paths/b
 ```bash
 uv run pcn archive run --config config/local.toml
 ```
+
+For an rsync-style NAS copy, configure:
+
+```toml
+[archive]
+backend = "command"
+command = "rsync -a {source_path} {archive_path}"
+```
+
+The command is invoked once per artifact. `{source_path}`, `{archive_path}`, and `{relative_path}` are expanded before execution; if no placeholders are present, source and archive paths are appended. PCN still verifies the archived file hash before marking the artifact archived.
 
 Explicit CLI options override config-file paths where supported.
 

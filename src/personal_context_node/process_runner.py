@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
-from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.archive import archive_completed_audio
+from personal_context_node.archive_adapters import build_archive_adapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.errors import TerminalPortError
@@ -100,7 +100,7 @@ def process_once(
         elif task.task_type == "archive":
             archive_completed_audio(
                 config=config,
-                archive=LocalFilesystemArchiveAdapter(root=config.nas_archive_root),
+                archive=build_archive_adapter(config=config),
             )
         else:
             raise ValueError(f"unsupported task type: {task.task_type}")

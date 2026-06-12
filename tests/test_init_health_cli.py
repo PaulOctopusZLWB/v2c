@@ -61,6 +61,9 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert "target_sample_rate_hz = 16000" in config_text
     assert "target_channels = 1" in config_text
     assert 'target_sample_format = "s16"' in config_text
+    assert "[archive]" in config_text
+    assert 'backend = "filesystem"' in config_text
+    assert "# command = \"rsync -a {source_path} {archive_path}\"" in config_text
     assert 'language = "zh"' in config_text
     assert 'model_name = "sensevoice"' in config_text
 
