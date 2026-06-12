@@ -703,21 +703,25 @@ def _load_config(
 def launchd_write_plists(
     output_dir: Path = typer.Option(Path("build/launchd"), help="Directory to write plist templates."),
     working_directory: Path = typer.Option(Path.cwd(), help="Repository working directory."),
-    data_dir: Path = typer.Option(Path("data"), help="Local data directory."),
-    obsidian_vault: Path = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
-    source_dir: Path = typer.Option(Path("/Volumes/DJI"), help="Mounted DJI source directory."),
-    archive_root: Path = typer.Option(Path("/Volumes/NAS/PersonalContext"), help="NAS archive root."),
+    source_dir: Path | None = typer.Option(None, help="Mounted DJI source directory."),
+    archive_root: Path | None = typer.Option(None, help="NAS archive root."),
 ) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    resolved_source_dir = source_dir or config.dji_mic_3.root_path or Path("/Volumes/DJI")
+    resolved_archive_root = archive_root or config.nas_archive_root
     paths = write_launchd_plists(
         output_dir=output_dir,
         working_directory=str(working_directory),
-        data_dir=str(data_dir),
-        obsidian_vault=str(obsidian_vault),
-        source_dir=str(source_dir),
-        archive_root=str(archive_root),
+        data_dir=str(config.data_dir),
+        obsidian_vault=str(config.obsidian_vault),
+        source_dir=str(resolved_source_dir),
+        archive_root=str(resolved_archive_root),
         dry_run=True,
     )
     typer.echo(f"plists_written={len(paths)} output_dir={output_dir}")
