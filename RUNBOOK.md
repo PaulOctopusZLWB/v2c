@@ -314,6 +314,8 @@ uv run pcn transcribe \
 
 The wrapper lazy-loads `funasr.AutoModel` and emits the same normalized JSON contract consumed by `CommandASRAdapter`. Core pipeline code does not import FunASR directly.
 
+Before running real FunASR jobs, run `pcn doctor --config config/local.toml`. When either `[vad].backend` or `[asr].backend` is `funasr`, the output includes `funasr_runtime=ok` only if the active uv/Docker Python environment can import `funasr`; otherwise it reports `funasr_runtime=missing` and returns `status=warning`.
+
 Expected rule-based summary smoke output after mock ASR:
 
 ```text

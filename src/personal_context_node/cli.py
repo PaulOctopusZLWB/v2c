@@ -134,6 +134,7 @@ def doctor_cmd(
                 f"obsidian_vault={result.obsidian_vault}",
                 f"source_dir={result.source_dir}",
                 f"archive_root={result.archive_root}",
+                f"funasr_runtime={result.funasr_runtime}",
                 f"pending_tasks={result.pending_tasks}",
                 f"failed_tasks={result.failed_tasks}",
                 f"recent_failed_jobs={result.recent_failed_jobs}",

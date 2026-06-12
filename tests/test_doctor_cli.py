@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -69,6 +70,34 @@ def test_doctor_cli_reports_warning_when_failed_tasks_exist(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "status=warning" in result.output
     assert "failed_tasks=1" in result.output
+
+
+def test_doctor_cli_reports_missing_funasr_runtime_when_funasr_backend_enabled(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "funasr" else object())
+    data = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data}"
+obsidian_vault = "{vault}"
+
+[vad]
+backend = "funasr"
+
+[asr]
+backend = "funasr"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["doctor", "--config", str(config_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "status=warning" in result.output
+    assert "funasr_runtime=missing" in result.output
 
 
 def test_doctor_cli_uses_config_path(tmp_path: Path) -> None:

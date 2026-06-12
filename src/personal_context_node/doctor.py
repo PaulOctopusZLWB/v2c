@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class DoctorResult:
     recent_failed_jobs: int
     memory_invalid_events: int
     memory_materialization_mismatches: int
+    funasr_runtime: str
 
 
 def run_doctor(
@@ -35,6 +37,7 @@ def run_doctor(
     memory = verify_memory_events(config=config)
     source_status = _path_status(source_dir, required=False)
     archive_status = _path_status(archive_root, required=False)
+    funasr_runtime = _funasr_runtime_status(config)
     status = "ok"
     if (
         health.status != "ok"
@@ -44,6 +47,7 @@ def run_doctor(
         or memory.materialization_mismatches
         or source_status == "missing"
         or archive_status == "missing"
+        or funasr_runtime == "missing"
     ):
         status = "warning"
     return DoctorResult(
@@ -57,6 +61,7 @@ def run_doctor(
         recent_failed_jobs=recent_failed_jobs,
         memory_invalid_events=memory.invalid_events,
         memory_materialization_mismatches=memory.materialization_mismatches,
+        funasr_runtime=funasr_runtime,
     )
 
 
@@ -88,3 +93,9 @@ def _path_status(path: Path | None, *, required: bool) -> str:
     if path.exists():
         return "ok"
     return "missing" if required else "missing"
+
+
+def _funasr_runtime_status(config: AppConfig) -> str:
+    if config.vad_backend != "funasr" and config.asr_backend != "funasr":
+        return "skipped"
+    return "ok" if importlib.util.find_spec("funasr") is not None else "missing"
