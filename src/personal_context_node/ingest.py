@@ -120,6 +120,7 @@ def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, s
         local_path = _raw_store_path(local_dir=local_dir, source_path=source_path, audio_file_id=audio_file_id)
         shutil.copy2(source_path, local_path)
         _repair_wav_file_metadata(local_path, recorded_at)
+        mark_raw_evidence_read_only(local_path)
         conn.execute(
             """
             insert into audio_files (
@@ -154,6 +155,7 @@ def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: Ap
             raw_audio = importer.copy_to_raw_store(stable_source, config.raw_audio_dir)
             if _raw_audio_exists(conn, raw_audio):
                 continue
+            mark_raw_evidence_read_only(raw_audio.local_raw_path)
             audio_file_id = f"aud_{uuid4().hex}"
             conn.execute(
                 """
@@ -202,6 +204,10 @@ def _raw_store_path(*, local_dir: Path, source_path: Path, audio_file_id: str) -
     if not target.exists():
         return target
     return local_dir / f"{source_path.stem}_{audio_file_id}{source_path.suffix}"
+
+
+def mark_raw_evidence_read_only(path: Path) -> None:
+    path.chmod(path.stat().st_mode & ~0o222)
 
 
 def is_file_stable(path: Path, *, settle_seconds: float = 0.1) -> bool:

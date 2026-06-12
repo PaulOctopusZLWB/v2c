@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import struct
 import wave
 from pathlib import Path
@@ -78,6 +79,23 @@ def test_ingest_import_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> Non
     assert tasks == [{"task_type": "vad", "target_type": "audio_file", "status": "pending"}]
 
 
+def test_ingest_import_marks_local_raw_audio_read_only(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    result = import_audio_files(config=config, source_dir=source)
+
+    assert result.imported_files == 1
+    conn = connect(config.database_path)
+    try:
+        audio_files = fetch_all(conn, "select local_raw_path from audio_files")
+    finally:
+        conn.close()
+    raw_path = Path(str(audio_files[0]["local_raw_path"]))
+    assert stat.S_IMODE(raw_path.stat().st_mode) & 0o222 == 0
+
+
 def test_ingest_import_group_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
@@ -137,16 +155,19 @@ stable_seconds = 0
     config = AppConfig(data_dir=data_dir, obsidian_vault=vault)
     conn = connect(config.database_path)
     try:
-        audio_files = fetch_all(conn, "select source_device, source_path, status from audio_files")
+        audio_files = fetch_all(conn, "select source_device, source_path, local_raw_path, status from audio_files")
     finally:
         conn.close()
+    raw_path = Path(str(audio_files[0]["local_raw_path"]))
     assert audio_files == [
         {
             "source_device": "DJI Mic 3",
             "source_path": str(source / "TX02_MIC001_20870510_173550_orig.wav"),
+            "local_raw_path": str(raw_path),
             "status": "imported",
         }
     ]
+    assert stat.S_IMODE(raw_path.stat().st_mode) & 0o222 == 0
 
 
 def test_ingest_import_group_cli_uses_configured_audio_globs(tmp_path: Path) -> None:
