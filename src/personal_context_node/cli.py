@@ -322,6 +322,8 @@ def transcribe(
         mock_text=mock_text,
         language=config.asr_language,
         model_name=config.asr_model_name,
+        model_id=config.asr_model_id,
+        model_version=config.asr_model_version,
     )
     result = transcribe_pending_chunks(config=config, asr=asr)
     typer.echo(
@@ -1259,6 +1261,8 @@ def _process_run(
         mock_text=mock_text,
         language=config.asr_language,
         model_name=config.asr_model_name,
+        model_id=config.asr_model_id,
+        model_version=config.asr_model_version,
     )
     llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
     run_id = f"run_{uuid4().hex}"
@@ -1315,6 +1319,8 @@ def _build_asr(
     mock_text: str | None,
     language: str = "zh",
     model_name: str = "mock-asr",
+    model_id: str = "iic/SenseVoiceSmall",
+    model_version: str = "funasr-sensevoice-local",
 ):
     if asr_backend == "mock":
         return MockASRAdapter(text=mock_text, language=language, model_name=model_name)
@@ -1323,7 +1329,20 @@ def _build_asr(
             raise typer.BadParameter("--asr-command is required when --asr-backend command")
         return CommandASRAdapter(command=asr_command.split())
     if asr_backend == "funasr":
-        command = asr_command.split() if asr_command else ["python3", "scripts/funasr_sensevoice_wrapper.py"]
+        command = (
+            asr_command.split()
+            if asr_command
+            else [
+                "python3",
+                "scripts/funasr_sensevoice_wrapper.py",
+                "--model",
+                model_id,
+                "--model-version",
+                model_version,
+                "--language",
+                language,
+            ]
+        )
         return CommandASRAdapter(command=command)
     raise typer.BadParameter("--asr-backend must be 'mock', 'command', or 'funasr'")
 

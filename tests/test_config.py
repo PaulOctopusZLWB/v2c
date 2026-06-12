@@ -28,6 +28,8 @@ backend = "command"
 command = "python scripts/funasr_wrapper.py"
 language = "zh"
 model_name = "sensevoice"
+model_id = "iic/SenseVoiceSmall"
+model_version = "sensevoice-local-2026-06"
 
 [vad]
 backend = "energy"
@@ -85,6 +87,8 @@ stable_seconds = 10
     assert config.asr_command == "python scripts/funasr_wrapper.py"
     assert config.asr_language == "zh"
     assert config.asr_model_name == "sensevoice"
+    assert config.asr_model_id == "iic/SenseVoiceSmall"
+    assert config.asr_model_version == "sensevoice-local-2026-06"
     assert config.vad_backend == "energy"
     assert config.vad_threshold == 0.02
     assert config.min_speech_ms == 250

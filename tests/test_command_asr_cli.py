@@ -67,6 +67,30 @@ def test_build_asr_accepts_funasr_backend() -> None:
     assert adapter.command[:2] == ["python3", "scripts/funasr_sensevoice_wrapper.py"]
 
 
+def test_build_asr_passes_configured_funasr_model_options() -> None:
+    adapter = _build_asr(
+        asr_backend="funasr",
+        asr_command=None,
+        mock_text="unused",
+        language="zh",
+        model_name="sensevoice",
+        model_id="local/SenseVoiceSmall",
+        model_version="local-2026-06",
+    )
+
+    assert isinstance(adapter, CommandASRAdapter)
+    assert adapter.command == [
+        "python3",
+        "scripts/funasr_sensevoice_wrapper.py",
+        "--model",
+        "local/SenseVoiceSmall",
+        "--model-version",
+        "local-2026-06",
+        "--language",
+        "zh",
+    ]
+
+
 def test_build_asr_allows_funasr_command_override() -> None:
     adapter = _build_asr(asr_backend="funasr", asr_command="uv run python scripts/funasr_sensevoice_wrapper.py --model local", mock_text="unused")
 
