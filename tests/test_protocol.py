@@ -70,6 +70,29 @@ def test_generated_memory_card_requires_evidence() -> None:
         raise AssertionError("MemoryCard accepted a generated claim without evidence")
 
 
+def test_memory_card_rejects_local_person_subject_id() -> None:
+    try:
+        MemoryCard(
+            card_id="mem_local_person_subject",
+            owner_did="did:key:test-owner",
+            claim_type="fact",
+            claim="Person A prefers async status updates.",
+            subject=SubjectRef(type="person", id="per_local_guest", label="Person A"),
+            evidence_refs=[
+                EvidenceRef(
+                    evidence_id="ev_local_person_subject",
+                    source_type="transcript_segment",
+                    source_id="seg_local_person_subject",
+                    quote="Person A prefers async status updates.",
+                )
+            ],
+        )
+    except ValueError as exc:
+        assert "local person id" in str(exc)
+    else:
+        raise AssertionError("MemoryCard accepted a local per_* person id in shared subject")
+
+
 def test_manual_memory_card_allows_empty_evidence() -> None:
     card = MemoryCard(
         card_id="mem_manual_without_evidence",

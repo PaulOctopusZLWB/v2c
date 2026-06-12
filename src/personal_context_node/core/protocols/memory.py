@@ -91,6 +91,12 @@ class MemoryCard(BaseModel):
             raise ValueError("generated memory cards require at least one evidence reference")
         return self
 
+    @model_validator(mode="after")
+    def reject_local_person_subject_id(self) -> "MemoryCard":
+        if self.subject.type == "person" and self.subject.id.startswith("per_"):
+            raise ValueError("shared memory cards cannot expose local person id in subject")
+        return self
+
 
 def _normalize_visibility(value: object) -> dict[str, str]:
     if isinstance(value, str):
