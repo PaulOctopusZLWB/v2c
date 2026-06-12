@@ -285,6 +285,8 @@ def preprocess(
         vad_threshold=vad_threshold if vad_threshold is not None else config.vad_threshold,
         merge_gap_ms=config.merge_gap_ms,
         min_speech_ms=config.min_speech_ms,
+        model_id=config.vad_model_id,
+        model_revision=config.vad_model_revision,
     )
     result = preprocess_imported_audio(
         config=config,
@@ -1254,6 +1256,8 @@ def _process_run(
         vad_threshold=config.vad_threshold if vad_threshold is None else vad_threshold,
         merge_gap_ms=config.merge_gap_ms,
         min_speech_ms=config.min_speech_ms,
+        model_id=config.vad_model_id,
+        model_revision=config.vad_model_revision,
     )
     asr = _build_asr(
         asr_backend=asr_backend or config.asr_backend,
@@ -1297,6 +1301,8 @@ def _build_vad(
     vad_threshold: float,
     merge_gap_ms: int = 250,
     min_speech_ms: int = 300,
+    model_id: str = "fsmn-vad",
+    model_revision: str | None = None,
 ):
     if vad_backend == "energy":
         return EnergyVadAdapter(threshold=vad_threshold, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
@@ -1307,7 +1313,9 @@ def _build_vad(
             raise typer.BadParameter("--vad-command is required when --vad-backend command")
         return CommandVADAdapter(command=vad_command.split())
     if vad_backend == "funasr":
-        command = vad_command.split() if vad_command else ["python3", "scripts/funasr_vad_wrapper.py"]
+        command = vad_command.split() if vad_command else ["python3", "scripts/funasr_vad_wrapper.py", "--model", model_id]
+        if not vad_command and model_revision is not None:
+            command.extend(["--model-revision", model_revision])
         return CommandVADAdapter(command=command)
     raise typer.BadParameter("--vad-backend must be 'energy', 'mock', 'command', or 'funasr'")
 

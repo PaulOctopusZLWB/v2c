@@ -95,6 +95,8 @@ def _config_text(config: AppConfig) -> str:
             "[vad]",
             f'backend = "{config.vad_backend}"',
             f"threshold = {config.vad_threshold}",
+            f'model_id = "{config.vad_model_id}"',
+            *([] if config.vad_model_revision is None else [f'model_revision = "{config.vad_model_revision}"']),
             f"min_speech_ms = {config.min_speech_ms}",
             f"merge_gap_ms = {config.merge_gap_ms}",
             f"max_chunk_ms = {config.max_chunk_ms}",

@@ -6,6 +6,8 @@ nas_archive_root = "/Volumes/NAS/PersonalContext"
 [vad]
 backend = "mock"
 threshold = 0.03
+model_id = "fsmn-vad"
+# model_revision = "v2.0.4"
 max_chunk_ms = 30000
 
 [asr]

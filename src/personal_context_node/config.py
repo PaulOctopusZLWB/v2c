@@ -40,6 +40,8 @@ class AppConfig(BaseModel):
     identity_key_path: Path | None = None
     vad_backend: str = "mock"
     vad_threshold: float = 0.03
+    vad_model_id: str = "fsmn-vad"
+    vad_model_revision: str | None = None
     min_speech_ms: int = 300
     merge_gap_ms: int = 800
     max_chunk_ms: int = 900_000
@@ -90,6 +92,8 @@ class AppConfig(BaseModel):
             "identity_key_path": _optional_resolve_path(base_dir, identity.get("signing_key_path")),
             "vad_backend": vad.get("backend", cls.model_fields["vad_backend"].default),
             "vad_threshold": vad.get("threshold", cls.model_fields["vad_threshold"].default),
+            "vad_model_id": vad.get("model_id", cls.model_fields["vad_model_id"].default),
+            "vad_model_revision": vad.get("model_revision", cls.model_fields["vad_model_revision"].default),
             "min_speech_ms": vad.get("min_speech_ms", cls.model_fields["min_speech_ms"].default),
             "merge_gap_ms": vad.get("merge_gap_ms", cls.model_fields["merge_gap_ms"].default),
             "max_chunk_ms": vad.get("max_chunk_ms", cls.model_fields["max_chunk_ms"].default),

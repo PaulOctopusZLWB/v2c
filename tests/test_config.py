@@ -34,6 +34,8 @@ model_version = "sensevoice-local-2026-06"
 [vad]
 backend = "energy"
 threshold = 0.02
+model_id = "fsmn-vad"
+model_revision = "v2.0.4"
 min_speech_ms = 250
 merge_gap_ms = 750
 max_chunk_ms = 45000
@@ -91,6 +93,8 @@ stable_seconds = 10
     assert config.asr_model_version == "sensevoice-local-2026-06"
     assert config.vad_backend == "energy"
     assert config.vad_threshold == 0.02
+    assert config.vad_model_id == "fsmn-vad"
+    assert config.vad_model_revision == "v2.0.4"
     assert config.min_speech_ms == 250
     assert config.merge_gap_ms == 750
     assert config.max_chunk_ms == 45000
