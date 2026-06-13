@@ -30,6 +30,7 @@ from personal_context_node.doctor import run_doctor
 from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.init_health import check_health, initialize_workspace
 from personal_context_node.ingest import (
+    IngestImportResult,
     import_audio_files,
     import_audio_files_from_port,
     repair_bwf_metadata_in_source_dir,
@@ -175,6 +176,123 @@ def run_first_milestone(
     )
 
 
+@app.command(name="run-all")
+def run_all(
+    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    vad_threshold: float | None = typer.Option(None, min=0.0, max=1.0, help="Energy VAD RMS threshold."),
+    vad_backend: str | None = typer.Option(None, help="VAD backend: energy, mock, command, or funasr."),
+    vad_command: str | None = typer.Option(None, help="Command VAD wrapper."),
+    max_chunk_ms: int | None = typer.Option(None, min=100, help="Maximum ASR chunk duration in milliseconds."),
+    asr_backend: str | None = typer.Option(None, help="ASR backend: mock, command, or funasr."),
+    asr_command: str | None = typer.Option(None, help="Command ASR wrapper."),
+    llm_backend: str | None = typer.Option(None, help="LLM backend: rule_based, mock, or command."),
+    llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
+    mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
+    mock: bool = typer.Option(False, "--mock", help="Explicitly use mock VAD, ASR, and LLM backends."),
+    max_steps: int = typer.Option(200, min=1, help="Maximum processing tasks to execute before stopping."),
+) -> None:
+    _run_all(
+        source_dir=source_dir,
+        config_path=config_path,
+        data_dir=data_dir,
+        obsidian_vault=obsidian_vault,
+        vad_threshold=vad_threshold,
+        vad_backend="mock" if mock and vad_backend is None else vad_backend,
+        vad_command=vad_command,
+        max_chunk_ms=max_chunk_ms,
+        asr_backend="mock" if mock else asr_backend,
+        asr_command=asr_command,
+        llm_backend="mock" if mock and llm_backend is None else llm_backend,
+        llm_command=llm_command,
+        mock_text=mock_text,
+        max_steps=max_steps,
+    )
+
+
+def _run_all(
+    *,
+    source_dir: Path | None,
+    config_path: Path | None,
+    data_dir: Path | None,
+    obsidian_vault: Path | None,
+    vad_threshold: float | None,
+    vad_backend: str | None,
+    vad_command: str | None,
+    max_chunk_ms: int | None,
+    asr_backend: str | None,
+    asr_command: str | None,
+    llm_backend: str | None,
+    llm_command: str | None,
+    mock_text: str | None,
+    max_steps: int,
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    import_result = _import_recordings(config=config, source_dir=source_dir)
+    vad = _build_vad(
+        vad_backend=vad_backend or config.vad_backend,
+        vad_command=vad_command or config.vad_command,
+        vad_threshold=config.vad_threshold if vad_threshold is None else vad_threshold,
+        merge_gap_ms=config.merge_gap_ms,
+        min_speech_ms=config.min_speech_ms,
+        model_id=config.vad_model_id,
+        model_revision=config.vad_model_revision,
+    )
+    asr = _build_asr(
+        asr_backend=asr_backend or config.asr_backend,
+        asr_command=asr_command or config.asr_command,
+        mock_text=mock_text,
+        language=config.asr_language,
+        model_name=config.asr_model_name,
+        model_id=config.asr_model_id,
+        model_version=config.asr_model_version,
+    )
+    llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
+    process_steps = 0
+    tasks_succeeded = 0
+    status = "step_limit"
+    while process_steps < max_steps:
+        run_id = f"run_{uuid4().hex}"
+        result = record_job_run(
+            config=config,
+            job_name="run-all.process",
+            run_id=run_id,
+            operation=lambda run_id=run_id: process_once(
+                config=config,
+                run_id=run_id,
+                vad=vad,
+                asr=asr,
+                llm=llm,
+                max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
+            ),
+        ).result
+        if result.status == "no_task":
+            status = "complete"
+            break
+        process_steps += 1
+        if result.status == "succeeded":
+            tasks_succeeded += 1
+    if status != "complete" and preview_next_process_task(config=config).status == "no_task":
+        status = "complete"
+    typer.echo(
+        " ".join(
+            [
+                f"imported_files={import_result.imported_files}",
+                f"process_steps={process_steps}",
+                f"tasks_succeeded={tasks_succeeded}",
+                f"status={status}",
+            ]
+        )
+    )
+    if status != "complete":
+        raise typer.Exit(code=1)
+
+
 @app.command(name="ingest-scan")
 def ingest_scan(
     source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
@@ -230,11 +348,16 @@ def _ingest_import(
     obsidian_vault: Path | None,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = _import_recordings(config=config, source_dir=source_dir)
+    typer.echo(f"imported_files={result.imported_files}")
+
+
+def _import_recordings(*, config: AppConfig, source_dir: Path | None) -> IngestImportResult:
     if source_dir is not None:
-        result = import_audio_files(config=config, source_dir=source_dir)
+        return import_audio_files(config=config, source_dir=source_dir)
     elif not config.dji_mic_3.enabled:
         importer = LocalDirectoryFileImportAdapter(device_roots=[], device_label=config.source_device)
-        result = import_audio_files_from_port(config=config, importer=importer)
+        return import_audio_files_from_port(config=config, importer=importer)
     elif config.dji_mic_3.root_path is not None:
         importer = LocalDirectoryFileImportAdapter(
             device_roots=[config.dji_mic_3.root_path],
@@ -242,7 +365,7 @@ def _ingest_import(
             audio_globs=config.dji_mic_3.audio_globs,
             volume_name_patterns=config.dji_mic_3.volume_name_patterns,
         )
-        result = import_audio_files_from_port(config=config, importer=importer)
+        return import_audio_files_from_port(config=config, importer=importer)
     else:
         importer = LocalDirectoryFileImportAdapter(
             device_roots=[],
@@ -251,8 +374,7 @@ def _ingest_import(
             volume_name_patterns=config.dji_mic_3.volume_name_patterns,
             volume_root=config.dji_mic_3.volume_root,
         )
-        result = import_audio_files_from_port(config=config, importer=importer)
-    typer.echo(f"imported_files={result.imported_files}")
+        return import_audio_files_from_port(config=config, importer=importer)
 
 
 @ingest_app.command(name="fix-metadata")

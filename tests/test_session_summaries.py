@@ -106,7 +106,8 @@ def test_summarize_session_persists_schema_and_renders_note(tmp_path: Path) -> N
     assert "三段以内摘要" not in note
     assert "- Decision: 我决定继续接入真实 ASR，需要保持音频本地处理。" in note
     assert "- Todo: 保持音频本地处理 (owner: self)" in note
-    assert "完整转写不进入 session note" in note
+    assert "## Transcript" in note
+    assert "- `00:00.000-00:01.000` **self**: 我决定继续接入真实 ASR，需要保持音频本地处理。" in note
 
 
 def test_summarize_session_omits_speaker_labels_when_disabled(tmp_path: Path) -> None:

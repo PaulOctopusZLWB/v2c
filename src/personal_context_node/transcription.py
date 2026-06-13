@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
 import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from uuid import uuid4
 
 from personal_context_node.config import AppConfig

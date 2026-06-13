@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
-from personal_context_node.core.ports.llm import DailyContext, LLMPort, MemoryCandidateDraft
+from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 

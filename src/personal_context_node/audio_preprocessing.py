@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import struct
 import wave
 from dataclasses import dataclass

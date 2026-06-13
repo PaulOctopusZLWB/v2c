@@ -14,7 +14,6 @@ from personal_context_node.core.ports.file_import import (
 )
 from personal_context_node.ingest import (
     _duration_ms,
-    _iter_audio_paths,
     _recorded_at_from_name,
     _repair_wav_file_metadata,
     _sha256,

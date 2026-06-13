@@ -38,6 +38,7 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
             """,
             (day,),
         )
+        transcript_segments_by_session = _transcript_segments_by_session(conn, day=day)
     finally:
         conn.close()
 
@@ -46,16 +47,31 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
     for session in sessions:
         note_path = output_dir / f"{session['session_id']}.md"
         existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
-        write_text_atomic(note_path, _session_note_text(session, existing_text=existing_text, source_run_id=source_run_id))
+        write_text_atomic(
+            note_path,
+            _session_note_text(
+                session,
+                transcript_segments=transcript_segments_by_session.get(str(session["session_id"]), []),
+                existing_text=existing_text,
+                source_run_id=source_run_id,
+            ),
+        )
     return PublishSessionNotesResult(notes_written=len(sessions))
 
 
-def _session_note_text(session: dict[str, object], *, existing_text: str | None = None, source_run_id: str | None = None) -> str:
+def _session_note_text(
+    session: dict[str, object],
+    *,
+    transcript_segments: list[dict[str, object]] | None = None,
+    existing_text: str | None = None,
+    source_run_id: str | None = None,
+) -> str:
     session_id = str(session["session_id"])
     summary_json = session.get("summary_json")
     summary = json.loads(str(summary_json)) if summary_json else None
     title = summary["headline"] if summary else f"Session {session_id}"
     managed_lines = _summary_lines(session, summary)
+    transcript_lines = _transcript_lines(transcript_segments or [])
     user_notes = _existing_user_notes(existing_text)
     return "\n".join(
         [
@@ -75,6 +91,10 @@ def _session_note_text(session: dict[str, object], *, existing_text: str | None 
             _block_start("session_summary", "managed"),
             *managed_lines,
             _block_end("session_summary"),
+            "",
+            _block_start("session_transcript", "managed"),
+            *transcript_lines,
+            _block_end("session_transcript"),
             "",
             "## User Notes",
             "",
@@ -116,10 +136,7 @@ def _summary_lines(session: dict[str, object], summary: dict[str, object] | None
         "",
     ]
     if summary is None:
-        return [
-            *metadata,
-            "完整转写不进入 session note；需要时从 SQLite transcript_segments 查询。",
-        ]
+        return metadata
     lines = [
         *metadata,
         f"## {summary['headline']}",
@@ -130,8 +147,77 @@ def _summary_lines(session: dict[str, object], summary: dict[str, object] | None
     lines.extend(_item_lines("Decision", summary.get("decisions", [])))
     lines.extend(_todo_lines(summary.get("todos", [])))
     lines.extend(_plain_lines("Open Question", summary.get("open_questions", [])))
-    lines.extend(["", "完整转写不进入 session note；需要时从 SQLite transcript_segments 查询。"])
     return lines
+
+
+def _transcript_segments_by_session(conn, *, day: str) -> dict[str, list[dict[str, object]]]:
+    rows = fetch_all(
+        conn,
+        """
+        select
+          ts.session_id, ts.start_ms, ts.end_ms, ts.text, ts.speaker, ts.asr_tags_json
+        from transcript_segments ts
+        join sessions s on s.session_id = ts.session_id
+        where s.date_key = ?
+          and ts.is_active = 1
+        order by ts.session_id, coalesce(ts.absolute_start_at, ''), ts.start_ms, ts.segment_id
+        """,
+        (day,),
+    )
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["session_id"]), []).append(row)
+    return grouped
+
+
+def _transcript_lines(segments: list[dict[str, object]]) -> list[str]:
+    lines = ["## Transcript", ""]
+    if not segments:
+        return [*lines, "暂无转写片段。"]
+    for segment in segments:
+        start_ms = _int_ms(segment.get("start_ms"))
+        end_ms = _int_ms(segment.get("end_ms"))
+        speaker = _single_line(segment.get("speaker") or "unknown")
+        text = _single_line(segment.get("text") or "")
+        tags = _tags_from_json(segment.get("asr_tags_json"))
+        tag_suffix = f" _(tags: {', '.join(tags)})_" if tags else ""
+        lines.append(f"- `{_format_ms(start_ms)}-{_format_ms(end_ms)}` **{speaker}**: {text}{tag_suffix}")
+    return lines
+
+
+def _int_ms(value: object) -> int:
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _format_ms(value: int) -> str:
+    hours, remainder = divmod(max(0, value), 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, millis = divmod(remainder, 1_000)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+    return f"{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+def _tags_from_json(value: object) -> list[str]:
+    if value is None:
+        return []
+    raw = str(value).strip()
+    if not raw or raw == "[]":
+        return []
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return [_single_line(raw)]
+    if not isinstance(decoded, list):
+        return [_single_line(decoded)]
+    return [_single_line(tag) for tag in decoded if str(tag).strip()]
+
+
+def _single_line(value: object) -> str:
+    return " ".join(str(value).split())
 
 
 def _item_lines(label: str, items: object) -> list[str]:
