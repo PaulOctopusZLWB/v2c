@@ -34,9 +34,17 @@ export interface Person {
   is_self: number;
 }
 
+export interface ImportProgress {
+  active: boolean;
+  done: number;
+  total: number;
+  current: string;
+}
+
 export interface StatusSnapshot {
   tasks: TaskRow[];
   worker_running: boolean;
+  import_progress?: ImportProgress | null;
 }
 
 export interface Health {

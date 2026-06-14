@@ -21,7 +21,7 @@ const DEVICE_POLL_MS = 5000;
 const TERMINAL = ["succeeded", "failed_terminal", "failed_retryable", "failed"];
 
 export function App() {
-  const { tasks, worker_running } = usePipelineStatus();
+  const { tasks, worker_running, import_progress } = usePipelineStatus();
   const { toasts, push, dismiss } = useToasts();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
@@ -104,16 +104,19 @@ export function App() {
   const gateOn = health?.require_accepted_transcripts ?? false;
   const firstRun = tasks.length === 0 && days.length === 0;
 
-  // The pipeline is "running" if the worker is alive OR a task is mid-flight.
-  const pipelineRunning = worker_running || tasks.some((tk) => tk.status === "running");
+  const importing = !!import_progress?.active;
+  // The pipeline is "running" if importing, the worker is alive, OR a task is mid-flight.
+  const pipelineRunning = importing || worker_running || tasks.some((tk) => tk.status === "running");
 
-  // Live progress derived from the SSE-fed task list. Only meaningful while
-  // there is genuine in-flight work — at idle / 100% the bar disappears.
+  // Live progress: import phase first (copying files), then transcription/processing
+  // from the SSE-fed task list. At idle / 100% the bar disappears.
   const inFlight = worker_running || tasks.some((tk) => !TERMINAL.includes(tk.status));
-  const total = inFlight ? tasks.length : 0;
-  const done = tasks.filter((tk) => TERMINAL.includes(tk.status)).length;
   const current = activeStage(tasks);
-  const progressLabel = STAGES.find((s) => s.id === current)?.label;
+  const total = importing ? import_progress!.total : inFlight ? tasks.length : 0;
+  const done = importing ? import_progress!.done : tasks.filter((tk) => TERMINAL.includes(tk.status)).length;
+  const progressLabel = importing
+    ? `导入 ${import_progress!.current || "…"}`
+    : STAGES.find((s) => s.id === current)?.label;
 
   // Map a pipeline stage to the DOM id of the panel that owns it, then scroll there.
   const STAGE_PANEL_ID: Record<Stage, string> = {

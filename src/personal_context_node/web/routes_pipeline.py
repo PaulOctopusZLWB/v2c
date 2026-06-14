@@ -26,16 +26,21 @@ class ImportRequest(BaseModel):
 @router.post("/import")
 def import_stage(request: Request, payload: ImportRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
+    worker = request.app.state.worker
+    if not payload.wait:
+        # Non-blocking: hand the (possibly multi-GB) copy to a background thread so the
+        # request returns immediately and the UI can render a live progress bar via SSE.
+        started = worker.start_import(payload.source_dir)
+        return {"started": started, "importing": True}
+    # wait=True: synchronous import + drain (tests / explicit "import and wait" only).
     result = import_audio_files(config=config, source_dir=Path(payload.source_dir))
-    # Default path returns immediately so a long ASR run never blocks the request.
     response: dict[str, object] = {"imported_files": result.imported_files, "queued": True}
-    if payload.wait:  # synchronous drain — tests / explicit "import and wait" only
-        drain = request.app.state.worker.drain_now()
-        response["drain"] = {
-            "status": drain.status,
-            "process_steps": drain.process_steps,
-            "tasks_succeeded": drain.tasks_succeeded,
-        }
+    drain = worker.drain_now()
+    response["drain"] = {
+        "status": drain.status,
+        "process_steps": drain.process_steps,
+        "tasks_succeeded": drain.tasks_succeeded,
+    }
     return response
 
 
@@ -83,11 +88,22 @@ async def events_stream(request: Request) -> StreamingResponse:
             if await request.is_disconnected():
                 break
             rows = process_status_rows(config=config)
-            signature = json.dumps([[r["task_id"], r["status"]] for r in rows], sort_keys=True)
+            import_progress = worker.import_state()
+            # Fold import progress into the change-signature so the bar advances frame
+            # by frame while the (possibly multi-GB) copy is running.
+            signature = json.dumps(
+                [[r["task_id"], r["status"]] for r in rows] + [import_progress],
+                sort_keys=True,
+                default=str,
+            )
             worker_running = worker.is_running()
             if signature != last_signature:
                 last_signature = signature
-                payload = {"tasks": rows, "worker_running": worker_running}
+                payload = {
+                    "tasks": rows,
+                    "worker_running": worker_running,
+                    "import_progress": import_progress,
+                }
                 yield "event: status.snapshot\n"
                 yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
             # Nothing is in flight and no worker is running: no further change can occur

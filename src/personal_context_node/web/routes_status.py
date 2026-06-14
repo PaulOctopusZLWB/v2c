@@ -34,4 +34,5 @@ def status_overview(request: Request) -> dict[str, object]:
         "worker_running": bool(worker.is_running()) if worker is not None else False,
         "status_counts": dict(counts),
         "total_tasks": len(rows),
+        "import_progress": worker.import_state() if worker is not None else None,
     }

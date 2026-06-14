@@ -12,6 +12,7 @@ import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 from uuid import uuid4
 
 from personal_context_node.config import AppConfig
@@ -70,11 +71,16 @@ def repair_bwf_metadata_in_source_dir(*, source_dir: Path, recursive: bool = Fal
     )
 
 
-def import_audio_files(*, config: AppConfig, source_dir: Path) -> IngestImportResult:
+def import_audio_files(
+    *,
+    config: AppConfig,
+    source_dir: Path,
+    progress: "Callable[[int, int, str], None] | None" = None,
+) -> IngestImportResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        imported = import_audio_files_in_conn(conn, config=config, source_dir=source_dir)
+        imported = import_audio_files_in_conn(conn, config=config, source_dir=source_dir, progress=progress)
         conn.commit()
         return IngestImportResult(imported_files=imported)
     finally:
@@ -92,57 +98,71 @@ def import_audio_files_from_port(*, config: AppConfig, importer: FileImportPort)
         conn.close()
 
 
-def import_audio_files_in_conn(conn: sqlite3.Connection, *, config: AppConfig, source_dir: Path) -> int:
+def import_audio_files_in_conn(
+    conn: sqlite3.Connection,
+    *,
+    config: AppConfig,
+    source_dir: Path,
+    progress: "Callable[[int, int, str], None] | None" = None,
+) -> int:
     imported = 0
-    for source_path in scan_audio_files(source_dir=source_dir).files:
-        if not is_file_stable(source_path):
-            continue
-        source_stat = source_path.stat()
-        existing = conn.execute(
-            """
-            select 1
-            from audio_files
-            where source_path = ?
-              and source_size_bytes = ?
-              and source_mtime_ns = ?
-            """,
-            (str(source_path), source_stat.st_size, source_stat.st_mtime_ns),
-        ).fetchone()
-        if existing:
-            continue
-        recorded_at = _recorded_at_from_name(path=source_path)
-        recorded_date = recorded_at[:10]
-        local_dir = config.raw_audio_dir / recorded_date
-        local_dir.mkdir(parents=True, exist_ok=True)
-        audio_file_id = f"aud_{uuid4().hex}"
-        local_path = _raw_store_path(local_dir=local_dir, source_path=source_path, audio_file_id=audio_file_id)
-        shutil.copy2(source_path, local_path)
-        _repair_wav_file_metadata(local_path, recorded_at)
-        sha256 = _sha256(local_path)
-        mark_raw_evidence_read_only(local_path)
-        conn.execute(
-            """
-            insert into audio_files (
-              audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
-              local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                audio_file_id,
-                config.source_device,
-                str(source_path),
-                source_stat.st_size,
-                source_stat.st_mtime_ns,
-                str(local_path),
-                sha256,
-                _duration_ms(local_path),
-                recorded_at,
-                datetime.now(timezone.utc).isoformat(),
-                "imported",
-            ),
-        )
-        enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
-        imported += 1
+    files = scan_audio_files(source_dir=source_dir).files
+    total = len(files)
+    done = 0
+    for source_path in files:
+        try:
+            if not is_file_stable(source_path):
+                continue
+            source_stat = source_path.stat()
+            existing = conn.execute(
+                """
+                select 1
+                from audio_files
+                where source_path = ?
+                  and source_size_bytes = ?
+                  and source_mtime_ns = ?
+                """,
+                (str(source_path), source_stat.st_size, source_stat.st_mtime_ns),
+            ).fetchone()
+            if existing:
+                continue
+            recorded_at = _recorded_at_from_name(path=source_path)
+            recorded_date = recorded_at[:10]
+            local_dir = config.raw_audio_dir / recorded_date
+            local_dir.mkdir(parents=True, exist_ok=True)
+            audio_file_id = f"aud_{uuid4().hex}"
+            local_path = _raw_store_path(local_dir=local_dir, source_path=source_path, audio_file_id=audio_file_id)
+            shutil.copy2(source_path, local_path)
+            _repair_wav_file_metadata(local_path, recorded_at)
+            sha256 = _sha256(local_path)
+            mark_raw_evidence_read_only(local_path)
+            conn.execute(
+                """
+                insert into audio_files (
+                  audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+                  local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audio_file_id,
+                    config.source_device,
+                    str(source_path),
+                    source_stat.st_size,
+                    source_stat.st_mtime_ns,
+                    str(local_path),
+                    sha256,
+                    _duration_ms(local_path),
+                    recorded_at,
+                    datetime.now(timezone.utc).isoformat(),
+                    "imported",
+                ),
+            )
+            enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
+            imported += 1
+        finally:
+            done += 1
+            if progress is not None:
+                progress(done, total, source_path.name)
     return imported
 
 

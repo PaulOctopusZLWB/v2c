@@ -17,12 +17,13 @@ def test_import_enqueues_vad_task_and_does_not_create_parallel_run_table(tmp_pat
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_backend="mock", vad_backend="mock", llm_backend="mock")
     client = TestClient(create_app(config=config))
 
-    response = client.post("/api/pipeline/import", json={"source_dir": str(source)})
+    # wait=True imports synchronously so the enqueued vad task is observable right away.
+    response = client.post("/api/pipeline/import", json={"source_dir": str(source), "wait": True})
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["imported_files"] == 1
-    assert payload["queued"] is True  # default import enqueues and returns immediately, no drain
+    assert payload["queued"] is True  # synchronous import enqueues then drains
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -32,6 +33,23 @@ def test_import_enqueues_vad_task_and_does_not_create_parallel_run_table(tmp_pat
         conn.close()
     assert "pipeline_runs" not in tables  # no parallel orchestrator
     assert len(vad_tasks) == 1
+
+
+def test_import_async_returns_started_without_blocking(tmp_path: Path) -> None:
+    source = tmp_path / "NO NAME"
+    _write_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_backend="mock", vad_backend="mock", llm_backend="mock")
+    client = TestClient(create_app(config=config))
+
+    # wait=False (default): the copy runs in a background thread; the request returns
+    # immediately with the started/importing shape. We assert only the response shape
+    # (not eventual completion) so the test never sleeps on the worker.
+    response = client.post("/api/pipeline/import", json={"source_dir": str(source), "wait": False})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["started"] is True
+    assert payload["importing"] is True
 
 
 def test_import_with_wait_runs_pipeline_through_mock_backends(tmp_path: Path) -> None:
