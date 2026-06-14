@@ -3,7 +3,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from personal_context_node.config import AppConfig
+from personal_context_node.web.routes_pipeline import events_router, router as pipeline_router
 from personal_context_node.web.routes_status import router as status_router
+from personal_context_node.web.worker import PipelineWorker
 
 
 def create_app(*, config: AppConfig) -> FastAPI:
@@ -20,6 +22,9 @@ def create_app(*, config: AppConfig) -> FastAPI:
             "require_accepted_transcripts": bool(getattr(config, "require_accepted_transcripts", False)),
         }
 
+    app.state.worker = PipelineWorker(config=config)
     app.include_router(status_router)
+    app.include_router(pipeline_router)
+    app.include_router(events_router)  # serves GET /api/events
 
     return app
