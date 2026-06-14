@@ -38,7 +38,6 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
             """,
             (day,),
         )
-        transcript_segments_by_session = _transcript_segments_by_session(conn, day=day)
     finally:
         conn.close()
 
@@ -51,7 +50,6 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
             note_path,
             _session_note_text(
                 session,
-                transcript_segments=transcript_segments_by_session.get(str(session["session_id"]), []),
                 existing_text=existing_text,
                 source_run_id=source_run_id,
             ),
@@ -62,16 +60,17 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
 def _session_note_text(
     session: dict[str, object],
     *,
-    transcript_segments: list[dict[str, object]] | None = None,
     existing_text: str | None = None,
     source_run_id: str | None = None,
 ) -> str:
+    # Per §29.7 the note carries only the session_summary managed block and a user
+    # block. The full transcript is intentionally NOT embedded; it stays queryable on
+    # demand via `pcn session-transcript`.
     session_id = str(session["session_id"])
     summary_json = session.get("summary_json")
     summary = json.loads(str(summary_json)) if summary_json else None
     title = summary["headline"] if summary else f"Session {session_id}"
     managed_lines = _summary_lines(session, summary)
-    transcript_lines = _transcript_lines(transcript_segments or [])
     user_notes = _existing_user_notes(existing_text)
     return "\n".join(
         [
@@ -92,10 +91,6 @@ def _session_note_text(
             *managed_lines,
             _block_end("session_summary"),
             "",
-            _block_start("session_transcript", "managed"),
-            *transcript_lines,
-            _block_end("session_transcript"),
-            "",
             "## User Notes",
             "",
             _block_start("user_notes", "user"),
@@ -103,6 +98,26 @@ def _session_note_text(
             _block_end("user_notes"),
         ]
     )
+
+
+def session_transcript_lines(*, config: AppConfig, session_id: str) -> list[str]:
+    """Render a session's full transcript on demand (§29.7: notes never embed it)."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        segments = fetch_all(
+            conn,
+            """
+            select ts.start_ms, ts.end_ms, ts.text, ts.speaker, ts.asr_tags_json
+            from transcript_segments ts
+            where ts.session_id = ? and ts.is_active = 1
+            order by coalesce(ts.absolute_start_at, ''), ts.start_ms, ts.segment_id
+            """,
+            (session_id,),
+        )
+    finally:
+        conn.close()
+    return _transcript_lines(segments)
 
 
 def _block_start(block_id: str, kind: str) -> str:
@@ -148,26 +163,6 @@ def _summary_lines(session: dict[str, object], summary: dict[str, object] | None
     lines.extend(_todo_lines(summary.get("todos", [])))
     lines.extend(_plain_lines("Open Question", summary.get("open_questions", [])))
     return lines
-
-
-def _transcript_segments_by_session(conn, *, day: str) -> dict[str, list[dict[str, object]]]:
-    rows = fetch_all(
-        conn,
-        """
-        select
-          ts.session_id, ts.start_ms, ts.end_ms, ts.text, ts.speaker, ts.asr_tags_json
-        from transcript_segments ts
-        join sessions s on s.session_id = ts.session_id
-        where s.date_key = ?
-          and ts.is_active = 1
-        order by ts.session_id, coalesce(ts.absolute_start_at, ''), ts.start_ms, ts.segment_id
-        """,
-        (day,),
-    )
-    grouped: dict[str, list[dict[str, object]]] = {}
-    for row in rows:
-        grouped.setdefault(str(row["session_id"]), []).append(row)
-    return grouped
 
 
 def _transcript_lines(segments: list[dict[str, object]]) -> list[str]:

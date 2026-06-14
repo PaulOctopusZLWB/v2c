@@ -528,3 +528,122 @@ def _insert_segments(
         conn.commit()
     finally:
         conn.close()
+
+
+def test_sync_speaker_review_logs_duplicate_self_instead_of_crashing(tmp_path):
+    # §29.6: a review marking two persons is_self must be reported to the sync log, not
+    # crash sync_speaker_review (it runs inside daily_generate).
+    from personal_context_node.config import AppConfig
+    from personal_context_node.speaker_review import sync_speaker_review
+    from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
+    review_dir = config.obsidian_vault / "90_System" / "Speaker_Review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "2087-05-10.md").write_text(
+        "<!-- pcn:speaker_mapping start date_key=\"2087-05-10\" version=\"1\" -->\n"
+        "```yaml\n"
+        "mappings:\n"
+        "  self: per_self\n"
+        "persons:\n"
+        "  per_self:\n"
+        "    display_name: A\n"
+        "    is_self: true\n"
+        "  per_other:\n"
+        "    display_name: B\n"
+        "    is_self: true\n"
+        "```\n"
+        "<!-- pcn:speaker_mapping end date_key=\"2087-05-10\" -->\n",
+        encoding="utf-8",
+    )
+
+    result = sync_speaker_review(config=config, day="2087-05-10")  # must not raise
+
+    assert result.mappings_upserted == 0
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        logs = fetch_all(conn, "select status, message from sync_logs")
+        persons = fetch_all(conn, "select count(*) as c from persons")
+    finally:
+        conn.close()
+    assert any("is_self" in str(row["message"]) for row in logs)
+    assert persons[0]["c"] == 0  # no side effect
+
+
+def test_speaker_review_republish_preserves_confirmed_mapping(tmp_path):
+    # §29.4.9: re-publishing the speaker review (as obsidian_publish does each cycle)
+    # must reflect the confirmed DB mappings, not reset them to defaults — otherwise the
+    # next sync reverts a user's real-name attribution (data loss).
+    from personal_context_node.config import AppConfig
+    from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
+    from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status)"
+            " values ('a', 'DJI Mic 3', '/s', '/l', 'sha', 1000, '2087-05-10T08:00:00+08:00', '2087-05-10T09:00:00+08:00', 'imported')"
+        )
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at)"
+            " values ('ses', '2087-05-10', '2087-05-10T08:00:00+08:00', '2087-05-10T08:10:00+08:00', 'x', 1, 1000, 'seg', 'n', 'n')"
+        )
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version)"
+            " values ('seg', 'a', 'chk', 'ses', 0, 1000, 'hi', 'zh', 'spk_1', 'spk_1', 'ev', 0.9, 'm', 'm', 'v')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    text = text.replace("  spk_1: per_unknown", "  spk_1: per_wang").replace(
+        "  per_unknown:\n    display_name: unknown\n    is_self: false",
+        "  per_unknown:\n    display_name: unknown\n    is_self: false\n  per_wang:\n    display_name: 王总\n    is_self: false",
+    )
+    review_path.write_text(text, encoding="utf-8")
+    sync_speaker_review(config=config, day="2087-05-10")
+
+    # Re-publish (obsidian_publish) then re-sync — mapping must survive.
+    publish_speaker_review(config=config, day="2087-05-10")
+    sync_speaker_review(config=config, day="2087-05-10")
+
+    conn = connect(config.database_path)
+    try:
+        mappings = fetch_all(conn, "select speaker, person_id from speaker_mappings where person_id is not null")
+    finally:
+        conn.close()
+    assert {"speaker": "spk_1", "person_id": "per_wang"} in [dict(m) for m in mappings]
+
+
+def test_speaker_review_reassigning_self_to_new_person_does_not_crash(tmp_path: Path) -> None:
+    # idx_persons_self + §29.6: reassigning "self" to a renamed/new person must MOVE the self
+    # designation, not raise IntegrityError (which would wedge the daily_generate task on every
+    # retry). Round 1 establishes per_self (is_self=1); round 2 promotes per_paul to self.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", edit_grace_seconds=0)
+    _insert_segments(config.database_path)
+    publish_speaker_review(config=config, day="2087-05-10")
+    sync_speaker_review(config=config, day="2087-05-10")  # round 1: per_self is_self=1
+
+    review_path = publish_speaker_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    edited = text.replace("  spk_self: per_self", "  spk_self: per_paul")
+    edited = edited.replace(
+        "  per_self:\n    display_name: self\n    is_self: true",
+        "  per_paul:\n    display_name: Paul\n    is_self: true",
+    )
+    review_path.write_text(edited, encoding="utf-8")
+
+    result = sync_speaker_review(config=config, day="2087-05-10")  # must not raise IntegrityError
+    assert result.mappings_upserted == 1
+
+    conn = connect(config.database_path)
+    try:
+        selves = fetch_all(conn, "select person_id from persons where is_self = 1")
+    finally:
+        conn.close()
+    assert [row["person_id"] for row in selves] == ["per_paul"]  # exactly one self, moved

@@ -27,12 +27,14 @@ def test_publish_session_notes_creates_stable_session_note(tmp_path: Path) -> No
     assert '<!-- pcn:block start id="session_summary" kind="managed" version="1" -->' in text
     assert '<!-- pcn:block end id="session_summary" -->' in text
     assert "segment_count: 2" in text
-    assert "## Transcript" in text
-    assert "暂无转写片段。" in text
-    assert "完整转写不进入 session note" not in text
+    # Per §29.7 the full transcript must NOT be embedded in the session note.
+    assert "## Transcript" not in text
+    assert 'id="session_transcript"' not in text
 
 
-def test_publish_session_notes_includes_transcript_text_and_asr_tags(tmp_path: Path) -> None:
+def test_publish_session_notes_omits_transcript_but_cli_renders_it(tmp_path: Path) -> None:
+    from personal_context_node.obsidian_sessions import session_transcript_lines
+
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session(config.database_path)
     _insert_transcript_segment(config.database_path)
@@ -41,11 +43,14 @@ def test_publish_session_notes_includes_transcript_text_and_asr_tags(tmp_path: P
 
     note_path = config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md"
     text = note_path.read_text(encoding="utf-8")
-    assert "## Transcript" in text
+    assert "我们继续开发 run-all。" not in text
+
+    rendered = "\n".join(session_transcript_lines(config=config, session_id="ses_test"))
+    assert "## Transcript" in rendered
     assert (
         "- `00:01.000-00:02.500` **self**: 我们继续开发 run-all。 "
         "_(tags: yue, EMO_UNKNOWN, Speech, withitn)_"
-    ) in text
+    ) in rendered
 
 
 def test_publish_session_notes_preserves_user_notes_block(tmp_path: Path) -> None:

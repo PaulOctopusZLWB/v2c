@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import hashlib
 import time
@@ -11,6 +12,7 @@ import yaml
 
 from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
+from personal_context_node.obsidian_publish_state import note_was_user_edited, record_note_digest
 from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.obsidian_sync_log import record_sync_log
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -38,6 +40,10 @@ class ParsedSpeakerReview:
 
 def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | None = None) -> Path:
     assert_personal_context_vault(config)
+    review_path = config.obsidian_vault / "90_System" / "Speaker_Review" / f"{day}.md"
+    if note_was_user_edited(config=config, note_path=review_path, edit_grace_seconds=config.edit_grace_seconds):
+        # Do not clobber the user's in-flight speaker-mapping edits on a re-publish (§29.6).
+        return review_path
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -65,8 +71,58 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
             """,
             (day,),
         )
+        # Reflect the CURRENT confirmed mappings so a re-publish (which obsidian_publish
+        # does every cycle) is idempotent and does NOT revert a user's mappings back to
+        # defaults (§29.4.9 declarative idempotent sync).
+        existing_mappings = {
+            str(row["speaker"]): str(row["person_id"])
+            for row in fetch_all(
+                conn, "select speaker, person_id from speaker_mappings where person_id is not null"
+            )
+        }
+        override_rows = fetch_all(
+            conn,
+            """
+            select o.segment_id, o.person_id
+            from segment_person_overrides o
+            join transcript_segments ts on ts.segment_id = o.segment_id
+            join sessions s on s.session_id = ts.session_id
+            where s.date_key = ? and o.person_id is not null
+            order by o.segment_id
+            """,
+            (day,),
+        )
+        resolved_mappings = {
+            str(row["speaker"]): existing_mappings.get(str(row["speaker"]), _default_person_id(str(row["speaker"])))
+            for row in speakers
+        }
+        referenced = set(resolved_mappings.values()) | {str(o["person_id"]) for o in override_rows}
+        referenced |= {"per_self", "per_unknown"}
+        person_by_id = {
+            str(row["person_id"]): row
+            for row in fetch_all(
+                conn,
+                f"select person_id, display_name, is_self from persons where person_id in "
+                f"({','.join('?' for _ in referenced)})",
+                tuple(sorted(referenced)),
+            )
+        }
     finally:
         conn.close()
+
+    def _person_block(person_id: str) -> list[str]:
+        row = person_by_id.get(person_id)
+        if row is not None:
+            display_name = str(row["display_name"])
+            is_self = bool(int(row["is_self"]))
+        else:
+            display_name = "self" if person_id == "per_self" else ("unknown" if person_id == "per_unknown" else person_id)
+            is_self = person_id == "per_self"
+        return [
+            f"  {person_id}:",
+            f"    display_name: {_yaml_scalar(display_name)}",
+            f"    is_self: {'true' if is_self else 'false'}",
+        ]
 
     review_dir = config.obsidian_vault / "90_System" / "Speaker_Review"
     review_dir.mkdir(parents=True, exist_ok=True)
@@ -89,17 +145,19 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
         "mappings:",
     ]
     for row in speakers:
-        lines.append(f"  {row['speaker']}: {_default_person_id(str(row['speaker']))}")
+        lines.append(f"  {row['speaker']}: {resolved_mappings[str(row['speaker'])]}")
+    lines.append("persons:")
+    ordered_persons = ["per_self", "per_unknown"] + sorted(referenced - {"per_self", "per_unknown"})
+    for person_id in ordered_persons:
+        lines.extend(_person_block(person_id))
+    if override_rows:
+        lines.append("segment_overrides:")
+        for override in override_rows:
+            lines.append(f"  {override['segment_id']}: {override['person_id']}")
+    else:
+        lines.append("segment_overrides: {}")
     lines.extend(
         [
-            "persons:",
-            "  per_self:",
-            "    display_name: self",
-            "    is_self: true",
-            "  per_unknown:",
-            "    display_name: unknown",
-            "    is_self: false",
-            "segment_overrides: {}",
             "```",
             f'<!-- pcn:speaker_mapping end date_key="{day}" -->',
             "",
@@ -109,7 +167,9 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
     )
     for row in segments:
         lines.append(f"- {row['segment_id']} | {row['speaker']} | {row['text']}")
-    write_text_atomic(review_path, "\n".join(lines) + "\n")
+    review_content = "\n".join(lines) + "\n"
+    write_text_atomic(review_path, review_content)
+    record_note_digest(config=config, note_path=review_path, content=review_content)
     return review_path
 
 
@@ -172,6 +232,26 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
                 target_id=day,
                 status="failed",
                 message=f"unknown person reference: {', '.join(unknown_person_ids)}",
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
+    self_person_ids = sorted(person_id for person_id, person in parsed.persons.items() if person.is_self)
+    if len(self_person_ids) > 1:
+        # At most one self person is allowed (idx_persons_self). Report the validation
+        # failure to the sync log instead of crashing the daily_generate task (§29.6).
+        conn = connect(config.database_path)
+        try:
+            initialize(conn)
+            record_sync_log(
+                config=config,
+                conn=conn,
+                day=day,
+                source="speaker_mapping_review",
+                target_id=day,
+                status="failed",
+                message=f"multiple persons marked is_self: {', '.join(self_person_ids)}",
             )
             conn.commit()
         finally:
@@ -395,13 +475,37 @@ def _default_person_id(speaker: str) -> str:
     return "per_self" if speaker in {"self", "spk_self"} else "per_unknown"
 
 
+_SAFE_YAML_SCALAR = re.compile(r"^[\w 一-鿿]+$")
+
+
+def _yaml_scalar(value: str) -> str:
+    # Emit a plain YAML scalar for simple names (letters/digits/spaces/CJK), else a
+    # double-quoted scalar (valid YAML) for anything that could need escaping.
+    if value and value == value.strip() and _SAFE_YAML_SCALAR.match(value):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
 def _upsert_person(conn, *, person: SpeakerPerson, now: str) -> None:
+    if person.is_self:
+        # At most one person may be self (idx_persons_self). Reassigning/renaming self to a new
+        # person_id must MOVE the designation, not crash the partial unique index — clear is_self
+        # on every other person first, in this same transaction (clear-then-set never leaves two
+        # self rows). Otherwise a routine correction (mapping the self cluster to a real name)
+        # would raise IntegrityError and wedge the daily_generate task on every retry.
+        conn.execute(
+            "update persons set is_self = 0, person_type = 'local', updated_at = ? "
+            "where is_self = 1 and person_id != ?",
+            (now, person.person_id),
+        )
     conn.execute(
         """
         insert into persons (person_id, display_name, person_type, is_self, public_identity_id, created_at, updated_at)
         values (?, ?, ?, ?, ?, ?, ?)
         on conflict(person_id) do update set
           display_name = excluded.display_name,
+          person_type = excluded.person_type,
+          is_self = excluded.is_self,
           updated_at = excluded.updated_at
         """,
         (

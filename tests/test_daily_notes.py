@@ -218,3 +218,49 @@ def _insert_daily_summary(database_path: Path, *, recorded_at: str = "2087-05-10
         conn.commit()
     finally:
         conn.close()
+
+
+def test_publish_daily_note_renders_evidence_links_for_todos_and_decisions(tmp_path: Path) -> None:
+    # §29.7: daily_todos / daily_decisions rollups must carry evidence links.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into summaries (summary_id, summary_type, target_type, target_id, prompt_version,
+              model_name, content_json, created_at, updated_at)
+            values (?, 'daily', 'date_key', '2087-05-10', 'llm_port.daily_summary.v1', 'rule_based', ?, ?, ?)
+            """,
+            (
+                "sum_ev",
+                json.dumps(
+                    {
+                        "schema_version": "daily_summary.v1",
+                        "date_key": "2087-05-10",
+                        "headline": "h",
+                        "summary": "s",
+                        "highlights": [],
+                        "decisions_rollup": [
+                            {"text": "用 FunASR", "session_id": "ses_x", "evidence_refs": ["ev_dec"]}
+                        ],
+                        "todos_rollup": [
+                            {"text": "本地处理", "owner": "self", "session_id": "ses_x", "evidence_refs": ["ev_todo"]}
+                        ],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "2087-05-10T10:00:00+08:00",
+                "2087-05-10T10:00:00+08:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    publish_daily_note(config=config, day="2087-05-10")
+
+    text = (config.obsidian_vault / "10_Daily" / "2087-05-10.md").read_text(encoding="utf-8")
+    assert "evidence: ev_todo" in text
+    assert "evidence: ev_dec" in text

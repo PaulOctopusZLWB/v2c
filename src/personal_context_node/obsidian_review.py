@@ -18,7 +18,8 @@ from personal_context_node.core.protocols.memory import (
 )
 from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.evidence_refs import evidence_ids_from_candidate_json, hydrate_candidate_evidence_refs
-from personal_context_node.identity_keys import load_or_create_signing_key
+from personal_context_node.identity_keys import effective_owner_did, load_or_create_signing_key
+from personal_context_node.obsidian_publish_state import note_was_user_edited, record_note_digest
 from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.obsidian_sync_log import record_sync_log
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
@@ -48,16 +49,22 @@ ALLOWED_REVIEW_ACTIONS = {"confirm", "edit", "reject", "defer", "exclude_from_me
 
 def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str | None = None) -> Path:
     assert_personal_context_vault(config)
+    review_path = config.obsidian_vault / "30_Memory_Candidates" / f"{day}.md"
+    if note_was_user_edited(config=config, note_path=review_path, edit_grace_seconds=config.edit_grace_seconds):
+        # The user has edited this review file since the system last wrote it and is still
+        # within the edit-grace window: do not clobber their in-flight edits on a
+        # re-publish (§29.6 mtime + content hash).
+        return review_path
     conn = connect(config.database_path)
     try:
         initialize(conn)
         rows = fetch_all(
             conn,
             """
-            select candidate_id, candidate_claim, claim_type, confidence
+            select candidate_id, candidate_claim, claim_type, confidence, status,
+                   created_card_id, reviewed_at
             from memory_candidates
-            where status = 'pending_review'
-              and date_key = ?
+            where date_key = ?
             order by candidate_id
             """,
             (day,),
@@ -83,7 +90,27 @@ def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str 
         "<!-- pcn-review-format: memory-candidates.v1 -->",
         "",
     ]
+    receipt_now = datetime.now(timezone.utc).isoformat()
     for row in rows:
+        if row["status"] != "pending_review":
+            # Already-processed candidates render as durable read-only receipts so a
+            # later re-publish does not erase them (§29.4.7); the actionable block is
+            # only emitted while a candidate is still pending.
+            action = {"confirmed": "confirm", "rejected": "reject"}.get(str(row["status"]), str(row["status"]))
+            receipt = {"action": action, "card_id": row["created_card_id"]}
+            # Render only the receipt block (no `- [x] cand |` line): that checkbox
+            # line would match the read-back tamper-detector and emit spurious
+            # "ignored edit" sync-log entries on every re-publish (§29.4.7).
+            lines.extend(
+                _receipt_lines(
+                    str(row["candidate_id"]),
+                    receipt,
+                    original_claim=str(row["candidate_claim"]),
+                    synced_at=str(row["reviewed_at"] or receipt_now),
+                )
+            )
+            lines.append("")
+            continue
         lines.append(f"- [ ] {row['candidate_id']} | {row['claim_type']} | {row['candidate_claim']}")
         lines.extend(
             [
@@ -98,7 +125,9 @@ def publish_candidate_review(*, config: AppConfig, day: str, source_run_id: str 
                 "",
             ]
         )
-    write_text_atomic(review_path, "\n".join(lines) + "\n")
+    review_content = "\n".join(lines) + "\n"
+    write_text_atomic(review_path, review_content)
+    record_note_digest(config=config, note_path=review_path, content=review_content)
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -156,6 +185,7 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
         events = 0
         receipts: dict[str, dict[str, str | None]] = {}
         signing_key = load_or_create_signing_key(config)
+        owner_did = effective_owner_did(config)
         for review_action in checked_actions:
             candidate_id = review_action.candidate_id
             action = review_action.action
@@ -229,27 +259,41 @@ def confirm_checked_candidates(*, config: AppConfig, day: str) -> ConfirmCandida
                 )
                 receipts[candidate_id] = {"action": "exclude_from_memory", "card_id": None}
                 continue
-            card = MemoryCard(
-                card_id=f"mem_{uuid4().hex}",
-                owner_did=config.owner_did,
-                claim_type=row["claim_type"],
-                claim=review_action.edited_claim or row["candidate_claim"],
-                subject=SubjectRef.model_validate(review_action.subject or json.loads(row["subject_json"])),
-                evidence_refs=hydrate_candidate_evidence_refs(conn, str(row["evidence_refs_json"])),
-                source_type="confirmed_generated",
-                candidate_claim=row["candidate_claim"],
-                confidence=float(row["confidence"]) if row["confidence"] is not None else None,
-                visibility=review_action.visibility or {"type": "private"},
-                tags=review_action.tags or [],
-            )
-            event, public_key = create_chained_event(
-                conn,
-                event_type="memory_card.created",
-                payload=card,
-                signer_did=config.owner_did,
-                private_key=signing_key,
-            )
-            insert_signed_event(conn, event=event, public_key=public_key)
+            try:
+                card = MemoryCard(
+                    card_id=f"mem_{uuid4().hex}",
+                    owner_did=owner_did,
+                    claim_type=row["claim_type"],
+                    claim=review_action.edited_claim or row["candidate_claim"],
+                    subject=SubjectRef.model_validate(review_action.subject or json.loads(row["subject_json"])),
+                    evidence_refs=hydrate_candidate_evidence_refs(conn, str(row["evidence_refs_json"])),
+                    source_type="confirmed_generated",
+                    candidate_claim=row["candidate_claim"],
+                    confidence=float(row["confidence"]) if row["confidence"] is not None else None,
+                    visibility=review_action.visibility or {"type": "private"},
+                    tags=review_action.tags or [],
+                )
+                event, public_key = create_chained_event(
+                    conn,
+                    event_type="memory_card.created",
+                    payload=card,
+                    signer_did=owner_did,
+                    private_key=signing_key,
+                )
+                insert_signed_event(conn, event=event, public_key=public_key)
+            except Exception as exc:
+                # A single invalid/edited candidate (e.g. a per_* local token in the edited
+                # claim, §17.6) must not abort the whole day's sync: log and skip it (§29.6).
+                record_sync_log(
+                    config=config,
+                    conn=conn,
+                    day=day,
+                    source="memory_candidate_review",
+                    target_id=candidate_id,
+                    status="failed",
+                    message=f"invalid confirmed claim {candidate_id}: {exc}",
+                )
+                continue
             conn.execute(
                 """
                 update memory_candidates
@@ -290,7 +334,15 @@ def _within_edit_grace(path: Path, *, edit_grace_seconds: int) -> bool:
 
 
 def _yaml_quote(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    # Escape for a YAML double-quoted scalar, including control characters so a claim
+    # with embedded newlines/tabs stays valid YAML (read back via the \n/\t escapes).
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
 
 
 def _mark_evidence_sessions_excluded(conn, *, evidence_refs_json: str) -> None:

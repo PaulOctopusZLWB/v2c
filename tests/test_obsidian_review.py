@@ -59,6 +59,43 @@ def test_publish_and_confirm_checked_memory_candidates(tmp_path: Path) -> None:
     assert events[0]["trust_status"] == "trusted"
 
 
+def test_republish_preserves_confirmed_receipts(tmp_path: Path) -> None:
+    # §29.4.7: a confirmed candidate's read-only receipt must survive a later
+    # re-publish of the candidate-review note, not silently disappear.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
+    _insert_candidate(config.database_path)
+    review_path = publish_candidate_review(config=config, day="2087-05-10")
+    text = review_path.read_text(encoding="utf-8")
+    review_path.write_text(text.replace("- [ ] cand_test_001", "- [x] cand_test_001"), encoding="utf-8")
+    confirm_checked_candidates(config=config, day="2087-05-10")
+
+    # Re-publish (e.g. another daily_generate -> obsidian_publish for the same day).
+    publish_candidate_review(config=config, day="2087-05-10")
+
+    republished = review_path.read_text(encoding="utf-8")
+    assert 'pcn:review_receipt start kind="managed" candidate_id="cand_test_001" action=confirm' in republished
+    assert "cand_test_001 -> mem_" in republished
+    # It must NOT be re-offered as an actionable pending block.
+    assert '<!-- pcn:review start type="memory_candidate" candidate_id="cand_test_001"' not in republished
+
+    # Re-syncing the re-published note must NOT flag the receipt as a user edit
+    # (the publish output must not trip its own read-back tamper-detector).
+    confirm_checked_candidates(config=config, day="2087-05-10")
+    conn = connect(config.database_path)
+    try:
+        ignored = fetch_all(
+            conn,
+            "select count(*) as c from sync_logs where message like '%ignored%' or status = 'ignored'",
+        )[0]["c"]
+        cards = fetch_all(conn, "select count(*) as c from memory_cards")[0]["c"]
+        events = fetch_all(conn, "select count(*) as c from signed_events")[0]["c"]
+    finally:
+        conn.close()
+    assert ignored == 0
+    assert cards == 1  # no duplicate card created on re-sync
+    assert events == 1
+
+
 def test_confirm_review_rewrites_checked_candidates_as_read_only_receipts(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", owner_did="did:key:test-owner", edit_grace_seconds=0)
     _insert_candidate(config.database_path)

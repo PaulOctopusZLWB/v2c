@@ -65,6 +65,17 @@ def publish_daily_note(*, config: AppConfig, day: str, source_run_id: str | None
             source_run_id=source_run_id,
         ),
     )
+    # Record the published note path on the daily report (§27.1 note_path column).
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "update daily_reports set note_path = ?, updated_at = ? where date_key = ?",
+            (str(note_path), datetime.now(timezone.utc).isoformat(), day),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     return PublishDailyNoteResult(notes_written=1)
 
 
@@ -84,10 +95,19 @@ def _daily_metrics(conn, *, day: str, sessions: list[dict[str, object]]) -> dict
         """,
         (day,),
     )
+    report = fetch_all(
+        conn,
+        "select self_speech_ms, others_speech_ms from daily_reports where date_key = ?",
+        (day,),
+    )
+    self_speech_ms = int(report[0]["self_speech_ms"]) if report else 0
+    others_speech_ms = int(report[0]["others_speech_ms"]) if report else 0
     return {
         "file_count": rows[0]["file_count"],
         "total_duration_ms": rows[0]["total_duration_ms"],
         "active_speech_ms": sum(int(session["active_speech_ms"]) for session in sessions),
+        "self_speech_ms": self_speech_ms,
+        "others_speech_ms": others_speech_ms,
         "session_count": len(sessions),
     }
 
@@ -126,6 +146,8 @@ def _daily_note_text(
             f"- Total imported files: {metrics['file_count']}",
             f"- Total duration ms: {metrics['total_duration_ms']}",
             f"- Active speech ms: {metrics['active_speech_ms']}",
+            f"- Self speech ms: {metrics['self_speech_ms']}",
+            f"- Others speech ms: {metrics['others_speech_ms']}",
             f"- Sessions: {metrics['session_count']}",
             _block_end("daily_metrics"),
             "",
@@ -179,11 +201,19 @@ def _session_lines(*, day: str, sessions: list[dict[str, object]]) -> list[str]:
     ] or ["- No sessions"]
 
 
+def _evidence_suffix(item: dict[str, object]) -> str:
+    # §29.7: daily todos/decisions rollups must carry evidence links.
+    refs = item.get("evidence_refs")
+    if isinstance(refs, list) and refs:
+        return f", evidence: {', '.join(str(ref) for ref in refs)}"
+    return ""
+
+
 def _todo_lines(items: object) -> list[str]:
     if not isinstance(items, list) or not items:
         return ["- No todos"]
     return [
-        f"- {item['text']} (owner: {item['owner']}, session: {item['session_id']})"
+        f"- {item['text']} (owner: {item['owner']}, session: {item['session_id']}{_evidence_suffix(item)})"
         for item in items
         if isinstance(item, dict)
     ]
@@ -193,7 +223,7 @@ def _decision_lines(items: object) -> list[str]:
     if not isinstance(items, list) or not items:
         return ["- No decisions"]
     return [
-        f"- {item['text']} (session: {item['session_id']})"
+        f"- {item['text']} (session: {item['session_id']}{_evidence_suffix(item)})"
         for item in items
         if isinstance(item, dict)
     ]
