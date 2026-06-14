@@ -7,15 +7,7 @@ from uuid import uuid4
 import typer
 
 from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
-from personal_context_node.adapters.asr.command import CommandASRAdapter
-from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.file_import.local_directory import LocalDirectoryFileImportAdapter
-from personal_context_node.adapters.llm.command import CommandLLMAdapter
-from personal_context_node.adapters.llm.mock import MockLLMAdapter
-from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
-from personal_context_node.adapters.vad.command import CommandVADAdapter
-from personal_context_node.adapters.vad.energy import EnergyVadAdapter
-from personal_context_node.adapters.vad.mock import MockVADAdapter
 from personal_context_node.archive import (
     archive_completed_audio,
     archive_status_rows,
