@@ -35,7 +35,7 @@
 ### 1.2 非目标
 
 1. v1 不做实时转写。
-2. v1 不做 Web 审核 UI。
+2. 初始 CLI v1 不做 Web 审核 UI;本机 Web Control Panel 作为后续本地控制台阶段实现,它是既有任务队列之上的薄观察层 + 一个额外 worker,不引入第二套编排,默认不改变自治行为(`require_accepted_transcripts` 默认关闭)。音频、原始转写与统计仍本地化。
 3. v1 不做原始音频共享。
 4. v1 不实现 MCP server、HTTP API、P2P 或同步服务。
 5. v1 不做端到端加密和复杂权限系统。
@@ -104,6 +104,10 @@ ports 由 core 定义，adapters 只实现 ports
 storage 是 core 基础设施：具体 SQLite 实现，不设 port
 protocols 不依赖具体传输方式
 ```
+
+### 2.2 本机 Web Control Panel 阶段
+
+Web 层只做加法:复用 `tasks` 队列 + `process_once` 作为唯一编排器,run 身份与历史来自既有 `job_runs`,实时状态来自 `tasks`;停止是进程内协作式标志,在工作单元之间检查。LLM 验收闸门是可选项(`require_accepted_transcripts`,默认关闭),其谓词只存在于 `transcript_review.accepted_segments_clause` 一处;speaker→person 由 `speaker_review` 的单一写入函数承担,markdown 同步与 Web API 共用它,数据库为权威源。前端覆盖 transcript 验收与 speaker/person 纠正,并只读展示 LLM 结果;memory candidate 的最终确认仍在 Obsidian。
 
 ## 3. 系统划分总览
 
