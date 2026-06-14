@@ -23,3 +23,4 @@ web/*.tsbuildinfo
 *.md
 web/shot.mjs
 web/shot-hl.mjs
+web/shot*.mjs
