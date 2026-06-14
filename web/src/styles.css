@@ -1,11 +1,51 @@
-.workbench { display: grid; grid-template-columns: 200px minmax(0, 1fr) 320px; min-height: 100vh; }
-.pipeline-rail, .run-inspector { border-right: 1px solid var(--border); padding: 16px; }
-.run-inspector { border-left: 1px solid var(--border); border-right: 0; }
-.main-panel { padding: 20px; }
+.workbench {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 340px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "header header header"
+    "left   center right";
+  min-height: 100vh;
+}
+
+.workbench-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.workbench-header h1 { font-size: 16px; margin: 0; }
+
+.rail-left { grid-area: left; border-right: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+.center-panel { grid-area: center; padding: 20px; overflow-y: auto; }
+.rail-right { grid-area: right; border-left: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+
+.device-panel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.device-panel h3 { margin: 0; font-size: 13px; }
+
+.empty { padding: 24px 0; }
+
 .stage { padding: 6px 8px; border-radius: 6px; }
 .stage.active { font-weight: 600; }
-.segment-row { display: grid; gap: 6px; padding: 10px; border-bottom: 1px solid var(--border); }
-.speaker-chip { font-size: 12px; }
-.task-list { font-size: 13px; }
-.task-row { display: flex; gap: 8px; justify-content: space-between; padding: 4px 0; }
-.candidate { padding: 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; }
+
+.segment-list { display: grid; gap: 8px; }
+.segment-row {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.segment-row .actions { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; }
+.segment-row .seg-text { margin: 0; }
+
+.speaker-panel { margin-top: 16px; }
+.speaker-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.speaker-add { display: flex; gap: 8px; margin-top: 8px; }
+
+.task-list { font-size: 13px; margin-top: 16px; }
+.task-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; padding: 4px 0; }
+.status-failed { color: var(--err); }

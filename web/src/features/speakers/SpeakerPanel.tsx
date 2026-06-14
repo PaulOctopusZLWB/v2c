@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { Person } from "../../api/types";
+import { t } from "../../i18n";
+import { speakerColor } from "../../lib/speakerColors";
 
 export function SpeakerPanel({
   speakers,
@@ -14,28 +16,31 @@ export function SpeakerPanel({
 }) {
   const [newName, setNewName] = useState("");
   return (
-    <section>
-      <h2>Speakers</h2>
+    <section className="speaker-panel">
+      <h2>{t.speaker.speaker}</h2>
       {speakers.map((speaker) => (
-        <div key={speaker}>
-          <label>
-            {`Person for ${speaker}`}
-            <select
-              aria-label={`Person for ${speaker}`}
-              defaultValue=""
-              onChange={(event) => event.target.value && onAssign(speaker, event.target.value)}
-            >
-              <option value="" disabled>Assign person…</option>
-              {persons.map((person) => (
-                <option key={person.person_id} value={person.person_id}>{person.display_name}</option>
-              ))}
-            </select>
-          </label>
+        <div className="speaker-row" key={speaker}>
+          <span className="chip" style={{ background: speakerColor(speaker) }}>{speaker}</span>
+          <select
+            aria-label={`${t.speaker.assign} ${speaker}`}
+            defaultValue=""
+            onChange={(event) => event.target.value && onAssign(speaker, event.target.value)}
+          >
+            <option value="" disabled>{t.speaker.assign}…</option>
+            {persons.map((person) => (
+              <option key={person.person_id} value={person.person_id}>{person.display_name}</option>
+            ))}
+          </select>
         </div>
       ))}
-      <div>
-        <input aria-label="New person name" value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="New person" />
-        <button onClick={() => newName && onCreatePerson(newName)}>Add person</button>
+      <div className="speaker-add">
+        <input
+          aria-label={t.speaker.newPerson}
+          value={newName}
+          onChange={(event) => setNewName(event.target.value)}
+          placeholder={t.speaker.newPerson}
+        />
+        <button onClick={() => newName && onCreatePerson(newName)}>{t.speaker.newPerson}</button>
       </div>
     </section>
   );

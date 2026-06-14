@@ -14,7 +14,7 @@ describe("SpeakerPanel", () => {
         onCreatePerson={async () => undefined}
       />
     );
-    await userEvent.selectOptions(screen.getByLabelText("Person for spk_1"), "per_paul");
+    await userEvent.selectOptions(screen.getByLabelText("指派发言人 spk_1"), "per_paul");
     expect(onAssign).toHaveBeenCalledWith("spk_1", "per_paul");
   });
 });

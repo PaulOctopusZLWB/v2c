@@ -19,14 +19,54 @@ describe("App container", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("imports the entered directory then starts a run", async () => {
+  it("imports a detected device then starts a run", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/devices")
+        return new Response(
+          JSON.stringify({ sources: [{ kind: "device", device_id: "dev_1", label: "录音器 A", root_path: "/Volumes/REC", audio_count: 3 }] }),
+          { status: 200 }
+        );
+      if (url === "/api/pipeline/import") return new Response(JSON.stringify({ imported_files: 3, queued: true }), { status: 200 });
+      if (url === "/api/pipeline/run") return new Response(JSON.stringify({ worker_running: true }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
     render(<App />);
-    await userEvent.type(screen.getByLabelText("Source directory"), "/data/incoming");
-    await userEvent.click(screen.getByRole("button", { name: "Import" }));
+    await userEvent.click(await screen.findByRole("button", { name: "导入" }));
 
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(calls).toContain("/api/pipeline/import");
     expect(calls).toContain("/api/pipeline/run");
+  });
+
+  it("shows 运行中 when the worker is running", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/status/tasks")
+        return new Response(
+          JSON.stringify({
+            tasks: [
+              {
+                task_id: "t1",
+                task_type: "asr",
+                target_type: "audio",
+                target_id: "a1",
+                status: "running",
+                attempt_count: 1,
+                last_error: null,
+                duration_ms: null
+              }
+            ]
+          }),
+          { status: 200 }
+        );
+      return new Response("{}", { status: 200 });
+    });
+
+    render(<App />);
+    expect(await screen.findAllByText("运行中")).not.toHaveLength(0);
   });
 
   it("navigates day -> session and accepts a segment", async () => {
