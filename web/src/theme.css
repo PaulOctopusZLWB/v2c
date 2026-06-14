@@ -26,6 +26,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .segment-enter { animation: slidein .18s ease-out; }
 @media (prefers-reduced-motion: reduce) { .live-dot, .segment-enter { animation: none; } }
 
+.spine{display:flex;gap:4px;align-items:center;font-size:13px}
+.stage{color:var(--text-dim);padding:2px 4px}
+.stage.active{color:var(--accent);font-weight:600}
+.sep{color:var(--border)}
+
 button { font-family: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .4; cursor: default; }

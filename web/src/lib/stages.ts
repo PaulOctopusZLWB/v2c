@@ -3,12 +3,12 @@ import type { TaskRow } from "../api/types";
 export type Stage = "device" | "import" | "asr" | "review" | "llm" | "publish";
 
 export const STAGES: Array<{ id: Stage; label: string }> = [
-  { id: "device", label: "Device" },
-  { id: "import", label: "Import" },
-  { id: "asr", label: "ASR" },
-  { id: "review", label: "Transcript Review" },
-  { id: "llm", label: "LLM" },
-  { id: "publish", label: "Publish" }
+  { id: "device", label: "设备" },
+  { id: "import", label: "导入" },
+  { id: "asr", label: "转写" },
+  { id: "review", label: "审核" },
+  { id: "llm", label: "观点" },
+  { id: "publish", label: "发布" }
 ];
 
 export function stageForTaskType(taskType: string): Stage {
