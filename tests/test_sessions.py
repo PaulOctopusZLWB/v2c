@@ -24,6 +24,165 @@ def test_derive_sessions_splits_by_gap_and_reuses_existing_ids(tmp_path: Path) -
     assert [row["session_id"] for row in _session_rows(config.database_path)] == first_ids
 
 
+def _insert_segment(database_path: Path, segment_id: str, start_ms: int, end_ms: int, audio_file_id: str = "aud_test") -> None:
+    conn = connect(database_path)
+    try:
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              language, speaker, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                segment_id,
+                audio_file_id,
+                f"chk_{segment_id}",
+                start_ms,
+                end_ms,
+                "测试片段",
+                "zh",
+                "self",
+                f"ev_{segment_id}",
+                0.99,
+                "MockASRAdapter",
+                "mock-asr",
+                "test",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_derive_sessions_reuses_session_id_when_group_gains_earlier_segment(tmp_path: Path) -> None:
+    # Rule 26.2.7: reuse a session_id when the regrouped session CONTAINS an existing
+    # session's first segment, even if a rerun prepends an earlier segment so the first
+    # position changes. Otherwise note filenames and [[ses_*]] refs drift on every rerun.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_test",
+                "DJI Mic 3",
+                "/source.wav",
+                "/local.wav",
+                "sha256:test",
+                2_000_000,
+                "2087-05-10T08:00:00+08:00",
+                "2087-05-10T10:00:00+08:00",
+                "imported",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _insert_segment(config.database_path, "seg_b", 30 * 60 * 1000, 30 * 60 * 1000 + 10_000)
+
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+    original = _session_rows(config.database_path)
+    assert len(original) == 1
+    original_id = original[0]["session_id"]
+
+    # Rerun discovers an earlier segment within the gap window; it becomes the new first.
+    _insert_segment(config.database_path, "seg_a", 25 * 60 * 1000, 25 * 60 * 1000 + 10_000)
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    rows = _session_rows(config.database_path)
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == original_id
+    assert rows[0]["segment_count"] == 2
+
+
+def test_derive_sessions_attributes_cross_midnight_session_to_started_at_date(tmp_path: Path) -> None:
+    # §25.3 rule 2: a session that starts after midnight is attributed to its
+    # started_at date, even though the file was recorded the previous day.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_test",
+                "DJI Mic 3",
+                "/source.wav",
+                "/local.wav",
+                "sha256:test",
+                5_000_000,
+                "2087-05-10T23:00:00+08:00",
+                "2087-05-11T10:00:00+08:00",
+                "imported",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    # Segment at +70min -> absolute start 2087-05-11T00:10 (after midnight).
+    _insert_segment(config.database_path, "seg_late", 70 * 60 * 1000, 70 * 60 * 1000 + 10_000)
+
+    result = derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    assert result.sessions_derived == 1
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select date_key, started_at from sessions")
+    finally:
+        conn.close()
+    assert rows[0]["date_key"] == "2087-05-11"
+    assert rows[0]["started_at"].startswith("2087-05-11T00:10")
+
+
+def test_derive_sessions_splits_by_source_device(tmp_path: Path) -> None:
+    # Rule 26.2.1: only same-device segments share a session, even within the gap window.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for audio_file_id, device in [("aud_a", "DJI Mic 3"), ("aud_b", "Other Mic")]:
+            conn.execute(
+                """
+                insert into audio_files (
+                  audio_file_id, source_device, source_path, local_raw_path, sha256,
+                  duration_ms, recorded_at, imported_at, status
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audio_file_id,
+                    device,
+                    f"/source/{audio_file_id}.wav",
+                    f"/local/{audio_file_id}.wav",
+                    f"sha256:{audio_file_id}",
+                    60_000,
+                    "2087-05-10T08:00:00+08:00",
+                    "2087-05-10T10:00:00+08:00",
+                    "imported",
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    _insert_segment(config.database_path, "seg_a", 0, 10_000, audio_file_id="aud_a")
+    _insert_segment(config.database_path, "seg_b", 20_000, 30_000, audio_file_id="aud_b")
+
+    result = derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    assert result.sessions_derived == 2
+
+
 def test_derive_sessions_preserves_exclude_from_memory_when_reusing_session_id(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_audio_and_segments(config.database_path)

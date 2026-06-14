@@ -138,3 +138,27 @@ class TaggedASRAdapter:
             model_name=self.model_name,
             model_version=self.model_version,
         )
+
+
+def test_transcribe_works_with_relative_data_dir(tmp_path: Path, monkeypatch) -> None:
+    # §32 default data_dir is relative ("data") and §33 `process run --mock` has no
+    # --config. local_chunk_path is already the full work path, so transcription must
+    # read it directly; re-prefixing a RELATIVE data_dir doubled it (data/data/...).
+    monkeypatch.chdir(tmp_path)
+    source = Path("recordings")
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=Path("data"), obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150)
+    preprocess_imported_audio(config=config, vad=vad, max_chunk_ms=1000)
+    result = transcribe_pending_chunks(config=config, asr=MockASRAdapter(text="relative ok"))
+
+    assert result.chunks_transcribed >= 1
+    assert result.segments_created >= 1
+    conn = connect(config.database_path)
+    try:
+        active = fetch_all(conn, "select text from transcript_segments where is_active = 1")
+    finally:
+        conn.close()
+    assert any(row["text"] == "relative ok" for row in active)

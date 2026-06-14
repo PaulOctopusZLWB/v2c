@@ -137,6 +137,41 @@ def test_asr_rerun_reopens_session_derivation_for_affected_day(tmp_path: Path) -
     assert session_tasks == [{"status": "pending", "retry_count": 0, "attempt_count": 0}]
 
 
+def test_multichunk_file_keeps_all_chunks_active_and_rerun_regenerates_all(tmp_path: Path) -> None:
+    # A multi-chunk recording must keep one active segment per chunk (§36.2.5); a
+    # per-chunk ASR task must not drop sibling chunks. A file-level ASR rerun
+    # regenerates every chunk (§36.2 `--target aud_...`).
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav", seconds=2.0)
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+    vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=2000, min_speech_ms=150)
+    for index in range(15):
+        process_once(config=config, run_id=f"r{index}", vad=vad, asr=MockASRAdapter(text="第一次"), max_chunk_ms=300)
+
+    conn = connect(config.database_path)
+    try:
+        chunk_count = fetch_all(conn, "select count(*) as c from audio_chunks")[0]["c"]
+        active = fetch_all(conn, "select count(*) as c from transcript_segments where is_active = 1")[0]["c"]
+        first_chunk = fetch_all(conn, "select chunk_id from audio_chunks order by source_start_ms limit 1")[0]["chunk_id"]
+    finally:
+        conn.close()
+    assert chunk_count >= 2
+    assert active == chunk_count  # no sibling chunks dropped
+
+    rerun_task(config=config, task_type="asr", target_type="audio_chunk", target_id=str(first_chunk))
+    for index in range(15):
+        process_once(config=config, run_id=f"rr{index}", vad=vad, asr=MockASRAdapter(text="第二次"), max_chunk_ms=300)
+
+    conn = connect(config.database_path)
+    try:
+        active_texts = fetch_all(conn, "select text from transcript_segments where is_active = 1")
+    finally:
+        conn.close()
+    assert len(active_texts) == chunk_count
+    assert all(row["text"] == "第二次" for row in active_texts)  # whole file regenerated
+
+
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
@@ -148,3 +183,38 @@ def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000
             sample = int(10_000 * math.sin(2 * math.pi * 440 * index / sample_rate))
             frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
         wav.writeframes(bytes(frames))
+
+
+def test_asr_rerun_keeps_session_id_stable(tmp_path: Path) -> None:
+    # §26.2.7 / §36.2.6: an ASR re-run replaces every segment id, but the session id
+    # (hence note filename and [[ses_*]] refs) must NOT drift — anchored on the stable
+    # first chunk.
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+    vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150)
+    for index in range(6):
+        if process_once(config=config, run_id=f"r{index}", vad=vad, asr=MockASRAdapter(text="first"), max_chunk_ms=1000).status == "no_task":
+            break
+    conn = connect(config.database_path)
+    try:
+        before = [row["session_id"] for row in fetch_all(conn, "select session_id from sessions")]
+        audio_file_id = fetch_all(conn, "select audio_file_id from audio_files")[0]["audio_file_id"]
+    finally:
+        conn.close()
+    assert len(before) == 1
+
+    rerun_task(config=config, task_type="asr", target_type="audio_file", target_id=str(audio_file_id))
+    for index in range(6):
+        if process_once(config=config, run_id=f"rr{index}", vad=vad, asr=MockASRAdapter(text="second"), max_chunk_ms=1000).status == "no_task":
+            break
+
+    conn = connect(config.database_path)
+    try:
+        after = [row["session_id"] for row in fetch_all(conn, "select session_id from sessions")]
+        active_texts = {row["text"] for row in fetch_all(conn, "select text from transcript_segments where is_active = 1")}
+    finally:
+        conn.close()
+    assert after == before  # session id stable across ASR rerun
+    assert active_texts == {"second"}  # transcript fully regenerated

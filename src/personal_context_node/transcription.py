@@ -4,6 +4,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from personal_context_node.config import AppConfig
@@ -39,17 +40,31 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
             params,
         )
         segments_created = 0
-        deactivated_audio_file_ids: set[str] = set()
         for chunk in chunks:
             audio_file_id = str(chunk["audio_file_id"])
-            if audio_file_id not in deactivated_audio_file_ids:
-                conn.execute(
-                    "update transcript_segments set is_active = 0 where audio_file_id = ? and is_active = 1",
-                    (audio_file_id,),
-                )
-                deactivated_audio_file_ids.add(audio_file_id)
+            # Retire THIS chunk's prior segments plus any of the file's active segments
+            # not backed by a real audio_chunk (e.g. mock-milestone placeholders).
+            # Per-chunk scoping is required: deactivating the whole file on every
+            # per-chunk ASR task would drop all but the last chunk of a multi-chunk
+            # recording (§36.2.5). Chunk boundaries are stable (preprocess is one-time
+            # per file), so sibling chunks keep their latest-run segments.
+            conn.execute(
+                """
+                update transcript_segments set is_active = 0
+                where is_active = 1
+                  and audio_file_id = ?
+                  and (
+                    chunk_id = ?
+                    or chunk_id not in (select chunk_id from audio_chunks where audio_file_id = ?)
+                  )
+                """,
+                (audio_file_id, chunk["chunk_id"], audio_file_id),
+            )
             asr_run_id = f"asrrun_{uuid4().hex}"
-            chunk_path = config.data_dir / chunk["local_chunk_path"]
+            # local_chunk_path is already the full work path (work_audio_dir/...), as
+            # written by VAD; use it directly (consistent with local_raw_path). Re-
+            # prefixing config.data_dir would double a relative data_dir (the §32 default).
+            chunk_path = Path(str(chunk["local_chunk_path"]))
             asr_result = asr.transcribe(chunk_path)
             decode_config_json = json.dumps(asr_result.decode_config, ensure_ascii=False, sort_keys=True)
             for segment in asr_result.segments:

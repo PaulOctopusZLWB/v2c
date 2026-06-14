@@ -10,6 +10,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import LLMPort, SessionSummary
 from personal_context_node.evidence_refs import persist_segment_evidence_refs
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+from personal_context_node.summary_schemas import validate_session_summary
 
 
 PROMPT_VERSION = "llm_port.session_summary.v1"
@@ -54,10 +55,13 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
 
 def _persist_session_summary(conn: sqlite3.Connection, summary: SessionSummary) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    content = {
-        "schema_version": "session_summary.v1",
-        **asdict(summary),
-    }
+    # §37.4 session_summary.v1 is a closed schema; validate before persisting.
+    content = validate_session_summary(
+        {
+            "schema_version": "session_summary.v1",
+            **asdict(summary),
+        }
+    )
     conn.execute(
         """
         insert into summaries (
