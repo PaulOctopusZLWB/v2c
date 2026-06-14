@@ -337,7 +337,11 @@ def test_claim_next_task_uses_available_at_and_priority_with_lease(tmp_path) -> 
 
 
 def test_failed_retryable_and_lease_reclaim(tmp_path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    # backoff disabled here to test the reclaim path directly (backoff timing is covered by
+    # test_failed_retryable_applies_backoff_before_reclaim).
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", task_retry_backoff_seconds=0
+    )
     task = enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
     claimed = claim_next_task(config=config, task_type="asr", run_id="run_1")
     assert claimed is not None
@@ -355,6 +359,37 @@ def test_failed_retryable_and_lease_reclaim(tmp_path) -> None:
     assert reclaimed == 1
     rows = process_status_rows(config=config)
     assert rows[0]["status"] == "pending"
+
+
+def test_failed_retryable_applies_backoff_before_reclaim(tmp_path) -> None:
+    # §12: a transient (non-terminal) failure must get a recovery window — it is not
+    # immediately re-claimable within the same run-all drain loop; available_at is deferred.
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", task_retry_backoff_seconds=60
+    )
+    task = enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
+    assert claim_next_task(config=config, task_type="asr", run_id="run_1") is not None
+    fail_task(config=config, task_id=task.task_id, error="model unavailable", terminal=False)
+
+    # Not immediately re-claimable (backoff window not elapsed).
+    assert claim_next_task(config=config, task_type="asr", run_id="run_2") is None
+    conn = connect(config.database_path)
+    try:
+        row = fetch_all(conn, "select available_at from tasks where task_id = ?", (task.task_id,))[0]
+    finally:
+        conn.close()
+    assert row["available_at"] > datetime.now(timezone.utc).isoformat()
+
+    # Once the backoff window has elapsed, it becomes claimable again.
+    past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update tasks set available_at = ? where task_id = ?", (past, task.task_id))
+        conn.commit()
+    finally:
+        conn.close()
+    retry = claim_next_task(config=config, task_type="asr", run_id="run_3")
+    assert retry is not None and retry.attempt_count == 2
 
 
 def test_claim_next_task_skips_retryable_tasks_at_max_retries(tmp_path) -> None:
@@ -407,3 +442,50 @@ def test_rerun_task_reopens_existing_target_task(tmp_path) -> None:
     rows = process_status_rows(config=config)
     assert rows[0]["status"] == "pending"
     assert rows[0]["attempt_count"] == 0
+
+
+def test_stale_worker_cannot_complete_a_reclaimed_task(tmp_path) -> None:
+    # §36.1.3: a worker whose lease expired and whose task was reclaimed and re-claimed
+    # by another run must NOT finalize it (ownership guard on completion).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    task = enqueue_task(config=config, task_type="vad", target_type="audio_file", target_id="aud_1")
+    claimed_a = claim_next_task(config=config, task_type="vad", run_id="run_A", lease_seconds=60)
+    assert claimed_a is not None
+    # run_A's lease expires, the task is reclaimed, run_B re-claims it.
+    reclaim_expired_tasks(
+        config=config, lease_seconds=60, now=datetime.now(timezone.utc) + timedelta(hours=2)
+    )
+    claimed_b = claim_next_task(config=config, task_type="vad", run_id="run_B", lease_seconds=60)
+    assert claimed_b is not None
+
+    # Stale run_A finishes late and tries to mark the task succeeded — must be a no-op.
+    updated = succeed_task(config=config, task_id=task.task_id, run_id="run_A")
+    assert updated is False
+    conn = connect(config.database_path)
+    try:
+        row = fetch_all(conn, "select status, claimed_by_run_id from tasks where task_id = ?", (task.task_id,))[0]
+    finally:
+        conn.close()
+    assert row["claimed_by_run_id"] == "run_B"
+    assert row["status"] != "succeeded"
+
+
+def test_reclaim_does_not_resurrect_a_succeeded_task(tmp_path) -> None:
+    # §36.1.5: reclaim is for crashed workers; a succeeded task with a stale lease must
+    # not be reset to pending.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    task = enqueue_task(config=config, task_type="vad", target_type="audio_file", target_id="aud_1")
+    claimed = claim_next_task(config=config, task_type="vad", run_id="run_1", lease_seconds=60)
+    assert claimed is not None
+    succeed_task(config=config, task_id=task.task_id, run_id="run_1")
+
+    reclaim_expired_tasks(
+        config=config, lease_seconds=60, now=datetime.now(timezone.utc) + timedelta(hours=2)
+    )
+
+    conn = connect(config.database_path)
+    try:
+        status = fetch_all(conn, "select status from tasks where task_id = ?", (task.task_id,))[0]["status"]
+    finally:
+        conn.close()
+    assert status == "succeeded"

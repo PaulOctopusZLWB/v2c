@@ -43,7 +43,7 @@ from personal_context_node.memory_import import import_memory_events
 from personal_context_node.memory_verify import verify_memory_events
 from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
-from personal_context_node.obsidian_sessions import publish_session_notes
+from personal_context_node.obsidian_sessions import publish_session_notes, session_transcript_lines
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
 from personal_context_node.process_runner import preview_next_process_task, process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
@@ -137,6 +137,7 @@ def doctor_cmd(
                 f"source_dir={result.source_dir}",
                 f"archive_root={result.archive_root}",
                 f"funasr_runtime={result.funasr_runtime}",
+                f"identity={result.identity}",
                 f"pending_tasks={result.pending_tasks}",
                 f"failed_tasks={result.failed_tasks}",
                 f"recent_failed_jobs={result.recent_failed_jobs}",
@@ -255,22 +256,32 @@ def _run_all(
     llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
     process_steps = 0
     tasks_succeeded = 0
+    tasks_failed = 0
     status = "step_limit"
     while process_steps < max_steps:
         run_id = f"run_{uuid4().hex}"
-        result = record_job_run(
-            config=config,
-            job_name="run-all.process",
-            run_id=run_id,
-            operation=lambda run_id=run_id: process_once(
+        try:
+            result = record_job_run(
                 config=config,
+                job_name="run-all.process",
                 run_id=run_id,
-                vad=vad,
-                asr=asr,
-                llm=llm,
-                max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
-            ),
-        ).result
+                operation=lambda run_id=run_id: process_once(
+                    config=config,
+                    run_id=run_id,
+                    vad=vad,
+                    asr=asr,
+                    llm=llm,
+                    max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
+                ),
+            ).result
+        except Exception:
+            # A single task failure (transient port error, schema-validation, etc.) is
+            # isolated and retryable (§36) — it must not abort the whole drain. process_once
+            # already marked the task failed (with backoff deferral), so count it and keep
+            # draining so independent files/days still get processed this run.
+            tasks_failed += 1
+            process_steps += 1
+            continue
         if result.status == "no_task":
             status = "complete"
             break
@@ -285,6 +296,7 @@ def _run_all(
                 f"imported_files={import_result.imported_files}",
                 f"process_steps={process_steps}",
                 f"tasks_succeeded={tasks_succeeded}",
+                f"tasks_failed={tasks_failed}",
                 f"status={status}",
             ]
         )
@@ -348,7 +360,12 @@ def _ingest_import(
     obsidian_vault: Path | None,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
-    result = _import_recordings(config=config, source_dir=source_dir)
+    # Record the job run so scheduled ingest failures are observable (§14.1).
+    result = record_job_run(
+        config=config,
+        job_name="ingest",
+        operation=lambda: _import_recordings(config=config, source_dir=source_dir),
+    ).result
     typer.echo(f"imported_files={result.imported_files}")
 
 
@@ -419,11 +436,13 @@ def preprocess(
         model_id=config.vad_model_id,
         model_revision=config.vad_model_revision,
     )
+    resolved_max_chunk_ms = max_chunk_ms or config.max_chunk_ms
     result = preprocess_imported_audio(
         config=config,
         vad=vad,
-        max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
-        chunk_overlap_ms=config.chunk_overlap_ms if config_path else 0,
+        max_chunk_ms=resolved_max_chunk_ms,
+        # Overlap only applies when strictly smaller than the chunk size.
+        chunk_overlap_ms=config.chunk_overlap_ms if config.chunk_overlap_ms < resolved_max_chunk_ms else 0,
     )
     typer.echo(
         " ".join(
@@ -604,6 +623,23 @@ def publish_session_notes_cmd(
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     result = publish_session_notes(config=config, day=day)
     typer.echo(f"notes_written={result.notes_written}")
+
+
+@app.command(name="session-transcript")
+def session_transcript_cmd(
+    session_id: str = typer.Option(..., "--session-id", help="Session id (ses_...)."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    # Full transcripts are not embedded in Obsidian notes (§29.7); this is the on-demand
+    # query path.
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    for line in session_transcript_lines(config=config, session_id=session_id):
+        typer.echo(line)
 
 
 @app.command()
@@ -873,10 +909,12 @@ def _archive_run(
         if message == "archive command is required when archive backend is command":
             raise typer.BadParameter("--archive-command is required when --archive-backend command") from exc
         raise typer.BadParameter(message) from exc
-    result = archive_completed_audio(
+    # Record the job run so scheduled archive failures are observable (§14.1).
+    result = record_job_run(
         config=config,
-        archive=archive_adapter,
-    )
+        job_name="archive",
+        operation=lambda: archive_completed_audio(config=config, archive=archive_adapter),
+    ).result
     typer.echo(
         " ".join(
             [
@@ -939,6 +977,7 @@ def launchd_write_plists(
         obsidian_vault=str(config.obsidian_vault),
         source_dir=str(resolved_source_dir),
         archive_root=str(resolved_archive_root),
+        config_path=str(config_path.resolve()) if config_path else None,
         dry_run=True,
     )
     typer.echo(f"plists_written={len(paths)} output_dir={output_dir}")
@@ -1081,7 +1120,7 @@ def memory_export_group(
 @app.command(name="memory-import")
 def memory_import(
     input_path: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL signed event import path."),
-    public_key: str = typer.Option(..., help="Base64url Ed25519 public key for verifying imported events."),
+    public_key: str | None = typer.Option(None, help="Base64url Ed25519 public key for legacy non-did:key events; did:key events self-certify."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -1101,7 +1140,7 @@ def memory_import(
 @memory_app.command(name="import")
 def memory_import_group(
     input_path: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL signed event import path."),
-    public_key: str = typer.Option(..., help="Base64url Ed25519 public key for verifying imported events."),
+    public_key: str | None = typer.Option(None, help="Base64url Ed25519 public key for legacy non-did:key events; did:key events self-certify."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -1147,7 +1186,7 @@ def _memory_export(
 def _memory_import(
     *,
     input_path: Path,
-    public_key: str,
+    public_key: str | None,
     config_path: Path | None,
     data_dir: Path | None,
     obsidian_vault: Path | None,
@@ -1522,12 +1561,24 @@ def _build_vad(
     if vad_backend == "command":
         if not vad_command:
             raise typer.BadParameter("--vad-command is required when --vad-backend command")
-        return CommandVADAdapter(command=vad_command.split())
+        return CommandVADAdapter(command=vad_command.split(), merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
     if vad_backend == "funasr":
-        command = vad_command.split() if vad_command else ["python3", "scripts/funasr_vad_wrapper.py", "--model", model_id]
-        if not vad_command and model_revision is not None:
-            command.extend(["--model-revision", model_revision])
-        return CommandVADAdapter(command=command)
+        if vad_command:
+            command = vad_command.split()
+        else:
+            # Pass the configurable VAD threshold to the wrapper; merge_gap/min_speech are
+            # applied adapter-side (§5 "VAD 阈值必须配置化").
+            command = [
+                "python3",
+                "scripts/funasr_vad_wrapper.py",
+                "--model",
+                model_id,
+                "--threshold",
+                str(vad_threshold),
+            ]
+            if model_revision is not None:
+                command.extend(["--model-revision", model_revision])
+        return CommandVADAdapter(command=command, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
     raise typer.BadParameter("--vad-backend must be 'energy', 'mock', 'command', or 'funasr'")
 
 

@@ -143,29 +143,53 @@ def claim_next_task(*, config: AppConfig, task_type: str, run_id: str, lease_sec
         conn.close()
 
 
-def start_task(*, config: AppConfig, task_id: str) -> None:
-    _update_task(config=config, task_id=task_id, status="running", started_at=_now())
+def start_task(*, config: AppConfig, task_id: str, run_id: str | None = None) -> None:
+    _update_task(config=config, task_id=task_id, expected_run_id=run_id, status="running", started_at=_now())
 
 
-def succeed_task(*, config: AppConfig, task_id: str) -> None:
-    _update_task(
+def succeed_task(*, config: AppConfig, task_id: str, run_id: str | None = None) -> bool:
+    return _update_task(
         config=config,
         task_id=task_id,
+        expected_run_id=run_id,
         status="succeeded",
         finished_at=_now(),
         lease_expires_at=None,
     )
 
 
-def fail_task(*, config: AppConfig, task_id: str, error: str, terminal: bool) -> None:
-    _update_task(
-        config=config,
-        task_id=task_id,
-        status="failed_terminal" if terminal else "failed_retryable",
-        finished_at=_now(),
-        lease_expires_at=None,
-        last_error=error,
-    )
+def fail_task(*, config: AppConfig, task_id: str, error: str, terminal: bool, run_id: str | None = None) -> bool:
+    fields: dict[str, object] = {
+        "status": "failed_terminal" if terminal else "failed_retryable",
+        "finished_at": _now(),
+        "lease_expires_at": None,
+        "last_error": error,
+    }
+    if not terminal:
+        # Defer the next retry by an exponential backoff so a transient failure gets a real
+        # recovery window (§12 retriable) instead of burning all retries instantly within a
+        # single run-all drain loop. Backoff is keyed off the current retry_count.
+        backoff = _retry_backoff_seconds(config=config, task_id=task_id)
+        if backoff > 0:
+            fields["available_at"] = (datetime.now(timezone.utc) + timedelta(seconds=backoff)).isoformat()
+    return _update_task(config=config, task_id=task_id, expected_run_id=run_id, **fields)
+
+
+def _retry_backoff_seconds(*, config: AppConfig, task_id: str) -> int:
+    base = int(getattr(config, "task_retry_backoff_seconds", 0) or 0)
+    if base <= 0:
+        return 0
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        row = conn.execute("select retry_count from tasks where task_id = ?", (task_id,)).fetchone()
+    finally:
+        conn.close()
+    attempt = int(row["retry_count"]) if row is not None else 1
+    # Exponential (base * 2^(attempt-1)) capped at the lease window so a stuck task is still
+    # eventually reclaimable on its normal lease cadence.
+    cap = max(base, int(getattr(config, "task_lease_seconds", base) or base))
+    return min(cap, base * (2 ** max(0, attempt - 1)))
 
 
 def reclaim_expired_tasks(*, config: AppConfig, lease_seconds: int, now: datetime | None = None) -> int:
@@ -174,6 +198,10 @@ def reclaim_expired_tasks(*, config: AppConfig, lease_seconds: int, now: datetim
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        # Reclaim atomically under a write lock and re-check status in the UPDATE, so a
+        # task that completes concurrently between the read and the reset is NOT
+        # resurrected to pending (§36.1.5 reclaims crashed workers, not finished ones).
+        conn.execute("begin immediate")
         rows = fetch_all(
             conn,
             "select task_id, claimed_at, lease_expires_at from tasks where status in ('claimed', 'running')",
@@ -188,7 +216,7 @@ def reclaim_expired_tasks(*, config: AppConfig, lease_seconds: int, now: datetim
             elif claimed_at:
                 expired = datetime.fromisoformat(str(claimed_at)).timestamp() < cutoff
             if expired:
-                conn.execute(
+                cursor = conn.execute(
                     """
                     update tasks
                     set status = 'pending',
@@ -197,13 +225,16 @@ def reclaim_expired_tasks(*, config: AppConfig, lease_seconds: int, now: datetim
                         lease_expires_at = null,
                         started_at = null,
                         updated_at = ?
-                    where task_id = ?
+                    where task_id = ? and status in ('claimed', 'running')
                     """,
                     (_now(), row["task_id"]),
                 )
-                reclaimed += 1
+                reclaimed += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
         conn.commit()
         return reclaimed
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -236,21 +267,78 @@ def retry_task(*, config: AppConfig, task_id: str) -> RetryTaskResult:
         conn.close()
 
 
+def _rerun_asr_for_file(conn, *, target_type: str, target_id: str) -> EnqueueTaskResult | None:
+    if target_type == "audio_file":
+        audio_file_id: str | None = target_id
+    else:
+        row = conn.execute(
+            "select audio_file_id from audio_chunks where chunk_id = ?",
+            (target_id,),
+        ).fetchone()
+        audio_file_id = str(row["audio_file_id"]) if row is not None else None
+    if audio_file_id is None:
+        return None
+    sibling_ids = [
+        str(row["chunk_id"])
+        for row in conn.execute(
+            "select chunk_id from audio_chunks where audio_file_id = ?",
+            (audio_file_id,),
+        ).fetchall()
+    ]
+    if not sibling_ids:
+        return None
+    conn.execute(
+        "update audio_chunks set status = 'pending_asr' where audio_file_id = ?",
+        (audio_file_id,),
+    )
+    placeholders = ",".join("?" for _ in sibling_ids)
+    conn.execute(
+        f"""
+        update tasks
+        set status = 'pending',
+            retry_count = 0,
+            attempt_count = 0,
+            claimed_by_run_id = null,
+            claimed_at = null,
+            lease_expires_at = null,
+            started_at = null,
+            finished_at = null,
+            updated_at = ?,
+            last_error = null
+        where task_type = 'asr' and target_type = 'audio_chunk'
+          and target_id in ({placeholders})
+        """,
+        (_now(), *sibling_ids),
+    )
+    first_task = conn.execute(
+        """
+        select task_id from tasks
+        where task_type = 'asr' and target_type = 'audio_chunk' and target_id = ?
+        """,
+        (sibling_ids[0],),
+    ).fetchone()
+    return EnqueueTaskResult(task_id=str(first_task["task_id"]) if first_task else sibling_ids[0], created=False)
+
+
 def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str) -> EnqueueTaskResult:
     _validate_task_type(task_type)
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        # An ASR re-run is file-level (§36.2, `--target aud_...`): regenerate EVERY
+        # chunk of the audio file so transcription (which deactivates the file's prior
+        # segments) rebuilds the whole file instead of dropping un-rerun chunks. Accept
+        # either an audio_file id (spec form) or an audio_chunk id (resolve its file).
+        if task_type == "asr" and target_type in ("audio_file", "audio_chunk"):
+            result = _rerun_asr_for_file(conn, target_type=target_type, target_id=target_id)
+            if result is not None:
+                conn.commit()
+                return result
         existing = conn.execute(
             "select task_id from tasks where task_type = ? and target_type = ? and target_id = ?",
             (task_type, target_type, target_id),
         ).fetchone()
         if existing:
-            if task_type == "asr" and target_type == "audio_chunk":
-                conn.execute(
-                    "update audio_chunks set status = 'pending_asr' where chunk_id = ?",
-                    (target_id,),
-                )
             conn.execute(
                 """
                 update tasks
@@ -270,6 +358,11 @@ def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id
             )
             conn.commit()
             return EnqueueTaskResult(task_id=str(existing["task_id"]), created=False)
+        if task_type == "asr":
+            # No existing asr task and no resolvable chunks: rerun resets an EXISTING
+            # target (§36.2.2); never mint a bogus unprocessable asr task.
+            conn.commit()
+            return EnqueueTaskResult(task_id="", created=False)
         result = enqueue_task_in_conn(conn, task_type=task_type, target_type=target_type, target_id=target_id)
         conn.commit()
         return result
@@ -341,14 +434,22 @@ def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
         conn.close()
 
 
-def _update_task(*, config: AppConfig, task_id: str, **fields: object) -> None:
+def _update_task(*, config: AppConfig, task_id: str, expected_run_id: str | None = None, **fields: object) -> bool:
     conn = connect(config.database_path)
     try:
         initialize(conn)
         fields.setdefault("updated_at", _now())
         assignments = ", ".join(f"{key} = ?" for key in fields)
-        conn.execute(f"update tasks set {assignments} where task_id = ?", (*fields.values(), task_id))
+        params: list[object] = [*fields.values(), task_id]
+        where = "where task_id = ?"
+        if expected_run_id is not None:
+            # Ownership guard: a worker whose lease expired and whose task was reclaimed
+            # by another run must not finalize it (§36.1.3).
+            where += " and claimed_by_run_id = ?"
+            params.append(expected_run_id)
+        cursor = conn.execute(f"update tasks set {assignments} {where}", params)
         conn.commit()
+        return bool(cursor.rowcount and cursor.rowcount > 0)
     finally:
         conn.close()
 

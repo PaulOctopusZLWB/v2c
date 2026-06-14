@@ -255,3 +255,90 @@ def _insert_audio_with_active_segments(*, config: AppConfig, segments: list[tupl
         conn.commit()
     finally:
         conn.close()
+
+
+def test_cross_midnight_session_is_enqueued_for_summarize_and_daily(tmp_path: Path) -> None:
+    # Regression: a session whose date_key is the day AFTER its file's recorded-day
+    # (cross-midnight, §25.3 rule 2) must still be picked up by the session_derive ->
+    # summarize_session fan-in (keyed by file-day) and routed to daily_generate for its
+    # own date_key — otherwise it is silently orphaned (never summarized/published).
+    from personal_context_node.process_runner import (
+        _ready_daily_generate_dates_in_conn,
+        _session_ids_for_day_in_conn,
+    )
+    from personal_context_node.sessions import derive_sessions_for_day
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status)
+            values ('aud', 'DJI Mic 3', '/s.wav', '/l.wav', 'sha256:x', 5000000,
+              '2087-05-10T23:00:00+08:00', '2087-05-11T10:00:00+08:00', 'imported')
+            """
+        )
+        conn.execute(
+            """
+            insert into transcript_segments (segment_id, audio_file_id, chunk_id, start_ms, end_ms, text,
+              language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version)
+            values ('seg_late', 'aud', 'chk', 4200000, 4210000, 'cross midnight', 'zh', 'self', 'self',
+              'ev', 0.9, 'mock', 'm', 'v')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    conn = connect(config.database_path)
+    try:
+        sessions = fetch_all(conn, "select session_id, date_key from sessions")
+        # The session_derive ran for the file-day; its fan-in (keyed by file-day) must find it.
+        summarize_targets = _session_ids_for_day_in_conn(conn, day="2087-05-10")
+        daily_dates = _ready_daily_generate_dates_in_conn(conn, session_id=sessions[0]["session_id"])
+    finally:
+        conn.close()
+
+    assert len(sessions) == 1
+    assert sessions[0]["date_key"] == "2087-05-11"
+    assert summarize_targets == [sessions[0]["session_id"]]
+    assert daily_dates == ["2087-05-11"]
+
+
+def test_retry_exhausted_summarize_session_does_not_block_daily_generate(tmp_path: Path) -> None:
+    # Liveness: a summarize_session whose retries are exhausted (failed_retryable at
+    # max_retries, e.g. repeated transient LLM failures) must not block the day's
+    # daily_generate forever; the day proceeds with the sessions that succeeded.
+    from personal_context_node.process_runner import _ready_daily_generate_dates_in_conn
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for sid in ("ses_ok", "ses_dead"):
+            conn.execute(
+                """
+                insert into sessions (session_id, date_key, started_at, ended_at, source,
+                  segment_count, active_speech_ms, first_segment_id, created_at, updated_at)
+                values (?, '2087-05-10', '2087-05-10T08:00:00+08:00', '2087-05-10T08:10:00+08:00',
+                  'derived_from_segments', 1, 1000, ?, 'now', 'now')
+                """,
+                (sid, "seg_" + sid),
+            )
+        conn.execute(
+            "insert into tasks (task_id, task_type, target_type, target_id, status, retry_count, max_retries, available_at, created_at)"
+            " values ('t_ok', 'summarize_session', 'session', 'ses_ok', 'succeeded', 0, 3, '', '')"
+        )
+        conn.execute(
+            "insert into tasks (task_id, task_type, target_type, target_id, status, retry_count, max_retries, available_at, created_at)"
+            " values ('t_dead', 'summarize_session', 'session', 'ses_dead', 'failed_retryable', 3, 3, '', '')"
+        )
+        conn.commit()
+        ready = _ready_daily_generate_dates_in_conn(conn, session_id="ses_ok")
+    finally:
+        conn.close()
+    assert ready == ["2087-05-10"]

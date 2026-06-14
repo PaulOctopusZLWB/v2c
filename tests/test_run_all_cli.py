@@ -73,8 +73,17 @@ edit_grace_seconds = 0
     session_notes = sorted((vault / "20_Conversations" / "2025-06-10").glob("ses_*.md"))
     assert len(session_notes) == 1
     session_text = session_notes[0].read_text(encoding="utf-8")
-    assert "## Transcript" in session_text
-    assert "run-all 转写文本" in session_text
+    # Per §29.7 the transcript is not embedded in the note; it is queried on demand.
+    assert "## Transcript" not in session_text
+    assert "run-all 转写文本" not in session_text
+    session_id = session_notes[0].stem
+    transcript_result = CliRunner().invoke(
+        app,
+        ["session-transcript", "--session-id", session_id, "--config", str(config_path)],
+    )
+    assert transcript_result.exit_code == 0, transcript_result.output
+    assert "## Transcript" in transcript_result.output
+    assert "run-all 转写文本" in transcript_result.output
     assert (vault / "10_Daily" / "2025-06-10.md").exists()
     assert (vault / "30_Memory_Candidates" / "2025-06-10.md").exists()
 
@@ -99,3 +108,50 @@ def _write_voice_wav(path: Path, seconds: float, sample_rate: int = 16_000) -> N
             sample = int(10_000 * math.sin(2 * math.pi * 440 * index / sample_rate))
             frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
         wav.writeframes(bytes(frames))
+
+
+def test_run_all_cli_continues_past_a_task_failure(tmp_path: Path, monkeypatch) -> None:
+    # §36: a single task failure is isolated and retryable — it must NOT abort the whole
+    # run-all drain. The loop catches the exception, counts tasks_failed, and keeps draining.
+    from personal_context_node import cli
+    from personal_context_node.process_runner import ProcessOnceResult
+
+    source_dir = tmp_path / "empty_source"
+    source_dir.mkdir()
+    data_dir = tmp_path / "data"
+    vault = tmp_path / "vault"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{data_dir}"
+obsidian_vault = "{vault}"
+
+[vad]
+backend = "energy"
+
+[llm]
+backend = "rule_based"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    calls = {"n": 0}
+
+    def fake_process_once(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient task failure")
+        return ProcessOnceResult(task_id="t", task_type="asr", status="no_task")
+
+    monkeypatch.setattr(cli, "process_once", fake_process_once)
+
+    result = CliRunner().invoke(
+        app, ["run-all", "--config", str(config_path), "--mock", "--max-steps", "20"]
+    )
+
+    assert result.exit_code == 0, result.output  # did not abort on the failure
+    assert "tasks_failed=1" in result.output
+    assert "status=complete" in result.output
+    assert calls["n"] == 2  # kept draining after the first failure

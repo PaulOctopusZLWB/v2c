@@ -17,7 +17,7 @@ from personal_context_node.core.protocols.memory import (
     SubjectRef,
 )
 from personal_context_node.evidence_refs import hydrate_candidate_evidence_refs
-from personal_context_node.identity_keys import load_or_create_signing_key
+from personal_context_node.identity_keys import effective_owner_did, load_or_create_signing_key
 from personal_context_node.ingest import import_audio_files_in_conn
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.sessions import derive_sessions_for_day
@@ -209,9 +209,10 @@ def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> Non
     if row is None:
         return
     evidence_refs = hydrate_candidate_evidence_refs(conn, str(row["evidence_refs_json"]))
+    owner_did = effective_owner_did(config)
     card = MemoryCard(
         card_id=f"mem_{uuid4().hex}",
-        owner_did=config.owner_did,
+        owner_did=owner_did,
         claim_type=row["claim_type"],
         claim=row["candidate_claim"],
         subject=SubjectRef.model_validate(json.loads(row["subject_json"])),
@@ -224,7 +225,7 @@ def _confirm_first_candidate(conn: sqlite3.Connection, config: AppConfig) -> Non
         conn,
         event_type="memory_card.created",
         payload=card,
-        signer_did=config.owner_did,
+        signer_did=owner_did,
         private_key=load_or_create_signing_key(config),
     )
     insert_signed_event(conn, event=event, public_key=public_key)
