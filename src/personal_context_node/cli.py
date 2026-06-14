@@ -53,6 +53,7 @@ from personal_context_node.speaker_review import publish_speaker_review, sync_sp
 from personal_context_node.system_summary import daily_system_summary
 from personal_context_node.tasks import process_status_rows, rerun_task, retry_task
 from personal_context_node.transcription import transcribe_pending_chunks
+from personal_context_node.web.server import run_web_server
 
 
 app = typer.Typer(help="Personal Context Node local pipeline.")
@@ -149,6 +150,20 @@ def doctor_cmd(
             ]
         )
     )
+
+
+@app.command(name="web")
+def web_cmd(
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(None, help="Dedicated PersonalContext Obsidian vault path."),
+    host: str = typer.Option("127.0.0.1", help="Bind host. v1 only allows 127.0.0.1."),
+    port: int = typer.Option(8765, min=1, max=65535, help="Bind port."),
+) -> None:
+    try:
+        run_web_server(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault, host=host, port=port)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
