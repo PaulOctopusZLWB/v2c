@@ -38,6 +38,37 @@ def test_daily_context_and_candidates(tmp_path: Path) -> None:
 
     assert ctx is not None and ctx["content"]["summary"] == "day"
     assert [c["candidate_id"] for c in candidates] == ["cand_1"]
+    assert candidates[0]["evidence_segment_ids"] == []
+
+
+def test_candidate_evidence_segment_ids_resolve(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_evidence_ref(config.database_path, evidence_id="ev_1", segment_id="seg_1")
+    _insert_candidate(
+        config.database_path,
+        day="2087-05-10",
+        candidate_id="cand_with_evidence",
+        evidence_refs=["ev_1"],
+    )
+
+    candidates = day_memory_candidates(config=config, day="2087-05-10")
+
+    assert candidates[0]["candidate_id"] == "cand_with_evidence"
+    assert candidates[0]["evidence_segment_ids"] == ["seg_1"]
+
+
+def test_candidate_evidence_segment_ids_empty_when_unresolved(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_candidate(
+        config.database_path,
+        day="2087-05-10",
+        candidate_id="cand_ghost_evidence",
+        evidence_refs=["ev_missing"],
+    )
+
+    candidates = day_memory_candidates(config=config, day="2087-05-10")
+
+    assert candidates[0]["evidence_segment_ids"] == []
 
 
 def _insert_summary(database_path: Path, *, summary_type: str, target_id: str, content: dict) -> None:
@@ -53,13 +84,33 @@ def _insert_summary(database_path: Path, *, summary_type: str, target_id: str, c
         conn.close()
 
 
-def _insert_candidate(database_path: Path, *, day: str) -> None:
+def _insert_candidate(
+    database_path: Path,
+    *,
+    day: str,
+    candidate_id: str = "cand_1",
+    evidence_refs: list[str] | None = None,
+) -> None:
     conn = connect(database_path)
     try:
         initialize(conn)
         conn.execute(
             "insert into memory_candidates (candidate_id, candidate_claim, claim_type, subject_json, confidence, evidence_refs_json, status, date_key, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("cand_1", "Paul 喜欢咖啡", "preference", "{}", 0.9, "[]", "pending", day, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+            (candidate_id, "Paul 喜欢咖啡", "preference", "{}", 0.9, json.dumps(evidence_refs or []), "pending", day, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_evidence_ref(database_path: Path, *, evidence_id: str, segment_id: str) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        # Mirrors persist_segment_evidence_refs: source_id holds the segment id.
+        conn.execute(
+            "insert into evidence_refs (evidence_id, source_type, source_ref, source_id, owner_id, quote, created_at) values (?, ?, ?, ?, ?, ?, ?)",
+            (evidence_id, "transcript_segment", segment_id, segment_id, "did:owner", "quote text", "2087-05-10T08:00:00+08:00"),
         )
         conn.commit()
     finally:

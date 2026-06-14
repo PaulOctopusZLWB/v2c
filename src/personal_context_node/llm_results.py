@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from personal_context_node.config import AppConfig
+from personal_context_node.evidence_refs import evidence_ids_from_candidate_json
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -46,15 +47,55 @@ def day_memory_candidates(*, config: AppConfig, day: str) -> list[dict[str, obje
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        return fetch_all(
+        candidates = fetch_all(
             conn,
             """
-            select candidate_id, candidate_claim, edited_claim, claim_type, confidence, status
+            select candidate_id, candidate_claim, edited_claim, claim_type, confidence, status,
+                   evidence_refs_json
             from memory_candidates
             where date_key = ?
             order by created_at
             """,
             (day,),
         )
+        for candidate in candidates:
+            candidate["evidence_segment_ids"] = _resolve_evidence_segment_ids(
+                conn, str(candidate.pop("evidence_refs_json"))
+            )
+        return candidates
     finally:
         conn.close()
+
+
+def _resolve_evidence_segment_ids(conn: object, evidence_refs_json: str) -> list[str]:
+    """Resolve a candidate's evidence refs to distinct transcript segment ids.
+
+    ``memory_candidates.evidence_refs_json`` is a JSON array of evidence ref ids
+    (or dicts carrying ``evidence_id``). Each evidence id maps, via
+    ``evidence_refs.evidence_id`` -> ``evidence_refs.source_id``, to a
+    ``transcript_segments.segment_id`` (for ``source_type = 'transcript_segment'``
+    the writer stores the segment id in ``source_id``). Returns the distinct
+    segment ids that resolve, preserving the evidence-ref order; empty when none.
+    """
+    evidence_ids = evidence_ids_from_candidate_json(evidence_refs_json)
+    if not evidence_ids:
+        return []
+    placeholders = ",".join("?" for _ in evidence_ids)
+    rows = conn.execute(  # type: ignore[attr-defined]
+        f"""
+        select evidence_id, source_id
+        from evidence_refs
+        where evidence_id in ({placeholders})
+        """,
+        tuple(evidence_ids),
+    ).fetchall()
+    source_id_by_evidence = {str(row["evidence_id"]): str(row["source_id"]) for row in rows}
+    segment_ids: list[str] = []
+    seen: set[str] = set()
+    for evidence_id in evidence_ids:
+        source_id = source_id_by_evidence.get(evidence_id)
+        if source_id is None or source_id in seen:
+            continue
+        seen.add(source_id)
+        segment_ids.append(source_id)
+    return segment_ids
