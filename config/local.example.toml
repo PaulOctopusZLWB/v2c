@@ -1,14 +1,42 @@
 [paths]
 data_dir = "data"
+raw_audio_dir = "data/audio/raw"
+work_audio_dir = "data/audio/work"
+sqlite_path = "data/db/personal_context.sqlite"
 obsidian_vault = "/Users/paul/Documents/Obsidian/PersonalContext"
 nas_archive_root = "/Volumes/NAS/PersonalContext"
+identity_dir = "~/.personal-context-node"
+
+[identity]
+# owner_did is derived from (and bound to) the signing key by `pcn init`.
+# signing_key_path = "data/keys/pcn_ed25519.key"
+
+[device.dji_mic_3]
+enabled = true
+volume_root = "/Volumes"
+# DJI Mic storage may mount as "NO NAME" on macOS.
+volume_name_patterns = ["DJI*", "MIC*", "NO NAME"]
+audio_globs = ["**/*.WAV", "**/*.wav"]
+stable_seconds = 10
+
+[audio]
+target_sample_rate_hz = 16000
+target_channels = 1
+target_sample_format = "s16"
 
 [vad]
 backend = "mock"
 threshold = 0.03
 model_id = "fsmn-vad"
 # model_revision = "v2.0.4"
-max_chunk_ms = 30000
+min_speech_ms = 300
+merge_gap_ms = 800
+max_chunk_ms = 900000
+chunk_overlap_ms = 1000
+
+[session]
+session_gap_minutes = 20
+cross_midnight_policy = "start_date"
 
 [asr]
 backend = "mock"
@@ -20,15 +48,22 @@ model_version = "funasr-sensevoice-local"
 
 [llm]
 backend = "mock"
+# command = "python3 scripts/llm_wrapper_example.py"
+send_person_names = true
+send_speaker_labels = true
+max_chunk_tokens = 6000
+
+[obsidian]
+edit_grace_seconds = 120
+
+[tasks]
+lease_seconds = 1800
+max_retries = 3
+
+[logging]
+log_dir = "data/logs"
+level = "INFO"
 
 [archive]
 backend = "filesystem"
 # command = "rsync -a {source_path} {archive_path}"
-
-[device.dji_mic_3]
-enabled = true
-volume_root = "/Volumes"
-# DJI Mic storage may mount as "NO NAME" on macOS.
-volume_name_patterns = ["DJI*", "MIC*", "NO NAME"]
-audio_globs = ["**/*.WAV", "**/*.wav"]
-stable_seconds = 10

@@ -22,6 +22,7 @@ def test_archive_cli_uses_config_archive_root(tmp_path: Path) -> None:
     raw_path = data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
     raw_path.parent.mkdir(parents=True)
     raw_path.write_bytes(b"raw audio bytes")
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     _insert_audio(data_dir / "db" / "personal_context.sqlite", raw_path, _sha256(raw_path))
 
     result = CliRunner().invoke(app, ["archive", "--config", str(config_path)])

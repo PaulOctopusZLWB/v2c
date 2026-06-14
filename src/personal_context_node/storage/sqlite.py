@@ -30,7 +30,7 @@ create table if not exists audio_files (
 create table if not exists transcript_segments (
   segment_id text primary key,
   audio_file_id text not null references audio_files(audio_file_id),
-  chunk_id text,
+  chunk_id text not null,
   session_id text,
   start_ms integer not null,
   end_ms integer not null,
@@ -293,6 +293,12 @@ create table if not exists job_runs (
   error text
 );
 
+create table if not exists note_digests (
+  note_path text primary key,
+  content_sha256 text not null,
+  updated_at text not null default ''
+);
+
 create table if not exists sync_logs (
   sync_log_id text primary key,
   source text not null,
@@ -395,8 +401,13 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         create unique index if not exists idx_audio_files_source_identity
-        on audio_files(source_path, source_size_bytes, source_mtime_ns, sha256)
+        on audio_files(source_device, source_path, source_size_bytes, source_mtime_ns, sha256)
         """
+    )
+    # local_raw_path is the unique raw-store path (§27.1): defense-in-depth against
+    # two records pointing at the same local evidence file.
+    conn.execute(
+        "create unique index if not exists idx_audio_files_local_raw_path on audio_files(local_raw_path)"
     )
     conn.execute("create index if not exists idx_audio_files_recorded_at on audio_files(recorded_at)")
     conn.execute("create index if not exists idx_audio_files_status on audio_files(status)")

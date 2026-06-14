@@ -45,6 +45,7 @@ def test_initialize_audio_files_indexes_source_snapshot_identity_time_and_status
     assert "idx_audio_files_recorded_at" in index_names
     assert "idx_audio_files_status" in index_names
     assert [row["name"] for row in source_identity] == [
+        "source_device",
         "source_path",
         "source_size_bytes",
         "source_mtime_ns",
