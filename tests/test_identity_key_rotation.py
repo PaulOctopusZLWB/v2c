@@ -19,6 +19,144 @@ from personal_context_node.signed_event_store import insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
+def test_cross_owner_revoke_is_order_independent(tmp_path: Path) -> None:
+    # §43: trust is a deterministic function of the trusted set, independent of arrival
+    # order. A forged cross-owner revoke inserted BEFORE its target card (the adversarial
+    # ordering) must still be rejected; the victim card stays active.
+    from personal_context_node.core.protocols.memory import did_key_from_public_key
+    from personal_context_node.memory_verify import verify_memory_events
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        victim_key = Ed25519PrivateKey.generate()
+        victim_did = did_key_from_public_key(victim_key.public_key().public_bytes_raw())
+        attacker_key = Ed25519PrivateKey.generate()
+        attacker_did = did_key_from_public_key(attacker_key.public_key().public_bytes_raw())
+        card = MemoryCard(
+            card_id="mem_victim",
+            owner_did=victim_did,
+            claim_type="decision",
+            claim="Victim claim.",
+            subject=SubjectRef(type="project", id="pcn", label="PCN"),
+            evidence_refs=[
+                EvidenceRef(evidence_id="ev_v", source_type="transcript_segment", source_id="seg_v", quote="q")
+            ],
+        )
+        card_event, _ = create_signed_event(event_type="memory_card.created", payload=card, signer_did=victim_did, private_key=victim_key)
+        revocation = MemoryCardRevocation(card_id="mem_victim", revoked_by=attacker_did)
+        revoke_event, _ = create_signed_event(
+            event_type="memory_card.revoked", payload=revocation, signer_did=attacker_did,
+            private_key=attacker_key, owner_sequence=1, object_version=2,
+        )
+        # Insert the forged revoke FIRST, the target card SECOND.
+        insert_signed_event(conn, event=revoke_event, public_key=None)
+        insert_signed_event(conn, event=card_event, public_key=None)
+        conn.commit()
+        revoke_status = fetch_all(
+            conn, "select trust_status from signed_events where event_hash = ?", (revoke_event.event_hash,)
+        )
+        card_status = fetch_all(conn, "select status from memory_cards where card_id = 'mem_victim'")
+    finally:
+        conn.close()
+    assert revoke_status == [{"trust_status": "rejected"}]
+    assert card_status == [{"status": "active"}]
+    # The store and the verifier agree (no divergence): nothing to repair.
+    assert verify_memory_events(config=config).materialization_mismatches == 0
+
+
+def test_forged_predecessor_profile_without_rotation_cannot_revoke_victim_card(tmp_path: Path) -> None:
+    # §41 rule 3: successor authority requires a TRUSTED old-key-signed rotation. A
+    # self-published predecessor profile (no backing rotation) must NOT grant authority
+    # to revoke/supersede a victim's card.
+    from personal_context_node.core.protocols.memory import (
+        IdentityPredecessor,
+        IdentityProfile,
+        did_key_from_public_key,
+    )
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        victim_key = Ed25519PrivateKey.generate()
+        victim_did = did_key_from_public_key(victim_key.public_key().public_bytes_raw())
+        card = MemoryCard(
+            card_id="mem_victim",
+            owner_did=victim_did,
+            claim_type="decision",
+            claim="Victim's claim.",
+            subject=SubjectRef(type="project", id="pcn", label="PCN"),
+            evidence_refs=[
+                EvidenceRef(evidence_id="ev_v", source_type="transcript_segment", source_id="seg_v", quote="q")
+            ],
+        )
+        card_event, _ = create_signed_event(event_type="memory_card.created", payload=card, signer_did=victim_did, private_key=victim_key)
+        insert_signed_event(conn, event=card_event, public_key=None)
+
+        attacker_key = Ed25519PrivateKey.generate()
+        attacker_did = did_key_from_public_key(attacker_key.public_key().public_bytes_raw())
+        forged_profile = IdentityProfile(
+            identity_id=attacker_did,
+            display_name="A",
+            public_key_multibase="zX",
+            predecessor=IdentityPredecessor(identity_id=victim_did, rotation_event_hash="sha256:deadbeef"),
+        )
+        profile_event, _ = create_signed_event(
+            event_type="identity_profile.published", payload=forged_profile, signer_did=attacker_did,
+            private_key=attacker_key, owner_sequence=1,
+        )
+        insert_signed_event(conn, event=profile_event, public_key=None)
+
+        revocation = MemoryCardRevocation(card_id="mem_victim", revoked_by=attacker_did)
+        revoke_event, _ = create_signed_event(
+            event_type="memory_card.revoked", payload=revocation, signer_did=attacker_did,
+            private_key=attacker_key, owner_sequence=2, object_version=2, prev_event_hash=profile_event.event_hash,
+        )
+        insert_signed_event(conn, event=revoke_event, public_key=None)
+        conn.commit()
+        revoke_status = fetch_all(
+            conn, "select trust_status from signed_events where event_hash = ?", (revoke_event.event_hash,)
+        )
+        card_status = fetch_all(conn, "select status from memory_cards where card_id = 'mem_victim'")
+    finally:
+        conn.close()
+    assert revoke_status == [{"trust_status": "rejected"}]
+    assert card_status == [{"status": "active"}]
+
+
+def test_forged_rotation_not_signed_by_old_identity_is_rejected(tmp_path: Path) -> None:
+    # §41.1 rule 1: identity_key.rotated must be signed by the OLD key. An attacker
+    # who never held the victim's key must not be able to claim successor authority.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    attacker_key = Ed25519PrivateKey.generate()
+    forged = IdentityKeyRotation(
+        old_identity_id="did:key:victim",
+        new_identity_id="did:key:attacker",
+        new_public_key_multibase="z6Mattacker",
+        reason="malicious",
+    )
+    # Signed by the attacker (owner_id = attacker), but the payload claims to rotate
+    # the victim's identity.
+    forged_event, attacker_public_key = create_signed_event(
+        event_type="identity_key.rotated",
+        payload=forged,
+        signer_did="did:key:attacker",
+        private_key=attacker_key,
+        owner_sequence=1,
+    )
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        insert_signed_event(conn, event=forged_event, public_key=attacker_public_key)
+        conn.commit()
+        rows = fetch_all(conn, "select trust_status from signed_events where event_hash = ?", (forged_event.event_hash,))
+    finally:
+        conn.close()
+    assert rows == [{"trust_status": "rejected"}]
+
+
 def test_memory_verify_rejects_old_identity_events_after_key_rotation(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     old_key = Ed25519PrivateKey.generate()

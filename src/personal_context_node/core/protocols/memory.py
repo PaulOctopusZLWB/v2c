@@ -5,12 +5,13 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Literal
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 ClaimType = Literal[
@@ -27,6 +28,60 @@ AnnotationType = Literal["confirm", "dispute", "comment", "supersede_reference"]
 MemoryCardSourceType = Literal["confirmed_generated", "manual"]
 SUPPORTED_VISIBILITY_TYPES = {"private", "public", "direct", "group"}
 LOCAL_PERSON_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])per_[A-Za-z0-9_]+(?![A-Za-z0-9])")
+
+# did:key (Ed25519) codec — the DID *is* the public key (RFC: did:key, multicodec ed25519-pub 0xed01).
+_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+_ED25519_MULTICODEC_PREFIX = b"\xed\x01"
+_DID_KEY_PREFIX = "did:key:z"
+
+
+def _base58btc_encode(data: bytes) -> str:
+    number = int.from_bytes(data, "big")
+    encoded = ""
+    while number > 0:
+        number, remainder = divmod(number, 58)
+        encoded = _BASE58_ALPHABET[remainder] + encoded
+    leading_zeros = len(data) - len(data.lstrip(b"\x00"))
+    return _BASE58_ALPHABET[0] * leading_zeros + encoded
+
+
+def _base58btc_decode(value: str) -> bytes:
+    number = 0
+    for char in value:
+        index = _BASE58_ALPHABET.find(char)
+        if index < 0:
+            raise ValueError(f"invalid base58 character: {char!r}")
+        number = number * 58 + index
+    decoded = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    leading_zeros = len(value) - len(value.lstrip(_BASE58_ALPHABET[0]))
+    return b"\x00" * leading_zeros + decoded
+
+
+def did_key_from_public_key(raw_public_key: bytes) -> str:
+    if len(raw_public_key) != 32:
+        raise ValueError("Ed25519 public key must be 32 bytes")
+    return _DID_KEY_PREFIX + _base58btc_encode(_ED25519_MULTICODEC_PREFIX + raw_public_key)
+
+
+def public_key_bytes_from_did_key(did: str) -> bytes:
+    if not did.startswith(_DID_KEY_PREFIX):
+        raise ValueError(f"not a did:key Ed25519 identifier: {did}")
+    decoded = _base58btc_decode(did[len(_DID_KEY_PREFIX) :])
+    if decoded[:2] != _ED25519_MULTICODEC_PREFIX or len(decoded) != 34:
+        raise ValueError(f"did:key is not an Ed25519 multicodec key: {did}")
+    return decoded[2:]
+
+
+def is_did_key(did: str) -> bool:
+    try:
+        public_key_bytes_from_did_key(did)
+    except ValueError:
+        return False
+    return True
+
+
+def public_key_text_from_did_key(did: str) -> str:
+    return base64.urlsafe_b64encode(public_key_bytes_from_did_key(did)).decode("ascii").rstrip("=")
 
 
 class SubjectRef(BaseModel):
@@ -57,11 +112,16 @@ class Visibility(BaseModel):
 
 
 class MemoryCard(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     schema_version: Literal["memory_card.v1"] = "memory_card.v1"
     card_id: str
-    owner_did: str
+    # The protocol field is `owner` (§17.1, §47.2); `owner_did` is the local field
+    # name. Accept both on input, always serialize as the canonical `owner`.
+    owner_did: str = Field(
+        validation_alias=AliasChoices("owner", "owner_did"),
+        serialization_alias="owner",
+    )
     claim_type: ClaimType
     claim: str
     subject: SubjectRef
@@ -112,6 +172,10 @@ class MemoryCard(BaseModel):
 
 
 def _normalize_visibility(value: object) -> dict[str, str]:
+    if isinstance(value, Visibility):
+        # A model instance (e.g. visibility=Visibility(type="public")) must not be
+        # silently downgraded to private; normalize from its dict form.
+        value = value.model_dump(exclude_none=True)
     if isinstance(value, str):
         return {"type": value if value in {"private", "public"} else "private"}
     if isinstance(value, dict):
@@ -274,13 +338,66 @@ class SignedEvent(BaseModel):
 
 
 def canonical_json_bytes(value: object) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=_json_default,
-    ).encode("utf-8")
+    # RFC 8785 / JCS: sorted keys, no insignificant whitespace, UTF-8 strings
+    # (no \uXXXX escaping of non-ASCII), and ES6-style number serialization so
+    # integral floats render as `1` not `1.0` (§47.4.1).
+    return _canonical_dumps(value).encode("utf-8")
+
+
+def _canonical_dumps(value: object) -> str:
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return _canonical_number(value)
+    if isinstance(value, datetime):
+        return json.dumps(_json_default(value), ensure_ascii=False)
+    if isinstance(value, dict):
+        return "{" + ",".join(
+            json.dumps(str(key), ensure_ascii=False) + ":" + _canonical_dumps(item)
+            for key, item in sorted(value.items(), key=lambda kv: str(kv[0]))
+        ) + "}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_canonical_dumps(item) for item in value) + "]"
+    raise TypeError(f"cannot serialize {type(value)!r}")
+
+
+def _canonical_number(value: float) -> str:
+    # RFC 8785 numbers follow ECMAScript Number::toString: shortest round-tripping
+    # digits, fixed notation for 1e-6 <= |x| < 1e21, exponential otherwise, with no
+    # leading zero in the exponent (so `1e-7`, not `1e-07`).
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError("non-finite numbers are not allowed in canonical JSON")
+    if value == 0:
+        return "0"
+    sign = "-" if value < 0 else ""
+    _, digit_tuple, exponent = Decimal(repr(abs(value))).as_tuple()
+    digits = list(digit_tuple)
+    while len(digits) > 1 and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    significant = "".join(str(digit) for digit in digits)
+    k = len(significant)
+    n = exponent + k  # value == significant × 10^(n-k)
+    if k <= n <= 21:
+        body = significant + "0" * (n - k)
+    elif 0 < n <= 21:
+        body = significant[:n] + "." + significant[n:]
+    elif -6 < n <= 0:
+        body = "0." + "0" * (-n) + significant
+    else:
+        ev = n - 1
+        exp_str = ("+" if ev >= 0 else "-") + str(abs(ev))
+        mantissa = significant if k == 1 else significant[0] + "." + significant[1:]
+        body = mantissa + "e" + exp_str
+    return sign + body
 
 
 def signing_body(event: SignedEvent) -> dict[str, object]:
@@ -305,7 +422,8 @@ def create_signed_event(
     key = private_key or Ed25519PrivateKey.generate()
     public_key = _public_key_to_text(key.public_key())
     created = created_at or datetime.now(timezone.utc)
-    payload_json = payload.model_dump(mode="json", exclude_none=True)
+    # by_alias so memory cards serialize the canonical protocol field name `owner`.
+    payload_json = payload.model_dump(mode="json", exclude_none=True, by_alias=True)
     event_body: dict[str, object] = {
         "envelope_version": "signed_event.v1",
         "event_type": event_type,
@@ -332,8 +450,22 @@ def create_signed_event(
     )
 
 
-def verify_signed_event(event: SignedEvent, public_key_text: str) -> bool:
-    public_key = _public_key_from_text(public_key_text)
+def verify_signed_event(event: SignedEvent, public_key_text: str | None = None) -> bool:
+    # A did:key owner self-certifies: the verification key is derived from the DID
+    # itself, never from a caller-supplied key. This binds owner_id to the signing
+    # key and prevents importing a forged event that claims another identity (§30.3,
+    # §40.2.1). Placeholder/non-did owners fall back to the supplied key (legacy).
+    if is_did_key(event.owner_id):
+        if event.signature.public_key_id != event.owner_id:
+            return False
+        try:
+            public_key = Ed25519PublicKey.from_public_bytes(public_key_bytes_from_did_key(event.owner_id))
+        except ValueError:
+            return False
+    elif public_key_text is not None:
+        public_key = _public_key_from_text(public_key_text)
+    else:
+        return False
     try:
         public_key.verify(_b64url_decode(event.signature.value), canonical_json_bytes(signing_body(event)))
     except InvalidSignature:
@@ -342,17 +474,27 @@ def verify_signed_event(event: SignedEvent, public_key_text: str) -> bool:
 
 
 def materialize_cards(events: list[SignedEvent], public_keys_by_did: dict[str, str]) -> dict[str, MemoryCard]:
+    # The materialized view is a deterministic function of the *trusted* event set,
+    # independent of arrival order: per-owner events are applied by owner_sequence,
+    # not by the signer-controlled created_at wall-clock (§43.2/43.3, §40.2.4).
     cards: dict[str, MemoryCard] = {}
-    for event in sorted(events, key=lambda item: item.created_at):
+    ordered = sorted(events, key=lambda item: (item.owner_id, item.owner_sequence, item.event_hash))
+    for event in ordered:
         public_key = public_keys_by_did.get(event.signer_did)
-        if public_key is None or not verify_signed_event(event, public_key):
-            raise ValueError(f"invalid signed event: {event.event_id}")
+        if not verify_signed_event(event, public_key):
+            # untrusted/unverifiable events are excluded, not fatal
+            continue
         if (
-            event.event_type in {"memory_card.confirmed.v1", "memory_card.created"}
+            event.event_type == "memory_card.created"
             and event.payload_encoding == "plain"
             and event.payload_type == "memory_card.v1"
         ):
-            card = MemoryCard.model_validate(event.payload)
+            try:
+                card = MemoryCard.model_validate(event.payload)
+            except ValueError:
+                # A verified event whose payload does not parse is excluded
+                # (fail-closed), not fatal to the whole projection (§42).
+                continue
             cards[card.card_id] = card
     return cards
 

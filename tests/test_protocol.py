@@ -44,7 +44,7 @@ def test_signed_memory_card_event_verifies_and_materializes() -> None:
     )
 
     event, public_key = create_signed_event(
-        event_type="memory_card.confirmed.v1",
+        event_type="memory_card.created",
         payload=card,
         signer_did="did:key:test-owner",
     )
@@ -505,6 +505,52 @@ def test_parameterized_visibility_requires_full_object() -> None:
     assert scalar_group.visibility.model_dump(exclude_none=True) == {"type": "private"}
     assert missing_group_id.visibility.model_dump(exclude_none=True) == {"type": "private"}
     assert complete_group.visibility.model_dump(exclude_none=True) == {"type": "group", "group_id": "grp_test"}
+
+
+def test_did_key_owner_rejects_forged_event_with_supplied_key() -> None:
+    # A did:key owner self-certifies: an event claiming a victim's DID but signed
+    # by an attacker must fail verification even when the attacker supplies their
+    # own public key. This is the impersonation guard (§30.3, §40.2.1).
+    victim = Ed25519PrivateKey.generate()
+    victim_did = protocol.did_key_from_public_key(victim.public_key().public_bytes_raw())
+    attacker = Ed25519PrivateKey.generate()
+    attacker_pub = base64.urlsafe_b64encode(attacker.public_key().public_bytes_raw()).decode("ascii").rstrip("=")
+    body = {
+        "envelope_version": "signed_event.v1",
+        "event_type": "memory_card.created",
+        "object_id": "mem_forged",
+        "object_version": 1,
+        "owner_id": victim_did,
+        "owner_sequence": 1,
+        "prev_event_hash": None,
+        "payload_type": "memory_card.v1",
+        "payload_encoding": "plain",
+        "payload": {"card_id": "mem_forged", "claim": "forged", "owner": victim_did},
+        "created_at": "2026-06-10T00:00:00Z",
+    }
+    forged = SignedEvent(
+        **body,
+        signature=EventSignature(
+            public_key_id=victim_did,
+            value=base64.urlsafe_b64encode(attacker.sign(canonical_json_bytes(body))).decode("ascii").rstrip("="),
+        ),
+    )
+    assert not verify_signed_event(forged, attacker_pub)
+
+    legit = SignedEvent(
+        **body,
+        signature=EventSignature(
+            public_key_id=victim_did,
+            value=base64.urlsafe_b64encode(victim.sign(canonical_json_bytes(body))).decode("ascii").rstrip("="),
+        ),
+    )
+    assert verify_signed_event(legit)
+
+
+def test_did_key_codec_roundtrips_spec_vector() -> None:
+    raw = base64.urlsafe_b64decode(TEST_PUBLIC_KEY + "==")
+    assert protocol.did_key_from_public_key(raw) == TEST_DID
+    assert protocol.public_key_bytes_from_did_key(TEST_DID) == raw
 
 
 def test_protocol_vector_hash_and_signature_verify() -> None:

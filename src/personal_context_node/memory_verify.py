@@ -18,7 +18,7 @@ from personal_context_node.core.protocols.memory import (
     canonical_signing_body_hash,
     verify_signed_event,
 )
-from personal_context_node.signed_event_store import trust_status_for_event
+from personal_context_node.signed_event_store import _payload_parses, trust_status_for_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -44,99 +44,11 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         _ensure_signed_event_columns(conn)
         rows = fetch_all(
             conn,
-            """
-            select *
-            from signed_events
-            order by owner_id, owner_sequence, event_hash
-            """,
+            "select * from signed_events order by owner_id, owner_sequence, event_hash",
         )
-        valid = 0
-        invalid = 0
-        trusted_events: list[SignedEvent] = []
-        previous_hash_by_owner: dict[str, str] = {}
-        previous_sequence_by_owner: dict[str, int] = {}
-        closed_owner_sequence: dict[str, int] = {}
-        forked_event_hashes = _forked_event_hashes(rows)
-        forked_event_hashes |= _object_version_conflict_hashes(rows)
-        successor_rotations = _successor_rotation_index(rows)
-        card_owner_by_id = _card_owner_index(rows, forked_event_hashes=forked_event_hashes)
-        annotation_author_by_id = _annotation_author_index(rows, forked_event_hashes=forked_event_hashes)
-        trusted_successor_profiles: set[str] = set()
-        for row in rows:
-            event_hash = _row_event_hash(row)
-            try:
-                event = _event_from_row(row)
-                hash_fields_valid = _hash_fields_valid(row, event)
-                signature_valid = verify_signed_event(event, str(row["public_key"]))
-                chain_fields_valid = _chain_fields_valid(
-                    row,
-                    previous_hash_by_owner=previous_hash_by_owner,
-                    previous_sequence_by_owner=previous_sequence_by_owner,
-                )
-                row_dangling = (
-                    event_hash not in forked_event_hashes
-                    and signature_valid
-                    and hash_fields_valid
-                    and not chain_fields_valid
-                )
-                row_valid = (
-                    event_hash not in forked_event_hashes
-                    and signature_valid
-                    and hash_fields_valid
-                    and chain_fields_valid
-                    and _owner_not_closed(row, closed_owner_sequence=closed_owner_sequence)
-                    and _successor_chain_start_valid(
-                        event,
-                        successor_rotations=successor_rotations,
-                        trusted_successor_profiles=trusted_successor_profiles,
-                    )
-                    and _card_successor_authorized(
-                        event,
-                        card_owner_by_id=card_owner_by_id,
-                        successor_rotations=successor_rotations,
-                        trusted_successor_profiles=trusted_successor_profiles,
-                    )
-                    and _annotation_revocation_authorized(
-                        event,
-                        annotation_author_by_id=annotation_author_by_id,
-                    )
-                    and _payload_authority_matches_event(event)
-                    and _object_id_matches_payload(event)
-                )
-            except Exception:
-                row_valid = False
-                row_dangling = False
-            if row_valid:
-                valid += 1
-                trust_status = trust_status_for_event(event=event, verified=True)
-                if trust_status == "trusted":
-                    trusted_events.append(event)
-                    if _is_matching_predecessor_profile(
-                        event,
-                        rotation=successor_rotations.get(event.owner_id),
-                    ):
-                        trusted_successor_profiles.add(event.owner_id)
-                previous_hash_by_owner[str(row["owner_id"])] = event_hash
-                previous_sequence_by_owner[str(row["owner_id"])] = int(row["owner_sequence"])
-                conn.execute(
-                    "update signed_events set verified = 1, trust_status = ? where event_hash = ?",
-                    (trust_status, event_hash),
-                )
-                if trust_status == "trusted" and event.event_type == "identity_key.rotated":
-                    IdentityKeyRotation.model_validate(event.payload)
-                    closed_owner_sequence[str(row["owner_id"])] = int(row["owner_sequence"])
-            elif row_dangling:
-                invalid += 1
-                conn.execute(
-                    "update signed_events set verified = 1, trust_status = 'dangling' where event_hash = ?",
-                    (event_hash,),
-                )
-            else:
-                invalid += 1
-                conn.execute(
-                    "update signed_events set verified = 0, trust_status = 'rejected' where event_hash = ?",
-                    (event_hash,),
-                )
+        trusted_events, valid, invalid = _evaluate_and_write_trust(conn, rows)
+        # verify is a CHECK: it diffs the trusted-set projection against the stored
+        # materialized view (to catch DB-level tampering) and does NOT rebuild it.
         mismatches = _materialization_mismatches(conn, trusted_events)
         conn.commit()
         return MemoryVerifyResult(
@@ -149,6 +61,128 @@ def verify_memory_events(*, config: AppConfig) -> MemoryVerifyResult:
         conn.close()
 
 
+def recompute_materialized_state(conn: sqlite3.Connection) -> list[SignedEvent]:
+    """Order-independent trust assignment + materialized-view rebuild (§43).
+
+    Both the live store (after each insert / import batch) and verification use the
+    SAME deterministic algorithm, so trust and materialization never depend on the
+    order events were received in.
+    """
+    from personal_context_node.signed_event_store import _rebuild_materialized_views
+
+    rows = fetch_all(conn, "select * from signed_events order by owner_id, owner_sequence, event_hash")
+    trusted_events, _valid, _invalid = _evaluate_and_write_trust(conn, rows)
+    _rebuild_materialized_views(conn)
+    return trusted_events
+
+
+def _evaluate_and_write_trust(
+    conn: sqlite3.Connection, rows: list[dict[str, object]]
+) -> tuple[list[SignedEvent], int, int]:
+    valid = 0
+    invalid = 0
+    trusted_events: list[SignedEvent] = []
+    previous_hash_by_owner: dict[str, str] = {}
+    previous_sequence_by_owner: dict[str, int] = {}
+    closed_owner_sequence: dict[str, int] = {}
+    trusted_object_versions: set[tuple[str, int]] = set()
+    # Clear any stale 'trusted' marks from a previous recompute before re-deriving the set,
+    # so the incremental per-row writes below can never transiently leave two rows trusted
+    # for the same partial-unique-index key (e.g. a prior batch's now-superseded card while
+    # this pass promotes a different one) — which would abort the insert/import transaction.
+    conn.execute("update signed_events set trust_status = 'unverified', verified = 0")
+    forked_event_hashes = _forked_event_hashes(rows)
+    forked_event_hashes |= _object_version_conflict_hashes(rows)
+    successor_rotations = _successor_rotation_index(rows)
+    card_owner_by_id = _card_owner_index(rows, forked_event_hashes=forked_event_hashes)
+    annotation_author_by_id = _annotation_author_index(rows, forked_event_hashes=forked_event_hashes)
+    trusted_successor_profiles: set[str] = set()
+    for row in rows:
+        event_hash = _row_event_hash(row)
+        event: SignedEvent | None = None
+        trust_status = "rejected"
+        try:
+            event = _event_from_row(row)
+            hash_fields_valid = (
+                _hash_fields_valid(row, event)
+                and _payload_json_consistent(row, event)
+                and _columns_match_event(row, event)
+            )
+            signature_valid = verify_signed_event(event, str(row["public_key"]))
+            not_forked = event_hash not in forked_event_hashes
+            chain_fields_valid = _chain_fields_valid(
+                event,
+                previous_hash_by_owner=previous_hash_by_owner,
+                previous_sequence_by_owner=previous_sequence_by_owner,
+            )
+            if not (not_forked and signature_valid and hash_fields_valid):
+                trust_status = "rejected"
+            elif not chain_fields_valid:
+                trust_status = "dangling"
+            elif trust_status_for_event(event=event, verified=True) == "unsupported" or not _payload_parses(event):
+                # Fail-closed (§42): unknown encoding/payload version, or a payload that
+                # does not parse against its declared v1 schema — kept but not materialized.
+                trust_status = "unsupported"
+            elif (
+                _owner_not_closed(event, closed_owner_sequence=closed_owner_sequence)
+                and _successor_chain_start_valid(
+                    event, successor_rotations=successor_rotations, trusted_successor_profiles=trusted_successor_profiles
+                )
+                and _card_successor_authorized(
+                    event,
+                    card_owner_by_id=card_owner_by_id,
+                    successor_rotations=successor_rotations,
+                    trusted_successor_profiles=trusted_successor_profiles,
+                )
+                and _annotation_revocation_authorized(event, annotation_author_by_id=annotation_author_by_id)
+                and _card_creation_authorized(event, card_owner_by_id=card_owner_by_id)
+                and _payload_authority_matches_event(event)
+                and _object_id_matches_payload(event)
+            ):
+                trust_status = "trusted"
+            else:
+                trust_status = "rejected"
+        except Exception:
+            trust_status = "rejected"
+
+        if trust_status == "trusted" and event is not None:
+            # Enforce the §27.1 single-trusted-version invariant across ALL owners and event
+            # types: a cross-owner (object_id, object_version) collision that authority binding
+            # did not already reject (e.g. annotation id reuse) must not put two rows in
+            # 'trusted' and trip idx_signed_events_trusted_object_version. Deterministic
+            # first-in-sorted-order (owner_id, owner_sequence, event_hash) wins.
+            object_version_key = (event.object_id, event.object_version)
+            if object_version_key in trusted_object_versions:
+                trust_status = "rejected"
+            else:
+                trusted_object_versions.add(object_version_key)
+
+        if trust_status in ("trusted", "unsupported") and event is not None:
+            valid += 1
+            # Both trusted and unsupported events occupy a valid chain position. Track
+            # the chain by the signature-protected event values, not derived columns.
+            previous_hash_by_owner[event.owner_id] = event_hash
+            previous_sequence_by_owner[event.owner_id] = event.owner_sequence
+            if trust_status == "trusted":
+                trusted_events.append(event)
+                if _is_matching_predecessor_profile(event, rotation=successor_rotations.get(event.owner_id)):
+                    trusted_successor_profiles.add(event.owner_id)
+                if event.event_type == "identity_key.rotated":
+                    closed_owner_sequence[event.owner_id] = event.owner_sequence
+            conn.execute(
+                "update signed_events set verified = 1, trust_status = ? where event_hash = ?",
+                (trust_status, event_hash),
+            )
+        else:
+            invalid += 1
+            verified_flag = 1 if trust_status == "dangling" else 0
+            conn.execute(
+                "update signed_events set verified = ?, trust_status = ? where event_hash = ?",
+                (verified_flag, trust_status, event_hash),
+            )
+    return trusted_events, valid, invalid
+
+
 def _event_from_row(row: dict[str, object]) -> SignedEvent:
     event_json = str(row.get("raw_event_json") or row.get("event_json") or "{}")
     try:
@@ -156,7 +190,9 @@ def _event_from_row(row: dict[str, object]) -> SignedEvent:
     except json.JSONDecodeError:
         event_payload = {}
     if event_payload:
-        event_payload["payload"] = json.loads(str(row["payload_json"]))
+        # Reconstruct from raw_event_json verbatim (the complete-event source of
+        # truth, §31.1) — do NOT substitute the derived payload_json column, or a
+        # tampered raw_event_json would escape re-verification and be re-exported.
         if isinstance(event_payload.get("signature"), str):
             event_payload["signature"] = _signature_from_row(row)
         return SignedEvent.model_validate(event_payload)
@@ -176,6 +212,16 @@ def _event_from_row(row: dict[str, object]) -> SignedEvent:
     )
 
 
+def _payload_json_consistent(row: dict[str, object], event: SignedEvent) -> bool:
+    # The derived payload_json column must match the authoritative raw_event_json
+    # payload; a mismatch means one of the two was tampered after signing.
+    try:
+        stored = json.loads(str(row["payload_json"]))
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return stored == event.payload
+
+
 def _hash_fields_valid(row: dict[str, object], event: SignedEvent) -> bool:
     expected = canonical_signing_body_hash(event)
     return (
@@ -185,14 +231,15 @@ def _hash_fields_valid(row: dict[str, object], event: SignedEvent) -> bool:
 
 
 def _chain_fields_valid(
-    row: dict[str, object],
+    event: SignedEvent,
     *,
     previous_hash_by_owner: dict[str, str],
     previous_sequence_by_owner: dict[str, int],
 ) -> bool:
-    owner_id = str(row["owner_id"])
-    sequence = int(row["owner_sequence"])
-    prev_event_hash = row["prev_event_hash"]
+    # Use the signature-protected event values, not the derived DB columns.
+    owner_id = event.owner_id
+    sequence = event.owner_sequence
+    prev_event_hash = event.prev_event_hash
     previous_hash = previous_hash_by_owner.get(owner_id)
     previous_sequence = previous_sequence_by_owner.get(owner_id)
     if sequence == 1:
@@ -200,11 +247,33 @@ def _chain_fields_valid(
     return previous_sequence == sequence - 1 and prev_event_hash == previous_hash
 
 
-def _owner_not_closed(row: dict[str, object], *, closed_owner_sequence: dict[str, int]) -> bool:
-    owner_id = str(row["owner_id"])
-    sequence = int(row["owner_sequence"])
-    closed_at = closed_owner_sequence.get(owner_id)
-    return closed_at is None or sequence <= closed_at
+def _owner_not_closed(event: SignedEvent, *, closed_owner_sequence: dict[str, int]) -> bool:
+    closed_at = closed_owner_sequence.get(event.owner_id)
+    return closed_at is None or event.owner_sequence <= closed_at
+
+
+def _authentic_event(row: dict[str, object]) -> SignedEvent | None:
+    try:
+        return _event_from_row(row)
+    except Exception:
+        return None
+
+
+def _columns_match_event(row: dict[str, object], event: SignedEvent) -> bool:
+    # Derived envelope columns must equal the signature-protected raw event; a
+    # mismatch means a DB-level tamper of a derived column (the signed blob is intact).
+    prev = row["prev_event_hash"]
+    prev_value = str(prev) if prev is not None else None
+    try:
+        return (
+            str(row["owner_id"]) == event.owner_id
+            and int(row["owner_sequence"]) == event.owner_sequence
+            and str(row["object_id"]) == event.object_id
+            and int(row["object_version"]) == event.object_version
+            and prev_value == event.prev_event_hash
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def _signature_from_row(row: dict[str, object]) -> dict[str, str]:
@@ -219,29 +288,46 @@ def _row_event_hash(row: dict[str, object]) -> str:
     return str(row.get("event_hash") or row["event_id"])
 
 
+def _owner_sequence_key(row: dict[str, object]) -> tuple[str, int]:
+    # Group by the signature-protected owner/sequence so a tampered column cannot hide
+    # a fork (§31.2.6); fall back to columns only for unparseable raw events.
+    event = _authentic_event(row)
+    if event is not None:
+        return (event.owner_id, event.owner_sequence)
+    return (str(row["owner_id"]), int(row["owner_sequence"]))
+
+
+def _object_version_key(row: dict[str, object]) -> tuple[str, str, int]:
+    # An object-version fork (§43.9) is scoped to one owner's object lineage, mirroring the
+    # owner-scoped owner_sequence fork (§31.2.6). A different owner reusing the same object_id
+    # is an id-collision, NOT a version fork of this owner's object — keying the conflict on
+    # owner_id prevents a forged cross-owner event from collaterally rejecting the legitimate
+    # owner's card/annotation. (Cross-owner collisions are resolved by owner-binding instead.)
+    event = _authentic_event(row)
+    if event is not None:
+        return (event.owner_id, event.object_id, event.object_version)
+    return (str(row["owner_id"] or row["signer_did"]), str(row["object_id"]), int(row["object_version"]))
+
+
 def _forked_event_hashes(rows: list[dict[str, object]]) -> set[str]:
     hashes_by_owner_sequence: dict[tuple[str, int], set[str]] = {}
     for row in rows:
-        key = (str(row["owner_id"]), int(row["owner_sequence"]))
-        hashes_by_owner_sequence.setdefault(key, set()).add(_row_event_hash(row))
+        hashes_by_owner_sequence.setdefault(_owner_sequence_key(row), set()).add(_row_event_hash(row))
     return {
-        event_hash
+        _row_event_hash(row)
         for row in rows
-        if len(hashes_by_owner_sequence[(str(row["owner_id"]), int(row["owner_sequence"]))]) > 1
-        for event_hash in [_row_event_hash(row)]
+        if len(hashes_by_owner_sequence[_owner_sequence_key(row)]) > 1
     }
 
 
 def _object_version_conflict_hashes(rows: list[dict[str, object]]) -> set[str]:
-    hashes_by_object_version: dict[tuple[str, int], set[str]] = {}
+    hashes_by_object_version: dict[tuple[str, str, int], set[str]] = {}
     for row in rows:
-        key = (str(row["object_id"]), int(row["object_version"]))
-        hashes_by_object_version.setdefault(key, set()).add(_row_event_hash(row))
+        hashes_by_object_version.setdefault(_object_version_key(row), set()).add(_row_event_hash(row))
     return {
-        event_hash
+        _row_event_hash(row)
         for row in rows
-        if len(hashes_by_object_version[(str(row["object_id"]), int(row["object_version"]))]) > 1
-        for event_hash in [_row_event_hash(row)]
+        if len(hashes_by_object_version[_object_version_key(row)]) > 1
     }
 
 
@@ -285,7 +371,11 @@ def _card_owner_index(rows: list[dict[str, object]], *, forked_event_hashes: set
             if trust_status_for_event(event=event, verified=True) != "trusted":
                 continue
             card = MemoryCard.model_validate(event.payload)
-            owners[card.card_id] = card.owner_did
+            # Bind each card_id to the FIRST creator in the deterministic row order
+            # (owner_id, owner_sequence, event_hash). A later cross-owner card.created for
+            # the same card_id is an id-collision and is rejected (see
+            # _card_creation_authorized), so it can neither censor nor overwrite the bound card.
+            owners.setdefault(card.card_id, card.owner_did)
         except Exception:
             continue
     return owners
@@ -350,6 +440,22 @@ def _card_successor_authorized(
     )
 
 
+def _card_creation_authorized(event: SignedEvent, *, card_owner_by_id: dict[str, str]) -> bool:
+    # A memory_card.created may only establish a card_id not already bound to a different
+    # owner (§11: a card belongs to exactly one owner; others may only annotate). The
+    # card-owner index binds each card_id to one deterministic owner; a cross-owner event
+    # reusing that card_id is id-squatting and is rejected so it cannot censor or overwrite
+    # the bound owner's card.
+    if event.event_type != "memory_card.created":
+        return True
+    try:
+        card_id = MemoryCard.model_validate(event.payload).card_id
+    except Exception:
+        return True  # payload validity is enforced elsewhere
+    bound_owner = card_owner_by_id.get(card_id)
+    return bound_owner is None or bound_owner == event.owner_id
+
+
 def _card_successor_target_id(event: SignedEvent) -> str | None:
     if event.event_type == "memory_card.revoked":
         return MemoryCardRevocation.model_validate(event.payload).card_id
@@ -391,6 +497,10 @@ def _payload_authority_matches_event(event: SignedEvent) -> bool:
     if event.event_type == "memory_annotation.revoked":
         revocation = MemoryAnnotationRevocation.model_validate(event.payload)
         return event.owner_id == revocation.revoked_by
+    if event.event_type == "identity_key.rotated":
+        # A rotation must be signed by the OLD key (§41.1 rule 1).
+        rotation = IdentityKeyRotation.model_validate(event.payload)
+        return event.owner_id == rotation.old_identity_id
     return True
 
 
@@ -476,8 +586,8 @@ def _memory_card_mismatches(conn: sqlite3.Connection, expected: dict[str, dict[s
         conn,
         """
         select card_id, current_version, owner_id, owner_did, claim_type, claim, source_type, confidence,
-               observed_at, valid_from, valid_until, visibility_json, tags_json, status,
-               source_event_hash, updated_at
+               observed_at, valid_from, valid_until, subject_json, evidence_refs_json, candidate_claim,
+               visibility_json, tags_json, status, source_event_hash, updated_at
         from memory_cards
         order by card_id
         """,
@@ -553,6 +663,13 @@ def _card_projection(
         "observed_at": card.observed_at,
         "valid_from": card.valid_from,
         "valid_until": card.valid_until,
+        # These claim-bearing columns must be in the diff: tampering the subject,
+        # evidence refs, or candidate_claim would otherwise pass verification (§33, §43).
+        "subject_json": card.subject.model_dump_json(),
+        "evidence_refs_json": json.dumps(
+            [evidence.model_dump(mode="json") for evidence in card.evidence_refs], ensure_ascii=False, sort_keys=True
+        ),
+        "candidate_claim": card.candidate_claim,
         "visibility_json": json.dumps(card.visibility.model_dump(mode="json", exclude_none=True), ensure_ascii=False, sort_keys=True),
         "tags_json": json.dumps(card.tags, ensure_ascii=False, sort_keys=True),
         "status": status,

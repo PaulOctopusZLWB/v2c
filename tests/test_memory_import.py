@@ -67,6 +67,78 @@ def test_import_memory_events_verifies_jsonl_and_materializes_cards(tmp_path: Pa
     ]
 
 
+def test_import_memory_events_ingests_spec_owner_field_and_quarantines_malformed(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    from personal_context_node.core.protocols.memory import SignedEvent, did_key_from_public_key
+
+    # Two distinct owners (multi-owner JSONL) so the two seq-1 events are not a fork.
+    spec_key = Ed25519PrivateKey.generate()
+    spec_did = did_key_from_public_key(spec_key.public_key().public_bytes_raw())
+    bad_key = Ed25519PrivateKey.generate()
+    bad_did = did_key_from_public_key(bad_key.public_key().public_bytes_raw())
+
+    def signed_line(key: Ed25519PrivateKey, did: str, payload: dict) -> str:
+        body = {
+            "envelope_version": "signed_event.v1",
+            "event_type": "memory_card.created",
+            "object_id": payload["card_id"],
+            "object_version": 1,
+            "owner_id": did,
+            "owner_sequence": 1,
+            "prev_event_hash": None,
+            "payload_type": "memory_card.v1",
+            "payload_encoding": "plain",
+            "payload": payload,
+            "created_at": "2026-06-10T00:00:00Z",
+        }
+        signature = key.sign(canonical_json_bytes(body))
+        event = SignedEvent(
+            **body,
+            signature=EventSignature(
+                public_key_id=did,
+                value=base64.urlsafe_b64encode(signature).decode("ascii").rstrip("="),
+            ),
+        )
+        return event.model_dump_json()
+
+    # Spec-conformant card uses the protocol field name `owner` (§17.1); a malformed
+    # v1 payload (missing required claim) must be quarantined, not crash the batch.
+    spec_card = {
+        "schema_version": "memory_card.v1",
+        "card_id": "mem_owner_field",
+        "owner": spec_did,
+        "claim_type": "decision",
+        "claim": "Spec cards use the owner field.",
+        "subject": {"type": "project", "id": "pcn", "label": "PCN"},
+        "evidence_refs": [],
+        "source_type": "manual",
+        "visibility": {"type": "private"},
+    }
+    malformed = {"schema_version": "memory_card.v1", "card_id": "mem_malformed", "owner": bad_did}
+    input_path = tmp_path / "events.jsonl"
+    input_path.write_text(
+        signed_line(spec_key, spec_did, spec_card) + "\n" + signed_line(bad_key, bad_did, malformed) + "\n",
+        encoding="utf-8",
+    )
+
+    result = import_memory_events(config=config, input_path=input_path)
+
+    assert result.events_imported == 2
+    assert result.trusted_events == 1
+    assert result.unsupported_events == 1
+    conn = connect(config.database_path)
+    try:
+        statuses = {
+            row["object_id"]: row["trust_status"]
+            for row in fetch_all(conn, "select object_id, trust_status from signed_events")
+        }
+        cards = [row["card_id"] for row in fetch_all(conn, "select card_id from memory_cards")]
+    finally:
+        conn.close()
+    assert statuses == {"mem_owner_field": "trusted", "mem_malformed": "unsupported"}
+    assert cards == ["mem_owner_field"]
+
+
 def test_import_memory_events_rejects_invalid_signatures_without_materializing(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     card = MemoryCard(
@@ -306,3 +378,54 @@ def _write_import_event(tmp_path: Path, *, owner_did: str) -> tuple[Path, str]:
     input_path = tmp_path / f"{card.card_id}.jsonl"
     input_path.write_text(event.model_dump_json() + "\n", encoding="utf-8")
     return input_path, public_key
+
+
+def test_no_config_owner_did_round_trips_export_import(tmp_path: Path) -> None:
+    # Even without `pcn init`/--config (placeholder owner_did default), events must be
+    # minted under a real, signing-key-bound did:key so a clean export imports as
+    # trusted on a fresh node (§30.3, §31.1). Otherwise the placeholder owner can't
+    # self-certify and import rejects everything.
+    from personal_context_node.core.protocols.memory import EvidenceRef, MemoryCard, SubjectRef
+    from personal_context_node.identity_keys import effective_owner_did, load_or_create_signing_key
+    from personal_context_node.memory_export import export_memory_events
+    from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
+    from personal_context_node.storage.sqlite import connect, initialize
+
+    source = AppConfig(data_dir=tmp_path / "src", obsidian_vault=tmp_path / "v1")
+    assert source.owner_did == "did:key:local-owner"  # the placeholder default
+    owner = effective_owner_did(source)
+    assert owner.startswith("did:key:z")  # real, key-derived did:key
+
+    conn = connect(source.database_path)
+    try:
+        initialize(conn)
+        card = MemoryCard(
+            card_id="mem_rt",
+            owner_did=owner,
+            claim_type="decision",
+            claim="round trip",
+            subject=SubjectRef(type="project", id="p", label="P"),
+            evidence_refs=[EvidenceRef(evidence_id="ev", source_type="transcript_segment", source_id="s", quote="q")],
+        )
+        event, pk = create_chained_event(
+            conn, event_type="memory_card.created", payload=card, signer_did=owner,
+            private_key=load_or_create_signing_key(source),
+        )
+        insert_signed_event(conn, event=event, public_key=pk)
+        conn.commit()
+    finally:
+        conn.close()
+    export_path = tmp_path / "export.jsonl"
+    export_memory_events(config=source, output_path=export_path, since="2000-01-01")
+
+    fresh = AppConfig(data_dir=tmp_path / "dst", obsidian_vault=tmp_path / "v2")
+    result = import_memory_events(config=fresh, input_path=export_path)  # no public_key
+
+    assert result.trusted_events == 1
+    assert result.rejected_events == 0
+    conn = connect(fresh.database_path)
+    try:
+        cards = fetch_all(conn, "select card_id from memory_cards")
+    finally:
+        conn.close()
+    assert cards == [{"card_id": "mem_rt"}]

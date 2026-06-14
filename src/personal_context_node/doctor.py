@@ -23,6 +23,7 @@ class DoctorResult:
     memory_invalid_events: int
     memory_materialization_mismatches: int
     funasr_runtime: str
+    identity: str
 
 
 def run_doctor(
@@ -38,6 +39,7 @@ def run_doctor(
     source_status = _path_status(source_dir, required=False)
     archive_status = _path_status(archive_root, required=False)
     funasr_runtime = _funasr_runtime_status(config)
+    identity = _identity_status(config)
     status = "ok"
     if (
         health.status != "ok"
@@ -48,6 +50,7 @@ def run_doctor(
         or source_status == "missing"
         or archive_status == "missing"
         or funasr_runtime == "missing"
+        or identity in {"mismatch", "missing_key", "error"}
     ):
         status = "warning"
     return DoctorResult(
@@ -62,6 +65,7 @@ def run_doctor(
         memory_invalid_events=memory.invalid_events,
         memory_materialization_mismatches=memory.materialization_mismatches,
         funasr_runtime=funasr_runtime,
+        identity=identity,
     )
 
 
@@ -99,3 +103,20 @@ def _funasr_runtime_status(config: AppConfig) -> str:
     if config.vad_backend != "funasr" and config.asr_backend != "funasr":
         return "skipped"
     return "ok" if importlib.util.find_spec("funasr") is not None else "missing"
+
+
+def _identity_status(config: AppConfig) -> str:
+    # A did:key owner_did must match the on-disk signing key (§30.3); a mismatch
+    # silently rejects every new card, so surface it as a health warning.
+    from personal_context_node.core.protocols.memory import is_did_key
+    from personal_context_node.identity_keys import derive_did, load_or_create_signing_key
+
+    if not is_did_key(config.owner_did):
+        return "unbound"
+    if not config.signing_key_path.exists():
+        return "missing_key"
+    try:
+        derived = derive_did(load_or_create_signing_key(config))
+    except Exception:
+        return "error"
+    return "ok" if derived == config.owner_did else "mismatch"

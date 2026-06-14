@@ -19,6 +19,8 @@ from personal_context_node.core.protocols.memory import (
     SignedEvent,
     canonical_signing_body_hash,
     create_signed_event,
+    is_did_key,
+    public_key_text_from_did_key,
     signing_body,
     verify_signed_event,
 )
@@ -34,6 +36,30 @@ SUPPORTED_EVENT_PAYLOAD_TYPES = {
     "memory_annotation.created": "memory_annotation.v1",
     "memory_annotation.revoked": "memory_annotation_revocation.v1",
 }
+
+# Pydantic model for each known event_type's payload, used to fail-closed on a
+# verified-but-malformed payload instead of crashing the import (§42, §31.2.5).
+_PAYLOAD_MODELS = {
+    "memory_card.created": MemoryCard,
+    "memory_card.metadata_updated": MemoryCardMetadataUpdate,
+    "memory_card.revoked": MemoryCardRevocation,
+    "memory_card.superseded": MemoryCardSupersession,
+    "identity_profile.published": IdentityProfile,
+    "identity_key.rotated": IdentityKeyRotation,
+    "memory_annotation.created": MemoryAnnotation,
+    "memory_annotation.revoked": MemoryAnnotationRevocation,
+}
+
+
+def _payload_parses(event: SignedEvent) -> bool:
+    model = _PAYLOAD_MODELS.get(event.event_type)
+    if model is None:
+        return True
+    try:
+        model.model_validate(event.payload)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -73,14 +99,25 @@ def create_chained_event(
     )
 
 
-def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str) -> None:
-    verified = verify_signed_event(event, public_key)
-    trust_status = _trusted_or_rejected_status(conn, event=event, public_key=public_key)
-    event_hash = event.event_hash
-    if trust_status == "trusted" and _reject_owner_sequence_fork(conn, event=event):
-        trust_status = "rejected"
-    if trust_status == "trusted" and _reject_object_version_fork(conn, event=event):
-        trust_status = "rejected"
+def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str | None = None) -> None:
+    # Persist the raw event, then recompute trust + materialization deterministically
+    # over the WHOLE event set. Trust must be an order-independent function of the
+    # trusted set (§43), so a cross-owner successor can never be trusted merely because
+    # it was inserted before its target card.
+    _insert_raw_signed_event(conn, event=event, public_key=public_key)
+    from personal_context_node.memory_verify import recompute_materialized_state
+
+    recompute_materialized_state(conn)
+
+
+def _insert_raw_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str | None = None) -> None:
+    # A did:key owner self-certifies, so the verification key is derived from the DID
+    # and no caller-supplied key is required (e.g. importing a multi-owner JSONL).
+    stored_public_key = public_key
+    if stored_public_key is None and is_did_key(event.owner_id):
+        stored_public_key = public_key_text_from_did_key(event.owner_id)
+    if stored_public_key is None:
+        stored_public_key = ""
     signing_body_json = json.dumps(signing_body(event), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     raw_event_json = event.model_dump_json()
     conn.execute(
@@ -93,10 +130,11 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
           canonical_signing_body_hash, signature_algorithm, public_key_id,
           signature_value, trust_status, event_json, signature, public_key, verified
         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(event_hash) do nothing
         """,
         (
-            event_hash,
-            event_hash,
+            event.event_hash,
+            event.event_hash,
             event.event_type,
             event.signer_did,
             event.owner_id,
@@ -115,16 +153,13 @@ def insert_signed_event(conn: sqlite3.Connection, *, event: SignedEvent, public_
             event.signature.algorithm,
             event.signature.public_key_id,
             event.signature.value,
-            trust_status,
+            "unverified",
             raw_event_json,
             event.signature.value,
-            public_key,
-            1 if verified else 0,
+            stored_public_key,
+            0,
         ),
     )
-    if trust_status == "trusted":
-        _apply_trusted_event(conn, event=event)
-        _promote_dangling_successors(conn, predecessor=event)
 
 
 def _reject_owner_sequence_fork(conn: sqlite3.Connection, *, event: SignedEvent) -> bool:
@@ -251,9 +286,13 @@ def _promote_dangling_successors(conn: sqlite3.Connection, *, predecessor: Signe
             _promote_dangling_successors(conn, predecessor=event)
 
 
-def _trusted_or_rejected_status(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str) -> str:
+def _trusted_or_rejected_status(conn: sqlite3.Connection, *, event: SignedEvent, public_key: str | None) -> str:
     verified = verify_signed_event(event, public_key)
     trust_status = trust_status_for_event(event=event, verified=verified)
+    if trust_status == "trusted" and not _payload_parses(event):
+        # Verified but the payload does not conform to its declared v1 schema:
+        # quarantine as unsupported rather than crash (fail-closed, §42/§31.2.5).
+        return "unsupported"
     if trust_status == "trusted" and _event_hash_chain_dangling(conn, event=event):
         trust_status = "dangling"
     if trust_status == "trusted" and _event_after_existing_rotation(conn, event=event):
@@ -392,16 +431,23 @@ def _unauthorized_known_annotation_revocation(conn: sqlite3.Connection, *, event
 def _identity_can_modify_card(conn: sqlite3.Connection, *, actor_did: str, card_owner_did: str) -> bool:
     if actor_did == card_owner_did:
         return True
-    row = conn.execute(
+    # Successor authority over another identity's cards requires a TRUSTED, old-key-signed
+    # rotation from card_owner -> actor (§41 rule 3), not merely a self-published profile
+    # claiming a predecessor. A forged predecessor profile alone must NOT grant authority.
+    rotation = _trusted_rotation_to_identity(conn, identity_id=actor_did)
+    if rotation is None or rotation.old_identity_id != card_owner_did:
+        return False
+    profile = conn.execute(
         """
         select 1
         from identity_profiles
         where identity_id = ?
           and predecessor_identity_id = ?
+          and predecessor_rotation_event_hash = ?
         """,
-        (actor_did, card_owner_did),
+        (actor_did, rotation.old_identity_id, rotation.event_hash),
     ).fetchone()
-    return row is not None
+    return profile is not None
 
 
 def _payload_authority_matches_event(event: SignedEvent) -> bool:
@@ -423,6 +469,12 @@ def _payload_authority_matches_event(event: SignedEvent) -> bool:
     if event.event_type == "memory_annotation.revoked":
         revocation = MemoryAnnotationRevocation.model_validate(event.payload)
         return event.owner_id == revocation.revoked_by
+    if event.event_type == "identity_key.rotated":
+        # A rotation must be signed by the OLD key (§41.1 rule 1): bind the signer
+        # (owner_id, which self-certifies via did:key) to old_identity_id. Without
+        # this, an attacker could forge a rotation and claim successor authority.
+        rotation = IdentityKeyRotation.model_validate(event.payload)
+        return event.owner_id == rotation.old_identity_id
     return True
 
 
