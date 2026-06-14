@@ -402,11 +402,40 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("pragma foreign_keys = on")
     conn.execute("pragma journal_mode = wal")
-    conn.execute("pragma busy_timeout = 5000")
+    conn.execute("pragma busy_timeout = 30000")
     return conn
 
 
+_INITIALIZED_DBS: set[str] = set()
+
+
+def _main_db_file(conn: sqlite3.Connection) -> str:
+    try:
+        row = conn.execute("pragma database_list").fetchone()
+    except sqlite3.Error:
+        return ""
+    return str(row[2]) if row and row[2] else ""
+
+
 def initialize(conn: sqlite3.Connection) -> None:
+    """Apply schema + migrations once per DB file per process.
+
+    The DDL below takes a write lock. Re-running it on every connection turned
+    every read request (and the 1s SSE status poll) into a write-lock contender,
+    which surfaced as `database is locked` 500s while the background worker was
+    committing transcripts. Connection-level pragmas (WAL, busy_timeout) live in
+    connect(), so skipping the DDL on subsequent connections to an already-migrated
+    file is safe.
+    """
+    dbfile = _main_db_file(conn)
+    if dbfile and dbfile in _INITIALIZED_DBS:
+        return
+    _run_migrations(conn)
+    if dbfile:
+        _INITIALIZED_DBS.add(dbfile)
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "audio_files", "source_size_bytes", "integer not null default 0")
     _ensure_column(conn, "audio_files", "source_mtime_ns", "integer not null default 0")
