@@ -18,3 +18,6 @@ sample_data/
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
+
+# Design/docs are kept local only — GitHub holds code, not design (*.md untracked)
+*.md
