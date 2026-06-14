@@ -17,6 +17,8 @@ class LaunchdJob:
     working_directory: str
     log_directory: str
     start_calendar: dict[str, int] | None = None
+    run_at_load: bool = False
+    keep_alive: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,14 +37,18 @@ def render_plist(job: LaunchdJob) -> bytes:
     payload: dict[str, object] = {
         "Label": job.label,
         "ProgramArguments": job.command,
-        "RunAtLoad": False,
+        "RunAtLoad": job.run_at_load,
         "WorkingDirectory": job.working_directory,
         "StandardOutPath": str(Path(job.log_directory) / f"{job.label}.out.log"),
         "StandardErrorPath": str(Path(job.log_directory) / f"{job.label}.err.log"),
     }
+    # A long-running KeepAlive service is mutually exclusive with the scheduling keys:
+    # launchd restarts it instead of running it on an interval/calendar.
+    if job.keep_alive:
+        payload["KeepAlive"] = True
     # A fixed-time daily job uses StartCalendarInterval (wall-clock), a periodic job
     # uses StartInterval (rolling). They are mutually exclusive.
-    if job.start_calendar is not None:
+    elif job.start_calendar is not None:
         payload["StartCalendarInterval"] = job.start_calendar
     else:
         payload["StartInterval"] = job.start_interval_seconds
@@ -144,6 +150,26 @@ def write_launchd_plists(
             start_interval_seconds=3_600,
             working_directory=working_directory,
             log_directory=log_directory,
+        ),
+        # web: long-running local control-panel HTTP service. Unlike the periodic jobs,
+        # it loads at login and is kept alive (restarted) by launchd, so it carries no
+        # StartInterval/StartCalendarInterval.
+        LaunchdJob(
+            label="com.personal-context-node.web",
+            command=[
+                "uv",
+                "run",
+                "pcn",
+                *config_args,
+                "web",
+                "--port",
+                "8765",
+            ],
+            start_interval_seconds=0,
+            working_directory=working_directory,
+            log_directory=log_directory,
+            run_at_load=True,
+            keep_alive=True,
         ),
     ]
     paths: list[Path] = []

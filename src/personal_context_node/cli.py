@@ -1003,6 +1003,7 @@ def launchd_uninstall(
         "com.personal-context-node.process",
         "com.personal-context-node.daily",
         "com.personal-context-node.archive",
+        "com.personal-context-node.web",
     ]
     result = uninstall_launchd_plists(
         labels=labels,

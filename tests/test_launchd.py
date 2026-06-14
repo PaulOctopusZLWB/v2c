@@ -48,6 +48,7 @@ def test_write_launchd_plists_dry_run_writes_project_files(tmp_path) -> None:
         "com.personal-context-node.daily.plist",
         "com.personal-context-node.ingest.plist",
         "com.personal-context-node.process.plist",
+        "com.personal-context-node.web.plist",
     ]
     process = plistlib.loads((output_dir / "com.personal-context-node.process.plist").read_bytes())
     assert "process-run" in process["ProgramArguments"]
