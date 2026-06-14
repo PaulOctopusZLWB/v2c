@@ -1,5 +1,6 @@
 import type { TaskRow } from "../api/types";
 import { t } from "../i18n";
+import { useAsyncAction } from "../hooks/useAsyncAction";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "待认领",
@@ -13,19 +14,28 @@ function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
 }
 
-export function TaskList({ tasks, onRetry }: { tasks: TaskRow[]; onRetry: (taskId: string) => void }) {
+function TaskRowView({ task, onRetry }: { task: TaskRow; onRetry: (taskId: string) => Promise<unknown> | void }) {
+  const failed = task.status.startsWith("failed");
+  const retry = useAsyncAction(async (taskId: string) => { await onRetry(taskId); });
+  return (
+    <div className="task-row">
+      <span>{task.task_type}</span>
+      <span className={failed ? "status-failed" : undefined}>{statusLabel(task.status)}</span>
+      {failed ? (
+        <button onClick={() => void retry.run(task.task_id)} disabled={retry.pending} aria-busy={retry.pending}>
+          {retry.pending ? "正在重试…" : t.run.retry}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function TaskList({ tasks, onRetry }: { tasks: TaskRow[]; onRetry: (taskId: string) => Promise<unknown> | void }) {
   return (
     <div className="task-list">
-      {tasks.map((task) => {
-        const failed = task.status.startsWith("failed");
-        return (
-          <div className="task-row" key={task.task_id}>
-            <span>{task.task_type}</span>
-            <span className={failed ? "status-failed" : undefined}>{statusLabel(task.status)}</span>
-            {failed ? <button onClick={() => onRetry(task.task_id)}>{t.run.retry}</button> : null}
-          </div>
-        );
-      })}
+      {tasks.map((task) => (
+        <TaskRowView key={task.task_id} task={task} onRetry={onRetry} />
+      ))}
     </div>
   );
 }

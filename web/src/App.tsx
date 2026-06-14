@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api/client";
 import { PipelineRail } from "./components/PipelineRail";
+import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
 import { TaskList } from "./components/TaskList";
 import { DevicePanel } from "./features/device/DevicePanel";
@@ -9,7 +10,8 @@ import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPan
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { usePipelineStatus } from "./hooks/usePipelineStatus";
-import { activeStage } from "./lib/stages";
+import { activeStage, STAGES } from "./lib/stages";
+import type { Stage } from "./lib/stages";
 import { t } from "./i18n";
 import type { DailyLlmResult, Health, ImportSource, Person, TranscriptSession } from "./api/types";
 
@@ -26,6 +28,7 @@ export function App() {
   const [persons, setPersons] = useState<Person[]>([]);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
+  const [focusedStage, setFocusedStage] = useState<Stage | null>(null);
 
   async function refreshDevices() {
     try {
@@ -83,6 +86,29 @@ export function App() {
   const gateOn = health?.require_accepted_transcripts ?? false;
   const firstRun = tasks.length === 0 && days.length === 0;
 
+  // Live progress derived from the SSE-fed task list.
+  const total = tasks.length;
+  const done = tasks.filter((tk) =>
+    ["succeeded", "failed_terminal", "failed_retryable", "failed"].includes(tk.status)
+  ).length;
+  const current = activeStage(tasks);
+  const progressLabel = STAGES.find((s) => s.id === current)?.label;
+
+  // Map a pipeline stage to the DOM id of the panel that owns it, then scroll there.
+  const STAGE_PANEL_ID: Record<Stage, string> = {
+    device: "panel-device",
+    import: "panel-device",
+    asr: "panel-transcript",
+    review: "panel-transcript",
+    llm: "panel-llm",
+    publish: "panel-run"
+  };
+  function focusStage(stage: Stage) {
+    setFocusedStage(stage);
+    const el = document.getElementById(STAGE_PANEL_ID[stage]);
+    el?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <main className="workbench">
       <header className="workbench-header">
@@ -91,16 +117,21 @@ export function App() {
           {worker_running ? <span className="live-dot" aria-hidden /> : null}
           {worker_running ? t.app.running : t.app.idle}
         </span>
-        <PipelineRail activeStage={activeStage(tasks)} />
+        <PipelineRail activeStage={current} focusedStage={focusedStage ?? undefined} onSelect={focusStage} />
+        <Progress done={done} total={total} label={progressLabel} />
       </header>
 
       <aside className="rail-left">
-        <DevicePanel sources={sources ?? []} onImport={handleImport} onRefresh={() => void refreshDevices()} />
+        <div id="panel-device">
+          <DevicePanel sources={sources ?? []} onImport={handleImport} onRefresh={() => void refreshDevices()} />
+        </div>
         <WorkspaceNav selectedDay={selectedDay} onSelectDay={selectDay} onSelectSession={selectSession} />
-        <TaskList tasks={tasks} onRetry={(taskId) => api.retry(taskId)} />
+        <div id="panel-run">
+          <TaskList tasks={tasks} onRetry={(taskId) => api.retry(taskId)} />
+        </div>
       </aside>
 
-      <section className="center-panel">
+      <section className="center-panel" id="panel-transcript">
         {firstRun ? <p className="empty dim">{t.empty.firstRun}</p> : null}
         {session ? (
           <>
@@ -130,7 +161,9 @@ export function App() {
           onRun={() => api.run()}
           onStop={() => api.stop()}
         />
-        {llm ? <LlmResultPanel result={llm} onHighlightEvidence={highlightEvidence} /> : null}
+        <div id="panel-llm">
+          {llm ? <LlmResultPanel result={llm} onHighlightEvidence={highlightEvidence} /> : null}
+        </div>
       </aside>
     </main>
   );
