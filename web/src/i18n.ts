@@ -9,7 +9,15 @@ export const t = {
   speaker: { speaker: "发言人", assign: "指派发言人", newPerson: "新建人物", reassign: "改人" },
   viewpoint: { title: "观点", readOnly: "只读", confirmInObsidian: "确认/拒绝请在 Obsidian 完成", evidence: "证据", none: "暂无观点" },
   gate: { on: "仅消费已验收转写", off: "消费全部转写" },
-  empty: { firstRun: "尚无数据。先在「设备」接入录音器并导入。" }
+  empty: {
+    firstRun: "先在「设备」接入录音器并导入",
+    firstRunHint: "导入后会自动转写，转写完成即可在此审核。",
+    pickDay: "从左侧选择日期开始审核",
+    pickDayHint: "左栏「日期」列出了已有录音的日子。",
+    pickSession: "选择一个会话",
+    pickSessionHint: "选中日期下的某个会话查看转写并逐段审核。"
+  },
+  error: { title: "操作失败" }
 } as const;
 
 export type ReviewKey = keyof typeof t.review;

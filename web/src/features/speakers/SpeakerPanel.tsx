@@ -3,6 +3,7 @@ import type { Person } from "../../api/types";
 import { t } from "../../i18n";
 import { speakerColor } from "../../lib/speakerColors";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
+import { Icon } from "../../components/Icon";
 
 function SpeakerAssignRow({
   speaker,
@@ -16,7 +17,10 @@ function SpeakerAssignRow({
   const assign = useAsyncAction(async (spk: string, personId: string) => { await onAssign(spk, personId); });
   return (
     <div className="speaker-row">
-      <span className="chip" style={{ background: speakerColor(speaker) }}>{speaker}</span>
+      <span className="chip" style={{ background: speakerColor(speaker) }}>
+        <Icon name="person" /> {speaker}
+      </span>
+      {assign.pending ? <span className="spinner" aria-hidden /> : null}
       <select
         aria-label={`${t.speaker.assign} ${speaker}`}
         defaultValue=""
@@ -44,10 +48,15 @@ export function SpeakerPanel({
   onCreatePerson: (displayName: string) => Promise<void>;
 }) {
   const [newName, setNewName] = useState("");
-  const create = useAsyncAction(async (name: string) => { await onCreatePerson(name); });
+  const create = useAsyncAction(async (name: string) => {
+    await onCreatePerson(name);
+    setNewName("");
+  });
   return (
-    <section className="speaker-panel">
-      <h2>{t.speaker.speaker}</h2>
+    <section className="speaker-panel card">
+      <div className="section-title">
+        <Icon name="person" /> {t.speaker.speaker}
+      </div>
       {speakers.map((speaker) => (
         <SpeakerAssignRow key={speaker} speaker={speaker} persons={persons} onAssign={onAssign} />
       ))}
@@ -60,10 +69,12 @@ export function SpeakerPanel({
           disabled={create.pending}
         />
         <button
+          className="ghost"
           onClick={() => newName && void create.run(newName)}
           disabled={create.pending || !newName}
           aria-busy={create.pending}
         >
+          {create.pending ? <span className="spinner" aria-hidden /> : <Icon name="person" />}
           {create.pending ? "正在新建…" : t.speaker.newPerson}
         </button>
       </div>

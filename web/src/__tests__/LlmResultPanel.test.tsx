@@ -9,7 +9,7 @@ describe("LlmResultPanel", () => {
     render(
       <LlmResultPanel
         result={{ day: "2087-05-10", context: { content: { summary: "讨论部署" }, model_name: "rule_based", updated_at: "" },
-          memory_candidates: [{ candidate_id: "c1", candidate_claim: "Paul 倾向数据不出本机", edited_claim: null, claim_type: "preference", confidence: 0.82, status: "pending" }] }}
+          memory_candidates: [{ candidate_id: "c1", candidate_claim: "Paul 倾向数据不出本机", edited_claim: null, claim_type: "preference", confidence: 0.82, status: "pending", evidence_segment_ids: ["seg_3"] }] }}
         onHighlightEvidence={onHighlight}
       />
     );

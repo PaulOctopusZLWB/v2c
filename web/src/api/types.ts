@@ -61,5 +61,6 @@ export interface DailyLlmResult {
     claim_type: string;
     confidence: number;
     status: string;
+    evidence_segment_ids: string[];
   }>;
 }

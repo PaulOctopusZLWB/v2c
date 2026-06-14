@@ -1,0 +1,45 @@
+import { useCallback, useRef, useState } from "react";
+
+export interface Toast {
+  id: number;
+  title: string;
+  message?: string;
+}
+
+const AUTO_DISMISS_MS = 5000;
+
+/** Tiny transient-error toast store: push errors, auto-dismiss after ~5s. */
+export function useToasts() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const seq = useRef(0);
+
+  const dismiss = useCallback((id: number) => {
+    setToasts((list) => list.filter((toast) => toast.id !== id));
+  }, []);
+
+  const push = useCallback(
+    (title: string, message?: string) => {
+      const id = ++seq.current;
+      setToasts((list) => [...list, { id, title, message }]);
+      setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
+      return id;
+    },
+    [dismiss]
+  );
+
+  return { toasts, push, dismiss };
+}
+
+export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="toasts" role="status" aria-live="polite">
+      {toasts.map((toast) => (
+        <div className="toast" key={toast.id} onClick={() => onDismiss(toast.id)}>
+          <div className="t-title">{toast.title}</div>
+          {toast.message ? <div className="dim">{toast.message}</div> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
