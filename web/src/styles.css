@@ -1,0 +1,13 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; color: #1f2933; background: #f6f7f9; }
+.workbench { display: grid; grid-template-columns: 200px minmax(0, 1fr) 320px; min-height: 100vh; }
+.pipeline-rail, .run-inspector { border-right: 1px solid #d9dee7; background: #fff; padding: 16px; }
+.run-inspector { border-left: 1px solid #d9dee7; border-right: 0; }
+.main-panel { padding: 20px; }
+.stage { padding: 6px 8px; border-radius: 6px; }
+.stage.active { font-weight: 600; background: #eef2ff; }
+.segment-row { display: grid; gap: 6px; padding: 10px; border-bottom: 1px solid #eef1f5; }
+.speaker-chip { font-size: 12px; color: #475569; }
+.task-list { font-size: 13px; }
+.task-row { display: flex; gap: 8px; justify-content: space-between; padding: 4px 0; }
+.candidate { padding: 8px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 6px; }

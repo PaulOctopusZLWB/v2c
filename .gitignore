@@ -13,3 +13,7 @@ __pycache__/
 # Local sample recordings (large WAV fixtures) and scratch/probe dirs — never commit
 sample_data/
 .tmp/
+
+# Frontend (web control panel) build + deps — never commit
+web/node_modules/
+web/dist/
