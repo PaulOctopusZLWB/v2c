@@ -13,7 +13,11 @@ class LocalFilesystemArchiveAdapter:
         self.require_existing_root = require_existing_root
 
     def archive_file(self, *, source_path: Path, relative_path: Path, expected_sha256: str) -> ArchiveResult:
-        if self.require_existing_root and not self.root.exists():
+        # A missing archive root means the NAS is unavailable: report pending instead of
+        # fabricating the root tree on the local boot disk and "verifying" against that
+        # local copy — otherwise unarchived raw gets marked archived and cleanup deletes
+        # the only real copy (§13.1 must not block; §13.2 never auto-delete unarchived raw).
+        if not self.root.exists():
             return ArchiveResult(archive_path=self.root / relative_path, verified=False, reason="archive root unavailable")
         target_path = self.root / relative_path
         try:

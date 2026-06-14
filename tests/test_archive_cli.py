@@ -17,6 +17,7 @@ def test_archive_cli_archives_imported_audio(tmp_path: Path) -> None:
     raw_path.write_bytes(b"raw audio bytes")
     _insert_audio(config.database_path, raw_path, _sha256(raw_path))
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
 
     result = CliRunner().invoke(
         app,
@@ -70,6 +71,7 @@ def test_archive_run_group_cli_archives_imported_audio(tmp_path: Path) -> None:
     raw_path.write_bytes(b"raw audio bytes")
     _insert_audio(config.database_path, raw_path, _sha256(raw_path))
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
 
     result = CliRunner().invoke(
         app,
@@ -103,6 +105,7 @@ def test_archive_run_group_cli_supports_command_backend(tmp_path: Path) -> None:
     raw_path.write_bytes(b"raw audio bytes")
     _insert_audio(config.database_path, raw_path, _sha256(raw_path))
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     script = tmp_path / "copy_archive.py"
     script.write_text(
         """
@@ -167,6 +170,7 @@ def test_archive_cleanup_cli_removes_verified_retained_local_audio(tmp_path: Pat
     raw_path.parent.mkdir(parents=True)
     raw_path.write_bytes(b"raw audio bytes")
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav"
     archive_path.parent.mkdir(parents=True)
     archive_path.write_bytes(raw_path.read_bytes())
@@ -213,6 +217,7 @@ def test_archive_mark_cleanup_eligible_cli_marks_without_removing_local_audio(tm
     raw_path.parent.mkdir(parents=True)
     raw_path.write_bytes(b"raw audio bytes")
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav"
     archive_path.parent.mkdir(parents=True)
     archive_path.write_bytes(raw_path.read_bytes())

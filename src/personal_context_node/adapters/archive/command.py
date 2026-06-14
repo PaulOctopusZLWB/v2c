@@ -23,6 +23,12 @@ class CommandArchiveAdapter:
 
     def archive_file(self, *, source_path: Path, relative_path: Path, expected_sha256: str) -> ArchiveResult:
         archive_path = self.root / relative_path
+        # A missing root means the NAS is unavailable: report pending instead of
+        # fabricating the archive tree locally and "verifying" against it, which would
+        # mark unarchived raw as archived and let cleanup delete the only copy
+        # (§13.1 must not block; §13.2 never auto-delete unarchived raw).
+        if not self.root.exists():
+            return ArchiveResult(archive_path=archive_path, verified=False, reason="archive root unavailable")
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         command = self._archive_command(source_path=source_path, archive_path=archive_path, relative_path=relative_path)
         completed = subprocess.run(command, check=False, text=True, capture_output=True)

@@ -10,6 +10,7 @@ def test_command_archive_adapter_runs_command_then_verifies_hash(tmp_path: Path)
     source = tmp_path / "source.wav"
     source.write_bytes(b"raw audio bytes")
     archive_root = tmp_path / "nas"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     log_path = tmp_path / "args.log"
     script = tmp_path / "archive_copy.py"
     script.write_text(
@@ -54,6 +55,7 @@ raise SystemExit(23)
 """.strip(),
         encoding="utf-8",
     )
+    (tmp_path / "nas").mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     adapter = CommandArchiveAdapter(root=tmp_path / "nas", command=["python3", str(script), "{source_path}", "{archive_path}"])
 
     result = adapter.archive_file(
@@ -65,6 +67,23 @@ raise SystemExit(23)
     assert result.verified is False
     assert result.archive_path == tmp_path / "nas" / "audio" / "raw" / "2087-05-10" / "source.wav"
     assert result.reason == "archive command failed with exit 23: nas unavailable"
+
+
+def test_command_archive_adapter_reports_unavailable_root_without_running_command(tmp_path: Path) -> None:
+    # §13.1/§13.2: an unmounted NAS root must yield pending, not a fabricated local tree.
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"raw audio bytes")
+    adapter = CommandArchiveAdapter(root=tmp_path / "unmounted" / "nas", command=["false"])
+
+    result = adapter.archive_file(
+        source_path=source,
+        relative_path=Path("audio/raw/2087-05-10/source.wav"),
+        expected_sha256=_sha256(source),
+    )
+
+    assert result.verified is False
+    assert result.reason == "archive root unavailable"
+    assert not (tmp_path / "unmounted").exists()  # no fabricated tree
 
 
 def _sha256(path: Path) -> str:

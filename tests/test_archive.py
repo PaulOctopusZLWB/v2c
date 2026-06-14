@@ -21,6 +21,7 @@ def test_archive_completed_audio_copies_and_hash_verifies(tmp_path: Path) -> Non
     raw_path.write_bytes(b"raw audio bytes")
     _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="imported")
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
 
     result = archive_completed_audio(
         config=config,
@@ -126,6 +127,7 @@ def test_archive_completed_audio_retries_pending_audio_record_to_verified(tmp_pa
     raw_path.write_bytes(b"raw audio bytes")
     _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="imported")
     archive_root = tmp_path / "nas"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
 
     first = archive_completed_audio(config=config, archive=RejectingArchive(root=archive_root))
     second = archive_completed_audio(config=config, archive=LocalFilesystemArchiveAdapter(root=archive_root))
@@ -152,6 +154,7 @@ def test_archive_completed_audio_only_processes_imported_audio(tmp_path: Path) -
     _insert_audio(config.database_path, removed_raw, removed_sha256, status="locally_removed", audio_file_id="aud_removed")
     _insert_audio(config.database_path, imported_raw, imported_sha256, status="imported", audio_file_id="aud_imported")
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
 
     result = archive_completed_audio(
         config=config,
@@ -166,6 +169,7 @@ def test_archive_completed_audio_only_processes_imported_audio(tmp_path: Path) -
 
 def test_local_filesystem_archive_adapter_verifies_existing_archive(tmp_path: Path) -> None:
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "sample.wav"
     archive_path.parent.mkdir(parents=True)
     archive_path.write_bytes(b"raw audio bytes")
@@ -205,6 +209,7 @@ def test_local_filesystem_archive_adapter_returns_unverified_on_copy_error(tmp_p
 def test_cleanup_archived_audio_removes_only_verified_retained_local_files(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     old_raw = _write_raw(config, "old.wav", b"old raw audio")
     recent_raw = _write_raw(config, "recent.wav", b"recent raw audio")
     imported_raw = _write_raw(config, "imported.wav", b"imported raw audio")
@@ -242,6 +247,7 @@ def test_cleanup_archived_audio_removes_only_verified_retained_local_files(tmp_p
 def test_mark_cleanup_eligible_audio_marks_verified_retained_files(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     old_raw = _write_raw(config, "old.wav", b"old raw audio")
     recent_raw = _write_raw(config, "recent.wav", b"recent raw audio")
     _insert_audio(config.database_path, old_raw, _sha256(old_raw), status="archived", audio_file_id="aud_old")
@@ -274,6 +280,7 @@ def test_mark_cleanup_eligible_audio_marks_verified_retained_files(tmp_path: Pat
 def test_cleanup_archived_audio_does_not_remove_archived_before_eligibility(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
     raw_path = _write_raw(config, "old.wav", b"old raw audio")
     _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="archived", audio_file_id="aud_old")
     archive_path = _copy_archive(archive_root, raw_path)
@@ -304,6 +311,7 @@ def test_archive_completed_audio_exports_signed_events_jsonl(tmp_path: Path) -> 
     _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="imported")
     _insert_signed_memory_event(config.database_path)
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
 
     result = archive_completed_audio(
         config=config,
@@ -333,6 +341,7 @@ def test_archive_completed_audio_exports_transcripts_and_summaries_jsonl(tmp_pat
     _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="imported")
     _insert_transcript_and_summary(config.database_path)
     archive_root = tmp_path / "nas" / "PersonalContext"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
 
     result = archive_completed_audio(
         config=config,
@@ -574,3 +583,30 @@ def _insert_transcript_and_summary(database_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def test_archive_unmounted_nas_stays_pending_and_never_fabricates_or_deletes_raw(tmp_path: Path) -> None:
+    # §13.1 NAS unavailable must not block / fabricate; §13.2 never auto-delete unarchived
+    # raw. With the archive root (NAS mount) absent, archive must report pending, not
+    # create the tree locally and mark the file archived (which cleanup would then delete).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw_path = config.data_dir / "audio" / "raw" / "2087-05-10" / "sample.wav"
+    raw_path.parent.mkdir(parents=True)
+    raw_path.write_bytes(b"raw audio bytes")
+    _insert_audio(config.database_path, raw_path, _sha256(raw_path), status="imported")
+    unmounted_root = tmp_path / "Volumes" / "NAS" / "PersonalContext"  # parent does not exist
+
+    result = archive_completed_audio(
+        config=config, archive=LocalFilesystemArchiveAdapter(root=unmounted_root)
+    )
+
+    assert result.files_archived == 0
+    assert result.files_pending == 1
+    assert not unmounted_root.exists()  # no fabricated NAS tree on the local disk
+    assert raw_path.exists()  # raw evidence preserved
+    conn = connect(config.database_path)
+    try:
+        status = fetch_all(conn, "select status from audio_files")[0]["status"]
+    finally:
+        conn.close()
+    assert status == "imported"  # not marked archived
