@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from personal_context_node.config import AppConfig
 from personal_context_node.web.routes_pipeline import events_router, router as pipeline_router
 from personal_context_node.web.routes_status import router as status_router
+from personal_context_node.web.routes_transcripts import router as transcripts_router
 from personal_context_node.web.worker import PipelineWorker
 
 
@@ -26,5 +27,6 @@ def create_app(*, config: AppConfig) -> FastAPI:
     app.include_router(status_router)
     app.include_router(pipeline_router)
     app.include_router(events_router)  # serves GET /api/events
+    app.include_router(transcripts_router)
 
     return app

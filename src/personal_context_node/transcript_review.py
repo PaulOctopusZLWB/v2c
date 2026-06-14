@@ -83,5 +83,39 @@ def accept_remaining_segments(*, config: AppConfig, session_id: str) -> dict[str
     return {"accepted": accepted}
 
 
+def list_days(*, config: AppConfig) -> list[dict[str, object]]:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        return fetch_all(
+            conn,
+            """
+            select date_key as day, count(*) as session_count
+            from sessions
+            group by date_key
+            order by date_key desc
+            """,
+        )
+    finally:
+        conn.close()
+
+
+def sessions_for_day(*, config: AppConfig, day: str) -> list[dict[str, object]]:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        sessions = fetch_all(
+            conn,
+            "select session_id, started_at, segment_count from sessions where date_key = ? order by started_at",
+            (day,),
+        )
+    finally:
+        conn.close()
+    # review_status is computed per session via the existing helper (N+1 is fine for a local single-user panel).
+    for session in sessions:
+        session["review_status"] = session_review_status(config=config, session_id=str(session["session_id"]))
+    return sessions
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
