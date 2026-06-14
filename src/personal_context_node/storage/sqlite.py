@@ -389,6 +389,8 @@ def connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("pragma foreign_keys = on")
+    conn.execute("pragma journal_mode = wal")
+    conn.execute("pragma busy_timeout = 5000")
     return conn
 
 
