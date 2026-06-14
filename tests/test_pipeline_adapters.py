@@ -27,3 +27,15 @@ def test_build_pipeline_adapters_uses_config_defaults() -> None:
     config = AppConfig()
     adapters = build_pipeline_adapters(config=config)
     assert isinstance(adapters.llm, MockLLMAdapter)
+
+
+def test_command_with_quoted_space_path_is_one_token() -> None:
+    # A repo path containing a space (e.g. "v2c 本地部署") must survive command parsing:
+    # shlex honours the quotes so the interpreter path stays a single argv token.
+    from personal_context_node.adapters.asr.command import CommandASRAdapter
+
+    cmd = '"/Users/x/v2c 本地部署/.venv/bin/python3" scripts/asr.py --language zh'
+    adapter = build_asr(asr_backend="command", asr_command=cmd, mock_text=None)
+    assert isinstance(adapter, CommandASRAdapter)
+    assert adapter.command[0] == "/Users/x/v2c 本地部署/.venv/bin/python3"
+    assert adapter.command[1] == "scripts/asr.py"

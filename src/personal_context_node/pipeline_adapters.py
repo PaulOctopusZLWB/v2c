@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 
 from personal_context_node.adapters.asr.command import CommandASRAdapter
@@ -40,10 +41,10 @@ def build_vad(
     if vad_backend == "command":
         if not vad_command:
             raise ValueError("vad_command is required when vad_backend is 'command'")
-        return CommandVADAdapter(command=vad_command.split(), merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
+        return CommandVADAdapter(command=shlex.split(vad_command), merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
     if vad_backend == "funasr":
         if vad_command:
-            command = vad_command.split()
+            command = shlex.split(vad_command)
         else:
             # Pass the configurable VAD threshold to the wrapper; merge_gap/min_speech are
             # applied adapter-side (§5 "VAD 阈值必须配置化").
@@ -76,10 +77,10 @@ def build_asr(
     if asr_backend == "command":
         if not asr_command:
             raise ValueError("asr_command is required when asr_backend is 'command'")
-        return CommandASRAdapter(command=asr_command.split())
+        return CommandASRAdapter(command=shlex.split(asr_command))
     if asr_backend == "funasr":
         command = (
-            asr_command.split()
+            shlex.split(asr_command)
             if asr_command
             else [
                 "python3",
@@ -104,7 +105,7 @@ def build_llm(*, llm_backend: str, llm_command: str | None) -> LLMPort:
     if llm_backend == "command":
         if not llm_command:
             raise ValueError("llm_command is required when llm_backend is 'command'")
-        return CommandLLMAdapter(command=llm_command.split())
+        return CommandLLMAdapter(command=shlex.split(llm_command))
     raise ValueError("llm_backend must be 'rule_based', 'mock', or 'command'")
 
 
