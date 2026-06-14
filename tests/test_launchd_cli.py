@@ -137,3 +137,26 @@ def test_launchd_uninstall_cli_defaults_to_dry_run(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "dry_run=True" in result.output
     assert "launchctl bootout gui/501" in result.output
+
+
+def test_launchd_write_plists_includes_config_so_scheduled_runs_use_real_backends(tmp_path) -> None:
+    # The scheduled jobs must pass --config, else _load_config falls back to AppConfig
+    # mock defaults (vad/asr/llm = "mock") in production (§6/§9).
+    output_dir = tmp_path / "launchd"
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        "\n".join(["[paths]", f"data_dir = '{tmp_path / 'data'}'", f"obsidian_vault = '{tmp_path / 'vault'}'"]),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["launchd-write-plists", "--config", str(config_path), "--output-dir", str(output_dir), "--working-directory", "/repo"],
+    )
+
+    assert result.exit_code == 0, result.output
+    for label in ("ingest", "process", "daily", "archive"):
+        args = plistlib.loads((output_dir / f"com.personal-context-node.{label}.plist").read_bytes())["ProgramArguments"]
+        assert "--config" in args, label
+        assert str(config_path.resolve()) in args, label

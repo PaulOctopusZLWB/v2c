@@ -16,6 +16,7 @@ class LaunchdJob:
     start_interval_seconds: int
     working_directory: str
     log_directory: str
+    start_calendar: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -31,15 +32,20 @@ class LaunchdUninstallResult:
 
 
 def render_plist(job: LaunchdJob) -> bytes:
-    payload = {
+    payload: dict[str, object] = {
         "Label": job.label,
         "ProgramArguments": job.command,
-        "StartInterval": job.start_interval_seconds,
         "RunAtLoad": False,
         "WorkingDirectory": job.working_directory,
         "StandardOutPath": str(Path(job.log_directory) / f"{job.label}.out.log"),
         "StandardErrorPath": str(Path(job.log_directory) / f"{job.label}.err.log"),
     }
+    # A fixed-time daily job uses StartCalendarInterval (wall-clock), a periodic job
+    # uses StartInterval (rolling). They are mutually exclusive.
+    if job.start_calendar is not None:
+        payload["StartCalendarInterval"] = job.start_calendar
+    else:
+        payload["StartInterval"] = job.start_interval_seconds
     return plistlib.dumps(payload, sort_keys=True)
 
 
@@ -51,18 +57,25 @@ def write_launchd_plists(
     obsidian_vault: str,
     source_dir: str,
     archive_root: str,
+    config_path: str | None = None,
     dry_run: bool = True,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     log_directory = str(Path(data_dir) / "logs" / "launchd")
+    # Pass --config so scheduled jobs use the configured real VAD/ASR/LLM backends and
+    # bound owner_did, not the AppConfig mock/placeholder defaults (§6/§9, §30.3).
+    config_args = ["--config", config_path] if config_path else []
     jobs = [
+        # ingest: real import driven by config-based device discovery; enqueues the
+        # first pipeline task (vad). It does NOT run the mock E2E orchestrator.
         LaunchdJob(
             label="com.personal-context-node.ingest",
             command=[
                 "uv",
                 "run",
                 "pcn",
-                "run-first-milestone",
+                *config_args,
+                "ingest-import",
                 "--source-dir",
                 source_dir,
                 "--data-dir",
@@ -74,12 +87,14 @@ def write_launchd_plists(
             working_directory=working_directory,
             log_directory=log_directory,
         ),
+        # process: advances the declarative pipeline DAG (vad -> asr -> ... -> publish).
         LaunchdJob(
             label="com.personal-context-node.process",
             command=[
                 "uv",
                 "run",
                 "pcn",
+                *config_args,
                 "process-run",
                 "--data-dir",
                 data_dir,
@@ -90,12 +105,15 @@ def write_launchd_plists(
             working_directory=working_directory,
             log_directory=log_directory,
         ),
+        # daily: fixed wall-clock time (23:30); drives any pending daily_generate /
+        # obsidian_publish work and exits when there is nothing new for the day.
         LaunchdJob(
             label="com.personal-context-node.daily",
             command=[
                 "uv",
                 "run",
                 "pcn",
+                *config_args,
                 "process-run",
                 "--data-dir",
                 data_dir,
@@ -105,6 +123,7 @@ def write_launchd_plists(
             start_interval_seconds=86_400,
             working_directory=working_directory,
             log_directory=log_directory,
+            start_calendar={"Hour": 23, "Minute": 30},
         ),
         LaunchdJob(
             label="com.personal-context-node.archive",
@@ -112,6 +131,7 @@ def write_launchd_plists(
                 "uv",
                 "run",
                 "pcn",
+                *config_args,
                 "archive",
                 "--data-dir",
                 data_dir,

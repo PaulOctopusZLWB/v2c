@@ -50,7 +50,9 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert "merge_gap_ms = 800" in config_text
     assert "chunk_overlap_ms = 1000" in config_text
     assert "[identity]" in config_text
-    assert 'owner_did = "did:key:local-owner"' in config_text
+    # owner_did is a real did:key derived from the signing key, never the placeholder
+    assert 'owner_did = "did:key:z' in config_text
+    assert "did:key:local-owner" not in config_text
     assert 'signing_key_path = "' in config_text
     assert "[device.dji_mic_3]" in config_text
     assert "enabled = true" in config_text

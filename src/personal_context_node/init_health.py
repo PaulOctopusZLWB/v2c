@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
+from personal_context_node.identity_keys import load_or_create_identity_did
+from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.storage.sqlite import connect, initialize
 
 
@@ -31,16 +33,22 @@ class HealthResult:
 
 
 def initialize_workspace(*, config: AppConfig, config_path: Path | None = None) -> InitResult:
+    # Never scaffold the PCN vault tree inside the protected Supcon vault (§10).
+    assert_personal_context_vault(config)
     for directory in [
         config.database_path.parent,
         config.raw_audio_dir,
         config.work_audio_dir,
         config.signing_key_path.parent,
-        config.data_dir / "logs",
+        config.log_dir,
     ]:
         directory.mkdir(parents=True, exist_ok=True)
     for folder in VAULT_DIRS:
         (config.obsidian_vault / folder).mkdir(parents=True, exist_ok=True)
+    # The owner identity is a did:key derived from (and bound to) the signing key:
+    # the DID *is* the public key (§30.3), so it cannot be an opaque free string.
+    owner_did = load_or_create_identity_did(config)
+    config = config.model_copy(update={"owner_did": owner_did})
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -66,6 +74,8 @@ def check_health(*, config: AppConfig) -> HealthResult:
     except Exception:
         database = "error"
     try:
+        # Refuse to probe-write into the protected Supcon vault (§10).
+        assert_personal_context_vault(config)
         config.obsidian_vault.mkdir(parents=True, exist_ok=True)
         probe = config.obsidian_vault / ".pcn-healthcheck"
         probe.write_text("ok", encoding="utf-8")
@@ -102,6 +112,10 @@ def _config_text(config: AppConfig) -> str:
             f"max_chunk_ms = {config.max_chunk_ms}",
             f"chunk_overlap_ms = {config.chunk_overlap_ms}",
             "",
+            "[session]",
+            f"session_gap_minutes = {config.session_gap_minutes}",
+            f'cross_midnight_policy = "{config.session_cross_midnight_policy}"',
+            "",
             "[asr]",
             f'backend = "{config.asr_backend}"',
             f'language = "{config.asr_language}"',
@@ -114,6 +128,17 @@ def _config_text(config: AppConfig) -> str:
             f"send_person_names = {str(config.send_person_names).lower()}",
             f"send_speaker_labels = {str(config.send_speaker_labels).lower()}",
             f"max_chunk_tokens = {config.max_chunk_tokens}",
+            "",
+            "[obsidian]",
+            f"edit_grace_seconds = {config.edit_grace_seconds}",
+            "",
+            "[tasks]",
+            f"lease_seconds = {config.task_lease_seconds}",
+            f"max_retries = {config.task_max_retries}",
+            "",
+            "[logging]",
+            f'log_dir = "{config.log_dir}"',
+            f'level = "{config.log_level}"',
             "",
             "[archive]",
             f'backend = "{config.archive_backend}"',
