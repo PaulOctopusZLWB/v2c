@@ -19,7 +19,7 @@ def create_app(*, config: AppConfig) -> FastAPI:
             "host": "127.0.0.1",
             "data_dir": str(config.data_dir),
             "obsidian_vault": str(config.obsidian_vault),
-            "require_accepted_transcripts": bool(getattr(config, "require_accepted_transcripts", False)),
+            "require_accepted_transcripts": bool(config.require_accepted_transcripts),
         }
 
     app.state.worker = PipelineWorker(config=config)

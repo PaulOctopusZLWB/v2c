@@ -58,6 +58,18 @@ on transcript_segments(session_id, absolute_start_at);
 create index if not exists idx_segments_audio_time
 on transcript_segments(audio_file_id, start_ms, end_ms);
 
+create table if not exists transcript_segment_reviews (
+  segment_id text primary key references transcript_segments(segment_id),
+  status text not null,
+  reviewer text not null default 'local_user',
+  note text,
+  reviewed_at text not null,
+  updated_at text not null
+);
+
+create index if not exists idx_segment_reviews_status
+on transcript_segment_reviews(status, reviewed_at);
+
 create table if not exists audio_chunks (
   chunk_id text primary key,
   audio_file_id text not null references audio_files(audio_file_id),
@@ -428,6 +440,19 @@ def initialize(conn: sqlite3.Connection) -> None:
     conn.execute("create index if not exists idx_segments_session_time on transcript_segments(session_id, absolute_start_at)")
     conn.execute("create index if not exists idx_segments_audio_time on transcript_segments(audio_file_id, start_ms, end_ms)")
     conn.execute("create index if not exists idx_segments_cluster on transcript_segments(speaker_cluster_id)")
+    conn.execute(
+        """
+        create table if not exists transcript_segment_reviews (
+          segment_id text primary key references transcript_segments(segment_id),
+          status text not null,
+          reviewer text not null default 'local_user',
+          note text,
+          reviewed_at text not null,
+          updated_at text not null
+        )
+        """
+    )
+    conn.execute("create index if not exists idx_segment_reviews_status on transcript_segment_reviews(status, reviewed_at)")
     _ensure_column(conn, "audio_chunks", "local_work_path", "text not null default ''")
     _ensure_column(conn, "audio_chunks", "start_ms", "integer not null default 0")
     _ensure_column(conn, "audio_chunks", "end_ms", "integer not null default 0")

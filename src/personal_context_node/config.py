@@ -58,6 +58,7 @@ class AppConfig(BaseModel):
     llm_command: str | None = None
     send_person_names: bool = True
     send_speaker_labels: bool = True
+    require_accepted_transcripts: bool = False
     max_chunk_tokens: int = 6000
     archive_backend: str = "filesystem"
     archive_command: str | None = None
@@ -118,6 +119,10 @@ class AppConfig(BaseModel):
             "llm_command": llm.get("command", cls.model_fields["llm_command"].default),
             "send_person_names": llm.get("send_person_names", cls.model_fields["send_person_names"].default),
             "send_speaker_labels": llm.get("send_speaker_labels", cls.model_fields["send_speaker_labels"].default),
+            "require_accepted_transcripts": llm.get(
+                "require_accepted_transcripts",
+                cls.model_fields["require_accepted_transcripts"].default,
+            ),
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
             "archive_backend": archive.get("backend", cls.model_fields["archive_backend"].default),
             "archive_command": archive.get("command", cls.model_fields["archive_command"].default),
