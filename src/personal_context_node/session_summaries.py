@@ -11,6 +11,7 @@ from personal_context_node.core.ports.llm import LLMPort, SessionSummary
 from personal_context_node.evidence_refs import persist_segment_evidence_refs
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.summary_schemas import validate_session_summary
+from personal_context_node.transcript_review import accepted_segments_clause
 
 
 PROMPT_VERSION = "llm_port.session_summary.v1"
@@ -25,12 +26,14 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        gate = accepted_segments_clause("transcript_segments") if config.require_accepted_transcripts else ""
         segments = fetch_all(
             conn,
-            """
+            f"""
             select segment_id, speaker, start_ms, end_ms, text, evidence_id
             from transcript_segments
             where session_id = ? and is_active = 1
+              {gate}
             order by start_ms, segment_id
             """,
             (session_id,),

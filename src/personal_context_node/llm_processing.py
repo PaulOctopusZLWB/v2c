@@ -13,6 +13,7 @@ from personal_context_node.daily_reports import set_daily_report_status
 from personal_context_node.evidence_refs import persist_segment_evidence_refs
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.summary_schemas import validate_daily_summary
+from personal_context_node.transcript_review import accepted_segments_clause
 
 
 @dataclass(frozen=True)
@@ -25,15 +26,17 @@ def generate_daily_context(*, config: AppConfig, day: str, llm: LLMPort) -> Dail
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        gate = accepted_segments_clause("ts") if config.require_accepted_transcripts else ""
         stored_segments = fetch_all(
             conn,
-            """
+            f"""
             select ts.segment_id, ts.session_id, ts.speaker, ts.start_ms, ts.end_ms, ts.text, ts.evidence_id
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
             join sessions s on s.session_id = ts.session_id
             where s.date_key = ? and ts.is_active = 1
               and coalesce(s.exclude_from_memory, 0) = 0
+              {gate}
             order by s.started_at, ts.start_ms
             """,
             (day,),
