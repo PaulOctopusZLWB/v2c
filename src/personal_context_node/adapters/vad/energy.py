@@ -42,14 +42,17 @@ class EnergyVadAdapter:
                 if is_speech and active_start_ms is None:
                     active_start_ms = cursor_ms
                 if not is_speech and active_start_ms is not None:
-                    if cursor_ms - active_start_ms >= self.min_speech_ms:
-                        ranges.append(SpeechRange(start_ms=active_start_ms, end_ms=cursor_ms))
+                    ranges.append(SpeechRange(start_ms=active_start_ms, end_ms=cursor_ms))
                     active_start_ms = None
                 cursor_ms += self.frame_ms
-            if active_start_ms is not None and cursor_ms - active_start_ms >= self.min_speech_ms:
+            if active_start_ms is not None:
                 ranges.append(SpeechRange(start_ms=active_start_ms, end_ms=cursor_ms))
+        # Merge adjacent bursts first, then drop anything still shorter than
+        # min_speech_ms — otherwise short bursts that should merge are lost (§5).
+        merged = self._merge(ranges)
+        kept = [r for r in merged if r.end_ms - r.start_ms >= self.min_speech_ms]
         return VADResult(
-            ranges=self._merge(ranges),
+            ranges=kept,
             backend=self.__class__.__name__,
             backend_version=None,
             config={

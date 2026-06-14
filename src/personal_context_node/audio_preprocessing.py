@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
 import wave
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from personal_context_node.atomic_write import write_text_atomic
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.vad import SpeechRange, VADPort, VADResult
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -157,11 +159,15 @@ def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, sta
             target_channels=config.audio.target_channels,
             error=exc,
         )
-    with wave.open(str(chunk_path), "wb") as target:
+    # Write via a temp file + atomic rename so a crash or a concurrent reader never sees
+    # a partial/0-byte work chunk (§36.1.6).
+    tmp_path = chunk_path.with_name(chunk_path.name + ".tmp")
+    with wave.open(str(tmp_path), "wb") as target:
         target.setnchannels(config.audio.target_channels)
         target.setsampwidth(2)
         target.setframerate(config.audio.target_sample_rate_hz)
         target.writeframes(frames)
+    os.replace(tmp_path, chunk_path)
     return chunk_path
 
 
@@ -178,7 +184,7 @@ def _write_vad_audit(*, config: AppConfig, audio_file_id: str, source_path: Path
         "warnings": vad_result.warnings,
         "ranges": [{"start_ms": speech_range.start_ms, "end_ms": speech_range.end_ms} for speech_range in vad_result.ranges],
     }
-    audit_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    write_text_atomic(audit_path, json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
     return audit_path
 
 

@@ -14,6 +14,8 @@ def main() -> int:
     parser.add_argument("audio_path", type=Path)
     parser.add_argument("--model", default="fsmn-vad")
     parser.add_argument("--model-revision", default=None)
+    # VAD detection threshold (§5 "VAD 阈值必须配置化"); passed through to FunASR.
+    parser.add_argument("--threshold", type=float, default=None)
     args = parser.parse_args()
 
     if not args.audio_path.exists():
@@ -33,9 +35,12 @@ def main() -> int:
     model_kwargs: dict[str, Any] = {"model": args.model}
     if args.model_revision:
         model_kwargs["model_revision"] = args.model_revision
+    generate_kwargs: dict[str, Any] = {"input": str(args.audio_path)}
+    if args.threshold is not None:
+        generate_kwargs["vad_threshold"] = args.threshold
     with contextlib.redirect_stdout(sys.stderr):
         model = AutoModel(**model_kwargs)
-        raw_result = model.generate(input=str(args.audio_path))
+        raw_result = model.generate(**generate_kwargs)
     print(json.dumps({"ranges": _normalize_ranges(raw_result)}, ensure_ascii=False, sort_keys=True))
     return 0
 

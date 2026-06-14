@@ -9,10 +9,16 @@ from personal_context_node.core.ports.vad import SpeechRange, VADResult
 
 
 class CommandVADAdapter:
-    """VAD adapter for local commands or Docker wrapper scripts."""
+    """VAD adapter for local commands or Docker wrapper scripts.
 
-    def __init__(self, *, command: list[str]) -> None:
+    The wrapper returns raw speech ranges; the configurable merge_gap_ms / min_speech_ms
+    (§5, §35) are applied here so VAD tuning is honored for the command/funasr backend.
+    """
+
+    def __init__(self, *, command: list[str], merge_gap_ms: int = 0, min_speech_ms: int = 0) -> None:
         self.command = command
+        self.merge_gap_ms = merge_gap_ms
+        self.min_speech_ms = min_speech_ms
 
     def detect(self, audio_path: Path) -> VADResult:
         result = subprocess.run(
@@ -30,13 +36,27 @@ class CommandVADAdapter:
         ranges = payload.get("ranges", payload.get("speech_ranges"))
         if not isinstance(ranges, list):
             raise TerminalPortError("VAD command output must include a ranges list")
+        parsed = [_speech_range(item) for item in ranges]
+        # Merge adjacent ranges then drop sub-min-speech ones (same order as the energy
+        # adapter; §5 "合并相邻语音段"). With both at 0 this is a no-op (raw ranges).
+        merged = self._merge(parsed) if self.merge_gap_ms > 0 else parsed
+        kept = [r for r in merged if (r.end_ms - r.start_ms) >= self.min_speech_ms] if self.min_speech_ms > 0 else merged
         return VADResult(
-            ranges=[_speech_range(item) for item in ranges],
+            ranges=kept,
             backend=self.__class__.__name__,
             backend_version=None,
-            config={"command": self.command},
+            config={"command": self.command, "merge_gap_ms": self.merge_gap_ms, "min_speech_ms": self.min_speech_ms},
             warnings=[],
         )
+
+    def _merge(self, ranges: list[SpeechRange]) -> list[SpeechRange]:
+        merged: list[SpeechRange] = []
+        for speech_range in ranges:
+            if merged and speech_range.start_ms - merged[-1].end_ms <= self.merge_gap_ms:
+                merged[-1] = SpeechRange(start_ms=merged[-1].start_ms, end_ms=speech_range.end_ms)
+            else:
+                merged.append(speech_range)
+        return merged
 
 
 def _speech_range(item: object) -> SpeechRange:

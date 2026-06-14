@@ -6,6 +6,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from personal_context_node.core.ports.errors import RetryablePortError
 from personal_context_node.core.ports.file_import import (
     ImportedRawAudio,
     MountedDevice,
@@ -79,7 +80,8 @@ class LocalDirectoryFileImportAdapter:
 
     def wait_until_stable(self, source: SourceAudioFile, *, stable_seconds: int) -> StableSourceAudioFile:
         if not is_file_stable(source.source_path, settle_seconds=stable_seconds):
-            raise RuntimeError(f"source file is not stable: {source.source_path}")
+            # A file still being written by the device is inherently retryable (§28).
+            raise RetryablePortError(f"source file is not stable: {source.source_path}")
         return StableSourceAudioFile(
             source=source,
             stable_checked_at=datetime.now(timezone.utc).isoformat(),

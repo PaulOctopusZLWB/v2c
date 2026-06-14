@@ -20,9 +20,14 @@ def main() -> int:
     parser.add_argument("--batch-size-s", type=int, default=300)
     args = parser.parse_args()
 
+    # Exit-code contract (mirrors CommandASRAdapter): 3 = permanently unsupported
+    # input (terminal); 2 = transient/environment failure (retryable).
+    terminal_exit_code = 3
+    retryable_exit_code = 2
+
     if not args.audio_path.exists():
         print(f"audio file does not exist: {args.audio_path}", file=sys.stderr)
-        return 2
+        return terminal_exit_code
 
     try:
         with contextlib.redirect_stdout(sys.stderr):
@@ -32,7 +37,7 @@ def main() -> int:
             "FunASR is not installed. Install it in the uv/Docker runtime that runs this wrapper.",
             file=sys.stderr,
         )
-        return 2
+        return retryable_exit_code
 
     model_kwargs: dict[str, Any] = {"model": args.model}
     if args.vad_model:

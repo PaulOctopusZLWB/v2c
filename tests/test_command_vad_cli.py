@@ -26,6 +26,8 @@ def test_build_vad_passes_configured_funasr_model_options() -> None:
         "scripts/funasr_vad_wrapper.py",
         "--model",
         "local-fsmn-vad",
+        "--threshold",
+        "0.03",
         "--model-revision",
         "v2.0.4",
     ]

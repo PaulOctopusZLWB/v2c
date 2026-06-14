@@ -123,3 +123,20 @@ def test_command_asr_adapter_reports_command_failure_as_retryable(tmp_path: Path
         assert "model busy" in str(exc)
     else:
         raise AssertionError("CommandASRAdapter accepted a failed command")
+
+
+def test_command_asr_adapter_maps_terminal_exit_code_to_terminal_error(tmp_path: Path) -> None:
+    chunk = tmp_path / "chunk.wav"
+    chunk.write_bytes(b"fake wav")
+    script = tmp_path / "terminal_asr.py"
+    # Exit code 3 = permanently unsupported input (§28.3.4).
+    script.write_text("import sys\nsys.stderr.write('unsupported format')\nsys.exit(3)", encoding="utf-8")
+
+    adapter = CommandASRAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.transcribe(chunk)
+    except TerminalPortError as exc:
+        assert "permanently unsupported" in str(exc)
+    else:
+        raise AssertionError("CommandASRAdapter retried a permanently unsupported input")

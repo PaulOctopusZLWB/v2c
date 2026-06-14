@@ -286,8 +286,8 @@ def _recorded_at_from_name(path: Path) -> str:
     parsed = _recorded_at_from_name_or_none(path=path)
     if parsed:
         return parsed
-    now = datetime.now().astimezone()
-    return f"{now.date().isoformat()}T{now.time().isoformat(timespec='seconds')}+{now.strftime('%z')[:3]}:{now.strftime('%z')[3:]}"
+    # isoformat() already emits a valid offset (e.g. +08:00); do not hand-build it.
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _recorded_at_from_name_or_none(path: Path) -> str | None:
@@ -311,7 +311,22 @@ def _recorded_at_from_name_or_none(path: Path) -> str | None:
 
 def _iter_audio_paths(*, source_dir: Path, recursive: bool) -> list[Path]:
     candidates = source_dir.rglob("*.wav") if recursive else source_dir.iterdir()
-    return sorted(path for path in candidates if path.is_file() and path.suffix.lower() == ".wav")
+    return sorted(
+        path
+        for path in candidates
+        if path.is_file()
+        and path.suffix.lower() == ".wav"
+        # Skip recycle-bin / hidden dirs like .Trashes (§34.1) — never rewrite those copies.
+        and not _has_hidden_part(path, source_dir)
+    )
+
+
+def _has_hidden_part(path: Path, source_dir: Path) -> bool:
+    try:
+        relative = path.relative_to(source_dir)
+    except ValueError:
+        relative = path
+    return any(part.startswith(".") for part in relative.parts)
 
 
 def _repair_wav_file_metadata(path: Path, recorded_at: str, *, dry_run: bool = False) -> bool:

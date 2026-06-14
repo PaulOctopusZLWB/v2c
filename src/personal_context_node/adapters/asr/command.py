@@ -8,12 +8,22 @@ from personal_context_node.core.ports.asr import ASRResult, ASRSegment
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
+# Exit-code contract for ASR wrapper commands (§28.3.4): a permanently-unsupported
+# input (missing/corrupt/unsupported audio) exits with TERMINAL_EXIT_CODE so the task
+# fails terminally; any other non-zero exit (model load failure, transient error) is
+# retryable.
+TERMINAL_EXIT_CODE = 3
+
+
 class CommandASRAdapter:
     """ASR adapter for local commands or Docker wrapper scripts.
 
     The command is invoked as: `<command...> <audio_path>`.
     It must emit JSON to stdout:
     `{"model_name": "...", "model_version": "...", "segments": [...]}`.
+
+    Exit codes: 0 success; ``TERMINAL_EXIT_CODE`` (3) means permanently unsupported
+    input (-> TerminalPortError); any other non-zero is retryable.
     """
 
     def __init__(self, *, command: list[str]) -> None:
@@ -30,6 +40,10 @@ class CommandASRAdapter:
             capture_output=True,
             text=True,
         )
+        if completed.returncode == TERMINAL_EXIT_CODE:
+            raise TerminalPortError(
+                f"ASR command rejected input as permanently unsupported: {completed.stderr.strip()}"
+            )
         if completed.returncode != 0:
             raise RetryablePortError(f"ASR command failed with exit {completed.returncode}: {completed.stderr.strip()}")
         try:
