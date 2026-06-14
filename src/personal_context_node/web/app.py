@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from personal_context_node.config import AppConfig
+from personal_context_node.web.routes_status import router as status_router
 
 
 def create_app(*, config: AppConfig) -> FastAPI:
@@ -18,5 +19,7 @@ def create_app(*, config: AppConfig) -> FastAPI:
             "obsidian_vault": str(config.obsidian_vault),
             "require_accepted_transcripts": bool(getattr(config, "require_accepted_transcripts", False)),
         }
+
+    app.include_router(status_router)
 
     return app
