@@ -173,6 +173,56 @@ def publish_speaker_review(*, config: AppConfig, day: str, source_run_id: str | 
     return review_path
 
 
+def upsert_speaker_mapping(
+    conn,
+    *,
+    speaker: str,
+    person_id: str,
+    person_label: str,
+    now: str,
+    source: str = "speaker_review",
+) -> None:
+    conn.execute(
+        """
+        insert into speaker_mappings (
+          speaker, speaker_mapping_id, person_label, speaker_cluster_id, person_id,
+          confidence, source, created_at, updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(speaker) do update set
+          speaker_mapping_id = excluded.speaker_mapping_id,
+          person_label = excluded.person_label,
+          speaker_cluster_id = excluded.speaker_cluster_id,
+          person_id = excluded.person_id,
+          confidence = excluded.confidence,
+          source = excluded.source,
+          updated_at = excluded.updated_at
+        """,
+        (speaker, f"spmap_{speaker}", person_label, speaker, person_id, 1.0, source, now, now),
+    )
+
+
+def upsert_segment_person_override(
+    conn,
+    *,
+    segment_id: str,
+    person_id: str,
+    person_label: str,
+    now: str,
+) -> None:
+    conn.execute(
+        """
+        insert into segment_person_overrides (segment_id, person_label, updated_at, person_id)
+        values (?, ?, ?, ?)
+        on conflict(segment_id) do update set
+          person_label = excluded.person_label,
+          updated_at = excluded.updated_at,
+          person_id = excluded.person_id
+        """,
+        (segment_id, person_label, now, person_id),
+    )
+
+
 def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResult:
     assert_personal_context_vault(config)
     review_path = config.obsidian_vault / "90_System" / "Speaker_Review" / f"{day}.md"
@@ -269,37 +319,23 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
             person = parsed.persons[person_id]
             _upsert_person(conn, person=person, now=now)
             _upsert_speaker_cluster(conn, speaker=speaker, now=now)
-            conn.execute(
-                """
-                insert into speaker_mappings (
-                  speaker, speaker_mapping_id, person_label, speaker_cluster_id, person_id,
-                  confidence, source, created_at, updated_at
-                )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(speaker) do update set
-                  speaker_mapping_id = excluded.speaker_mapping_id,
-                  person_label = excluded.person_label,
-                  speaker_cluster_id = excluded.speaker_cluster_id,
-                  person_id = excluded.person_id,
-                  confidence = excluded.confidence,
-                  source = excluded.source,
-                  updated_at = excluded.updated_at
-                """,
-                (speaker, f"spmap_{speaker}", person.display_name, speaker, person.person_id, 1.0, "speaker_review", now, now),
+            upsert_speaker_mapping(
+                conn,
+                speaker=speaker,
+                person_id=person.person_id,
+                person_label=person.display_name,
+                now=now,
+                source="speaker_review",
             )
         for segment_id, person_id in overrides.items():
             person = parsed.persons[person_id]
             _upsert_person(conn, person=person, now=now)
-            conn.execute(
-                """
-                insert into segment_person_overrides (segment_id, person_label, updated_at, person_id)
-                values (?, ?, ?, ?)
-                on conflict(segment_id) do update set
-                  person_label = excluded.person_label,
-                  updated_at = excluded.updated_at,
-                  person_id = excluded.person_id
-                """,
-                (segment_id, person.display_name, now, person.person_id),
+            upsert_segment_person_override(
+                conn,
+                segment_id=segment_id,
+                person_id=person.person_id,
+                person_label=person.display_name,
+                now=now,
             )
         conn.commit()
     finally:
