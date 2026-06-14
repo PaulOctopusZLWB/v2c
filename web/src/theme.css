@@ -1,0 +1,31 @@
+:root {
+  --bg: #0b1016;
+  --panel: #111927;
+  --panel-2: #0e1521;
+  --border: #1e2a3a;
+  --text: #dbe4ef;
+  --text-dim: #7e8ca0;
+  --accent: #22d3ee;            /* electric cyan — ONLY for active/live */
+  --accent-soft: #0e3a44;
+  --ok: #34d399;                /* 接受/成功 */
+  --warn: #fbbf24;              /* 存疑/进行 */
+  --err: #f87171;               /* 拒绝/失败 */
+  --pending: #64748b;           /* 待审 */
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
+  --sans: "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* motion: only meaningful state */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.live { color: var(--accent); }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes slidein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.segment-enter { animation: slidein .18s ease-out; }
+@media (prefers-reduced-motion: reduce) { .live-dot, .segment-enter { animation: none; } }
+
+button { font-family: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .4; cursor: default; }
