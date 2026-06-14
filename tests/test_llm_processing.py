@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import DailyContext, MemoryCandidateDraft
 from personal_context_node.llm_processing import generate_daily_context
@@ -593,27 +594,29 @@ def test_generate_daily_context_mints_evidence_refs_before_candidate_extraction(
     ]
 
 
-def test_generate_daily_context_rejects_unmatched_todo_without_side_effects(tmp_path: Path) -> None:
+def test_generate_daily_context_includes_unmatched_todo_with_empty_evidence(tmp_path: Path) -> None:
+    # A paraphrased daily todo with no verbatim segment match must NOT crash daily
+    # generation; it is included with empty evidence_refs (§37.4 allows empty refs).
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_transcript(config.database_path)
 
-    try:
-        generate_daily_context(config=config, day="2087-05-10", llm=UnmatchedTodoLLM())
-    except ValueError as exc:
-        assert "todo missing evidence" in str(exc)
-    else:
-        raise AssertionError("generate_daily_context accepted an unmatched todo")
+    result = generate_daily_context(config=config, day="2087-05-10", llm=UnmatchedTodoLLM())
 
+    assert result.summaries_created == 1
     conn = connect(config.database_path)
     try:
-        summaries = fetch_all(conn, "select summary_id from summaries")
-        legacy_summaries = fetch_all(conn, "select day from daily_summaries")
-        evidence_refs = fetch_all(conn, "select evidence_id from evidence_refs")
+        content = json.loads(
+            fetch_all(
+                conn,
+                "select content_json from summaries where summary_type = 'daily'",
+            )[0]["content_json"]
+        )
     finally:
         conn.close()
-    assert summaries == []
-    assert legacy_summaries == []
-    assert evidence_refs == []
+    todos = content["todos_rollup"]
+    assert todos == [
+        {"text": "这个待办没有对应的转写证据", "owner": "self", "session_id": None, "evidence_refs": []}
+    ]
 
 
 def test_generate_daily_context_merges_duplicate_candidates_within_day(tmp_path: Path) -> None:
@@ -980,3 +983,79 @@ def _insert_transcript_segment(database_path: Path, *, segment_id: str, evidence
         conn.commit()
     finally:
         conn.close()
+
+
+def _seed_daily_fixture(database_path) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("aud_d", "DJI Mic 3", "/src/d.wav", "/raw/d.wav", "sha256:d", 5000,
+             "2087-05-10T00:00:00+08:00", "2087-05-10T00:10:00+08:00", "imported"),
+        )
+        conn.execute(
+            """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id, exclude_from_memory, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("ses_d", "2087-05-10", "2087-05-10T00:00:00+08:00", "2087-05-10T00:00:01+08:00",
+             "derived_from_segments", 1, 1000, "seg_d", 0, "2087-05-10T00:10:00+08:00", "2087-05-10T00:10:00+08:00"),
+        )
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text,
+              language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("seg_d", "aud_d", "chk_d", "ses_d", 0, 1000, "我要求音频和转写处理保持本地。",
+             "zh", "self", "self", "ev_d", 0.99, "MockASRAdapter", "mock-asr", "test"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_generate_daily_context_is_idempotent_and_populates_report_metrics(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_daily_fixture(config.database_path)
+    llm = RuleBasedLLMAdapter()
+
+    generate_daily_context(config=config, day="2087-05-10", llm=llm)
+    conn = connect(config.database_path)
+    try:
+        first = fetch_all(conn, "select count(*) as c from memory_candidates")[0]["c"]
+    finally:
+        conn.close()
+
+    # Re-running daily generation (as the confirm workflow does) must not duplicate
+    # same-day candidates (§37.2).
+    generate_daily_context(config=config, day="2087-05-10", llm=llm)
+    generate_daily_context(config=config, day="2087-05-10", llm=llm)
+
+    conn = connect(config.database_path)
+    try:
+        again = fetch_all(conn, "select count(*) as c from memory_candidates")[0]["c"]
+        report = fetch_all(
+            conn,
+            "select total_recorded_ms, active_speech_ms, self_speech_ms, others_speech_ms, generated_at "
+            "from daily_reports where date_key = '2087-05-10'",
+        )[0]
+    finally:
+        conn.close()
+
+    assert again == first  # idempotent
+    # §27.1 statistics columns are populated, not left at 0/NULL.
+    assert report["total_recorded_ms"] == 5000
+    assert report["active_speech_ms"] == 1000
+    assert report["self_speech_ms"] == 1000
+    assert report["others_speech_ms"] == 0
+    assert report["generated_at"]
