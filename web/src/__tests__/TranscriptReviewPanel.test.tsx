@@ -22,10 +22,10 @@ describe("TranscriptReviewPanel", () => {
         onPlay={() => undefined}
       />
     );
-    await userEvent.click(screen.getByRole("button", { name: "Accept" }));
+    await userEvent.click(screen.getByRole("button", { name: "接受" }));
     expect(onReview).toHaveBeenCalledWith("seg_1", "accepted");
 
-    await userEvent.selectOptions(screen.getByLabelText("Override person for seg_1"), "per_paul");
+    await userEvent.selectOptions(screen.getByLabelText("改人 seg_1"), "per_paul");
     expect(onOverride).toHaveBeenCalledWith("seg_1", "per_paul");
   });
 });

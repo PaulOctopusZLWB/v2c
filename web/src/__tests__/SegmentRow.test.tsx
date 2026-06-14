@@ -1,0 +1,21 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { SegmentRow } from "../features/transcript/SegmentRow";
+
+const seg = { segment_id: "seg_1", text: "数据不出本机", speaker: "self", start_ms: 9000, end_ms: 12000, review_status: "pending_review" as const, note: null };
+
+describe("SegmentRow", () => {
+  it("renders Chinese status, a speaker chip, and fires review/override/play", async () => {
+    const onReview = vi.fn(), onOverride = vi.fn(), onPlay = vi.fn();
+    render(
+      <SegmentRow segment={seg} persons={[{ person_id: "p1", display_name: "李雷", person_type: "contact", is_self: 0 }]}
+        highlighted={false} onReview={onReview} onOverride={onOverride} onPlay={onPlay} />
+    );
+    expect(screen.getByText("待审")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "接受" }));
+    expect(onReview).toHaveBeenCalledWith("seg_1", "accepted");
+    await userEvent.click(screen.getByRole("button", { name: "播放" }));
+    expect(onPlay).toHaveBeenCalledWith("seg_1");
+  });
+});

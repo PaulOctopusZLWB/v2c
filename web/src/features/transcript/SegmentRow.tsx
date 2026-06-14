@@ -1,49 +1,39 @@
 import type { Person, ReviewStatus, TranscriptSegment } from "../../api/types";
+import { t } from "../../i18n";
+import { speakerColor } from "../../lib/speakerColors";
+
+const fmt = (ms: number) => {
+  const s = Math.floor(ms / 1000);
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+};
 
 export function SegmentRow({
-  segment,
-  persons,
-  onReview,
-  onOverride,
-  onPlay
+  segment, persons, highlighted, onReview, onOverride, onPlay
 }: {
   segment: TranscriptSegment;
   persons: Person[];
-  onReview: (segmentId: string, status: ReviewStatus) => void;
-  onOverride: (segmentId: string, personId: string) => void;
-  onPlay: (segmentId: string) => void;
+  highlighted: boolean;
+  onReview: (id: string, status: ReviewStatus) => void;
+  onOverride: (id: string, personId: string) => void;
+  onPlay: (id: string) => void;
 }) {
   return (
-    <article className="segment-row">
-      <div>
-        <button aria-label="Play segment" onClick={() => onPlay(segment.segment_id)}>Play</button>
-        <span className="speaker-chip">{segment.speaker}</span>
-        <time>{formatMs(segment.start_ms)}-{formatMs(segment.end_ms)}</time>
-        <span>{segment.review_status}</span>
-      </div>
-      <p>{segment.text}</p>
-      <div>
-        <button onClick={() => onReview(segment.segment_id, "accepted")}>Accept</button>
-        <button onClick={() => onReview(segment.segment_id, "rejected")}>Reject</button>
-        <button onClick={() => onReview(segment.segment_id, "needs_fix")}>Flag</button>
-        <select
-          aria-label={`Override person for ${segment.segment_id}`}
-          defaultValue=""
-          onChange={(event) => event.target.value && onOverride(segment.segment_id, event.target.value)}
-        >
-          <option value="" disabled>Override person…</option>
-          {persons.map((person) => (
-            <option key={person.person_id} value={person.person_id}>{person.display_name}</option>
-          ))}
+    <article className={`segment-row${highlighted ? " hl" : ""}`} data-seg={segment.segment_id}>
+      <span className="chip" style={{ background: speakerColor(segment.speaker) }}>{segment.speaker}</span>
+      <time className="num">{fmt(segment.start_ms)}</time>
+      <button aria-label="播放" title="播放" onClick={() => onPlay(segment.segment_id)}>▶</button>
+      <p className="seg-text">{segment.text}</p>
+      <span className={`status s-${segment.review_status}`}>{t.review[segment.review_status]}</span>
+      <span className="actions">
+        <button onClick={() => onReview(segment.segment_id, "accepted")}>{t.review.accepted}</button>
+        <button onClick={() => onReview(segment.segment_id, "rejected")}>{t.review.rejected}</button>
+        <button onClick={() => onReview(segment.segment_id, "needs_fix")}>{t.review.needs_fix}</button>
+        <select aria-label={`${t.speaker.reassign} ${segment.segment_id}`} defaultValue=""
+          onChange={(e) => e.target.value && onOverride(segment.segment_id, e.target.value)}>
+          <option value="" disabled>{t.speaker.reassign}…</option>
+          {persons.map((p) => <option key={p.person_id} value={p.person_id}>{p.display_name}</option>)}
         </select>
-      </div>
+      </span>
     </article>
   );
-}
-
-function formatMs(value: number) {
-  const seconds = Math.floor(value / 1000);
-  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
 }

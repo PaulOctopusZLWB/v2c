@@ -44,7 +44,7 @@ describe("App container", () => {
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
-    await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await userEvent.click(await screen.findByRole("button", { name: "接受" }));
 
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(calls).toContain("/api/transcripts/sessions/ses_1");
