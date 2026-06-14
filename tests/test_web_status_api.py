@@ -53,3 +53,11 @@ def test_status_overview_reports_counts_and_worker_idle(tmp_path: Path) -> None:
     payload = response.json()
     assert payload["worker_running"] is False
     assert "status_counts" in payload
+
+
+def test_root_returns_api_marker_when_frontend_not_built(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    client = TestClient(create_app(config=config))
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json()["app"] == "Personal Context Node"

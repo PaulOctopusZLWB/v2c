@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from personal_context_node.config import AppConfig
 from personal_context_node.web.routes_audio import router as audio_router
@@ -34,5 +37,13 @@ def create_app(*, config: AppConfig) -> FastAPI:
     app.include_router(speakers_router)
     app.include_router(audio_router)
     app.include_router(llm_router)
+
+    @app.get("/")
+    def root() -> dict[str, str]:
+        return {"app": "Personal Context Node", "mode": "api-only"}
+
+    dist_dir = Path(__file__).resolve().parents[3] / "web" / "dist"
+    if dist_dir.exists():
+        app.mount("/app", StaticFiles(directory=dist_dir, html=True), name="frontend")
 
     return app
