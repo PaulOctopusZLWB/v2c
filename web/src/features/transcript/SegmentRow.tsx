@@ -8,7 +8,17 @@ import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 
 const BARS = 24;
-const FLAT = Array.from({ length: BARS }, () => 0.12);
+/** A stable, quiet waveform silhouette per segment so the bar reads as a waveform
+ *  at rest (real peaks replace it on play). Deterministic from the segment id. */
+function restingWave(seed: string): number[] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = (h ^ seed.charCodeAt(i)) * 16777619 >>> 0;
+  return Array.from({ length: BARS }, (_, i) => {
+    h = (h * 1103515245 + 12345) >>> 0;
+    const taper = Math.sin((i / (BARS - 1)) * Math.PI); // fade in/out like a clip
+    return 0.12 + ((h % 1000) / 1000) * 0.42 * (0.45 + 0.55 * taper);
+  });
+}
 
 export function SegmentRow({
   segment, persons, highlighted, isEvidence, onReview, onOverride, onPlay
@@ -23,7 +33,7 @@ export function SegmentRow({
 }) {
   // Track which review status is in flight so only the clicked button shows its spinner.
   const [reviewing, setReviewing] = useState<ReviewStatus | null>(null);
-  const [peaks, setPeaks] = useState<number[]>(FLAT);
+  const [peaks, setPeaks] = useState<number[]>(() => restingWave(segment.segment_id));
   const review = useAsyncAction(async (id: string, status: ReviewStatus) => { await onReview(id, status); });
   const override = useAsyncAction(async (id: string, personId: string) => { await onOverride(id, personId); });
   const audio = useSegmentAudio();
