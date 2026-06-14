@@ -17,3 +17,4 @@ sample_data/
 # Frontend (web control panel) build + deps — never commit
 web/node_modules/
 web/dist/
+web/*.tsbuildinfo
