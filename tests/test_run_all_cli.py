@@ -113,7 +113,7 @@ def _write_voice_wav(path: Path, seconds: float, sample_rate: int = 16_000) -> N
 def test_run_all_cli_continues_past_a_task_failure(tmp_path: Path, monkeypatch) -> None:
     # §36: a single task failure is isolated and retryable — it must NOT abort the whole
     # run-all drain. The loop catches the exception, counts tasks_failed, and keeps draining.
-    from personal_context_node import cli
+    from personal_context_node import process_runner
     from personal_context_node.process_runner import ProcessOnceResult
 
     source_dir = tmp_path / "empty_source"
@@ -145,7 +145,9 @@ backend = "rule_based"
             raise RuntimeError("transient task failure")
         return ProcessOnceResult(task_id="t", task_type="asr", status="no_task")
 
-    monkeypatch.setattr(cli, "process_once", fake_process_once)
+    # The drain loop now lives in process_runner.drain_process_queue (shared by CLI and web),
+    # so patch process_once where that loop resolves it.
+    monkeypatch.setattr(process_runner, "process_once", fake_process_once)
 
     result = CliRunner().invoke(
         app, ["run-all", "--config", str(config_path), "--mock", "--max-steps", "20"]

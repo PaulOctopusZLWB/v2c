@@ -45,7 +45,10 @@ from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.obsidian_sessions import publish_session_notes, session_transcript_lines
 from personal_context_node.pipeline import run_first_milestone as run_first_milestone_pipeline
-from personal_context_node.process_runner import preview_next_process_task, process_once
+from personal_context_node.pipeline_adapters import build_asr as _domain_build_asr
+from personal_context_node.pipeline_adapters import build_llm as _domain_build_llm
+from personal_context_node.pipeline_adapters import build_vad as _domain_build_vad
+from personal_context_node.process_runner import drain_process_queue, preview_next_process_task, process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
 from personal_context_node.system_summary import daily_system_summary
 from personal_context_node.tasks import process_status_rows, rerun_task, retry_task
@@ -254,49 +257,23 @@ def _run_all(
         model_version=config.asr_model_version,
     )
     llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
-    process_steps = 0
-    tasks_succeeded = 0
-    tasks_failed = 0
-    status = "step_limit"
-    while process_steps < max_steps:
-        run_id = f"run_{uuid4().hex}"
-        try:
-            result = record_job_run(
-                config=config,
-                job_name="run-all.process",
-                run_id=run_id,
-                operation=lambda run_id=run_id: process_once(
-                    config=config,
-                    run_id=run_id,
-                    vad=vad,
-                    asr=asr,
-                    llm=llm,
-                    max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
-                ),
-            ).result
-        except Exception:
-            # A single task failure (transient port error, schema-validation, etc.) is
-            # isolated and retryable (§36) — it must not abort the whole drain. process_once
-            # already marked the task failed (with backoff deferral), so count it and keep
-            # draining so independent files/days still get processed this run.
-            tasks_failed += 1
-            process_steps += 1
-            continue
-        if result.status == "no_task":
-            status = "complete"
-            break
-        process_steps += 1
-        if result.status == "succeeded":
-            tasks_succeeded += 1
-    if status != "complete" and preview_next_process_task(config=config).status == "no_task":
-        status = "complete"
+    drain = drain_process_queue(
+        config=config,
+        vad=vad,
+        asr=asr,
+        llm=llm,
+        max_chunk_ms=max_chunk_ms,
+        max_steps=max_steps,
+        job_name="run-all.process",
+    )
+    status = drain.status
     typer.echo(
         " ".join(
             [
                 f"imported_files={import_result.imported_files}",
-                f"process_steps={process_steps}",
-                f"tasks_succeeded={tasks_succeeded}",
-                f"tasks_failed={tasks_failed}",
+                f"process_steps={drain.process_steps}",
+                f"tasks_succeeded={drain.tasks_succeeded}",
+                f"tasks_failed={drain.tasks_failed}",
                 f"status={status}",
             ]
         )
@@ -1554,32 +1531,18 @@ def _build_vad(
     model_id: str = "fsmn-vad",
     model_revision: str | None = None,
 ):
-    if vad_backend == "energy":
-        return EnergyVadAdapter(threshold=vad_threshold, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
-    if vad_backend == "mock":
-        return MockVADAdapter()
-    if vad_backend == "command":
-        if not vad_command:
-            raise typer.BadParameter("--vad-command is required when --vad-backend command")
-        return CommandVADAdapter(command=vad_command.split(), merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
-    if vad_backend == "funasr":
-        if vad_command:
-            command = vad_command.split()
-        else:
-            # Pass the configurable VAD threshold to the wrapper; merge_gap/min_speech are
-            # applied adapter-side (§5 "VAD 阈值必须配置化").
-            command = [
-                "python3",
-                "scripts/funasr_vad_wrapper.py",
-                "--model",
-                model_id,
-                "--threshold",
-                str(vad_threshold),
-            ]
-            if model_revision is not None:
-                command.extend(["--model-revision", model_revision])
-        return CommandVADAdapter(command=command, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
-    raise typer.BadParameter("--vad-backend must be 'energy', 'mock', 'command', or 'funasr'")
+    try:
+        return _domain_build_vad(
+            vad_backend=vad_backend,
+            vad_command=vad_command,
+            vad_threshold=vad_threshold,
+            merge_gap_ms=merge_gap_ms,
+            min_speech_ms=min_speech_ms,
+            model_id=model_id,
+            model_revision=model_revision,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _build_asr(
@@ -1592,41 +1555,25 @@ def _build_asr(
     model_id: str = "iic/SenseVoiceSmall",
     model_version: str = "funasr-sensevoice-local",
 ):
-    if asr_backend == "mock":
-        return MockASRAdapter(text=mock_text, language=language, model_name=model_name)
-    if asr_backend == "command":
-        if not asr_command:
-            raise typer.BadParameter("--asr-command is required when --asr-backend command")
-        return CommandASRAdapter(command=asr_command.split())
-    if asr_backend == "funasr":
-        command = (
-            asr_command.split()
-            if asr_command
-            else [
-                "python3",
-                "scripts/funasr_sensevoice_wrapper.py",
-                "--model",
-                model_id,
-                "--model-version",
-                model_version,
-                "--language",
-                language,
-            ]
+    try:
+        return _domain_build_asr(
+            asr_backend=asr_backend,
+            asr_command=asr_command,
+            mock_text=mock_text,
+            language=language,
+            model_name=model_name,
+            model_id=model_id,
+            model_version=model_version,
         )
-        return CommandASRAdapter(command=command)
-    raise typer.BadParameter("--asr-backend must be 'mock', 'command', or 'funasr'")
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _build_llm(*, llm_backend: str, llm_command: str | None):
-    if llm_backend == "rule_based":
-        return RuleBasedLLMAdapter()
-    if llm_backend == "mock":
-        return MockLLMAdapter()
-    if llm_backend == "command":
-        if not llm_command:
-            raise typer.BadParameter("--llm-command is required when --llm-backend command")
-        return CommandLLMAdapter(command=llm_command.split())
-    raise typer.BadParameter("--llm-backend must be 'rule_based', 'mock', or 'command'")
+    try:
+        return _domain_build_llm(llm_backend=llm_backend, llm_command=llm_command)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command(name="daily-status")

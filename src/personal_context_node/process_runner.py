@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
+from uuid import uuid4
 
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.archive import archive_completed_audio
@@ -15,6 +16,7 @@ from personal_context_node.core.ports.llm import LLMPort
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.core.ports.vad import VADPort
 from personal_context_node.daily_reports import set_daily_report_status
+from personal_context_node.jobs import record_job_run
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates
@@ -158,6 +160,68 @@ def preview_next_process_task(*, config: AppConfig) -> ProcessOnceResult:
         return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
     finally:
         conn.close()
+
+
+@dataclass(frozen=True)
+class DrainResult:
+    process_steps: int
+    tasks_succeeded: int
+    tasks_failed: int
+    status: str  # "complete" | "stopped" | "step_limit"
+
+
+def drain_process_queue(
+    *,
+    config: AppConfig,
+    vad: VADPort,
+    asr: ASRPort,
+    llm: LLMPort | None = None,
+    max_chunk_ms: int | None = None,
+    max_steps: int = 200,
+    should_stop: Callable[[], bool] = lambda: False,
+    job_name: str = "process.drain",
+) -> DrainResult:
+    chunk_ms = max_chunk_ms if max_chunk_ms is not None else config.max_chunk_ms
+    process_steps = 0
+    tasks_succeeded = 0
+    tasks_failed = 0
+    status = "step_limit"
+    while process_steps < max_steps:
+        if should_stop():
+            status = "stopped"
+            break
+        run_id = f"run_{uuid4().hex}"
+        try:
+            result = record_job_run(
+                config=config,
+                job_name=job_name,
+                run_id=run_id,
+                operation=lambda run_id=run_id: process_once(
+                    config=config, run_id=run_id, vad=vad, asr=asr, llm=llm, max_chunk_ms=chunk_ms
+                ),
+            ).result
+        except Exception:
+            # A single task failure (transient port error, schema-validation, etc.) is
+            # isolated and retryable (§36) — it must not abort the whole drain. process_once
+            # already marked the task failed (with backoff deferral), so count it and keep
+            # draining so independent files/days still get processed this run.
+            tasks_failed += 1
+            process_steps += 1
+            continue
+        if result.status == "no_task":
+            status = "complete"
+            break
+        process_steps += 1
+        if result.status == "succeeded":
+            tasks_succeeded += 1
+    if status == "step_limit" and preview_next_process_task(config=config).status == "no_task":
+        status = "complete"
+    return DrainResult(
+        process_steps=process_steps,
+        tasks_succeeded=tasks_succeeded,
+        tasks_failed=tasks_failed,
+        status=status,
+    )
 
 
 def _succeed_task_and_enqueue_downstream(
