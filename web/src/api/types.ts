@@ -39,6 +39,14 @@ export interface StatusSnapshot {
   worker_running: boolean;
 }
 
+export interface ImportSource {
+  kind: "device" | "known";
+  device_id: string;
+  label: string;
+  root_path: string;
+  audio_count: number;
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;

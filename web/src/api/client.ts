@@ -34,5 +34,6 @@ export const api = {
     request(`/api/transcripts/segments/${segmentId}/person-override`, { method: "POST", body: JSON.stringify({ person_id }) }),
   // read-only llm
   dailyLlm: (day: string) => request<DailyLlmResult>(`/api/llm/days/${day}`),
-  audioUrl: (segmentId: string) => `/api/audio/segments/${segmentId}`
+  audioUrl: (segmentId: string) => `/api/audio/segments/${segmentId}`,
+  devices: () => request<{ sources: import("./types").ImportSource[] }>("/api/devices"),
 };

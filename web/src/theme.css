@@ -34,3 +34,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 button { font-family: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .4; cursor: default; }
+
+.device-card{display:grid;gap:4px;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px}
+.path{color:var(--text-dim);font-size:11px}
+.dim{color:var(--text-dim)}
