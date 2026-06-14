@@ -42,3 +42,5 @@ button:disabled { opacity: .4; cursor: default; }
 .chip{font-size:11px;color:#04121a;border-radius:4px;padding:1px 6px;font-weight:600}
 .segment-row.hl{outline:1px solid var(--accent);background:var(--accent-soft)}
 .status.s-accepted{color:var(--ok)}.status.s-rejected{color:var(--err)}.status.s-needs_fix{color:var(--warn)}.status.s-pending_review{color:var(--pending)}
+
+.viewpoint{padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin:4px 0;cursor:pointer}.viewpoint:hover{border-color:var(--accent)}

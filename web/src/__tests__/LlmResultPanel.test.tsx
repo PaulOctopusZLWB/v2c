@@ -1,24 +1,22 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { LlmResultPanel } from "../features/llm/LlmResultPanel";
 
 describe("LlmResultPanel", () => {
-  it("renders daily summary and read-only candidates with an Obsidian pointer", () => {
+  it("renders read-only viewpoints with an Obsidian pointer and emits highlight on click", async () => {
+    const onHighlight = vi.fn();
     render(
       <LlmResultPanel
-        result={{
-          day: "2087-05-10",
-          context: { content: { summary: "今天讨论了部署" }, model_name: "rule_based", updated_at: "2087-05-10T09:00:00+08:00" },
-          memory_candidates: [
-            { candidate_id: "cand_1", candidate_claim: "Paul 喜欢咖啡", edited_claim: null, claim_type: "preference", confidence: 0.9, status: "pending" }
-          ]
-        }}
+        result={{ day: "2087-05-10", context: { content: { summary: "讨论部署" }, model_name: "rule_based", updated_at: "" },
+          memory_candidates: [{ candidate_id: "c1", candidate_claim: "Paul 倾向数据不出本机", edited_claim: null, claim_type: "preference", confidence: 0.82, status: "pending" }] }}
+        onHighlightEvidence={onHighlight}
       />
     );
-    expect(screen.getByText("今天讨论了部署")).toBeInTheDocument();
-    expect(screen.getByText("Paul 喜欢咖啡")).toBeInTheDocument();
+    expect(screen.getByText("讨论部署")).toBeInTheDocument();
     expect(screen.getByText(/Obsidian/)).toBeInTheDocument();
-    // Read-only: no confirm/reject controls.
-    expect(screen.queryByRole("button", { name: /confirm/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /确认/ })).toBeNull(); // read-only
+    await userEvent.click(screen.getByText(/Paul 倾向数据不出本机/));
+    expect(onHighlight).toHaveBeenCalledWith("c1");
   });
 });

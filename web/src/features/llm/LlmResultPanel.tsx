@@ -1,17 +1,22 @@
 import type { DailyLlmResult } from "../../api/types";
+import { t } from "../../i18n";
 
-export function LlmResultPanel({ result }: { result: DailyLlmResult }) {
+export function LlmResultPanel({
+  result, onHighlightEvidence
+}: {
+  result: DailyLlmResult;
+  onHighlightEvidence?: (candidateId: string) => void;
+}) {
   const summary = result.context?.content?.["summary"];
   return (
-    <section>
-      <h2>LLM Result — {result.day}</h2>
-      {summary ? <p>{String(summary)}</p> : <p>No daily context generated yet.</p>}
-      <h3>Memory candidates (read-only)</h3>
-      <p>Confirm or reject these in Obsidian — the panel shows them for review only.</p>
-      {result.memory_candidates.map((candidate) => (
-        <div className="candidate" key={candidate.candidate_id}>
-          <strong>{candidate.edited_claim ?? candidate.candidate_claim}</strong>
-          <span> · {candidate.claim_type} · {Math.round(candidate.confidence * 100)}% · {candidate.status}</span>
+    <section className="llm-panel">
+      <h3>{t.viewpoint.title} · {result.day} <span className="dim">({t.viewpoint.readOnly})</span></h3>
+      {summary ? <p>{String(summary)}</p> : <p className="dim">{t.viewpoint.none}</p>}
+      <p className="dim">{t.viewpoint.confirmInObsidian} ↗</p>
+      {result.memory_candidates.map((c) => (
+        <div className="viewpoint" key={c.candidate_id} onClick={() => onHighlightEvidence?.(c.candidate_id)}>
+          <strong>◆ {c.edited_claim ?? c.candidate_claim}</strong>
+          <span className="dim num"> · {c.claim_type} · {Math.round(c.confidence * 100)}% · {c.status}</span>
         </div>
       ))}
     </section>
