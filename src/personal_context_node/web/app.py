@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from personal_context_node.config import AppConfig
+from personal_context_node.web.routes_audio import router as audio_router
 from personal_context_node.web.routes_pipeline import events_router, router as pipeline_router
 from personal_context_node.web.routes_speakers import router as speakers_router
 from personal_context_node.web.routes_status import router as status_router
@@ -30,5 +31,6 @@ def create_app(*, config: AppConfig) -> FastAPI:
     app.include_router(events_router)  # serves GET /api/events
     app.include_router(transcripts_router)
     app.include_router(speakers_router)
+    app.include_router(audio_router)
 
     return app

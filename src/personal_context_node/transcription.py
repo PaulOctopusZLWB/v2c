@@ -150,3 +150,28 @@ def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
 
 def _absolute_time(recorded_at: str, offset_ms: int) -> str:
     return (datetime.fromisoformat(recorded_at) + timedelta(milliseconds=offset_ms)).isoformat()
+
+
+def segment_audio_path(*, config: AppConfig, segment_id: str) -> Path | None:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            """
+            select ac.local_chunk_path
+            from transcript_segments ts
+            join audio_chunks ac on ac.chunk_id = ts.chunk_id
+            where ts.segment_id = ? and ts.is_active = 1
+            """,
+            (segment_id,),
+        )
+    finally:
+        conn.close()
+    if not rows or not rows[0]["local_chunk_path"]:
+        return None
+    # local_chunk_path is stored as the already-rooted work path (work_audio_dir/...),
+    # exactly as transcribe_pending_chunks reads it — do NOT re-prefix config.data_dir
+    # (that would double a relative data_dir; see the §32 note in transcribe_pending_chunks).
+    path = Path(str(rows[0]["local_chunk_path"]))
+    return path if path.exists() else None
