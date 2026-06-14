@@ -9,3 +9,7 @@ data/
 build/
 __pycache__/
 *.py[cod]
+
+# Local sample recordings (large WAV fixtures) and scratch/probe dirs — never commit
+sample_data/
+.tmp/
