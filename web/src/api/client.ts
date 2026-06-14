@@ -1,4 +1,4 @@
-import type { DailyLlmResult, Person, ReviewStatus, TaskRow, TranscriptSession } from "./types";
+import type { DailyLlmResult, Health, Person, ReviewStatus, TaskRow, TranscriptSession } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
@@ -15,6 +15,7 @@ export const api = {
   retry: (taskId: string) => request<{ task_id: string; status: string }>(`/api/pipeline/tasks/${taskId}/retry`, { method: "POST" }),
   // status
   statusTasks: () => request<{ tasks: TaskRow[] }>("/api/status/tasks"),
+  health: () => request<Health>("/api/health"),
   // transcript navigation + review
   days: () => request<{ days: Array<{ day: string; session_count: number }> }>("/api/transcripts/days"),
   sessionsForDay: (day: string) =>

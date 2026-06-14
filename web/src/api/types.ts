@@ -39,6 +39,10 @@ export interface StatusSnapshot {
   worker_running: boolean;
 }
 
+export interface Health {
+  require_accepted_transcripts: boolean;
+}
+
 export interface ImportSource {
   kind: "device" | "known";
   device_id: string;
