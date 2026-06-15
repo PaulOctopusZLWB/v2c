@@ -91,9 +91,10 @@ class LocalDirectoryFileImportAdapter:
         recorded_at = _recorded_at_from_name(source.source.source_path)
         target_dir = destination_dir / recorded_at[:10]
         target_dir.mkdir(parents=True, exist_ok=True)
-        # Two distinct recordings can share a filename (same day, different cards). Pick a
-        # non-colliding destination so a second import never overwrites the first copy.
-        local_raw_path = _unique_destination_path(target_dir, source.source.source_path.name)
+        # Two distinct recordings can share a filename (same day, different cards). Reserve a
+        # non-colliding destination atomically (O_EXCL) so a second import — even a concurrent
+        # process (scheduled ingest vs. manual run) — never overwrites the first copy.
+        local_raw_path = _reserve_destination_path(target_dir, source.source.source_path.name)
         shutil.copy2(source.source.source_path, local_raw_path)
         _repair_wav_file_metadata(local_raw_path, recorded_at)
         return ImportedRawAudio(
@@ -105,18 +106,25 @@ class LocalDirectoryFileImportAdapter:
         )
 
 
-def _unique_destination_path(target_dir: Path, source_name: str) -> Path:
+def _reserve_destination_path(target_dir: Path, source_name: str) -> Path:
+    # Reserve by atomically creating the file with O_CREAT|O_EXCL: the OS guarantees only one
+    # caller wins a given name, closing the check-then-write race that shutil.copy2 (O_TRUNC,
+    # no O_EXCL) would otherwise leave open between concurrent imports. The caller overwrites
+    # the empty placeholder with the real copy.
     candidate = target_dir / source_name
-    if not candidate.exists():
-        return candidate
     stem = candidate.stem
     suffix = candidate.suffix
     counter = 2
+    path = candidate
     while True:
-        next_candidate = target_dir / f"{stem}_{counter}{suffix}"
-        if not next_candidate.exists():
-            return next_candidate
-        counter += 1
+        try:
+            handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            path = target_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+            continue
+        os.close(handle)
+        return path
 
 
 def _has_hidden_part(path: Path, root_path: Path) -> bool:

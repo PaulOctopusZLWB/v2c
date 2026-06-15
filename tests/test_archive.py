@@ -668,3 +668,43 @@ def test_cleanup_archived_audio_refuses_local_hash_mismatch(tmp_path: Path) -> N
 
     assert result.files_removed == 0
     assert raw.exists()
+
+
+def test_cleanup_archived_audio_recovers_after_hash_mismatch_clears(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas"
+    archive_root.mkdir()
+    raw = _write_raw(config, "recover.wav", b"good bytes")
+    archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "recover.wav"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(b"good bytes")
+    sha = _sha256(archive_path)
+    _insert_audio(config.database_path, raw, sha, status="cleanup_eligible", audio_file_id="aud_recover")
+    _insert_archive_record(
+        config.database_path,
+        audio_file_id="aud_recover",
+        source_path=raw,
+        archive_path=archive_path,
+        sha256=sha,
+        archived_at="2000-01-01T00:00:00+00:00",
+    )
+
+    # Run 1: local bytes are momentarily corrupted -> the guard trips, nothing is removed.
+    raw.write_bytes(b"corrupted mid-rewrite")
+    first = cleanup_archived_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime.now(timezone.utc),
+    )
+    assert first.files_removed == 0
+    assert raw.exists()
+
+    # Run 2: local bytes restored to match the verified archive -> reclaimed (no dead-end).
+    raw.write_bytes(b"good bytes")
+    second = cleanup_archived_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime.now(timezone.utc),
+    )
+    assert second.files_removed == 1
+    assert not raw.exists()

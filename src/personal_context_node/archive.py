@@ -243,7 +243,7 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
               on ar.target_type = 'audio_file'
              and ar.target_id = af.audio_file_id
              and ar.verified = 1
-             and ar.status in ('verified', 'cleanup_eligible')
+             and ar.status in ('verified', 'cleanup_eligible', 'cleanup_pending')
             where af.status = 'cleanup_eligible'
               and ar.archived_at < ?
             order by ar.archived_at, af.audio_file_id

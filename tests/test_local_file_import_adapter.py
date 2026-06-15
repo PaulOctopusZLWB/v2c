@@ -3,7 +3,10 @@ from __future__ import annotations
 import wave
 from pathlib import Path
 
-from personal_context_node.adapters.file_import.local_directory import LocalDirectoryFileImportAdapter
+from personal_context_node.adapters.file_import.local_directory import (
+    LocalDirectoryFileImportAdapter,
+    _reserve_destination_path,
+)
 from personal_context_node.core.ports.file_import import MountedDevice, SourceAudioFile, StableSourceAudioFile
 
 
@@ -114,6 +117,20 @@ def test_copy_to_raw_store_keeps_existing_file_when_name_collides(tmp_path: Path
     assert first.local_raw_path != second.local_raw_path
     assert first.local_raw_path.exists()
     assert second.local_raw_path.exists()
+
+
+def test_reserve_destination_path_reserves_atomically(tmp_path: Path) -> None:
+    # Each reservation creates the file, so a second reservation of the same name cannot
+    # pick the same path — closing the check-then-copy race between concurrent imports.
+    target = tmp_path / "raw"
+    target.mkdir()
+
+    first = _reserve_destination_path(target, "TX01_MIC001_20870510_120000_orig.wav")
+    second = _reserve_destination_path(target, "TX01_MIC001_20870510_120000_orig.wav")
+
+    assert first != second
+    assert first.exists()
+    assert second.exists()
 
 
 def _stable_source(device: MountedDevice, path: Path) -> StableSourceAudioFile:
