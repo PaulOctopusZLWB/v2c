@@ -508,3 +508,20 @@ def test_retry_task_resets_attempts_and_available_at_for_immediate_claim(tmp_pat
     assert reclaimed is not None
     assert reclaimed.task_id == created.task_id
     assert reclaimed.attempt_count == 1
+
+
+def test_rerun_task_resets_available_at_for_immediate_claim(tmp_path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        task_retry_backoff_seconds=3600,
+    )
+    created = enqueue_task(config=config, task_type="vad", target_type="audio_file", target_id="aud_rerun")
+    assert claim_next_task(config=config, task_type="vad", run_id="run_fail") is not None
+    fail_task(config=config, task_id=created.task_id, error="boom", terminal=False, run_id="run_fail")
+
+    rerun_task(config=config, task_type="vad", target_type="audio_file", target_id="aud_rerun")
+    reclaimed = claim_next_task(config=config, task_type="vad", run_id="run_rerun")
+
+    assert reclaimed is not None
+    assert reclaimed.task_id == created.task_id

@@ -304,6 +304,7 @@ def _rerun_asr_for_file(conn, *, target_type: str, target_id: str) -> EnqueueTas
         set status = 'pending',
             retry_count = 0,
             attempt_count = 0,
+            available_at = ?,
             claimed_by_run_id = null,
             claimed_at = null,
             lease_expires_at = null,
@@ -314,7 +315,7 @@ def _rerun_asr_for_file(conn, *, target_type: str, target_id: str) -> EnqueueTas
         where task_type = 'asr' and target_type = 'audio_chunk'
           and target_id in ({placeholders})
         """,
-        (_now(), *sibling_ids),
+        (_now(), _now(), *sibling_ids),
     )
     first_task = conn.execute(
         """
@@ -351,6 +352,7 @@ def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id
                 set status = 'pending',
                     retry_count = 0,
                     attempt_count = 0,
+                    available_at = ?,
                     claimed_by_run_id = null,
                     claimed_at = null,
                     lease_expires_at = null,
@@ -360,7 +362,7 @@ def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id
                     last_error = null
                 where task_id = ?
                 """,
-                (_now(), existing["task_id"]),
+                (_now(), _now(), existing["task_id"]),
             )
             conn.commit()
             return EnqueueTaskResult(task_id=str(existing["task_id"]), created=False)
