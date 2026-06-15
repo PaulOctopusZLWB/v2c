@@ -11,6 +11,14 @@ def test_dockerignore_excludes_local_runtime_data() -> None:
         assert required in ignored
 
 
+def test_dockerignore_excludes_config_relative_runtime_data() -> None:
+    # `COPY config ./config` would otherwise bake config/data (live SQLite DB, raw audio,
+    # signing key) into the image, since data_dir resolves relative to the config file.
+    ignored = Path(".dockerignore").read_text(encoding="utf-8").splitlines()
+
+    assert "config/data/" in ignored
+
+
 def test_dockerfile_includes_wrapper_scripts() -> None:
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
 

@@ -6,6 +6,12 @@ __pycache__/
 *.py[cod]
 .tmp/
 data/
+# config/local.example.toml resolves data_dir relative to config/, so live runtime data
+# (SQLite DB, raw audio, signing key) lands in config/data — which `data/` (anchored at the
+# context root) does NOT match. Exclude it explicitly so `COPY config ./config` never bakes
+# local state or secrets into the image.
+config/data/
+**/data/
 sample_data/
 build/
 audio/
