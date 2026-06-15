@@ -49,6 +49,10 @@ model_version = "funasr-sensevoice-local"
 [llm]
 backend = "rule_based"
 # command = "python3 scripts/llm_wrapper_example.py"
+# To use the official Zhipu GLM cloud model (text-only), export GLM_API_KEY and set:
+#   backend = "command"
+#   command = "python3 scripts/glm_llm_wrapper.py"
+# GLM_MODEL defaults to glm-4-flash; raw audio is never sent (CommandLLMAdapter strips paths).
 send_person_names = true
 send_speaker_labels = true
 max_chunk_tokens = 6000
