@@ -212,3 +212,7 @@ def test_app_config_rejects_non_positive_command_timeout_seconds(tmp_path: Path)
     config_path.write_text("[commands]\ntimeout_seconds = -5\n", encoding="utf-8")
     with pytest.raises(ValidationError):
         AppConfig.from_toml(config_path)
+
+
+def test_app_config_has_default_asr_device_mps() -> None:
+    assert AppConfig().asr_device == "mps"

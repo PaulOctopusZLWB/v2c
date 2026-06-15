@@ -80,6 +80,7 @@ def build_asr(
     model_id: str = "iic/SenseVoiceSmall",
     model_version: str = "funasr-sensevoice-local",
     timeout_seconds: float = 3600.0,
+    asr_device: str = "mps",
 ) -> ASRPort:
     if asr_backend == "mock":
         return MockASRAdapter(text=mock_text, language=language, model_name=model_name)
@@ -87,6 +88,15 @@ def build_asr(
         if not asr_command:
             raise ValueError("asr_command is required when asr_backend is 'command'")
         return CommandASRAdapter(command=shlex.split(asr_command), timeout_seconds=timeout_seconds)
+    if asr_backend == "funasr_server":
+        from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+        command = (
+            shlex.split(asr_command)
+            if asr_command
+            else ["python3", "scripts/funasr_sensevoice_wrapper.py", "--server",
+                  "--model", model_id, "--device", asr_device, "--language", language]
+        )
+        return PersistentCommandASRAdapter(command=command, timeout_seconds=timeout_seconds)
     if asr_backend == "funasr":
         command = (
             shlex.split(asr_command)
@@ -103,7 +113,7 @@ def build_asr(
             ]
         )
         return CommandASRAdapter(command=command, timeout_seconds=timeout_seconds)
-    raise ValueError("asr_backend must be 'mock', 'command', or 'funasr'")
+    raise ValueError("asr_backend must be 'mock', 'command', 'funasr', or 'funasr_server'")
 
 
 def build_llm(*, llm_backend: str, llm_command: str | None, timeout_seconds: float = 3600.0) -> LLMPort:
@@ -139,6 +149,7 @@ def build_pipeline_adapters(*, config: AppConfig) -> PipelineAdapters:
             model_id=config.asr_model_id,
             model_version=config.asr_model_version,
             timeout_seconds=config.command_timeout_seconds,
+            asr_device=config.asr_device,
         ),
         llm=build_llm(
             llm_backend=config.llm_backend,

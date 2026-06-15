@@ -44,6 +44,13 @@ def test_build_llm_mock_remains_explicit_fixture_adapter() -> None:
     assert isinstance(build_llm(llm_backend="mock", llm_command=None), MockLLMAdapter)
 
 
+def test_build_asr_funasr_server_returns_persistent_adapter() -> None:
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(asr_backend="funasr_server", asr_command=None, mock_text=None, asr_device="mps")
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert "--server" in adapter.command and "--device" in adapter.command
+
+
 def test_command_with_quoted_space_path_is_one_token() -> None:
     # A repo path containing a space (e.g. "v2c 本地部署") must survive command parsing:
     # shlex honours the quotes so the interpreter path stays a single argv token.
