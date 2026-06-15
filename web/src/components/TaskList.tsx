@@ -39,12 +39,29 @@ function TaskRowView({ task, onRetry }: { task: TaskRow; onRetry: (taskId: strin
   );
 }
 
-export function TaskList({ tasks, onRetry }: { tasks: TaskRow[]; onRetry: (taskId: string) => Promise<unknown> | void }) {
-  if (tasks.length === 0) return null;
+export function TaskList({
+  tasks,
+  taskCount,
+  failedCount,
+  onToggle,
+  onRetry,
+  onRetryAllFailed
+}: {
+  tasks: TaskRow[];
+  taskCount?: number;
+  failedCount?: number;
+  onToggle?: (open: boolean) => void;
+  onRetry: (taskId: string) => Promise<unknown> | void;
+  onRetryAllFailed?: () => Promise<unknown> | void;
+}) {
+  // The summary feeds a count even before the (lazy) full list loads, so the panel can
+  // open at scale without holding the ~1881-row array.
+  const count = taskCount ?? tasks.length;
+  if (count === 0) return null;
   return (
-    <details className="task-list">
+    <details className="task-list" onToggle={(e) => onToggle?.((e.currentTarget as HTMLDetailsElement).open)}>
       <summary className="section-title">
-        <Icon name="run" /> {t.nav.tasks} ({tasks.length})
+        <Icon name="run" /> {t.nav.tasks} ({count})
       </summary>
       <div className="task-rows">
         {tasks.map((task) => (

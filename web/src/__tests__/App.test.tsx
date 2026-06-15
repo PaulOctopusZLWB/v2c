@@ -44,29 +44,31 @@ describe("App container", () => {
   });
 
   it("shows 运行中 when the worker is running", async () => {
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
-      if (url === "/api/status/tasks")
-        return new Response(
-          JSON.stringify({
-            tasks: [
-              {
-                task_id: "t1",
-                task_type: "asr",
-                target_type: "audio",
-                target_id: "a1",
-                status: "running",
-                attempt_count: 1,
-                last_error: null,
-                duration_ms: null
-              }
-            ]
-          }),
-          { status: 200 }
-        );
-      return new Response("{}", { status: 200 });
-    });
+    // Running state now derives from the compact SSE `status.summary`, not the lazily
+    // fetched full task array — so drive it through the summary event.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
 
     render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { running: 1, pending: 2 },
+          total: 3,
+          active_stage: "asr",
+          current_target: "a1",
+          import_progress: null,
+          worker_running: true
+        })
+      })
+    );
     expect(await screen.findAllByText("运行中")).not.toHaveLength(0);
   });
 
@@ -123,10 +125,13 @@ describe("App container", () => {
   });
 
   it("refreshes days when a run completes (running -> idle)", async () => {
-    let statusListener: ((event: { data: string }) => void) | null = null;
+    // Migrated from the removed per-tick `status.snapshot` (full task array) to the
+    // compact `status.summary`. Intent preserved: a running -> idle transition must
+    // re-list days without a manual refresh.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
     vi.stubGlobal("EventSource", class {
       addEventListener(type: string, cb: (event: { data: string }) => void) {
-        if (type === "status.snapshot") statusListener = cb;
+        if (type === "status.summary") summaryListener = cb;
       }
       close() {}
     } as unknown as typeof EventSource);
@@ -137,18 +142,19 @@ describe("App container", () => {
       if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
       if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: runFinished ? [{ day: "2087-05-10", session_count: 1 }] : [] }));
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }));
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }));
       return new Response(JSON.stringify({}));
     });
 
     render(<App />);
-    await waitFor(() => expect(statusListener).not.toBeNull());
+    await waitFor(() => expect(summaryListener).not.toBeNull());
 
     // A run starts (pipeline becomes "running")...
-    act(() => statusListener!({ data: JSON.stringify({ tasks: [{ task_id: "t1", task_type: "asr", target_type: "audio", target_id: "a1", status: "running", attempt_count: 1, last_error: null, duration_ms: null }], worker_running: true }) }));
+    act(() => summaryListener!({ data: JSON.stringify({ status_counts: { running: 1 }, total: 1, active_stage: "asr", current_target: "a1", import_progress: null, worker_running: true }) }));
     // ...then finishes (running -> idle), which must re-list days without a manual refresh.
     runFinished = true;
-    act(() => statusListener!({ data: JSON.stringify({ tasks: [], worker_running: false }) }));
+    act(() => summaryListener!({ data: JSON.stringify({ status_counts: { succeeded: 1 }, total: 1, active_stage: null, current_target: null, import_progress: null, worker_running: false }) }));
 
     expect(await screen.findByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
   });

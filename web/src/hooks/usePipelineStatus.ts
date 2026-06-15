@@ -1,19 +1,32 @@
 import { useEffect, useState } from "react";
 import { subscribeStatus } from "../api/events";
-import { api } from "../api/client";
-import type { StatusSnapshot } from "../api/types";
+import type { ImportProgress, StatusSummary } from "../api/types";
 
-export function usePipelineStatus(): StatusSnapshot {
-  const [snapshot, setSnapshot] = useState<StatusSnapshot>({ tasks: [], worker_running: false });
+export interface PipelineStatus {
+  /** Compact live aggregate from the SSE `status.summary` event; null until the first frame. */
+  summary: StatusSummary | null;
+  worker_running: boolean;
+  import_progress?: ImportProgress | null;
+}
+
+/**
+ * Subscribe to the compact live pipeline summary. The full task list is no longer
+ * streamed every tick — components that need it (TaskList) fetch it lazily via
+ * `api.statusTasks()` when their panel opens.
+ */
+export function usePipelineStatus(): PipelineStatus {
+  const [summary, setSummary] = useState<StatusSummary | null>(null);
   useEffect(() => {
     let active = true;
-    // Seed from a one-shot GET so the UI is populated before the first SSE frame.
-    api.statusTasks().then((r) => active && setSnapshot((s) => ({ ...s, tasks: r.tasks }))).catch(() => undefined);
-    const unsubscribe = subscribeStatus((snap) => active && setSnapshot(snap));
+    const unsubscribe = subscribeStatus((s) => active && setSummary(s));
     return () => {
       active = false;
       unsubscribe();
     };
   }, []);
-  return snapshot;
+  return {
+    summary,
+    worker_running: summary?.worker_running ?? false,
+    import_progress: summary?.import_progress ?? null
+  };
 }

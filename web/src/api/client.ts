@@ -1,4 +1,4 @@
-import type { DailyLlmResult, Health, Person, ReviewStatus, TaskRow, TranscriptSession } from "./types";
+import type { DailyLlmResult, DayStatusRow, Health, Person, ReviewStatus, TaskRow, TranscriptSession } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
@@ -13,11 +13,13 @@ export const api = {
   run: () => request<{ worker_running: boolean }>("/api/pipeline/run", { method: "POST" }),
   stop: () => request<{ stop_requested: boolean }>("/api/pipeline/stop", { method: "POST" }),
   retry: (taskId: string) => request<{ task_id: string; status: string }>(`/api/pipeline/tasks/${taskId}/retry`, { method: "POST" }),
+  retryFailed: () => request<{ retried: number }>("/api/pipeline/retry-failed", { method: "POST" }),
   // status
   statusTasks: () => request<{ tasks: TaskRow[] }>("/api/status/tasks"),
   health: () => request<Health>("/api/health"),
   // transcript navigation + review
   days: () => request<{ days: Array<{ day: string; session_count: number }> }>("/api/transcripts/days"),
+  dayStatus: () => request<{ days: DayStatusRow[] }>("/api/transcripts/day-status"),
   sessionsForDay: (day: string) =>
     request<{ day: string; sessions: Array<{ session_id: string; started_at: string; segment_count: number; review_status: string }> }>(`/api/transcripts/days/${day}/sessions`),
   session: (id: string) => request<TranscriptSession>(`/api/transcripts/sessions/${id}`),

@@ -2,24 +2,27 @@ import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { t } from "../../i18n";
 import { dayLabel, reviewStatusZh, sessionListLabel } from "../../lib/format";
-import type { ReviewStatus } from "../../api/types";
+import type { DayStatusRow, ReviewStatus } from "../../api/types";
 import { Icon } from "../../components/Icon";
 
 type SessionRow = { session_id: string; started_at: string; segment_count: number; review_status: string };
 
 export function WorkspaceNav({
   days,
+  dayStatus,
   selectedDay,
   selectedSessionId,
   onSelectDay,
   onSelectSession
 }: {
   days: Array<{ day: string; session_count: number }>;
+  dayStatus?: DayStatusRow[];
   selectedDay: string | null;
   selectedSessionId?: string | null;
   onSelectDay: (day: string) => void;
   onSelectSession: (sessionId: string) => void;
 }) {
+  const statusByDay = new Map((dayStatus ?? []).map((d) => [d.day, d.status]));
   // Days are owned by App (the top-level coordinator) so import/run refreshes flow here;
   // sessions stay local since they depend on the selected day.
   const [sessions, setSessions] = useState<SessionRow[]>([]);
