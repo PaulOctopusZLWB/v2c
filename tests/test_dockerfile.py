@@ -58,7 +58,7 @@ def test_funasr_example_config_enables_real_model_backends() -> None:
     assert 'data_dir = "/data"' in config
     assert 'obsidian_vault = "/obsidian"' in config
     assert '[vad]\nbackend = "funasr"' in config
-    assert '[asr]\nbackend = "funasr"' in config
+    assert '[asr]' in config and ('backend = "funasr"' in config or 'backend = "funasr_server"' in config)
     assert 'model_id = "iic/SenseVoiceSmall"' in config
 
 

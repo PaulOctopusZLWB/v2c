@@ -13,7 +13,8 @@ max_chunk_ms = 30000
 chunk_overlap_ms = 1000
 
 [asr]
-backend = "funasr"
+backend = "funasr_server"
+device = "mps"
 language = "zh"
 model_name = "sensevoice"
 model_id = "iic/SenseVoiceSmall"
