@@ -94,9 +94,9 @@ describe("App container", () => {
       });
 
       render(<App />);
-      await vi.advanceTimersByTimeAsync(0); // flush bootstrap
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // flush bootstrap
       const afterBootstrap = daysSpy.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(5000); // one poll interval
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); // one poll interval
 
       expect(daysSpy.mock.calls.length).toBeGreaterThan(afterBootstrap);
     } finally {

@@ -12,7 +12,17 @@ export function useSegmentAudio() {
     if (!response.ok) throw new Error(`audio request failed: ${response.status}`);
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) {
-      await new Audio(api.audioUrl(segmentId)).play();
+      // No Web Audio API: play the already-fetched clip via an <audio> element instead of
+      // issuing a second request for the same URL.
+      const url = URL.createObjectURL(await response.blob());
+      const element = new Audio(url);
+      element.addEventListener("ended", () => URL.revokeObjectURL(url));
+      try {
+        await element.play();
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        throw err;
+      }
       return [];
     }
     const ctx = (ctxRef.current ??= new Ctx());
