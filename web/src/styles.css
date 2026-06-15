@@ -76,6 +76,9 @@
 @media (max-width: 700px) {
   .workbench {
     grid-template-columns: 1fr;
+    /* Give the flexible 1fr track to the transcript (center), not the nav rail; without
+       an explicit rows list the base `auto 1fr` would balloon the left rail to fill 100vh. */
+    grid-template-rows: auto auto 1fr auto;
     grid-template-areas:
       "header"
       "left"
