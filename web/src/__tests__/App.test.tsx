@@ -72,6 +72,40 @@ describe("App container", () => {
     expect(await screen.findAllByText("运行中")).not.toHaveLength(0);
   });
 
+  it("shows per-stage breakdown, ETA, and task count from the summary without opening the task list", async () => {
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
+
+    render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { running: 200, succeeded: 1500 },
+          total: 1700,
+          stage_counts: { asr: { done: 1200, total: 1500 }, summarize_session: { done: 0, total: 200 } },
+          eta_seconds: 300,
+          active_stage: "asr",
+          current_target: "chk_1",
+          import_progress: null,
+          worker_running: true
+        })
+      })
+    );
+
+    // The TaskList panel is never opened, so the lazy task array stays empty — these must
+    // come from the compact summary.
+    expect(await screen.findByText("1200/1500")).toBeInTheDocument(); // asr stage breakdown
+    expect(screen.getByText(/剩余约/)).toBeInTheDocument(); // ETA
+    expect(screen.getByText("1700")).toBeInTheDocument(); // RunInspector count == summary total
+  });
+
   it("shows an actionable backend error when bootstrap API calls fail", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(new Response("broken", { status: 500 }));
 

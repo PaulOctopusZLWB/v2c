@@ -8,7 +8,8 @@ import { Icon } from "./Icon";
 // Manual virtualization constants — no new dependency. We render a bounded window of
 // rows around the current scroll offset plus a small overscan, with spacer divs above
 // and below to preserve the scrollbar geometry of the full list.
-const ROW_HEIGHT = 64; // px, approximate; only needs to be a stable estimate
+const ROW_HEIGHT = 88; // px; fixed so virtualization geometry is exact — sized to fit a
+// failed row (type+badge+retry, meta, and a 2-line clamped error) so content never overlaps.
 const VIEWPORT_ROWS = 12; // visible rows in the scroll area
 const OVERSCAN = 6; // extra rows above/below the viewport
 const WINDOW = VIEWPORT_ROWS + OVERSCAN * 2; // total rows rendered at once (<= 60 DOM rows)
@@ -43,7 +44,7 @@ function TaskRowView({ task, onRetry }: { task: TaskRow; onRetry: (taskId: strin
       <span className="task-meta num">
         <span>{task.target_id}</span> · attempt <span>{task.attempt_count}</span>
       </span>
-      {task.last_error ? <span className="task-error">{task.last_error}</span> : null}
+      {task.last_error ? <span className="task-error" title={task.last_error}>{task.last_error}</span> : null}
     </div>
   );
 }

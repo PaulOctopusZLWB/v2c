@@ -117,6 +117,10 @@ def test_events_status_summary_has_compact_shape(tmp_path: Path) -> None:
     assert "status_counts" in summary_data
     assert "total" in summary_data
     assert "import_progress" in summary_data
+    # Per-stage breakdown + ETA travel in the compact summary so the header doesn't need
+    # the full task list.
+    assert "stage_counts" in summary_data
+    assert "eta_seconds" in summary_data
     # Must NOT be a full tasks dump — no 'tasks' key in the compact payload.
     assert "tasks" not in summary_data
 

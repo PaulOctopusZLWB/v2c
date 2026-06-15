@@ -55,6 +55,8 @@ export interface StatusSnapshot {
 export interface StatusSummary {
   status_counts: Record<string, number>;
   total: number;
+  stage_counts?: Record<string, { done: number; total: number }>;
+  eta_seconds?: number | null;
   active_stage: string | null;
   current_target: string | null;
   import_progress?: ImportProgress | null;

@@ -103,6 +103,20 @@ async def events_stream(request: Request) -> StreamingResponse:
             from collections import Counter
             status_counts = dict(Counter(str(r["status"]) for r in rows))
             total = len(rows)
+            # Per-stage done/total + an ETA, so the always-visible header can show the
+            # breakdown and remaining time WITHOUT fetching the full task list. Kept tiny
+            # (a few task_type buckets), so the stream stays compact.
+            _done_statuses = {"succeeded", "failed_terminal", "failed"}
+            stage_counts: dict[str, dict[str, int]] = {}
+            for r in rows:
+                bucket = stage_counts.setdefault(str(r["task_type"]), {"done": 0, "total": 0})
+                bucket["total"] += 1
+                if str(r["status"]) in _done_statuses:
+                    bucket["done"] += 1
+            durations = [int(r["duration_ms"]) for r in rows if r["duration_ms"] is not None]
+            done_total = sum(b["done"] for b in stage_counts.values())
+            remaining = total - done_total
+            eta_seconds = round(remaining * (sum(durations) / len(durations)) / 1000.0) if durations and remaining > 0 else None
             # Determine the active stage and current target from the first running/claimed task.
             active_stage: str | None = None
             current_target: str | None = None
@@ -124,6 +138,8 @@ async def events_stream(request: Request) -> StreamingResponse:
                 payload = {
                     "status_counts": status_counts,
                     "total": total,
+                    "stage_counts": stage_counts,
+                    "eta_seconds": eta_seconds,
                     "active_stage": active_stage,
                     "current_target": current_target,
                     "import_progress": import_progress,

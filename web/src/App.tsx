@@ -19,36 +19,20 @@ import { t } from "./i18n";
 import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, TaskRow, TranscriptSession } from "./api/types";
 
 const DEVICE_POLL_MS = 5000;
-const TERMINAL = ["succeeded", "failed_terminal", "failed_retryable", "failed"];
 const ACTIVE_STATUSES = ["pending", "claimed", "running"];
 
-/** Per-task_type done/total breakdown for the Progress bar — needs the full task list. */
-function computeStageBreakdown(tasks: TaskRow[]): Array<{ label: string; done: number; total: number }> {
-  if (tasks.length === 0) return [];
-  const byType = new Map<string, { done: number; total: number }>();
-  for (const tk of tasks) {
-    const entry = byType.get(tk.task_type) ?? { done: 0, total: 0 };
-    entry.total += 1;
-    if (TERMINAL.includes(tk.status)) entry.done += 1;
-    byType.set(tk.task_type, entry);
-  }
+/** Per-task_type done/total breakdown for the Progress bar, from the compact SSE summary
+ *  (so the always-visible header shows it without fetching the full task list). */
+function stageBreakdownFromSummary(
+  stageCounts: Record<string, { done: number; total: number }> | undefined
+): Array<{ label: string; done: number; total: number }> {
+  if (!stageCounts) return [];
   // Only show stages that still have unfinished work, ordered by the pipeline DAG.
   const order = ["vad", "asr", "session_derive", "summarize_session", "daily_generate", "obsidian_publish", "archive"];
-  return [...byType.entries()]
+  return Object.entries(stageCounts)
     .filter(([, c]) => c.done < c.total)
     .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
     .map(([type, c]) => ({ label: taskTypeZh(type), done: c.done, total: c.total }));
-}
-
-/** ETA = remaining * avg(succeeded duration). Returns null when no durations are known. */
-function computeEtaSeconds(tasks: TaskRow[]): number | null {
-  if (tasks.length === 0) return null;
-  const succeeded = tasks.filter((tk) => tk.status === "succeeded" && tk.duration_ms != null);
-  if (succeeded.length === 0) return null;
-  const avgMs = succeeded.reduce((s, tk) => s + (tk.duration_ms ?? 0), 0) / succeeded.length;
-  const remaining = tasks.filter((tk) => !TERMINAL.includes(tk.status)).length;
-  if (remaining === 0) return null;
-  return Math.round((remaining * avgMs) / 1000);
 }
 
 export function App() {
@@ -234,9 +218,9 @@ export function App() {
       : STAGES.find((s) => s.id === current)?.label;
 
   // Per-stage breakdown + ETA need the full task list (durations live there, not in the
-  // summary). Compute them only when the TaskList panel is open and has fetched rows.
-  const stageBreakdown = computeStageBreakdown(tasks);
-  const etaSeconds = computeEtaSeconds(tasks);
+  // summary), so they show in the always-visible header without the heavy task fetch.
+  const stageBreakdown = stageBreakdownFromSummary(summary?.stage_counts);
+  const etaSeconds = summary?.eta_seconds ?? null;
   const failedCount = tasks.filter((tk) => tk.status.startsWith("failed")).length;
 
   // Map a pipeline stage to the DOM id of the panel that owns it, then scroll there.
@@ -367,7 +351,7 @@ export function App() {
         <div id="panel-run">
           <RunInspector
             workerRunning={pipelineRunning}
-            taskCount={tasks.length}
+            taskCount={summaryTotal}
             gateOn={gateOn}
             onRun={guard(() => api.run())}
             onStop={guard(() => api.stop())}
