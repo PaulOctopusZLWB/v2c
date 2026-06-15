@@ -237,7 +237,8 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
         rows = fetch_all(
             conn,
             """
-            select af.audio_file_id, af.local_raw_path, ar.archive_path, ar.sha256
+            select af.audio_file_id, af.local_raw_path, ar.archive_path, ar.sha256,
+                   ar.status as archive_status, ar.updated_at as archive_updated_at
             from audio_files af
             join archive_records ar
               on ar.target_type = 'audio_file'
@@ -253,13 +254,21 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
         removed = 0
         now = datetime.now(timezone.utc).isoformat()
         for row in rows:
+            local_path = Path(row["local_raw_path"])
+            # A row already parked at cleanup_pending whose local file has not changed since
+            # we marked it is still in the same guarded state; skip it without re-hashing the
+            # whole file every run. A genuine restore/repair bumps the file's mtime and
+            # re-enters full evaluation (so transient mismatches still recover).
+            if str(row["archive_status"]) == "cleanup_pending" and not _local_modified_after(
+                local_path, row["archive_updated_at"]
+            ):
+                continue
             archive_result = archive.verify_file(
                 archive_path=Path(row["archive_path"]),
                 expected_sha256=str(row["sha256"]),
             )
             if not archive_result.verified:
                 continue
-            local_path = Path(row["local_raw_path"])
             # Fail-closed before deleting the only local copy (§13.2): never unlink a path
             # outside the raw audio store, and never unlink raw whose local bytes no longer
             # match the verified archive hash (corruption / wrong row).
@@ -302,6 +311,21 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
         return CleanupArchivedAudioResult(files_removed=removed, files_pending=int(pending_rows[0]["count"]))
     finally:
         conn.close()
+
+
+def _local_modified_after(path: Path, iso_timestamp: object) -> bool:
+    # True if the local file changed after iso_timestamp (worth re-evaluating a parked row);
+    # False if untouched, so cleanup can skip the repeated full re-hash. Unknown/unreadable
+    # cases default to True so we never silently stop reconsidering a row.
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return True
+    try:
+        marked = datetime.fromisoformat(str(iso_timestamp)).timestamp()
+    except (TypeError, ValueError):
+        return True
+    return mtime > marked
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:

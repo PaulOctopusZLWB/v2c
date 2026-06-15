@@ -708,3 +708,47 @@ def test_cleanup_archived_audio_recovers_after_hash_mismatch_clears(tmp_path: Pa
     )
     assert second.files_removed == 1
     assert not raw.exists()
+
+
+class _CountingArchive:
+    def __init__(self, inner: LocalFilesystemArchiveAdapter) -> None:
+        self._inner = inner
+        self.verify_calls = 0
+
+    def archive_file(self, **kwargs: object) -> ArchiveResult:
+        return self._inner.archive_file(**kwargs)  # type: ignore[arg-type]
+
+    def verify_file(self, *, archive_path: Path, expected_sha256: str) -> ArchiveResult:
+        self.verify_calls += 1
+        return self._inner.verify_file(archive_path=archive_path, expected_sha256=expected_sha256)
+
+
+def test_cleanup_archived_audio_does_not_rehash_unchanged_mismatch_each_run(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas"
+    archive_root.mkdir()
+    raw = _write_raw(config, "stuck.wav", b"changed local bytes")
+    archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "stuck.wav"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(b"archived bytes")
+    archive_sha = _sha256(archive_path)
+    _insert_audio(config.database_path, raw, archive_sha, status="cleanup_eligible", audio_file_id="aud_stuck")
+    _insert_archive_record(
+        config.database_path,
+        audio_file_id="aud_stuck",
+        source_path=raw,
+        archive_path=archive_path,
+        sha256=archive_sha,
+        archived_at="2000-01-01T00:00:00+00:00",
+    )
+    counting = _CountingArchive(LocalFilesystemArchiveAdapter(root=archive_root))
+
+    first = cleanup_archived_audio(config=config, archive=counting, archived_before=datetime.now(timezone.utc))
+    calls_after_first = counting.verify_calls
+    # The local file is untouched -> the parked cleanup_pending row must be skipped, not re-hashed.
+    second = cleanup_archived_audio(config=config, archive=counting, archived_before=datetime.now(timezone.utc))
+
+    assert first.files_removed == 0
+    assert second.files_removed == 0
+    assert raw.exists()
+    assert counting.verify_calls == calls_after_first  # no repeat hashing of the unchanged row
