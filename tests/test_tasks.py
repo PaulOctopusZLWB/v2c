@@ -489,3 +489,22 @@ def test_reclaim_does_not_resurrect_a_succeeded_task(tmp_path) -> None:
     finally:
         conn.close()
     assert status == "succeeded"
+
+
+def test_retry_task_resets_attempts_and_available_at_for_immediate_claim(tmp_path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        task_retry_backoff_seconds=3600,
+    )
+    created = enqueue_task(config=config, task_type="vad", target_type="audio_file", target_id="aud_retry")
+    claimed = claim_next_task(config=config, task_type="vad", run_id="run_fail")
+    assert claimed is not None
+    fail_task(config=config, task_id=created.task_id, error="model busy", terminal=False, run_id="run_fail")
+
+    retry_task(config=config, task_id=created.task_id)
+    reclaimed = claim_next_task(config=config, task_type="vad", run_id="run_retry")
+
+    assert reclaimed is not None
+    assert reclaimed.task_id == created.task_id
+    assert reclaimed.attempt_count == 1

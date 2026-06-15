@@ -246,10 +246,16 @@ def retry_task(*, config: AppConfig, task_id: str) -> RetryTaskResult:
         row = conn.execute("select task_id from tasks where task_id = ?", (task_id,)).fetchone()
         if row is None:
             raise ValueError(f"task not found: {task_id}")
+        now = _now()
+        # Reset retry/attempt counters and clear any backoff window so a manual retry is
+        # claimable immediately, not deferred behind the exponential backoff from fail_task.
         conn.execute(
             """
             update tasks
             set status = 'pending',
+                retry_count = 0,
+                attempt_count = 0,
+                available_at = ?,
                 claimed_by_run_id = null,
                 claimed_at = null,
                 lease_expires_at = null,
@@ -259,7 +265,7 @@ def retry_task(*, config: AppConfig, task_id: str) -> RetryTaskResult:
                 last_error = null
             where task_id = ?
             """,
-            (_now(), task_id),
+            (now, now, task_id),
         )
         conn.commit()
         return RetryTaskResult(task_id=task_id, status="pending")
