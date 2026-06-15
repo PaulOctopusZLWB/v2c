@@ -31,14 +31,14 @@ export function LlmResultPanel({
         {t.viewpoint.confirmInObsidian} <Icon name="link" />
       </p>
       {result.memory_candidates.map((c) => (
-        <div className="viewpoint" key={c.candidate_id} onClick={() => onHighlightEvidence?.(c.candidate_id)}>
-          <div className="claim">
+        <button className="viewpoint" type="button" key={c.candidate_id} onClick={() => onHighlightEvidence?.(c.candidate_id)}>
+          <span className="claim">
             <Icon name="viewpoint" /> {c.edited_claim ?? c.candidate_claim}
-          </div>
-          <div className="meta num">
+          </span>
+          <span className="meta num">
             {c.claim_type} · {Math.round(c.confidence * 100)}% · {statusZh(c.status)}
-          </div>
-        </div>
+          </span>
+        </button>
       ))}
     </section>
   );

@@ -6,13 +6,17 @@ export function useSegmentAudio() {
   const [playing, setPlaying] = useState<string | null>(null);
 
   async function play(segmentId: string): Promise<number[]> {
+    // Fetch (and validate) the clip first so a missing/failed request rejects regardless
+    // of whether the Web Audio API is available, letting callers surface the failure.
+    const response = await fetch(api.audioUrl(segmentId));
+    if (!response.ok) throw new Error(`audio request failed: ${response.status}`);
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) {
-      new Audio(api.audioUrl(segmentId)).play().catch(() => undefined);
+      await new Audio(api.audioUrl(segmentId)).play();
       return [];
     }
     const ctx = (ctxRef.current ??= new Ctx());
-    const buf = await fetch(api.audioUrl(segmentId)).then((r) => r.arrayBuffer());
+    const buf = await response.arrayBuffer();
     const audio = await ctx.decodeAudioData(buf);
     const src = ctx.createBufferSource();
     src.buffer = audio;

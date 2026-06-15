@@ -35,9 +35,12 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
   return (
     <div className="toasts" role="status" aria-live="polite">
       {toasts.map((toast) => (
-        <div className="toast" key={toast.id} onClick={() => onDismiss(toast.id)}>
+        <div className="toast" key={toast.id} role="alert">
           <div className="t-title">{toast.title}</div>
           {toast.message ? <div className="dim">{toast.message}</div> : null}
+          <button className="icon-btn ghost" type="button" aria-label="关闭通知" onClick={() => onDismiss(toast.id)}>
+            ×
+          </button>
         </div>
       ))}
     </div>

@@ -21,7 +21,7 @@ function restingWave(seed: string): number[] {
 }
 
 export function SegmentRow({
-  segment, persons, highlighted, isEvidence, onReview, onOverride, onPlay
+  segment, persons, highlighted, isEvidence, onReview, onOverride, onPlay, onPlaybackError
 }: {
   segment: TranscriptSegment;
   persons: Person[];
@@ -30,6 +30,7 @@ export function SegmentRow({
   onReview: (id: string, status: ReviewStatus) => Promise<unknown> | void;
   onOverride: (id: string, personId: string) => Promise<unknown> | void;
   onPlay: (id: string) => void;
+  onPlaybackError?: (message: string) => void;
 }) {
   // Track which review status is in flight so only the clicked button shows its spinner.
   const [reviewing, setReviewing] = useState<ReviewStatus | null>(null);
@@ -50,7 +51,7 @@ export function SegmentRow({
     void audio
       .play(segment.segment_id)
       .then((p) => { if (p.length) setPeaks(normalize(p)); })
-      .catch(() => undefined);
+      .catch((err) => onPlaybackError?.(err instanceof Error ? err.message : "audio playback failed"));
   };
 
   const reviewBtn = (status: ReviewStatus, icon: string, label: string) => {

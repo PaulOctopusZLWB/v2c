@@ -69,6 +69,36 @@ describe("App container", () => {
     expect(await screen.findAllByText("运行中")).not.toHaveLength(0);
   });
 
+  it("shows an actionable backend error when bootstrap API calls fail", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(new Response("broken", { status: 500 }));
+
+    render(<App />);
+
+    expect(await screen.findByText(/后端或 API 不可用/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /重试/ })).toBeInTheDocument();
+  });
+
+  it("refreshes days after import and run", async () => {
+    // Days are empty until an import runs; after import the new day must surface without
+    // a manual refresh. Keyed off whether /api/pipeline/import was called (order-robust).
+    let imported = false;
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
+      if (url === "/api/devices") return new Response(JSON.stringify({ sources: [{ kind: "known", device_id: "sample", label: "DJI Mic 3", root_path: "sample_data", audio_count: 1 }] }));
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: imported ? [{ day: "2087-05-10", session_count: 1 }] : [] }));
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }));
+      if (url === "/api/pipeline/import") { imported = true; return new Response(JSON.stringify({ started: true, importing: true })); }
+      if (url === "/api/pipeline/run") return new Response(JSON.stringify({ worker_running: true }));
+      return new Response(JSON.stringify({}));
+    });
+
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "导入" }));
+
+    expect(await screen.findByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
+  });
+
   it("navigates day -> session and accepts a segment", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });

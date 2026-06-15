@@ -19,4 +19,21 @@ describe("LlmResultPanel", () => {
     await userEvent.click(screen.getByText(/Paul 倾向数据不出本机/));
     expect(onHighlight).toHaveBeenCalledWith("c1");
   });
+
+  it("renders memory candidates as keyboard-reachable buttons", async () => {
+    const onHighlightEvidence = vi.fn();
+    render(
+      <LlmResultPanel
+        result={{ day: "2087-05-10", context: null,
+          memory_candidates: [{ candidate_id: "c1", candidate_claim: "继续完善本地上下文系统", edited_claim: null, claim_type: "task", confidence: 0.7, status: "pending", evidence_segment_ids: ["seg_1"] }] }}
+        onHighlightEvidence={onHighlightEvidence}
+      />
+    );
+
+    const candidate = screen.getByRole("button", { name: /继续完善本地上下文系统/ });
+    candidate.focus();
+    expect(candidate).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(onHighlightEvidence).toHaveBeenCalledWith("c1");
+  });
 });

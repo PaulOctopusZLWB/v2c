@@ -8,22 +8,22 @@ import { Icon } from "../../components/Icon";
 type SessionRow = { session_id: string; started_at: string; segment_count: number; review_status: string };
 
 export function WorkspaceNav({
+  days,
   selectedDay,
   selectedSessionId,
   onSelectDay,
   onSelectSession
 }: {
+  days: Array<{ day: string; session_count: number }>;
   selectedDay: string | null;
   selectedSessionId?: string | null;
   onSelectDay: (day: string) => void;
   onSelectSession: (sessionId: string) => void;
 }) {
-  const [days, setDays] = useState<Array<{ day: string; session_count: number }>>([]);
+  // Days are owned by App (the top-level coordinator) so import/run refreshes flow here;
+  // sessions stay local since they depend on the selected day.
   const [sessions, setSessions] = useState<SessionRow[]>([]);
 
-  useEffect(() => {
-    api.days().then((r) => setDays(r.days ?? [])).catch(() => undefined);
-  }, []);
   useEffect(() => {
     if (!selectedDay) {
       setSessions([]);

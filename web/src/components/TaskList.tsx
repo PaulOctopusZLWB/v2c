@@ -31,6 +31,10 @@ function TaskRowView({ task, onRetry }: { task: TaskRow; onRetry: (taskId: strin
           </button>
         ) : null}
       </span>
+      <span className="task-meta num">
+        <span>{task.target_id}</span> · attempt <span>{task.attempt_count}</span>
+      </span>
+      {task.last_error ? <span className="task-error">{task.last_error}</span> : null}
     </div>
   );
 }

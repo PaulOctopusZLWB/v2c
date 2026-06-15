@@ -10,7 +10,8 @@ export function TranscriptReviewPanel({
   evidenceSegmentIds,
   onReview,
   onOverride,
-  onPlay
+  onPlay,
+  onPlaybackError
 }: {
   session: TranscriptSession;
   persons: Person[];
@@ -19,6 +20,7 @@ export function TranscriptReviewPanel({
   onReview: (segmentId: string, status: ReviewStatus) => void;
   onOverride: (segmentId: string, personId: string) => void;
   onPlay: (segmentId: string) => void;
+  onPlaybackError?: (message: string) => void;
 }) {
   const head = sessionHeader(session.segments);
   return (
@@ -41,6 +43,7 @@ export function TranscriptReviewPanel({
             onReview={onReview}
             onOverride={onOverride}
             onPlay={onPlay}
+            onPlaybackError={onPlaybackError}
           />
         ))}
       </div>

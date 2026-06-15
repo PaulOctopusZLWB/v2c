@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api/client";
 import { PipelineRail } from "./components/PipelineRail";
 import { Progress } from "./components/Progress";
@@ -33,6 +33,8 @@ export function App() {
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [focusedStage, setFocusedStage] = useState<Stage | null>(null);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapped, setBootstrapped] = useState(false);
 
   // Wrap any async action so a rejected api call surfaces a dismissable error toast.
   function guard<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
@@ -53,11 +55,34 @@ export function App() {
     }
   }
 
+  async function refreshDays() {
+    const result = await api.days();
+    setDays(result.days ?? []);
+  }
+
+  // Load the initial workspace state. If the backend/API is unreachable, surface an
+  // actionable error + retry instead of silently rendering an empty workspace.
+  async function refreshBootstrap() {
+    setBootstrapError(null);
+    try {
+      const [personsResult, healthResult, daysResult, devicesResult] = await Promise.all([
+        api.persons(),
+        api.health(),
+        api.days(),
+        api.devices()
+      ]);
+      setPersons(personsResult.persons ?? []);
+      setHealth(healthResult);
+      setDays(daysResult.days ?? []);
+      setSources(devicesResult.sources ?? []);
+      setBootstrapped(true);
+    } catch (err) {
+      setBootstrapError(err instanceof Error ? err.message : "API bootstrap failed");
+    }
+  }
+
   useEffect(() => {
-    api.persons().then((r) => setPersons(r.persons ?? [])).catch(() => undefined);
-    api.health().then((h) => setHealth(h)).catch(() => undefined);
-    api.days().then((r) => setDays(r.days ?? [])).catch(() => undefined);
-    void refreshDevices();
+    void refreshBootstrap();
     const timer = setInterval(() => void refreshDevices(), DEVICE_POLL_MS);
     return () => clearInterval(timer);
   }, []);
@@ -66,6 +91,7 @@ export function App() {
     if (!root) return;
     await api.importDir(root);
     await api.run(); // import only enqueues; explicitly start the background worker
+    await refreshDays(); // a fresh import yields a new day; reflect it immediately
   }
 
   async function selectDay(day: string) {
@@ -108,6 +134,16 @@ export function App() {
   // The pipeline is "running" if importing, the worker is alive, OR a task is mid-flight.
   const pipelineRunning = importing || worker_running || tasks.some((tk) => tk.status === "running");
 
+  // Re-list days whenever the pipeline finishes (running -> idle), so a completed run
+  // surfaces its new day without a manual refresh.
+  const wasPipelineRunning = useRef(false);
+  useEffect(() => {
+    if (wasPipelineRunning.current && !pipelineRunning) {
+      void refreshDays().catch((err) => push(t.error.title, err instanceof Error ? err.message : undefined));
+    }
+    wasPipelineRunning.current = pipelineRunning;
+  }, [pipelineRunning]);
+
   // Live progress: import phase first (copying files), then transcription/processing
   // from the SSE-fed task list. At idle / 100% the bar disappears.
   const inFlight = worker_running || tasks.some((tk) => !TERMINAL.includes(tk.status));
@@ -134,6 +170,18 @@ export function App() {
   }
 
   function renderCenter() {
+    if (bootstrapError && !bootstrapped) {
+      return (
+        <div className="empty error-state">
+          <Icon name="run" className="empty-icon" />
+          <h3>后端或 API 不可用</h3>
+          <p>{bootstrapError}</p>
+          <button className="primary" onClick={() => void refreshBootstrap()}>
+            <Icon name="refresh" /> 重试
+          </button>
+        </div>
+      );
+    }
     if (session) {
       return (
         <>
@@ -145,6 +193,7 @@ export function App() {
             onReview={guard(async (id, status) => { await api.reviewSegment(id, status); await reloadSession(); })}
             onOverride={guard(async (id, personId) => { await api.overridePerson(id, personId); await reloadSession(); })}
             onPlay={() => undefined}
+            onPlaybackError={(message) => push("音频播放失败", message)}
           />
           <SpeakerPanel
             speakers={speakers}
@@ -199,12 +248,13 @@ export function App() {
           <DevicePanel sources={sources ?? []} onImport={guard(handleImport)} onRefresh={() => void refreshDevices()} />
         </div>
         <WorkspaceNav
+          days={days}
           selectedDay={selectedDay}
           selectedSessionId={selectedSessionId}
           onSelectDay={(d) => void guard(selectDay)(d)}
           onSelectSession={(id) => void guard(selectSession)(id)}
         />
-        <TaskList tasks={tasks} onRetry={guard((taskId: string) => api.retry(taskId))} />
+        <TaskList tasks={tasks} onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); })} />
       </aside>
 
       <section className="center-panel" id="panel-transcript">

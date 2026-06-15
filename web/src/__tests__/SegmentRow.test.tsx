@@ -18,4 +18,24 @@ describe("SegmentRow", () => {
     await userEvent.click(screen.getByRole("button", { name: "播放" }));
     expect(onPlay).toHaveBeenCalledWith("seg_1");
   });
+
+  it("reports playback failures", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("missing", { status: 404 }) as Response);
+    const onPlaybackError = vi.fn();
+    render(
+      <SegmentRow
+        segment={seg}
+        persons={[]}
+        highlighted={false}
+        onReview={vi.fn()}
+        onOverride={vi.fn()}
+        onPlay={vi.fn()}
+        onPlaybackError={onPlaybackError}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /播放/ }));
+
+    expect(onPlaybackError).toHaveBeenCalledWith(expect.stringContaining("404"));
+  });
 });
