@@ -419,7 +419,7 @@ def preprocess(
     resolved_vad_backend = vad_backend or config.vad_backend
     vad = _build_vad(
         vad_backend=resolved_vad_backend,
-        vad_command=vad_command,
+        vad_command=vad_command or config.vad_command,
         vad_threshold=vad_threshold if vad_threshold is not None else config.vad_threshold,
         merge_gap_ms=config.merge_gap_ms,
         min_speech_ms=config.min_speech_ms,
@@ -1505,7 +1505,7 @@ def _process_run(
         return
     vad = _build_vad(
         vad_backend=vad_backend or config.vad_backend,
-        vad_command=vad_command,
+        vad_command=vad_command or config.vad_command,
         vad_threshold=config.vad_threshold if vad_threshold is None else vad_threshold,
         merge_gap_ms=config.merge_gap_ms,
         min_speech_ms=config.min_speech_ms,

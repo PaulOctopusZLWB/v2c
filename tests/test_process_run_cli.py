@@ -308,3 +308,30 @@ def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000
             sample = int(10_000 * math.sin(2 * math.pi * 440 * index / sample_rate))
             frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
         wav.writeframes(bytes(frames))
+
+
+def test_process_run_uses_configured_vad_command(tmp_path: Path) -> None:
+    # Scheduled launchd process/daily jobs invoke `pcn process-run --config <toml>` only;
+    # a config-driven command VAD must be honored, not rejected with "vad_command is required".
+    config_path = tmp_path / "local.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[paths]",
+                f'data_dir = "{tmp_path / "data"}"',
+                f'obsidian_vault = "{tmp_path / "vault"}"',
+                "[vad]",
+                'backend = "command"',
+                'command = "python3 scripts/my_vad.py"',
+                "[asr]",
+                'backend = "mock"',
+                "[llm]",
+                'backend = "mock"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["process-run", "--config", str(config_path)])
+
+    assert result.exit_code == 0, result.output  # was exit 2: BadParameter "vad_command is required"
