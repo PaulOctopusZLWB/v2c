@@ -154,7 +154,9 @@ input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 
 .wave.playing i { background: var(--accent); }
 
 /* ---- viewpoint ---- */
-.viewpoint { padding: var(--s4); border: 1px solid var(--border); border-radius: var(--r2); margin: var(--s3) 0; cursor: pointer; background: var(--elev); transition: border-color .12s, box-shadow .12s; }
+/* Viewpoint cards are <button>s for keyboard reach; override the base inline-flex button
+   layout so each card is a full-width block with claim stacked above its metadata. */
+.viewpoint { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; padding: var(--s4); border: 1px solid var(--border); border-radius: var(--r2); margin: var(--s3) 0; cursor: pointer; background: var(--elev); transition: border-color .12s, box-shadow .12s; }
 .viewpoint:hover { border-color: var(--accent); box-shadow: 0 0 18px -10px var(--accent-glow); }
 .viewpoint .claim { font-size: 13.5px; line-height: 1.55; }
 .viewpoint .meta { font-size: 11px; color: var(--text-dim); margin-top: var(--s2); }

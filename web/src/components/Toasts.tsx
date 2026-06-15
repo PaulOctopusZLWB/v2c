@@ -33,7 +33,9 @@ export function useToasts() {
 export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
   if (toasts.length === 0) return null;
   return (
-    <div className="toasts" role="status" aria-live="polite">
+    // Each toast is its own role="alert" live region; the container is a plain wrapper so
+    // we don't nest an assertive alert inside a polite status region (ARIA anti-pattern).
+    <div className="toasts">
       {toasts.map((toast) => (
         <div className="toast" key={toast.id} role="alert">
           <div className="t-title">{toast.title}</div>

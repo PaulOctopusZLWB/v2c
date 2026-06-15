@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -95,6 +95,37 @@ describe("App container", () => {
 
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: "导入" }));
+
+    expect(await screen.findByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
+  });
+
+  it("refreshes days when a run completes (running -> idle)", async () => {
+    let statusListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.snapshot") statusListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+
+    let runFinished = false;
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
+      if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: runFinished ? [{ day: "2087-05-10", session_count: 1 }] : [] }));
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }));
+      return new Response(JSON.stringify({}));
+    });
+
+    render(<App />);
+    await waitFor(() => expect(statusListener).not.toBeNull());
+
+    // A run starts (pipeline becomes "running")...
+    act(() => statusListener!({ data: JSON.stringify({ tasks: [{ task_id: "t1", task_type: "asr", target_type: "audio", target_id: "a1", status: "running", attempt_count: 1, last_error: null, duration_ms: null }], worker_running: true }) }));
+    // ...then finishes (running -> idle), which must re-list days without a manual refresh.
+    runFinished = true;
+    act(() => statusListener!({ data: JSON.stringify({ tasks: [], worker_running: false }) }));
 
     expect(await screen.findByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
   });
