@@ -80,6 +80,24 @@ describe("App container", () => {
     expect(screen.getByRole("button", { name: /重试/ })).toBeInTheDocument();
   });
 
+  it("does not poll while the bootstrap error screen is shown", async () => {
+    vi.useFakeTimers();
+    try {
+      const daysSpy = vi.spyOn(api, "days");
+      (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(new Response("broken", { status: 500 }));
+
+      render(<App />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // bootstrap fails
+      const afterBootstrap = daysSpy.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); // poll tick
+
+      // The poll is gated on bootstrap success, so it must not fill the rail behind the error.
+      expect(daysSpy.mock.calls.length).toBe(afterBootstrap);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("re-lists days on the poll interval as a backstop", async () => {
     vi.useFakeTimers();
     try {

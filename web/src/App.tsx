@@ -35,6 +35,12 @@ export function App() {
   const [focusedStage, setFocusedStage] = useState<Stage | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
+  // Mirror bootstrap state into a ref so the mount-time poll interval reads the latest value
+  // (its closure captures the initial state).
+  const bootstrappedRef = useRef(false);
+  useEffect(() => {
+    bootstrappedRef.current = bootstrapped;
+  }, [bootstrapped]);
 
   // Wrap any async action so a rejected api call surfaces a dismissable error toast.
   function guard<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
@@ -84,6 +90,9 @@ export function App() {
   useEffect(() => {
     void refreshBootstrap();
     const timer = setInterval(() => {
+      // Don't poll while the bootstrap-error screen is up: refreshBootstrap (重试) is the
+      // sole recovery path, so the rail can't fill with days while the center stays errored.
+      if (!bootstrappedRef.current) return;
       void refreshDevices();
       // Backstop the running -> idle day refresh: if that single SSE transition is missed
       // (dropped/coalesced frame), the poll still surfaces a freshly produced day.
