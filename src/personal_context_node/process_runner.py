@@ -390,7 +390,7 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
     rows = fetch_all(
         conn,
         """
-        select ac.audio_file_id, substr(af.recorded_at, 1, 10) as date_key
+        select substr(af.recorded_at, 1, 10) as date_key
         from audio_chunks ac
         join audio_files af on af.audio_file_id = ac.audio_file_id
         where ac.chunk_id = ?
@@ -399,18 +399,24 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
     )
     if not rows:
         return []
-    audio_file_id = str(rows[0]["audio_file_id"])
-    # A chunk blocks session_derive only while its ASR work is still live; a chunk whose
-    # asr task is failed_terminal or retry-exhausted is "done (failed)" and must not
-    # block the file's sessions forever (liveness — mirrors the daily_generate fan-in).
+    date_key = str(rows[0]["date_key"])
+    # session_derive (and everything downstream of it — summarize_session, daily_generate,
+    # obsidian_publish) consumes the WHOLE day: derive_sessions_for_day rebuilds from every
+    # same-day file's segments. So the fan-in must wait until every chunk of EVERY audio file
+    # recorded on this day has finished ASR — not just the triggering chunk's own file. Gating
+    # per-file caused a premature, partial derive+publish for the first-completed recording on a
+    # multi-recording day (the common case — recorded_at carries HHMMSS), then a redundant full
+    # re-derive/re-summarize/re-publish once the later recordings transcribed. A chunk whose asr
+    # is failed_terminal or retry-exhausted is "done (failed)" and must not block forever.
     pending = fetch_all(
         conn,
         """
         select ac.chunk_id
         from audio_chunks ac
+        join audio_files af on af.audio_file_id = ac.audio_file_id
         left join tasks t
           on t.task_type = 'asr' and t.target_type = 'audio_chunk' and t.target_id = ac.chunk_id
-        where ac.audio_file_id = ?
+        where substr(af.recorded_at, 1, 10) = ?
           and ac.status != 'transcribed'
           and (
             t.status is null
@@ -420,11 +426,11 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
             )
           )
         """,
-        (audio_file_id,),
+        (date_key,),
     )
     if pending:
         return []
-    return sorted({str(row["date_key"]) for row in rows})
+    return [date_key]
 
 
 def _session_ids_for_day(*, config: AppConfig, day: str) -> list[str]:
