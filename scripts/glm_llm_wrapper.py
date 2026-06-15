@@ -63,6 +63,13 @@ def build_daily_messages(payload: dict) -> list[dict]:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+def _as_list(value: object) -> list:
+    # GLM (json_object mode) guarantees parseable JSON but not the requested array shape — it may
+    # collapse a one-element list to a bare object or omit the field. Coerce anything non-list to
+    # an empty list so a malformed shape drops to "no items" instead of crashing the whole task.
+    return value if isinstance(value, list) else []
+
+
 def _conf(value: object) -> float:
     # GLM may return a non-numeric confidence ("high", "0.9 (high)", null); coerce defensively
     # and clamp to [0,1] so one bad value doesn't crash the whole day's generation.
@@ -75,7 +82,9 @@ def _conf(value: object) -> float:
 def normalize_daily_context(raw: dict, segments: list[dict]) -> dict:
     valid = _evidence_ids(segments)
     candidates = []
-    for c in raw.get("memory_candidates", []) or []:
+    for c in _as_list(raw.get("memory_candidates")):
+        if not isinstance(c, dict):
+            continue  # GLM may emit a bare string / wrong shape; drop it, don't fail the day
         refs = [r for r in (c.get("evidence_source_ids") or c.get("evidence_refs") or []) if str(r) in valid]
         if not refs:
             continue  # adapter rejects empty evidence; drop rather than fail the whole day
@@ -88,9 +97,9 @@ def normalize_daily_context(raw: dict, segments: list[dict]) -> dict:
         })
     return {
         "summary": str(raw.get("summary", "")),
-        "todos": [str(t) for t in raw.get("todos", []) or []],
-        "facts": [str(f) for f in raw.get("facts", []) or []],
-        "inferences": _normalize_inferences(raw.get("inferences", []) or []),
+        "todos": [str(t) for t in _as_list(raw.get("todos"))],
+        "facts": [str(f) for f in _as_list(raw.get("facts"))],
+        "inferences": _normalize_inferences(_as_list(raw.get("inferences"))),
         "memory_candidates": candidates,
     }
 
@@ -126,7 +135,9 @@ def normalize_session_summary(raw: dict, segments: list[dict]) -> dict:
 
     def keep(items, owner=False):
         out = []
-        for it in items or []:
+        for it in _as_list(items):
+            if not isinstance(it, dict):
+                continue  # a bare string / wrong shape: drop the entry, don't fail the session
             refs = [str(r) for r in (it.get("evidence_refs") or []) if str(r) in valid]
             if not refs:
                 continue
@@ -139,10 +150,10 @@ def normalize_session_summary(raw: dict, segments: list[dict]) -> dict:
     return {
         "headline": str(raw.get("headline", "")),
         "summary": str(raw.get("summary", "")),
-        "topics": [str(t) for t in raw.get("topics", []) or []],
+        "topics": [str(t) for t in _as_list(raw.get("topics"))],
         "decisions": keep(raw.get("decisions")),
         "todos": keep(raw.get("todos"), owner=True),
-        "open_questions": [str(q) for q in raw.get("open_questions", []) or []],
+        "open_questions": [str(q) for q in _as_list(raw.get("open_questions"))],
     }
 
 

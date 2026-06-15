@@ -57,6 +57,42 @@ def test_normalize_daily_context_constrains_claim_type_and_evidence() -> None:
     assert len(out["memory_candidates"]) == 1
 
 
+def test_normalize_daily_context_tolerates_malformed_memory_candidates() -> None:
+    # GLM (json_object mode) guarantees parseable JSON, not the requested array shape. A
+    # memory_candidates that is a bare string, a dict, or a list with non-dict elements must DROP
+    # the bad items rather than crash (AttributeError) and fail the whole day via the broad except.
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}]
+    base = {"summary": "s", "todos": [], "facts": [], "inferences": []}
+
+    # list containing a plain string element
+    out = glm.normalize_daily_context({**base, "memory_candidates": ["I prefer tea"]}, segments)
+    assert out["memory_candidates"] == [] and out["summary"] == "s"
+    # a dict instead of a list (iterating would otherwise yield string keys)
+    out = glm.normalize_daily_context({**base, "memory_candidates": {"candidate_claim": "c"}}, segments)
+    assert out["memory_candidates"] == []
+    # todos as a non-list must not char-iterate into a list of letters
+    out = glm.normalize_daily_context({**base, "todos": "do it", "memory_candidates": []}, segments)
+    assert out["todos"] == []
+
+
+def test_normalize_session_summary_tolerates_malformed_decisions_and_todos() -> None:
+    # A decisions/todos that is a single object (LLM collapsing a one-element list) or contains a
+    # bare string must drop the bad entry, not raise AttributeError and fail the summarize task.
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}]
+    raw = {
+        "headline": "h", "summary": "s", "topics": [],
+        "decisions": {"text": "ship it", "evidence_refs": ["ev_1"]},  # bare object, not a list
+        "todos": ["just a string"],  # non-dict element
+        "open_questions": [],
+    }
+
+    out = glm.normalize_session_summary(raw, segments)  # must not raise
+
+    assert out["decisions"] == []
+    assert out["todos"] == []
+    assert out["headline"] == "h"
+
+
 def test_normalize_session_summary_drops_decisions_without_known_evidence() -> None:
     segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "继续本地 ASR。"}]
     raw = {
