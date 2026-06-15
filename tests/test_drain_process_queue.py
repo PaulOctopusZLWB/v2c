@@ -52,5 +52,37 @@ def test_web_worker_drains_more_than_default_max_steps(tmp_path: Path, monkeypat
     assert result.tasks_succeeded == total_tasks
 
 
+def test_web_worker_import_path_drains_more_than_default_max_steps(tmp_path: Path, monkeypatch) -> None:
+    # The default non-blocking UI import path (start_import -> _import_then_drain) must ALSO
+    # drain past the 200-step cap, not just the explicit /run path.
+    import personal_context_node.web.worker as _worker_module
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    total_tasks = 205
+    calls: dict[str, int] = {"n": 0}
+
+    def fake_process_once(**kwargs) -> ProcessOnceResult:
+        calls["n"] += 1
+        if calls["n"] <= total_tasks:
+            return ProcessOnceResult(task_id=f"t{calls['n']}", task_type="asr", status="succeeded")
+        return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
+
+    def fake_preview(**kwargs) -> ProcessOnceResult:
+        if calls["n"] < total_tasks:
+            return ProcessOnceResult(task_id="peek", task_type="asr", status="dry_run")
+        return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
+
+    monkeypatch.setattr(_pr_module, "process_once", fake_process_once)
+    monkeypatch.setattr(_pr_module, "preview_next_process_task", fake_preview)
+    monkeypatch.setattr(_worker_module, "import_audio_files", lambda **kwargs: None)
+
+    worker = PipelineWorker(config=config)
+    assert worker.start_import("ignored") is True
+    worker._thread.join(timeout=30)
+
+    assert worker._last_result is not None
+    assert worker._last_result.tasks_succeeded == total_tasks
+
+
 class _Unused:
     pass

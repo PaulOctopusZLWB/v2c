@@ -32,18 +32,14 @@ class PipelineWorker:
         state = self._import
         return dict(state) if state is not None else None
 
-    def drain_now(self, *, max_steps: int = 200) -> DrainResult:
-        """Synchronous drain (used in request handlers and tests).
-
-        Loops drain_process_queue in batches of max_steps until the queue is
-        empty (status == 'complete') or a stop is requested, so a backlog larger
-        than max_steps is always fully drained in one call.
-        """
-        self._stop.clear()
-        adapters = build_pipeline_adapters(config=self._config)
+    def _drain_to_completion(self, adapters, *, max_steps: int = 200) -> DrainResult:
+        """Loop drain_process_queue in batches of max_steps until the queue is empty
+        (status 'complete') or a stop is requested, so a backlog larger than max_steps is
+        always fully drained in one call. Shared by every drain entry point."""
         total_steps = 0
         total_succeeded = 0
         total_failed = 0
+        last_status = "complete"
         while not self._stop.is_set():
             result = drain_process_queue(
                 config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
@@ -52,22 +48,21 @@ class PipelineWorker:
             total_steps += result.process_steps
             total_succeeded += result.tasks_succeeded
             total_failed += result.tasks_failed
+            last_status = result.status
             if result.status in ("complete", "stopped"):
-                final = DrainResult(
-                    process_steps=total_steps,
-                    tasks_succeeded=total_succeeded,
-                    tasks_failed=total_failed,
-                    status=result.status,
-                )
-                self._last_result = final
-                return final
-        # stop was requested between iterations
-        final = DrainResult(
+                break
+        return DrainResult(
             process_steps=total_steps,
             tasks_succeeded=total_succeeded,
             tasks_failed=total_failed,
-            status="stopped",
+            status=last_status if not self._stop.is_set() else "stopped",
         )
+
+    def drain_now(self, *, max_steps: int = 200) -> DrainResult:
+        """Synchronous drain (used in request handlers and tests). Fully drains the queue."""
+        self._stop.clear()
+        adapters = build_pipeline_adapters(config=self._config)
+        final = self._drain_to_completion(adapters, max_steps=max_steps)
         self._last_result = final
         return final
 
@@ -103,27 +98,7 @@ class PipelineWorker:
 
     def _run(self, *, max_steps: int) -> None:
         adapters = build_pipeline_adapters(config=self._config)
-        total_steps = 0
-        total_succeeded = 0
-        total_failed = 0
-        last_status = "complete"
-        while not self._stop.is_set():
-            result = drain_process_queue(
-                config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
-                max_steps=max_steps, should_stop=self._stop.is_set, job_name="web.drain",
-            )
-            total_steps += result.process_steps
-            total_succeeded += result.tasks_succeeded
-            total_failed += result.tasks_failed
-            last_status = result.status
-            if result.status in ("complete", "stopped"):
-                break
-        self._last_result = DrainResult(
-            process_steps=total_steps,
-            tasks_succeeded=total_succeeded,
-            tasks_failed=total_failed,
-            status=last_status if not self._stop.is_set() else "stopped",
-        )
+        self._last_result = self._drain_to_completion(adapters, max_steps=max_steps)
 
     def _import_then_drain(self, *, source_dir: str) -> None:
         adapters = build_pipeline_adapters(config=self._config)
@@ -143,10 +118,7 @@ class PipelineWorker:
                 total = int(final.get("total", 0))
                 done = int(final.get("done", total))
                 self._import = {"active": False, "done": done, "total": total, "current": ""}
-            self._last_result = drain_process_queue(
-                config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
-                should_stop=self._stop.is_set, job_name="web.drain",
-            )
+            self._last_result = self._drain_to_completion(adapters)
         finally:
             # Guard against an import that raised before the inner finally set active=False.
             if self._import is not None and self._import.get("active"):
