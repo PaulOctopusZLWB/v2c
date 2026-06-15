@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location("funasr_wrapper", Path("scripts/funasr_sensevoice_wrapper.py"))
+fw = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fw)
+
+
+def test_resolve_device_prefers_mps_when_available() -> None:
+    assert fw.resolve_device("mps", mps_available=lambda: True) == "mps"
+    assert fw.resolve_device("mps", mps_available=lambda: False) == "cpu"  # graceful fallback
+    assert fw.resolve_device("cpu", mps_available=lambda: True) == "cpu"   # explicit override respected
 
 
 def test_funasr_sensevoice_wrapper_normalizes_sentence_info(tmp_path: Path) -> None:

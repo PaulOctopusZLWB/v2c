@@ -4,28 +4,49 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")  # unsupported MPS ops fall back to CPU
+
+
+def resolve_device(requested: str, *, mps_available=None) -> str:
+    if requested != "mps":
+        return requested
+    if mps_available is None:
+        import torch
+        mps_available = torch.backends.mps.is_available
+    return "mps" if mps_available() else "cpu"
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run FunASR SenseVoice and emit Personal Context Node ASR JSON.")
-    parser.add_argument("audio_path", type=Path)
+    parser.add_argument("audio_path", type=Path, nargs="?", default=None)
     parser.add_argument("--model", default="iic/SenseVoiceSmall")
     parser.add_argument("--vad-model", default=None)
     parser.add_argument("--model-version", default="funasr-sensevoice-local")
     parser.add_argument("--language", default="auto")
     parser.add_argument("--batch-size-s", type=int, default=300)
+    parser.add_argument("--device", default="mps")
+    parser.add_argument("--server", action="store_true")
     args = parser.parse_args()
+
+    if args.server:
+        import contextlib as _ctx
+        with _ctx.redirect_stdout(sys.stderr):
+            from funasr import AutoModel
+            model = AutoModel(model=args.model, device=resolve_device(args.device))
+        return run_server(model, sys.stdin, sys.stdout, language=args.language)
 
     # Exit-code contract (mirrors CommandASRAdapter): 3 = permanently unsupported
     # input (terminal); 2 = transient/environment failure (retryable).
     terminal_exit_code = 3
     retryable_exit_code = 2
 
-    if not args.audio_path.exists():
+    if args.audio_path is None or not args.audio_path.exists():
         print(f"audio file does not exist: {args.audio_path}", file=sys.stderr)
         return terminal_exit_code
 
@@ -39,7 +60,7 @@ def main() -> int:
         )
         return retryable_exit_code
 
-    model_kwargs: dict[str, Any] = {"model": args.model}
+    model_kwargs: dict[str, Any] = {"model": args.model, "device": resolve_device(args.device)}
     if args.vad_model:
         model_kwargs["vad_model"] = args.vad_model
     with contextlib.redirect_stdout(sys.stderr):
