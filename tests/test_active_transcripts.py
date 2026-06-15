@@ -44,22 +44,11 @@ def test_explicit_asr_rerun_writes_new_active_segments_without_deleting_history(
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+    vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150)
 
-    process_once(
-        config=config,
-        run_id="run_vad",
-        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
-        asr=MockASRAdapter(text="第一次 ASR"),
-        max_chunk_ms=1000,
-    )
-    first_asr = process_once(
-        config=config,
-        run_id="run_asr_first",
-        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
-        asr=MockASRAdapter(text="第一次 ASR"),
-        max_chunk_ms=1000,
-    )
-    assert first_asr.task_type == "asr"
+    # Run vad + first asr pass.
+    for run_id in ["run_vad", "run_asr_first"]:
+        process_once(config=config, run_id=run_id, vad=vad, asr=MockASRAdapter(text="第一次 ASR"), max_chunk_ms=1000)
 
     conn = connect(config.database_path)
     try:
@@ -68,15 +57,14 @@ def test_explicit_asr_rerun_writes_new_active_segments_without_deleting_history(
         conn.close()
     rerun_task(config=config, task_type="asr", target_type="audio_chunk", target_id=str(chunk_id))
 
-    second_asr = process_once(
-        config=config,
-        run_id="run_asr_second",
-        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
-        asr=MockASRAdapter(text="第二次 ASR"),
-        max_chunk_ms=1000,
-    )
+    # After the rerun, finishing-stage tasks (session_derive etc.) that were enqueued by
+    # the first asr pass may be claimed before the re-queued asr (new scheduling order
+    # prefers finishing a day over more transcription). Drain until asr runs.
+    for index in range(10):
+        result = process_once(config=config, run_id=f"drain_{index}", vad=vad, asr=MockASRAdapter(text="第二次 ASR"), max_chunk_ms=1000)
+        if result.task_type == "asr":
+            break
 
-    assert second_asr.task_type == "asr"
     conn = connect(config.database_path)
     try:
         segments = fetch_all(conn, "select text, is_active from transcript_segments order by created_at")
@@ -117,13 +105,14 @@ def test_asr_rerun_reopens_session_derivation_for_affected_day(tmp_path: Path) -
         conn.close()
 
     rerun_task(config=config, task_type="asr", target_type="audio_chunk", target_id=str(chunk_id))
-    process_once(
-        config=config,
-        run_id="run_asr_second",
-        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
-        asr=MockASRAdapter(text="第二次 ASR"),
-        max_chunk_ms=1000,
-    )
+
+    # After the rerun, finishing-stage tasks may be claimed before the re-queued asr
+    # (new scheduling order). Drain until asr runs so the fanout resets session_derive.
+    vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150)
+    for index in range(10):
+        result = process_once(config=config, run_id=f"drain_{index}", vad=vad, asr=MockASRAdapter(text="第二次 ASR"), max_chunk_ms=1000)
+        if result.task_type == "asr":
+            break
 
     conn = connect(config.database_path)
     try:
