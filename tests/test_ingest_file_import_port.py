@@ -1,12 +1,41 @@
 from __future__ import annotations
 
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 
+import personal_context_node.ingest as ingest_module
+from personal_context_node.adapters.file_import.local_directory import LocalDirectoryFileImportAdapter
 from personal_context_node.config import AppConfig, DeviceDiscoveryConfig
 from personal_context_node.core.ports.file_import import ImportedRawAudio, MountedDevice, SourceAudioFile, StableSourceAudioFile
 from personal_context_node.ingest import import_audio_files_from_port
 from personal_context_node.storage.sqlite import connect, fetch_all
+
+
+def test_import_unlinks_orphan_copy_on_post_copy_dedup(tmp_path: Path, monkeypatch) -> None:
+    device_root = tmp_path / "DJI_MIC"
+    source = device_root / "TX02_MIC001_20870510_173550_orig.wav"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(source), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16_000)
+        wav.writeframes(b"\0\1" * 16_000)
+    importer = LocalDirectoryFileImportAdapter(device_roots=[device_root], device_label="DJI Mic 3")
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        dji_mic_3=DeviceDiscoveryConfig(root_path=device_root, stable_seconds=0),
+    )
+    assert import_audio_files_from_port(config=config, importer=importer).imported_files == 1
+
+    # Simulate a concurrent race: the pre-copy source guard misses, so the second pass copies
+    # again and only the post-copy sha256 dedup catches the duplicate.
+    monkeypatch.setattr(ingest_module, "_source_audio_exists", lambda conn, source: False)
+    assert import_audio_files_from_port(config=config, importer=importer).imported_files == 0
+
+    raw_files = sorted(config.raw_audio_dir.rglob("*.wav"))
+    assert len(raw_files) == 1  # the orphan copy written by the losing pass was unlinked
 
 
 def test_import_audio_files_from_port_registers_stable_sources_and_enqueues_vad(tmp_path: Path) -> None:

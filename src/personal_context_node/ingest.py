@@ -175,6 +175,10 @@ def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: Ap
             stable_source = importer.wait_until_stable(source, stable_seconds=config.dji_mic_3.stable_seconds)
             raw_audio = importer.copy_to_raw_store(stable_source, config.raw_audio_dir)
             if _raw_audio_exists(conn, raw_audio):
+                # The copy lost a post-copy dedup race (e.g. concurrent scheduled vs. manual
+                # import): remove the just-written, untracked copy so it does not leak in the
+                # raw store as an orphan that is never registered, archived, or cleaned up.
+                raw_audio.local_raw_path.unlink(missing_ok=True)
                 continue
             mark_raw_evidence_read_only(raw_audio.local_raw_path)
             audio_file_id = f"aud_{uuid4().hex}"
