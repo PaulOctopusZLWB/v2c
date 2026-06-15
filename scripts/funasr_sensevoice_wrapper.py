@@ -141,5 +141,22 @@ def _split_text_tags(value: object) -> tuple[str, list[str]]:
     return re.sub(r"<\|[^|>]+\|>", "", text).strip(), tags
 
 
+def run_server(model, stdin, stdout, *, language: str) -> int:
+    """Resident loop: one chunk path per input line -> one result JSON per output line."""
+    for raw_line in stdin:
+        path = raw_line.strip()
+        if not path:
+            continue
+        try:
+            result = model.generate(input=path, language=language, use_itn=True, batch_size_s=300)
+            payload = {"model_name": "sensevoice", "model_version": "funasr-sensevoice-server",
+                       "segments": _normalize_segments(result)}
+        except Exception as exc:  # one bad chunk must not kill the resident server
+            payload = {"error": f"{type(exc).__name__}: {exc}"}
+        stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        stdout.flush()
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

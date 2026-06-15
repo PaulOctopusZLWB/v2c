@@ -18,6 +18,34 @@ def test_resolve_device_prefers_mps_when_available() -> None:
     assert fw.resolve_device("cpu", mps_available=lambda: True) == "cpu"   # explicit override respected
 
 
+def test_run_server_emits_one_result_line_per_chunk_path() -> None:
+    class FakeModel:
+        def generate(self, *, input, **kw):
+            return [{"text": f"<|zh|>转写 {input}", "timestamp": [0, 1000]}]
+
+    stdin = io.StringIO("a.wav\n\nb.wav\n")   # blank line ignored
+    stdout = io.StringIO()
+
+    fw.run_server(FakeModel(), stdin, stdout, language="zh")
+
+    lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert len(lines) == 2
+    assert lines[0]["segments"][0]["text"] == "转写 a.wav"
+    assert lines[0]["model_name"] == "sensevoice"
+
+
+def test_run_server_reports_per_chunk_error_without_crashing() -> None:
+    class BoomModel:
+        def generate(self, *, input, **kw):
+            raise RuntimeError("decode failed")
+
+    stdout = io.StringIO()
+    fw.run_server(BoomModel(), io.StringIO("x.wav\n"), stdout, language="zh")
+
+    out = json.loads(stdout.getvalue())
+    assert "error" in out and "decode failed" in out["error"]
+
+
 def test_funasr_sensevoice_wrapper_normalizes_sentence_info(tmp_path: Path) -> None:
     fake_package = tmp_path / "fake_package"
     funasr_dir = fake_package / "funasr"
