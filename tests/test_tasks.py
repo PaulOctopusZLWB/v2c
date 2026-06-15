@@ -512,6 +512,25 @@ def test_retry_task_resets_attempts_and_available_at_for_immediate_claim(tmp_pat
     assert reclaimed.attempt_count == 1
 
 
+def test_two_sequential_claims_return_distinct_tasks(tmp_path) -> None:
+    # The multi-worker safety story rests on claim_next_task's `begin immediate` + targeted UPDATE
+    # never handing the SAME pending task to two claimers. With two pending tasks in the queue, two
+    # consecutive claims must return DIFFERENT task_ids — a regression that claimed by a blind
+    # SELECT (or re-included 'claimed' rows) would double-claim and this asserts against it.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_1")
+    enqueue_task(config=config, task_type="asr", target_type="audio_chunk", target_id="chk_2")
+
+    first = claim_next_task(config=config, task_type="asr", run_id="run_1", lease_seconds=60)
+    second = claim_next_task(config=config, task_type="asr", run_id="run_2", lease_seconds=60)
+
+    assert first is not None and second is not None
+    assert first.task_id != second.task_id  # no double-claim of the same row
+    assert {first.target_id, second.target_id} == {"chk_1", "chk_2"}
+    # A third claim finds the queue drained (both leased), not a re-handed duplicate.
+    assert claim_next_task(config=config, task_type="asr", run_id="run_3", lease_seconds=60) is None
+
+
 def test_claim_prefers_lower_priority_value_over_earlier_available_at(tmp_path) -> None:
     # Priority (the recording-day ordinal / "process this day first" knob) must dominate
     # available_at. Give the LOW-priority task an EARLIER available_at than the HIGH-priority

@@ -50,6 +50,30 @@ describe("TaskList", () => {
     expect(rows.length).toBeLessThanOrEqual(60);
   });
 
+  it("virtualization window follows the scroll offset and preserves scrollbar geometry", () => {
+    // The <=60-row cap test stays at scrollTop=0, so the offset math, the start clamp, and the
+    // padTop/padBottom spacer geometry are all unobserved. Scroll to the bottom and assert the
+    // window shifted to the last rows, the top is unmounted, and the top spacer grew — catching a
+    // regression that ignores scrollTop, breaks the start clamp, or drops the spacers.
+    const ROW_HEIGHT = 88; // must match TaskList's constant
+    const { container } = render(<TaskList tasks={makeTasks(500)} onRetry={vi.fn()} />);
+    const scroller = container.querySelector(".task-rows") as HTMLDivElement;
+
+    // At rest the window starts at the top.
+    expect(screen.getByText("chk_0")).toBeInTheDocument();
+    expect(screen.queryByText("chk_499")).not.toBeInTheDocument();
+
+    // Scroll near the bottom: first = floor(490) - 6 = 484, clamped to length-WINDOW = 476.
+    fireEvent.scroll(scroller, { target: { scrollTop: ROW_HEIGHT * 490 } });
+
+    expect(screen.getByText("chk_499")).toBeInTheDocument();   // the list bottom is reachable
+    expect(screen.getByText("chk_476")).toBeInTheDocument();   // start clamped to length - WINDOW (500-24)
+    expect(screen.queryByText("chk_0")).not.toBeInTheDocument(); // top rows unmounted
+    expect(screen.queryByText("chk_475")).not.toBeInTheDocument(); // exactly at the clamp boundary
+    // The top spacer height equals start * ROW_HEIGHT (476 * 88), preserving the full scrollbar.
+    expect((scroller.firstElementChild as HTMLElement).style.height).toBe(`${ROW_HEIGHT * 476}px`);
+  });
+
   it("filters to failed-only via 仅看失败", async () => {
     // 100 tasks, every 10th failed -> 10 failed.
     render(<TaskList tasks={makeTasks(100, 10)} onRetry={vi.fn()} />);

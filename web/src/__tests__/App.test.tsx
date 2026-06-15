@@ -106,6 +106,88 @@ describe("App container", () => {
     expect(screen.getByText("1700")).toBeInTheDocument(); // RunInspector count == summary total
   });
 
+  it("derives the progress done count and failed count from summary.done_total / failed_total", async () => {
+    // doneCount = summary.done_total ?? fallback, failedCount = summary.failed_total ?? fallback.
+    // Feed values that DIFFER from the fallback so a regression (dropping the summary fields, or
+    // flipping done_total<->failed_total) changes a rendered value. Fallback done would be
+    // total - running = 1700 - 200 = 1500, so done_total=1234 only matches if the field is used.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
+
+    render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { running: 200, succeeded: 1500 },
+          total: 1700,
+          done_total: 1234,
+          failed_total: 42,
+          active_stage: "asr",
+          current_target: "chk_1",
+          import_progress: null,
+          worker_running: true
+        })
+      })
+    );
+
+    const bar = await screen.findByRole("progressbar");
+    expect(bar).toHaveAttribute("aria-valuenow", "1234"); // from done_total, not the 1500 fallback
+    expect(bar).toHaveAttribute("aria-valuemax", "1700");
+    // failed_total flows to the TaskList "重试全部失败 (N)" control (panel rendered via summary count).
+    expect(screen.getByRole("button", { name: /重试全部失败/ })).toHaveTextContent("42");
+  });
+
+  it("refreshes the task list after a retry (api.retry -> api.run -> refreshTasks)", async () => {
+    // The retry handlers end with `await refreshTasks()` so the open panel re-syncs. Open the
+    // panel, retry the failed row, and assert the retry + run calls fire AND a fresh GET
+    // /api/status/tasks follows — deleting refreshTasks() (or reordering it) fails this.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    const failedTask = {
+      task_id: "task_x", task_type: "asr", target_type: "audio_chunk", target_id: "chk_x",
+      status: "failed_retryable", attempt_count: 2, last_error: "model busy", duration_ms: 1200
+    };
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [failedTask] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const urls = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    const statusTasksCount = () => urls().filter((u) => u === "/api/status/tasks").length;
+
+    const { container } = render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    // A summary with a non-zero total makes the TaskList render (count = summaryTotal), so its
+    // panel can be opened to lazily load the rows.
+    act(() => summaryListener!({ data: JSON.stringify({ status_counts: { failed_retryable: 1 }, total: 1, active_stage: null, current_target: null, import_progress: null, worker_running: false }) }));
+
+    // Open the <details> panel -> onToggle(true) -> refreshTasks() loads the failed row.
+    const details = container.querySelector("details.task-list") as HTMLDetailsElement;
+    details.open = true;
+    act(() => { details.dispatchEvent(new Event("toggle")); });
+    await screen.findByText("model busy"); // the failed row is now loaded
+    const beforeRetry = statusTasksCount();
+
+    await userEvent.click(screen.getByRole("button", { name: /重试$/ }));
+
+    await waitFor(() => {
+      expect(urls()).toContain("/api/pipeline/tasks/task_x/retry");
+      expect(urls()).toContain("/api/pipeline/run");
+      expect(statusTasksCount()).toBeGreaterThan(beforeRetry); // refreshTasks ran after the retry
+    });
+  });
+
   it("shows an actionable backend error when bootstrap API calls fail", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(new Response("broken", { status: 500 }));
 

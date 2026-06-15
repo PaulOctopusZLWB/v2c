@@ -46,9 +46,21 @@ def test_build_llm_mock_remains_explicit_fixture_adapter() -> None:
 
 def test_build_asr_funasr_server_returns_persistent_adapter() -> None:
     from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
-    adapter = build_asr(asr_backend="funasr_server", asr_command=None, mock_text=None, asr_device="mps")
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_command=None, mock_text=None,
+        asr_device="cpu", language="ja", model_id="iic/Custom", model_version="v9",
+    )
     assert isinstance(adapter, PersistentCommandASRAdapter)
-    assert "--server" in adapter.command and "--device" in adapter.command
+    # Pin the WHOLE argv, not just flag presence: dropping --model/--model-version/--language or
+    # wiring the wrong --device VALUE all silently break the resident server (e.g. wrong model,
+    # lost model_version provenance, wrong device). The configured values must reach the command.
+    assert adapter.command == [
+        "python3", "scripts/funasr_sensevoice_wrapper.py", "--server",
+        "--model", "iic/Custom", "--model-version", "v9",
+        "--device", "cpu", "--language", "ja",
+    ]
+    # model_version also threads into the adapter so provenance survives even before first reply.
+    assert adapter.model_version == "v9"
 
 
 def test_command_with_quoted_space_path_is_one_token() -> None:
