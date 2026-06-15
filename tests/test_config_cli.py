@@ -65,6 +65,23 @@ def test_first_slice_review_and_verify_commands_accept_config(tmp_path: Path) ->
     assert jobs == [{"job_name": "memory-verify"}]
 
 
+def test_process_run_uses_config_paths_when_cli_paths_omitted(tmp_path: Path) -> None:
+    config_path = tmp_path / "local.toml"
+    config_path.write_text(
+        f"""
+[paths]
+data_dir = "{tmp_path / 'configured-data'}"
+obsidian_vault = "{tmp_path / 'configured-vault'}"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["process-run", "--config", str(config_path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "configured-data" / "db" / "personal_context.sqlite").exists()
+
+
 def _insert_audio(database_path: Path, raw_path: Path, sha256: str) -> None:
     conn = connect(database_path)
     try:

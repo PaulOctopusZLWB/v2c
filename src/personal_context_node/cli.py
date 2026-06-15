@@ -316,7 +316,7 @@ def ingest_import(
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
@@ -329,7 +329,7 @@ def ingest_import_group(
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
 ) -> None:
@@ -948,18 +948,22 @@ def launchd_write_plists(
         None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
-    source_dir: Path | None = typer.Option(None, help="Mounted DJI source directory."),
+    source_dir: Path | None = typer.Option(
+        None, help="Optional fixed source directory. Omit to use configured device discovery."
+    ),
     archive_root: Path | None = typer.Option(None, help="NAS archive root."),
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
-    resolved_source_dir = source_dir or config.dji_mic_3.root_path or Path("/Volumes/DJI")
+    # No hardcoded /Volumes/DJI fallback: an explicit --source-dir or configured device
+    # root_path pins a fixed source; otherwise scheduled ingest uses device discovery.
+    resolved_source_dir = source_dir or config.dji_mic_3.root_path
     resolved_archive_root = archive_root or config.nas_archive_root
     paths = write_launchd_plists(
         output_dir=output_dir,
         working_directory=str(working_directory),
         data_dir=str(config.data_dir),
         obsidian_vault=str(config.obsidian_vault),
-        source_dir=str(resolved_source_dir),
+        source_dir=str(resolved_source_dir) if resolved_source_dir else None,
         archive_root=str(resolved_archive_root),
         config_path=str(config_path.resolve()) if config_path else None,
         dry_run=True,

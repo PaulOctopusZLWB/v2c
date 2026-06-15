@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import plistlib
+from pathlib import Path
 
 from personal_context_node.launchd import (
     LaunchdJob,
@@ -30,13 +31,30 @@ def test_render_plist_contains_uv_pcn_command_and_logs() -> None:
     assert parsed["StandardErrorPath"] == "/tmp/pcn-logs/com.personal-context-node.ingest.err.log"
 
 
+def test_render_plist_includes_environment_path_and_absolute_logs(tmp_path: Path) -> None:
+    job = LaunchdJob(
+        label="com.personal-context-node.test",
+        command=["/opt/homebrew/bin/uv", "run", "pcn", "health"],
+        start_interval_seconds=60,
+        working_directory=str(tmp_path),
+        log_directory=str(tmp_path / "logs" / "launchd"),
+    )
+
+    payload = plistlib.loads(render_plist(job))
+
+    assert payload["ProgramArguments"][0] == "/opt/homebrew/bin/uv"
+    assert payload["EnvironmentVariables"]["PATH"]
+    assert payload["StandardOutPath"] == str(tmp_path / "logs" / "launchd" / "com.personal-context-node.test.out.log")
+    assert payload["StandardErrorPath"] == str(tmp_path / "logs" / "launchd" / "com.personal-context-node.test.err.log")
+
+
 def test_write_launchd_plists_dry_run_writes_project_files(tmp_path) -> None:
     output_dir = tmp_path / "launchd"
 
     paths = write_launchd_plists(
         output_dir=output_dir,
         working_directory="/repo",
-        data_dir="/repo/data",
+        data_dir=str(tmp_path / "data"),
         obsidian_vault="/vault",
         source_dir="/Volumes/DJI",
         archive_root="/nas",
@@ -65,7 +83,7 @@ def test_install_launchd_plists_copies_files_and_bootstraps_with_runner(tmp_path
     paths = write_launchd_plists(
         output_dir=source_dir,
         working_directory="/repo",
-        data_dir="/repo/data",
+        data_dir=str(tmp_path / "data"),
         obsidian_vault="/vault",
         source_dir="/Volumes/DJI",
         archive_root="/nas",

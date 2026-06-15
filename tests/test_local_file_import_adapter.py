@@ -4,6 +4,7 @@ import wave
 from pathlib import Path
 
 from personal_context_node.adapters.file_import.local_directory import LocalDirectoryFileImportAdapter
+from personal_context_node.core.ports.file_import import MountedDevice, SourceAudioFile, StableSourceAudioFile
 
 
 def test_local_directory_file_import_adapter_copies_stable_audio_to_raw_store(tmp_path: Path) -> None:
@@ -98,6 +99,35 @@ def test_local_directory_file_import_adapter_skips_hidden_system_audio_directori
     sources = adapter.discover_audio_files(adapter.discover_devices()[0])
 
     assert [source.source_path for source in sources] == [real_audio]
+
+
+def test_copy_to_raw_store_keeps_existing_file_when_name_collides(tmp_path: Path) -> None:
+    device = MountedDevice(device_id="dev", label="DJI Mic 3", root_path=tmp_path / "device")
+    first_source = _stable_source(device, tmp_path / "first" / "TX01_MIC001_20870510_120000_orig.wav")
+    second_source = _stable_source(device, tmp_path / "second" / "TX01_MIC001_20870510_120000_orig.wav")
+    adapter = LocalDirectoryFileImportAdapter(device_roots=[], device_label="DJI Mic 3")
+    destination = tmp_path / "data" / "audio" / "raw"
+
+    first = adapter.copy_to_raw_store(first_source, destination)
+    second = adapter.copy_to_raw_store(second_source, destination)
+
+    assert first.local_raw_path != second.local_raw_path
+    assert first.local_raw_path.exists()
+    assert second.local_raw_path.exists()
+
+
+def _stable_source(device: MountedDevice, path: Path) -> StableSourceAudioFile:
+    _write_tiny_wav(path)
+    stat = path.stat()
+    return StableSourceAudioFile(
+        source=SourceAudioFile(
+            device=device,
+            source_path=path,
+            size_bytes=stat.st_size,
+            mtime_ns=stat.st_mtime_ns,
+        ),
+        stable_checked_at="2087-05-10T12:00:00+08:00",
+    )
 
 
 def _write_tiny_wav(path: Path) -> None:

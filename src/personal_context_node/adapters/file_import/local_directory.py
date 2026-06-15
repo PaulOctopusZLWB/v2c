@@ -91,7 +91,9 @@ class LocalDirectoryFileImportAdapter:
         recorded_at = _recorded_at_from_name(source.source.source_path)
         target_dir = destination_dir / recorded_at[:10]
         target_dir.mkdir(parents=True, exist_ok=True)
-        local_raw_path = target_dir / source.source.source_path.name
+        # Two distinct recordings can share a filename (same day, different cards). Pick a
+        # non-colliding destination so a second import never overwrites the first copy.
+        local_raw_path = _unique_destination_path(target_dir, source.source.source_path.name)
         shutil.copy2(source.source.source_path, local_raw_path)
         _repair_wav_file_metadata(local_raw_path, recorded_at)
         return ImportedRawAudio(
@@ -101,6 +103,20 @@ class LocalDirectoryFileImportAdapter:
             duration_ms=_duration_ms(local_raw_path),
             recorded_at=recorded_at,
         )
+
+
+def _unique_destination_path(target_dir: Path, source_name: str) -> Path:
+    candidate = target_dir / source_name
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    counter = 2
+    while True:
+        next_candidate = target_dir / f"{stem}_{counter}{suffix}"
+        if not next_candidate.exists():
+            return next_candidate
+        counter += 1
 
 
 def _has_hidden_part(path: Path, root_path: Path) -> bool:

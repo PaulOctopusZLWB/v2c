@@ -27,7 +27,7 @@ def test_existing_jobs_unchanged_and_web_job_added(tmp_path: Path) -> None:
     paths = write_launchd_plists(
         output_dir=tmp_path,
         working_directory="/repo",
-        data_dir="/repo/data",
+        data_dir=str(tmp_path / "data"),
         obsidian_vault="/vault",
         source_dir="/Volumes/DJI",
         archive_root="/nas",

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import plistlib
+from pathlib import Path
 
 from typer.testing import CliRunner
 
 from personal_context_node.cli import app
+from personal_context_node.launchd import write_launchd_plists
 
 
 def test_launchd_write_plists_cli_writes_templates(tmp_path) -> None:
@@ -19,7 +21,7 @@ def test_launchd_write_plists_cli_writes_templates(tmp_path) -> None:
             "--working-directory",
             "/repo",
             "--data-dir",
-            "/repo/data",
+            str(tmp_path / "data"),
             "--obsidian-vault",
             "/vault",
             "--source-dir",
@@ -80,6 +82,51 @@ def test_launchd_write_plists_cli_uses_config_path(tmp_path) -> None:
     assert str(archive_root) in archive["ProgramArguments"]
 
 
+def test_launchd_write_plists_uses_absolute_uv_and_creates_log_dir(tmp_path: Path) -> None:
+    runner = CliRunner()
+    output_dir = tmp_path / "plists"
+    data_dir = tmp_path / "data"
+
+    result = runner.invoke(
+        app,
+        [
+            "launchd-write-plists",
+            "--output-dir",
+            str(output_dir),
+            "--working-directory",
+            str(tmp_path),
+            "--data-dir",
+            str(data_dir),
+            "--obsidian-vault",
+            str(tmp_path / "vault"),
+            "--archive-root",
+            str(tmp_path / "nas"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (data_dir / "logs" / "launchd").is_dir()
+    plist = plistlib.loads((output_dir / "com.personal-context-node.process.plist").read_bytes())
+    assert Path(plist["ProgramArguments"][0]).is_absolute()
+
+
+def test_launchd_ingest_omits_source_dir_when_not_explicit(tmp_path: Path) -> None:
+    paths = write_launchd_plists(
+        output_dir=tmp_path / "plists",
+        working_directory=str(tmp_path),
+        data_dir=str(tmp_path / "data"),
+        obsidian_vault=str(tmp_path / "vault"),
+        source_dir=None,
+        archive_root=str(tmp_path / "nas"),
+        config_path="config/local.example.toml",
+    )
+
+    ingest = plistlib.loads(next(p for p in paths if "ingest" in p.name).read_bytes())
+
+    assert "--source-dir" not in ingest["ProgramArguments"]
+    assert "--config" in ingest["ProgramArguments"]
+
+
 def test_launchd_install_cli_defaults_to_dry_run(tmp_path) -> None:
     output_dir = tmp_path / "launchd"
     launch_agents = tmp_path / "LaunchAgents"
@@ -92,7 +139,7 @@ def test_launchd_install_cli_defaults_to_dry_run(tmp_path) -> None:
             "--working-directory",
             "/repo",
             "--data-dir",
-            "/repo/data",
+            str(tmp_path / "data"),
             "--obsidian-vault",
             "/vault",
             "--source-dir",

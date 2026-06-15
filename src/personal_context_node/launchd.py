@@ -19,6 +19,7 @@ class LaunchdJob:
     start_calendar: dict[str, int] | None = None
     run_at_load: bool = False
     keep_alive: bool = False
+    environment_path: str = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ def render_plist(job: LaunchdJob) -> bytes:
     payload: dict[str, object] = {
         "Label": job.label,
         "ProgramArguments": job.command,
+        "EnvironmentVariables": {"PATH": job.environment_path},
         "RunAtLoad": job.run_at_load,
         "WorkingDirectory": job.working_directory,
         "StandardOutPath": str(Path(job.log_directory) / f"{job.label}.out.log"),
@@ -55,19 +57,33 @@ def render_plist(job: LaunchdJob) -> bytes:
     return plistlib.dumps(payload, sort_keys=True)
 
 
+def _resolve_uv() -> str:
+    resolved = shutil.which("uv")
+    return resolved or "uv"
+
+
 def write_launchd_plists(
     *,
     output_dir: Path,
     working_directory: str,
     data_dir: str,
     obsidian_vault: str,
-    source_dir: str,
+    source_dir: str | None,
     archive_root: str,
     config_path: str | None = None,
     dry_run: bool = True,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     log_directory = str(Path(data_dir) / "logs" / "launchd")
+    # launchd will not create the log directory, so a missing dir silently drops job
+    # stdout/stderr; create it up front so scheduled-job output is observable.
+    Path(log_directory).mkdir(parents=True, exist_ok=True)
+    # Resolve uv to an absolute path: launchd jobs run with a minimal PATH, so a bare
+    # "uv" is not found and the job fails to even start.
+    uv_bin = _resolve_uv()
+    # Omit --source-dir unless an explicit source is configured, so scheduled ingest falls
+    # back to configured device discovery (DJI volume auto-detect) instead of a fixed path.
+    source_args = ["--source-dir", source_dir] if source_dir else []
     # Pass --config so scheduled jobs use the configured real VAD/ASR/LLM backends and
     # bound owner_did, not the AppConfig mock/placeholder defaults (§6/§9, §30.3).
     config_args = ["--config", config_path] if config_path else []
@@ -77,13 +93,12 @@ def write_launchd_plists(
         LaunchdJob(
             label="com.personal-context-node.ingest",
             command=[
-                "uv",
+                uv_bin,
                 "run",
                 "pcn",
                 *config_args,
                 "ingest-import",
-                "--source-dir",
-                source_dir,
+                *source_args,
                 "--data-dir",
                 data_dir,
                 "--obsidian-vault",
@@ -97,7 +112,7 @@ def write_launchd_plists(
         LaunchdJob(
             label="com.personal-context-node.process",
             command=[
-                "uv",
+                uv_bin,
                 "run",
                 "pcn",
                 *config_args,
@@ -116,7 +131,7 @@ def write_launchd_plists(
         LaunchdJob(
             label="com.personal-context-node.daily",
             command=[
-                "uv",
+                uv_bin,
                 "run",
                 "pcn",
                 *config_args,
@@ -134,7 +149,7 @@ def write_launchd_plists(
         LaunchdJob(
             label="com.personal-context-node.archive",
             command=[
-                "uv",
+                uv_bin,
                 "run",
                 "pcn",
                 *config_args,
@@ -157,7 +172,7 @@ def write_launchd_plists(
         LaunchdJob(
             label="com.personal-context-node.web",
             command=[
-                "uv",
+                uv_bin,
                 "run",
                 "pcn",
                 *config_args,

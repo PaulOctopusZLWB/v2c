@@ -4,6 +4,13 @@ from pathlib import Path
 import tomllib
 
 
+def test_dockerignore_excludes_local_runtime_data() -> None:
+    ignored = Path(".dockerignore").read_text(encoding="utf-8").splitlines()
+
+    for required in [".venv/", ".tmp/", "data/", "sample_data/", "web/node_modules/", "web/dist/", ".pytest_cache/", ".ruff_cache/"]:
+        assert required in ignored
+
+
 def test_dockerfile_includes_wrapper_scripts() -> None:
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
 
