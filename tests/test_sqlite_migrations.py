@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+from personal_context_node.storage.sqlite import _run_migrations, connect, fetch_all, initialize
 
 
 def test_initialize_records_schema_migration_version(tmp_path) -> None:
@@ -77,8 +77,34 @@ def test_initialize_tasks_schema_tracks_claim_priority_and_retry_metadata(tmp_pa
     index_names = {row["name"] for row in indexes}
     assert "idx_tasks_claim" in index_names
     assert "idx_tasks_target" in index_names
-    assert [row["name"] for row in claim_index] == ["status", "available_at", "priority"]
+    # Index column order mirrors claim_next_task's filter + "order by priority, available_at".
+    assert [row["name"] for row in claim_index] == ["task_type", "status", "priority", "available_at"]
     assert [row["name"] for row in target_index] == ["target_type", "target_id"]
+
+
+def test_initialize_replaces_legacy_claim_index_definition(tmp_path) -> None:
+    # An existing DB may carry the legacy idx_tasks_claim (status, available_at, priority). Because
+    # "create index if not exists" is a no-op when the name already exists, _run_migrations must
+    # drop then recreate it so the index matches the priority-first claim order. Simulate the legacy
+    # DB by initializing fully, downgrading only the index, then re-running migrations (as a fresh
+    # process would — initialize() itself caches per-process, so call _run_migrations directly).
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+        conn.execute("drop index idx_tasks_claim")
+        conn.execute("create index idx_tasks_claim on tasks(status, available_at, priority)")
+        conn.commit()
+        assert [row["name"] for row in fetch_all(conn, "pragma index_info(idx_tasks_claim)")] == [
+            "status", "available_at", "priority",
+        ]
+
+        _run_migrations(conn)  # a fresh process re-runs migrations; must converge the legacy index
+
+        claim_index = fetch_all(conn, "pragma index_info(idx_tasks_claim)")
+    finally:
+        conn.close()
+
+    assert [row["name"] for row in claim_index] == ["task_type", "status", "priority", "available_at"]
 
 
 def test_initialize_memory_candidates_schema_tracks_prompt_version(tmp_path) -> None:

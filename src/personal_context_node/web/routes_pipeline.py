@@ -83,6 +83,23 @@ def retry_failed_route(request: Request) -> dict[str, object]:
 _ACTIVE_TASK_STATUSES = frozenset({"pending", "claimed", "running"})
 
 
+def _is_settled(row: dict[str, object]) -> bool:
+    """A task that won't progress on its own: succeeded, terminally failed, or a retryable
+    failure that has exhausted its retries (the claimer skips it once retry_count >= max_retries,
+    so it is effectively terminal even though its status string is still 'failed_retryable')."""
+    status = str(row["status"])
+    if status in ("succeeded", "failed_terminal"):
+        return True
+    if status == "failed_retryable":
+        return int(row["retry_count"]) >= int(row["max_retries"])
+    return False
+
+
+def _is_failed(row: dict[str, object]) -> bool:
+    """A settled task that ended in failure (a subset of _is_settled — excludes 'succeeded')."""
+    return _is_settled(row) and str(row["status"]) != "succeeded"
+
+
 @events_router.get("/events")
 async def events_stream(request: Request) -> StreamingResponse:
     config: AppConfig = request.app.state.config
@@ -103,18 +120,21 @@ async def events_stream(request: Request) -> StreamingResponse:
             from collections import Counter
             status_counts = dict(Counter(str(r["status"]) for r in rows))
             total = len(rows)
-            # Per-stage done/total + an ETA, so the always-visible header can show the
-            # breakdown and remaining time WITHOUT fetching the full task list. Kept tiny
-            # (a few task_type buckets), so the stream stays compact.
-            _done_statuses = {"succeeded", "failed_terminal", "failed"}
+            # Per-stage done/total + done/failed totals + an ETA, so the always-visible header
+            # can show the breakdown and remaining time WITHOUT fetching the full task list.
+            # "done" = settled (will not progress on its own); "failed" = settled-with-failure.
             stage_counts: dict[str, dict[str, int]] = {}
+            done_total = 0
+            failed_total = 0
             for r in rows:
                 bucket = stage_counts.setdefault(str(r["task_type"]), {"done": 0, "total": 0})
                 bucket["total"] += 1
-                if str(r["status"]) in _done_statuses:
+                if _is_settled(r):
                     bucket["done"] += 1
+                    done_total += 1
+                    if _is_failed(r):
+                        failed_total += 1
             durations = [int(r["duration_ms"]) for r in rows if r["duration_ms"] is not None]
-            done_total = sum(b["done"] for b in stage_counts.values())
             remaining = total - done_total
             eta_seconds = round(remaining * (sum(durations) / len(durations)) / 1000.0) if durations and remaining > 0 else None
             # Determine the active stage and current target from the first running/claimed task.
@@ -126,10 +146,13 @@ async def events_stream(request: Request) -> StreamingResponse:
                     current_target = str(r["target_id"])
                     break
 
-            # Compact change-signature: (sorted status counts, import_progress)
-            # We intentionally exclude task-level detail so the signature is small.
+            # Compact change-signature: every field that the rendered payload shows must be
+            # part of it, or a transition that changes only that field (e.g. the worker going
+            # idle after the last task settled, or the active stage/target advancing) would be
+            # silently dropped and the UI would freeze on a stale frame. Still tiny — counts,
+            # not per-task detail.
             signature = json.dumps(
-                (sorted(status_counts.items()), import_progress),
+                (sorted(status_counts.items()), worker_running, active_stage, current_target, import_progress),
                 sort_keys=True,
                 default=str,
             )
@@ -139,6 +162,8 @@ async def events_stream(request: Request) -> StreamingResponse:
                     "status_counts": status_counts,
                     "total": total,
                     "stage_counts": stage_counts,
+                    "done_total": done_total,
+                    "failed_total": failed_total,
                     "eta_seconds": eta_seconds,
                     "active_stage": active_stage,
                     "current_target": current_target,

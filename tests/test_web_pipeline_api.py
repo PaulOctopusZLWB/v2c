@@ -121,8 +121,61 @@ def test_events_status_summary_has_compact_shape(tmp_path: Path) -> None:
     # the full task list.
     assert "stage_counts" in summary_data
     assert "eta_seconds" in summary_data
+    # Settled/failed totals (with correct retryable-exhausted semantics) ride along too, so the
+    # header's done/failed counters don't have to fetch the full task list.
+    assert "done_total" in summary_data
+    assert "failed_total" in summary_data
+    assert "worker_running" in summary_data
     # Must NOT be a full tasks dump — no 'tasks' key in the compact payload.
     assert "tasks" not in summary_data
+
+
+def test_events_summary_counts_exhausted_retryable_as_done_and_failed(tmp_path: Path) -> None:
+    # done_total/failed_total must treat a failed_retryable task that has exhausted its retries
+    # (retry_count >= max_retries — the claimer will never pick it up again) as settled-and-failed,
+    # while a retryable task with attempts left is NOT counted as done. (No 'pending' task here:
+    # pending is an active status that would hold the buffering-TestClient stream open forever;
+    # failed_retryable is inactive, so the stream still closes after its snapshot.)
+    import json
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = "2026-06-01T10:00:00+00:00"
+        # (task_id, status, retry_count, max_retries)
+        for task_id, status, retry_count, max_retries in [
+            ("ok", "succeeded", 1, 3),
+            ("terminal", "failed_terminal", 1, 3),
+            ("exhausted", "failed_retryable", 3, 3),  # no retries left -> settled + failed
+            ("retrying", "failed_retryable", 1, 3),  # retries left -> NOT done, NOT failed
+        ]:
+            conn.execute(
+                """
+                insert into tasks (task_id, task_type, target_type, target_id, status,
+                                   retry_count, max_retries, available_at, created_at, updated_at)
+                values (?, 'asr', 'audio_chunk', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (task_id, task_id, status, retry_count, max_retries, now, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    with client.stream("GET", "/api/events") as response:
+        lines = list(response.iter_lines())
+    summary_data: dict | None = None
+    for i, line in enumerate(lines):
+        if line == "event: status.summary" and i + 1 < len(lines):
+            summary_data = json.loads(lines[i + 1][len("data: "):])
+            break
+
+    assert summary_data is not None
+    # succeeded + failed_terminal + exhausted-retryable = 3 settled; the still-retrying task excluded.
+    assert summary_data["done_total"] == 3
+    # failed = terminal + exhausted-retryable (succeeded excluded).
+    assert summary_data["failed_total"] == 2
 
 
 def test_retry_failed_resets_all_failed_tasks(tmp_path: Path) -> None:

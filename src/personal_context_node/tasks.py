@@ -106,7 +106,7 @@ def claim_next_task(*, config: AppConfig, task_type: str, run_id: str, lease_sec
                 or (status = 'failed_retryable' and retry_count < max_retries)
               )
               and available_at <= ?
-            order by available_at, priority, created_at
+            order by priority, available_at, created_at
             limit 1
             """,
             (task_type, now),
@@ -421,7 +421,7 @@ def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
             conn,
             """
             select task_id, task_type, target_type, target_id, status, attempt_count,
-                   last_error, started_at, finished_at,
+                   retry_count, max_retries, last_error, started_at, finished_at,
                    coalesce((
                      select group_concat(distinct transcript_segments.model_name)
                      from transcript_segments

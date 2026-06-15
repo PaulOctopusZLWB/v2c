@@ -56,6 +56,10 @@ export interface StatusSummary {
   status_counts: Record<string, number>;
   total: number;
   stage_counts?: Record<string, { done: number; total: number }>;
+  /** Tasks that will not progress on their own (succeeded + terminal/exhausted failures). */
+  done_total?: number;
+  /** Subset of done_total that ended in failure (terminal, or retryable with retries exhausted). */
+  failed_total?: number;
   eta_seconds?: number | null;
   active_stage: string | null;
   current_target: string | null;

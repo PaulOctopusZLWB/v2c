@@ -187,7 +187,11 @@ export function App() {
   const counts = summary?.status_counts ?? {};
   const summaryTotal = summary?.total ?? 0;
   const activeCount = ACTIVE_STATUSES.reduce((n, s) => n + (counts[s] ?? 0), 0);
-  const doneCount = summaryTotal > 0 ? summaryTotal - (counts["pending"] ?? 0) - (counts["claimed"] ?? 0) - (counts["running"] ?? 0) : 0;
+  // Prefer the backend's settled-task count (it knows retryable-but-exhausted failures count
+  // as done); fall back to total-minus-active only for an older backend without done_total.
+  const doneCount =
+    summary?.done_total ??
+    (summaryTotal > 0 ? summaryTotal - (counts["pending"] ?? 0) - (counts["claimed"] ?? 0) - (counts["running"] ?? 0) : 0);
 
   const firstRun = summaryTotal === 0 && days.length === 0;
 
@@ -221,7 +225,10 @@ export function App() {
   // summary), so they show in the always-visible header without the heavy task fetch.
   const stageBreakdown = stageBreakdownFromSummary(summary?.stage_counts);
   const etaSeconds = summary?.eta_seconds ?? null;
-  const failedCount = tasks.filter((tk) => tk.status.startsWith("failed")).length;
+  // The summary's failed_total counts terminal + retry-exhausted failures (matching the
+  // backend's "done" semantics); the task-list fallback over-counts retryable failures that
+  // still have attempts left, but only applies when the summary hasn't arrived yet.
+  const failedCount = summary?.failed_total ?? tasks.filter((tk) => tk.status.startsWith("failed")).length;
 
   // Map a pipeline stage to the DOM id of the panel that owns it, then scroll there.
   const STAGE_PANEL_ID: Record<Stage, string> = {
@@ -338,8 +345,8 @@ export function App() {
             setTasksOpen(open);
             if (open) void refreshTasks().catch(() => undefined);
           }}
-          onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); })}
-          onRetryAllFailed={guard(async () => { await api.retryFailed(); await api.run(); })}
+          onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); await refreshTasks(); })}
+          onRetryAllFailed={guard(async () => { await api.retryFailed(); await api.run(); await refreshTasks(); })}
         />
       </aside>
 
