@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from personal_context_node import process_runner as _pr_module
+from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
 from personal_context_node.config import AppConfig
+from personal_context_node.pipeline_adapters import PipelineAdapters
 from personal_context_node.process_runner import ProcessOnceResult, drain_process_queue
 from personal_context_node.web.worker import PipelineWorker
 
@@ -82,6 +84,32 @@ def test_web_worker_import_path_drains_more_than_default_max_steps(tmp_path: Pat
 
     assert worker._last_result is not None
     assert worker._last_result.tasks_succeeded == total_tasks
+
+
+def test_drain_closes_persistent_asr_adapter_when_done(tmp_path: Path, monkeypatch) -> None:
+    # A funasr_server drain owns a resident model subprocess; once drain_now() returns the
+    # worker must close() it (try/finally), or every import leaks a live MPS process. We prove
+    # the actual subprocess is reaped — deterministically, without forcing GC.
+    import personal_context_node.web.worker as _worker_module
+
+    server = tmp_path / "resident.py"
+    server.write_text("import sys\nfor _line in sys.stdin:\n    pass\n", encoding="utf-8")
+    adapter = PersistentCommandASRAdapter(command=["python3", str(server)], timeout_seconds=10)
+    proc = adapter._ensure()  # spawn the resident process up front
+    assert proc.poll() is None  # alive before the drain
+
+    monkeypatch.setattr(
+        _worker_module, "build_pipeline_adapters",
+        lambda **kwargs: PipelineAdapters(vad=_Unused(), asr=adapter, llm=_Unused()),
+    )
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    worker = PipelineWorker(config=config)
+    result = worker.drain_now()  # empty queue -> returns immediately, then closes adapters
+
+    assert result.status == "complete"
+    assert adapter._proc is None  # adapter forgot its process (close() ran)
+    assert proc.poll() is not None  # the resident subprocess was actually terminated/reaped
 
 
 class _Unused:
