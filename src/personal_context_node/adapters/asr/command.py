@@ -26,20 +26,25 @@ class CommandASRAdapter:
     input (-> TerminalPortError); any other non-zero is retryable.
     """
 
-    def __init__(self, *, command: list[str]) -> None:
+    def __init__(self, *, command: list[str], timeout_seconds: float = 3600.0) -> None:
         if not command:
             raise ValueError("ASR command must not be empty")
         self.command = command
+        self.timeout_seconds = timeout_seconds
         self.model_name = "command-asr"
         self.model_version = "unknown"
 
     def transcribe(self, audio_path: Path) -> ASRResult:
-        completed = subprocess.run(
-            [*self.command, str(audio_path)],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                [*self.command, str(audio_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RetryablePortError(f"ASR command timed out after {self.timeout_seconds:g}s") from exc
         if completed.returncode == TERMINAL_EXIT_CODE:
             raise TerminalPortError(
                 f"ASR command rejected input as permanently unsupported: {completed.stderr.strip()}"

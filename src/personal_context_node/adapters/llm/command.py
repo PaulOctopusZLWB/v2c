@@ -24,10 +24,11 @@ RAW_AUDIO_PATH_VALUE_RE = re.compile(r"[/\\][^\s\"']+\.(?:wav|wave|m4a|mp3|flac|
 class CommandLLMAdapter:
     """Text-only LLM adapter for local or cloud wrapper commands."""
 
-    def __init__(self, *, command: list[str]) -> None:
+    def __init__(self, *, command: list[str], timeout_seconds: float = 3600.0) -> None:
         if not command:
             raise ValueError("LLM command must not be empty")
         self.command = command
+        self.timeout_seconds = timeout_seconds
 
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
         payload = self._run_json(
@@ -63,13 +64,17 @@ class CommandLLMAdapter:
         )
 
     def _run_json(self, payload: dict[str, object]) -> dict[str, object]:
-        completed = subprocess.run(
-            self.command,
-            input=json.dumps(payload, ensure_ascii=False),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                self.command,
+                input=json.dumps(payload, ensure_ascii=False),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RetryablePortError(f"LLM command timed out after {self.timeout_seconds:g}s") from exc
         if completed.returncode != 0:
             raise RetryablePortError(f"LLM command failed with exit {completed.returncode}: {completed.stderr.strip()}")
         try:

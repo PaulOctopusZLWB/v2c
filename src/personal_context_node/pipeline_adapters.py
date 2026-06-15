@@ -33,6 +33,7 @@ def build_vad(
     min_speech_ms: int = 300,
     model_id: str = "fsmn-vad",
     model_revision: str | None = None,
+    timeout_seconds: float = 3600.0,
 ) -> VADPort:
     if vad_backend == "energy":
         return EnergyVadAdapter(threshold=vad_threshold, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
@@ -41,7 +42,12 @@ def build_vad(
     if vad_backend == "command":
         if not vad_command:
             raise ValueError("vad_command is required when vad_backend is 'command'")
-        return CommandVADAdapter(command=shlex.split(vad_command), merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
+        return CommandVADAdapter(
+            command=shlex.split(vad_command),
+            merge_gap_ms=merge_gap_ms,
+            min_speech_ms=min_speech_ms,
+            timeout_seconds=timeout_seconds,
+        )
     if vad_backend == "funasr":
         if vad_command:
             command = shlex.split(vad_command)
@@ -58,7 +64,9 @@ def build_vad(
             ]
             if model_revision is not None:
                 command.extend(["--model-revision", model_revision])
-        return CommandVADAdapter(command=command, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms)
+        return CommandVADAdapter(
+            command=command, merge_gap_ms=merge_gap_ms, min_speech_ms=min_speech_ms, timeout_seconds=timeout_seconds
+        )
     raise ValueError("vad_backend must be 'energy', 'mock', 'command', or 'funasr'")
 
 
@@ -71,13 +79,14 @@ def build_asr(
     model_name: str = "mock-asr",
     model_id: str = "iic/SenseVoiceSmall",
     model_version: str = "funasr-sensevoice-local",
+    timeout_seconds: float = 3600.0,
 ) -> ASRPort:
     if asr_backend == "mock":
         return MockASRAdapter(text=mock_text, language=language, model_name=model_name)
     if asr_backend == "command":
         if not asr_command:
             raise ValueError("asr_command is required when asr_backend is 'command'")
-        return CommandASRAdapter(command=shlex.split(asr_command))
+        return CommandASRAdapter(command=shlex.split(asr_command), timeout_seconds=timeout_seconds)
     if asr_backend == "funasr":
         command = (
             shlex.split(asr_command)
@@ -93,11 +102,11 @@ def build_asr(
                 language,
             ]
         )
-        return CommandASRAdapter(command=command)
+        return CommandASRAdapter(command=command, timeout_seconds=timeout_seconds)
     raise ValueError("asr_backend must be 'mock', 'command', or 'funasr'")
 
 
-def build_llm(*, llm_backend: str, llm_command: str | None) -> LLMPort:
+def build_llm(*, llm_backend: str, llm_command: str | None, timeout_seconds: float = 3600.0) -> LLMPort:
     if llm_backend == "rule_based":
         return RuleBasedLLMAdapter()
     if llm_backend == "mock":
@@ -105,7 +114,7 @@ def build_llm(*, llm_backend: str, llm_command: str | None) -> LLMPort:
     if llm_backend == "command":
         if not llm_command:
             raise ValueError("llm_command is required when llm_backend is 'command'")
-        return CommandLLMAdapter(command=shlex.split(llm_command))
+        return CommandLLMAdapter(command=shlex.split(llm_command), timeout_seconds=timeout_seconds)
     raise ValueError("llm_backend must be 'rule_based', 'mock', or 'command'")
 
 
@@ -119,6 +128,7 @@ def build_pipeline_adapters(*, config: AppConfig) -> PipelineAdapters:
             min_speech_ms=config.min_speech_ms,
             model_id=config.vad_model_id,
             model_revision=config.vad_model_revision,
+            timeout_seconds=config.command_timeout_seconds,
         ),
         asr=build_asr(
             asr_backend=config.asr_backend,
@@ -128,6 +138,11 @@ def build_pipeline_adapters(*, config: AppConfig) -> PipelineAdapters:
             model_name=config.asr_model_name,
             model_id=config.asr_model_id,
             model_version=config.asr_model_version,
+            timeout_seconds=config.command_timeout_seconds,
         ),
-        llm=build_llm(llm_backend=config.llm_backend, llm_command=config.llm_command),
+        llm=build_llm(
+            llm_backend=config.llm_backend,
+            llm_command=config.llm_command,
+            timeout_seconds=config.command_timeout_seconds,
+        ),
     )

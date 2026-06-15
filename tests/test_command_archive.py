@@ -69,6 +69,25 @@ raise SystemExit(23)
     assert result.reason == "archive command failed with exit 23: nas unavailable"
 
 
+def test_command_archive_adapter_times_out_hung_command(tmp_path: Path) -> None:
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"raw audio bytes")
+    script = tmp_path / "hang_archive.py"
+    script.write_text("import time\ntime.sleep(5)", encoding="utf-8")
+    archive_root = tmp_path / "archive"
+    archive_root.mkdir(parents=True, exist_ok=True)  # simulate a mounted NAS
+    adapter = CommandArchiveAdapter(root=archive_root, command=["python3", str(script)], timeout_seconds=0.01)
+
+    result = adapter.archive_file(
+        source_path=source,
+        relative_path=Path("x.wav"),
+        expected_sha256="sha256:test",
+    )
+
+    assert result.verified is False
+    assert "timed out" in (result.reason or "")
+
+
 def test_command_archive_adapter_reports_unavailable_root_without_running_command(tmp_path: Path) -> None:
     # §13.1/§13.2: an unmounted NAS root must yield pending, not a fabricated local tree.
     source = tmp_path / "source.wav"

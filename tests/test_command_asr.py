@@ -125,6 +125,22 @@ def test_command_asr_adapter_reports_command_failure_as_retryable(tmp_path: Path
         raise AssertionError("CommandASRAdapter accepted a failed command")
 
 
+def test_command_asr_adapter_times_out_hung_command(tmp_path: Path) -> None:
+    chunk = tmp_path / "chunk.wav"
+    chunk.write_bytes(b"fake wav")
+    script = tmp_path / "hang_asr.py"
+    script.write_text("import time\ntime.sleep(5)", encoding="utf-8")
+
+    adapter = CommandASRAdapter(command=["python3", str(script)], timeout_seconds=0.01)
+
+    try:
+        adapter.transcribe(chunk)
+    except RetryablePortError as exc:
+        assert "timed out" in str(exc)
+    else:
+        raise AssertionError("CommandASRAdapter did not time out a hung command")
+
+
 def test_command_asr_adapter_maps_terminal_exit_code_to_terminal_error(tmp_path: Path) -> None:
     chunk = tmp_path / "chunk.wav"
     chunk.write_bytes(b"fake wav")

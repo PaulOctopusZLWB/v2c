@@ -15,11 +15,12 @@ class CommandArchiveAdapter:
     are present, source and archive paths are appended.
     """
 
-    def __init__(self, *, root: Path, command: list[str]) -> None:
+    def __init__(self, *, root: Path, command: list[str], timeout_seconds: float = 3600.0) -> None:
         if not command:
             raise ValueError("archive command must not be empty")
         self.root = root
         self.command = command
+        self.timeout_seconds = timeout_seconds
 
     def archive_file(self, *, source_path: Path, relative_path: Path, expected_sha256: str) -> ArchiveResult:
         archive_path = self.root / relative_path
@@ -31,7 +32,16 @@ class CommandArchiveAdapter:
             return ArchiveResult(archive_path=archive_path, verified=False, reason="archive root unavailable")
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         command = self._archive_command(source_path=source_path, archive_path=archive_path, relative_path=relative_path)
-        completed = subprocess.run(command, check=False, text=True, capture_output=True)
+        try:
+            completed = subprocess.run(
+                command, check=False, text=True, capture_output=True, timeout=self.timeout_seconds
+            )
+        except subprocess.TimeoutExpired:
+            return ArchiveResult(
+                archive_path=archive_path,
+                verified=False,
+                reason=f"archive command timed out after {self.timeout_seconds:g}s",
+            )
         if completed.returncode != 0:
             stderr = completed.stderr.strip()
             reason = f"archive command failed with exit {completed.returncode}"

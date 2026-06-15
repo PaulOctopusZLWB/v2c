@@ -15,18 +15,25 @@ class CommandVADAdapter:
     (§5, §35) are applied here so VAD tuning is honored for the command/funasr backend.
     """
 
-    def __init__(self, *, command: list[str], merge_gap_ms: int = 0, min_speech_ms: int = 0) -> None:
+    def __init__(
+        self, *, command: list[str], merge_gap_ms: int = 0, min_speech_ms: int = 0, timeout_seconds: float = 3600.0
+    ) -> None:
         self.command = command
         self.merge_gap_ms = merge_gap_ms
         self.min_speech_ms = min_speech_ms
+        self.timeout_seconds = timeout_seconds
 
     def detect(self, audio_path: Path) -> VADResult:
-        result = subprocess.run(
-            [*self.command, str(audio_path)],
-            check=False,
-            text=True,
-            capture_output=True,
-        )
+        try:
+            result = subprocess.run(
+                [*self.command, str(audio_path)],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=self.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RetryablePortError(f"VAD command timed out after {self.timeout_seconds:g}s") from exc
         if result.returncode != 0:
             raise RetryablePortError(f"VAD command failed with exit {result.returncode}: {result.stderr.strip()}")
         try:

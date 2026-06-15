@@ -48,6 +48,18 @@ print(json.dumps({"ranges": [{"start_ms": 900, "end_ms": 100}]}))
         CommandVADAdapter(command=["python3", str(script)]).detect(audio)
 
 
+def test_command_vad_adapter_times_out_hung_command(tmp_path: Path) -> None:
+    script = tmp_path / "hang_vad.py"
+    script.write_text("import time\ntime.sleep(5)", encoding="utf-8")
+    audio = tmp_path / "chunk.wav"
+    audio.write_bytes(b"RIFFfake")
+
+    adapter = CommandVADAdapter(command=["python3", str(script)], timeout_seconds=0.01)
+
+    with pytest.raises(RetryablePortError, match="timed out"):
+        adapter.detect(audio)
+
+
 def test_command_vad_adapter_reports_command_failure_as_retryable(tmp_path: Path) -> None:
     script = tmp_path / "failed_vad.py"
     script.write_text("import sys\nsys.stderr.write('device busy')\nsys.exit(9)", encoding="utf-8")

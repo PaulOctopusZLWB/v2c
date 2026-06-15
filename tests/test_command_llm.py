@@ -288,6 +288,19 @@ def test_command_llm_adapter_reports_invalid_json(tmp_path: Path) -> None:
         raise AssertionError("CommandLLMAdapter accepted invalid JSON")
 
 
+def test_command_llm_adapter_times_out_hung_command(tmp_path: Path) -> None:
+    script = tmp_path / "hang_llm.py"
+    script.write_text("import time\ntime.sleep(5)", encoding="utf-8")
+    adapter = CommandLLMAdapter(command=["python3", str(script)], timeout_seconds=0.01)
+
+    try:
+        adapter.generate_daily_context(day="2087-05-10", transcript_segments=[])
+    except RetryablePortError as exc:
+        assert "timed out" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter did not time out a hung command")
+
+
 def test_command_llm_adapter_reports_command_failure_as_retryable(tmp_path: Path) -> None:
     script = tmp_path / "failed_llm.py"
     script.write_text("import sys\nsys.stderr.write('rate limited')\nsys.exit(8)", encoding="utf-8")
