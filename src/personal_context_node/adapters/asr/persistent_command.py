@@ -7,7 +7,7 @@ from pathlib import Path
 
 from personal_context_node.adapters.asr.command import _asr_segment
 from personal_context_node.core.ports.asr import ASRResult
-from personal_context_node.core.ports.errors import RetryablePortError
+from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
 class PersistentCommandASRAdapter:
@@ -83,6 +83,10 @@ class PersistentCommandASRAdapter:
             self.close()
             raise RetryablePortError(f"invalid ASR server JSON: {exc}") from exc
         if "error" in payload:
+            # The server marks permanently-unsupported input (e.g. a missing chunk file) as
+            # terminal, matching CommandASRAdapter's exit-3 contract; everything else is transient.
+            if payload.get("terminal"):
+                raise TerminalPortError(f"ASR server rejected input as permanently unsupported: {payload['error']}")
             raise RetryablePortError(f"ASR server error: {payload['error']}")
         self.model_name = str(payload.get("model_name", self.model_name))
         self.model_version = str(payload.get("model_version", self.model_version))

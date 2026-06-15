@@ -18,32 +18,53 @@ def test_resolve_device_prefers_mps_when_available() -> None:
     assert fw.resolve_device("cpu", mps_available=lambda: True) == "cpu"   # explicit override respected
 
 
-def test_run_server_emits_one_result_line_per_chunk_path() -> None:
+def test_run_server_emits_one_result_line_per_chunk_path(tmp_path: Path) -> None:
     class FakeModel:
         def generate(self, *, input, **kw):
             return [{"text": f"<|zh|>转写 {input}", "timestamp": [0, 1000]}]
 
-    stdin = io.StringIO("a.wav\n\nb.wav\n")   # blank line ignored
+    a = tmp_path / "a.wav"; a.write_bytes(b"")
+    b = tmp_path / "b.wav"; b.write_bytes(b"")
+    stdin = io.StringIO(f"{a}\n\n{b}\n")   # blank line ignored
     stdout = io.StringIO()
 
     fw.run_server(FakeModel(), stdin, stdout, language="zh")
 
     lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
     assert len(lines) == 2
-    assert lines[0]["segments"][0]["text"] == "转写 a.wav"
+    assert lines[0]["segments"][0]["text"] == f"转写 {a}"
     assert lines[0]["model_name"] == "sensevoice"
 
 
-def test_run_server_reports_per_chunk_error_without_crashing() -> None:
+def test_run_server_reports_per_chunk_error_without_crashing(tmp_path: Path) -> None:
     class BoomModel:
         def generate(self, *, input, **kw):
             raise RuntimeError("decode failed")
 
+    x = tmp_path / "x.wav"; x.write_bytes(b"")
     stdout = io.StringIO()
-    fw.run_server(BoomModel(), io.StringIO("x.wav\n"), stdout, language="zh")
+    fw.run_server(BoomModel(), io.StringIO(f"{x}\n"), stdout, language="zh")
 
     out = json.loads(stdout.getvalue())
     assert "error" in out and "decode failed" in out["error"]
+    assert not out.get("terminal")  # a model decode failure is transient -> retryable, NOT terminal
+
+
+def test_run_server_flags_missing_chunk_file_as_terminal(tmp_path: Path) -> None:
+    # A missing chunk path is permanently-unsupported input (it will never appear on retry):
+    # the server must emit a terminal-flagged error WITHOUT invoking the model, mirroring the
+    # one-shot path's exit-code-3 contract so the task fails fast instead of retrying to exhaustion.
+    class NeverCalledModel:
+        def generate(self, *, input, **kw):
+            raise AssertionError("model.generate must not run for a missing chunk file")
+
+    missing = tmp_path / "gone.wav"  # never created
+    stdout = io.StringIO()
+    fw.run_server(NeverCalledModel(), io.StringIO(f"{missing}\n"), stdout, language="zh")
+
+    out = json.loads(stdout.getvalue())
+    assert out.get("terminal") is True
+    assert "does not exist" in out["error"]
 
 
 def test_funasr_sensevoice_wrapper_normalizes_sentence_info(tmp_path: Path) -> None:
@@ -139,7 +160,7 @@ def test_funasr_sensevoice_wrapper_reports_missing_dependency(tmp_path: Path) ->
     assert "FunASR is not installed" in result.stderr
 
 
-def test_run_server_honors_batch_size_s() -> None:
+def test_run_server_honors_batch_size_s(tmp_path: Path) -> None:
     captured: dict = {}
 
     class FakeModel:
@@ -147,12 +168,13 @@ def test_run_server_honors_batch_size_s() -> None:
             captured.update(kw)
             return [{"text": "x", "timestamp": [0, 1]}]
 
-    fw.run_server(FakeModel(), io.StringIO("a.wav\n"), io.StringIO(), language="zh", batch_size_s=42)
+    a = tmp_path / "a.wav"; a.write_bytes(b"")
+    fw.run_server(FakeModel(), io.StringIO(f"{a}\n"), io.StringIO(), language="zh", batch_size_s=42)
 
     assert captured["batch_size_s"] == 42
 
 
-def test_run_server_redirects_model_stdout_away_from_protocol() -> None:
+def test_run_server_redirects_model_stdout_away_from_protocol(tmp_path: Path) -> None:
     # FunASR/tqdm may print to stdout during inference; run_server must redirect it so the
     # one-line-per-result protocol stream stays pure JSON.
     class NoisyModel:
@@ -160,8 +182,9 @@ def test_run_server_redirects_model_stdout_away_from_protocol() -> None:
             print("FUNASR PROGRESS noise")  # would corrupt the JSON line if not redirected
             return [{"text": "x", "timestamp": [0, 1]}]
 
+    a = tmp_path / "a.wav"; a.write_bytes(b"")
     out = io.StringIO()
-    fw.run_server(NoisyModel(), io.StringIO("a.wav\n"), out, language="zh")
+    fw.run_server(NoisyModel(), io.StringIO(f"{a}\n"), out, language="zh")
 
     lines = out.getvalue().splitlines()
     assert len(lines) == 1
@@ -169,13 +192,14 @@ def test_run_server_redirects_model_stdout_away_from_protocol() -> None:
     assert "noise" not in out.getvalue()
 
 
-def test_run_server_uses_given_model_version() -> None:
+def test_run_server_uses_given_model_version(tmp_path: Path) -> None:
     class FakeModel:
         def generate(self, *, input, **kw):
             return [{"text": "x", "timestamp": [0, 1]}]
 
+    a = tmp_path / "a.wav"; a.write_bytes(b"")
     out = io.StringIO()
-    fw.run_server(FakeModel(), io.StringIO("a.wav\n"), out, language="zh", model_version="custom-v9")
+    fw.run_server(FakeModel(), io.StringIO(f"{a}\n"), out, language="zh", model_version="custom-v9")
 
     assert json.loads(out.getvalue())["model_version"] == "custom-v9"
 

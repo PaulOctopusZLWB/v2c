@@ -167,6 +167,16 @@ def run_server(
         path = raw_line.strip()
         if not path:
             continue
+        if not Path(path).exists():
+            # Mirror the one-shot path's terminal_exit_code=3: a missing chunk file is
+            # permanently unsupported input (it will never appear on retry), so flag it
+            # terminal. The resident server can't exit per-chunk, so the terminal signal
+            # rides on the JSON line as "terminal": true and the adapter maps it to
+            # TerminalPortError (parity with CommandASRAdapter's exit-3 handling).
+            payload = {"error": f"audio file does not exist: {path}", "terminal": True}
+            stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            stdout.flush()
+            continue
         try:
             # FunASR/tqdm may print to stdout during inference; redirect it to stderr so only
             # our explicit JSON line reaches the one-line-per-result protocol stream.
@@ -174,7 +184,7 @@ def run_server(
                 result = model.generate(input=path, language=language, use_itn=True, batch_size_s=batch_size_s)
             payload = {"model_name": "sensevoice", "model_version": model_version,
                        "segments": _normalize_segments(result)}
-        except Exception as exc:  # one bad chunk must not kill the resident server
+        except Exception as exc:  # one bad chunk must not kill the resident server (transient -> retryable)
             payload = {"error": f"{type(exc).__name__}: {exc}"}
         stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
         stdout.flush()

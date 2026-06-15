@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
-from personal_context_node.core.ports.errors import RetryablePortError
+from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
 
 def _server_script(tmp_path: Path) -> Path:
@@ -28,12 +28,46 @@ def test_persistent_adapter_reuses_one_process_across_chunks(tmp_path: Path) -> 
     adapter = PersistentCommandASRAdapter(command=["python3", str(_server_script(tmp_path))], timeout_seconds=10)
 
     r1 = adapter.transcribe(tmp_path / "chk_1.wav")
+    # Anchor the headline "model loads once" guarantee: capture the resident process after the
+    # first chunk, then assert the SAME Popen object and OS pid serve the second chunk. Without
+    # this, a regression that respawns per chunk (reloading the ~900MB model every time) would
+    # still echo correct text and slip through — the whole ~50x win silently lost.
+    proc_after_first = adapter._proc
+    pid_after_first = proc_after_first.pid
     r2 = adapter.transcribe(tmp_path / "chk_2.wav")
+    assert adapter._proc is proc_after_first  # not respawned: same process object
+    assert adapter._proc.pid == pid_after_first  # same OS process -> model loaded exactly once
     adapter.close()
 
     assert r1.segments[0].text == f"转 {tmp_path / 'chk_1.wav'}"
     assert r2.segments[0].text == f"转 {tmp_path / 'chk_2.wav'}"
     assert r1.backend == "PersistentCommandASRAdapter"
+
+
+def test_persistent_adapter_raises_terminal_for_terminal_flagged_error(tmp_path: Path) -> None:
+    # A server that flags an error line as terminal (e.g. a missing chunk file, mirroring the
+    # one-shot exit-code-3 contract) must surface as TerminalPortError so the task fails fast
+    # instead of burning the whole retry budget. A non-flagged error stays retryable (covered
+    # by the server-dies test above).
+    script = tmp_path / "terminal_err.py"
+    script.write_text(
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    if not line.strip(): continue\n"
+        "    print(json.dumps({'error': 'audio file does not exist', 'terminal': True}), flush=True)\n",
+        encoding="utf-8",
+    )
+    adapter = PersistentCommandASRAdapter(command=["python3", str(script)], timeout_seconds=10)
+    try:
+        adapter.transcribe(tmp_path / "missing.wav")
+    except TerminalPortError as exc:
+        assert "permanently unsupported" in str(exc)
+    except RetryablePortError:
+        raise AssertionError("terminal-flagged server error must raise TerminalPortError, not RetryablePortError")
+    else:
+        raise AssertionError("expected TerminalPortError for a terminal-flagged server error")
+    finally:
+        adapter.close()
 
 
 def test_persistent_adapter_raises_retryable_when_server_dies(tmp_path: Path) -> None:
