@@ -52,11 +52,11 @@ PIPELINE = (
 )
 PROCESS_TASK_ORDER = (
     "vad",
-    "asr",
     "session_derive",
     "summarize_session",
     "daily_generate",
     "obsidian_publish",
+    "asr",
     "archive",
 )
 

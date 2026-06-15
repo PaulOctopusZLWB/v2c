@@ -220,6 +220,49 @@ def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000
         wav.writeframes(bytes(frames))
 
 
+def test_process_once_prefers_finishing_a_day_over_more_asr(tmp_path: Path) -> None:
+    # Regression guard: after the PROCESS_TASK_ORDER reorder, a claimable session_derive
+    # (day A fully transcribed) must be picked before a pending asr (day B still transcribing).
+    from personal_context_node.storage.sqlite import initialize
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        # day A: seed a claimable session_derive task
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_sd_dayA', 'session_derive', 'date_key', '2026-06-01', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        # day B: seed a pending asr task (a chunk still to transcribe)
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_asr_dayB', 'asr', 'audio_chunk', 'chk_dayB_001', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = process_once(
+        config=config,
+        run_id="r_test_order",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="test"),
+    )
+
+    # The reordered PROCESS_TASK_ORDER must prefer session_derive over asr.
+    assert result.task_type == "session_derive", (
+        f"expected session_derive to preempt asr, got {result.task_type}"
+    )
+
+
 def test_terminal_failure_completing_fanin_still_enqueues_downstream(tmp_path: Path) -> None:
     # Liveness regression: a terminal task failure that COMPLETES a fan-in set must
     # still register the downstream (the fan-in is otherwise only evaluated on success),
