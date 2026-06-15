@@ -90,8 +90,10 @@ export function App() {
   async function handleImport(root: string) {
     if (!root) return;
     await api.importDir(root);
-    await api.run(); // import only enqueues; explicitly start the background worker
-    await refreshDays(); // a fresh import yields a new day; reflect it immediately
+    await api.run(); // import only enqueues; explicitly start the background worker.
+    // The new day appears once the run finishes (the running -> idle effect calls
+    // refreshDays): import is async and days derive from sessions that exist only after
+    // the pipeline drains, so refreshing here would just re-fetch the same empty list.
   }
 
   async function selectDay(day: string) {
