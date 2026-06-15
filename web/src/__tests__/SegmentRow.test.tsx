@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SegmentRow } from "../features/transcript/SegmentRow";
@@ -36,6 +36,7 @@ describe("SegmentRow", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /播放/ }));
 
-    expect(onPlaybackError).toHaveBeenCalledWith(expect.stringContaining("404"));
+    // playback runs fire-and-forget; wait for the rejection to propagate to the callback.
+    await waitFor(() => expect(onPlaybackError).toHaveBeenCalledWith(expect.stringContaining("404")));
   });
 });
