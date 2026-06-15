@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { api } from "../api/client";
 
 describe("App container", () => {
   beforeEach(() => {
@@ -75,7 +76,32 @@ describe("App container", () => {
     render(<App />);
 
     expect(await screen.findByText(/后端或 API 不可用/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument(); // announced to screen readers
     expect(screen.getByRole("button", { name: /重试/ })).toBeInTheDocument();
+  });
+
+  it("re-lists days on the poll interval as a backstop", async () => {
+    vi.useFakeTimers();
+    try {
+      const daysSpy = vi.spyOn(api, "days");
+      (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+        if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
+        if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
+        if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
+        if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }));
+        if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }));
+        return new Response(JSON.stringify({}));
+      });
+
+      render(<App />);
+      await vi.advanceTimersByTimeAsync(0); // flush bootstrap
+      const afterBootstrap = daysSpy.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5000); // one poll interval
+
+      expect(daysSpy.mock.calls.length).toBeGreaterThan(afterBootstrap);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refreshes days when a run completes (running -> idle)", async () => {

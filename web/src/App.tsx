@@ -83,7 +83,12 @@ export function App() {
 
   useEffect(() => {
     void refreshBootstrap();
-    const timer = setInterval(() => void refreshDevices(), DEVICE_POLL_MS);
+    const timer = setInterval(() => {
+      void refreshDevices();
+      // Backstop the running -> idle day refresh: if that single SSE transition is missed
+      // (dropped/coalesced frame), the poll still surfaces a freshly produced day.
+      void refreshDays().catch(() => undefined);
+    }, DEVICE_POLL_MS);
     return () => clearInterval(timer);
   }, []);
 
@@ -174,7 +179,7 @@ export function App() {
   function renderCenter() {
     if (bootstrapError && !bootstrapped) {
       return (
-        <div className="empty error-state">
+        <div className="empty error-state" role="alert">
           <Icon name="run" className="empty-icon" />
           <h3>后端或 API 不可用</h3>
           <p>{bootstrapError}</p>
