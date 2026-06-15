@@ -260,6 +260,25 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
             if not archive_result.verified:
                 continue
             local_path = Path(row["local_raw_path"])
+            # Fail-closed before deleting the only local copy (§13.2): never unlink a path
+            # outside the raw audio store, and never unlink raw whose local bytes no longer
+            # match the verified archive hash (corruption / wrong row).
+            if not _is_relative_to(local_path, config.raw_audio_dir):
+                _record_cleanup_error(
+                    conn,
+                    audio_file_id=str(row["audio_file_id"]),
+                    archive_path=str(row["archive_path"]),
+                    error="local raw path outside raw audio dir",
+                )
+                continue
+            if local_path.exists() and _sha256(local_path) != str(row["sha256"]):
+                _record_cleanup_error(
+                    conn,
+                    audio_file_id=str(row["audio_file_id"]),
+                    archive_path=str(row["archive_path"]),
+                    error="local raw hash mismatch",
+                )
+                continue
             if local_path.exists():
                 local_path.unlink()
             conn.execute(
@@ -283,6 +302,30 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
         return CleanupArchivedAudioResult(files_removed=removed, files_pending=int(pending_rows[0]["count"]))
     finally:
         conn.close()
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def _record_cleanup_error(conn, *, audio_file_id: str, archive_path: str, error: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        update archive_records
+        set status = 'cleanup_pending',
+            last_error = ?,
+            updated_at = ?
+        where target_type = 'audio_file'
+          and target_id = ?
+          and archive_path = ?
+        """,
+        (error, now, audio_file_id, archive_path),
+    )
 
 
 def _archive_relative_path(*, config: AppConfig, source_path: Path) -> Path:

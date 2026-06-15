@@ -610,3 +610,61 @@ def test_archive_unmounted_nas_stays_pending_and_never_fabricates_or_deletes_raw
     finally:
         conn.close()
     assert status == "imported"  # not marked archived
+
+
+def test_cleanup_archived_audio_refuses_path_outside_raw_store(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas"
+    archive_root.mkdir()
+    outside = tmp_path / "outside.wav"
+    outside.write_bytes(b"do not delete")
+    expected = _sha256(outside)
+    _insert_audio(config.database_path, outside, expected, status="cleanup_eligible", audio_file_id="aud_outside")
+    archive_path = archive_root / "outside.wav"
+    archive_path.write_bytes(outside.read_bytes())
+    _insert_archive_record(
+        config.database_path,
+        audio_file_id="aud_outside",
+        source_path=outside,
+        archive_path=archive_path,
+        sha256=expected,
+        archived_at="2000-01-01T00:00:00+00:00",
+    )
+
+    result = cleanup_archived_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime.now(timezone.utc),
+    )
+
+    assert result.files_removed == 0
+    assert outside.exists()
+
+
+def test_cleanup_archived_audio_refuses_local_hash_mismatch(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas"
+    archive_root.mkdir()
+    raw = _write_raw(config, "mismatch.wav", b"changed local bytes")
+    archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "mismatch.wav"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(b"archived bytes")
+    archive_sha = _sha256(archive_path)
+    _insert_audio(config.database_path, raw, archive_sha, status="cleanup_eligible", audio_file_id="aud_mismatch")
+    _insert_archive_record(
+        config.database_path,
+        audio_file_id="aud_mismatch",
+        source_path=raw,
+        archive_path=archive_path,
+        sha256=archive_sha,
+        archived_at="2000-01-01T00:00:00+00:00",
+    )
+
+    result = cleanup_archived_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime.now(timezone.utc),
+    )
+
+    assert result.files_removed == 0
+    assert raw.exists()
