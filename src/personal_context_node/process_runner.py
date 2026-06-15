@@ -150,7 +150,10 @@ def preview_next_process_task(*, config: AppConfig) -> ProcessOnceResult:
                     or (status = 'failed_retryable' and retry_count < max_retries)
                   )
                   and available_at <= ?
-                order by available_at, priority, created_at
+                -- Must mirror claim_next_task's ORDER BY exactly (priority first), or the
+                -- dry-run preview reports a different "next task" than the one actually claimed
+                -- whenever priority and availability disagree (the date-major scheduling case).
+                order by priority, available_at, created_at
                 limit 1
                 """,
                 (task_type, now),

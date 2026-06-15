@@ -9,9 +9,40 @@ from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
 from personal_context_node.pipeline import run_first_milestone
-from personal_context_node.process_runner import process_once
-from personal_context_node.tasks import enqueue_task, process_status_rows
-from personal_context_node.storage.sqlite import connect, fetch_all
+from personal_context_node.process_runner import preview_next_process_task, process_once
+from personal_context_node.tasks import claim_next_task, enqueue_task, process_status_rows
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+
+def test_preview_matches_claim_order_when_priority_and_availability_disagree(tmp_path: Path) -> None:
+    # preview_next_process_task (the dry-run "next task" report) must order tasks IDENTICALLY to
+    # claim_next_task. Otherwise `pcn process run --dry-run` reports a different task than the one
+    # actually claimed whenever priority and availability disagree — exactly the date-major
+    # scheduling case (earlier recorded day = lower priority value, but maybe later available_at).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        earlier = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        for task_id, priority, available_at in [
+            ("t_other_day", 20300, earlier),   # later recorded day, but available sooner
+            ("t_priority_day", 20260, now),     # earlier recorded day -> lower priority value
+        ]:
+            conn.execute(
+                "insert into tasks (task_id, task_type, target_type, target_id, status, priority,"
+                " available_at, created_at, updated_at) values (?, 'vad', 'audio_file', ?, 'pending', ?, ?, ?, ?)",
+                (task_id, task_id, priority, available_at, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    preview = preview_next_process_task(config=config)
+    claimed = claim_next_task(config=config, task_type="vad", run_id="r")
+
+    assert preview.task_id == "t_priority_day"  # priority-first, not earliest-available
+    assert claimed is not None and claimed.task_id == preview.task_id  # preview agrees with the real claim
 
 
 def test_process_once_runs_vad_then_asr_tasks(tmp_path: Path) -> None:
