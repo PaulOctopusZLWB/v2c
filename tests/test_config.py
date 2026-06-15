@@ -146,5 +146,56 @@ def test_app_config_defaults_match_mock_first_slice() -> None:
 
     assert config.vad_backend == "mock"
     assert config.asr_backend == "mock"
-    assert config.llm_backend == "mock"
+    # The LLM default is rule_based so the pipeline is safe to run without an API key.
+    assert config.llm_backend == "rule_based"
     assert "NO NAME" in config.dji_mic_3.volume_name_patterns
+
+
+def test_default_max_chunk_ms_is_bounded_for_production_audio() -> None:
+    config = AppConfig()
+
+    assert config.max_chunk_ms == 120_000
+
+
+def test_app_config_defaults_are_production_safe_without_llm_key() -> None:
+    config = AppConfig()
+
+    assert config.vad_backend == "mock"
+    assert config.asr_backend == "mock"
+    assert config.llm_backend == "rule_based"
+    assert config.llm_command is None
+    assert "NO NAME" in config.dji_mic_3.volume_name_patterns
+
+
+def test_app_config_resolves_obsidian_and_archive_paths_relative_to_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "local.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        """
+[paths]
+data_dir = "pcn-data"
+obsidian_vault = "vault"
+nas_archive_root = "~/pcn-nas"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = AppConfig.from_toml(config_path)
+
+    assert config.obsidian_vault == tmp_path / "config" / "vault"
+    assert config.nas_archive_root == (Path.home() / "pcn-nas").resolve(strict=False)
+
+
+def test_app_config_loads_command_timeout_seconds(tmp_path: Path) -> None:
+    config_path = tmp_path / "local.toml"
+    config_path.write_text(
+        """
+[commands]
+timeout_seconds = 12
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = AppConfig.from_toml(config_path)
+
+    assert config.command_timeout_seconds == 12

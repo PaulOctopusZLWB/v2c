@@ -6,6 +6,7 @@ from pathlib import Path
 from personal_context_node.cli import _build_llm
 from personal_context_node.config import AppConfig
 from personal_context_node.adapters.llm.mock import MockLLMAdapter
+from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 
 
 def test_mock_llm_daily_context_comes_from_fixture() -> None:
@@ -52,7 +53,7 @@ def test_build_llm_mock_uses_fixture_adapter() -> None:
     assert isinstance(adapter, MockLLMAdapter)
 
 
-def test_default_llm_backend_uses_mock_fixture_adapter() -> None:
+def test_default_llm_backend_uses_rule_based_adapter() -> None:
     adapter = _build_llm(llm_backend=AppConfig().llm_backend, llm_command=None)
 
-    assert isinstance(adapter, MockLLMAdapter)
+    assert isinstance(adapter, RuleBasedLLMAdapter)

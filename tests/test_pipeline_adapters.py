@@ -4,6 +4,7 @@ import pytest
 
 from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.llm.mock import MockLLMAdapter
+from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
 from personal_context_node.pipeline_adapters import build_asr, build_llm, build_pipeline_adapters, build_vad
@@ -23,10 +24,24 @@ def test_build_unknown_backend_raises_value_error() -> None:
 
 
 def test_build_pipeline_adapters_uses_config_defaults() -> None:
-    # AppConfig defaults to the mock backends, so the assembled adapters reflect them.
+    # AppConfig defaults to the rule-based LLM so the pipeline runs without an API key.
     config = AppConfig()
     adapters = build_pipeline_adapters(config=config)
-    assert isinstance(adapters.llm, MockLLMAdapter)
+    assert isinstance(adapters.llm, RuleBasedLLMAdapter)
+
+
+def test_build_llm_rule_based_returns_rule_based_adapter() -> None:
+    assert isinstance(build_llm(llm_backend="rule_based", llm_command=None), RuleBasedLLMAdapter)
+
+
+def test_pipeline_adapters_default_llm_is_rule_based() -> None:
+    adapters = build_pipeline_adapters(config=AppConfig())
+
+    assert isinstance(adapters.llm, RuleBasedLLMAdapter)
+
+
+def test_build_llm_mock_remains_explicit_fixture_adapter() -> None:
+    assert isinstance(build_llm(llm_backend="mock", llm_command=None), MockLLMAdapter)
 
 
 def test_command_with_quoted_space_path_is_one_token() -> None:

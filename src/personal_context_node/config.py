@@ -46,7 +46,7 @@ class AppConfig(BaseModel):
     vad_model_revision: str | None = None
     min_speech_ms: int = 300
     merge_gap_ms: int = 800
-    max_chunk_ms: int = 900_000
+    max_chunk_ms: int = 120_000
     chunk_overlap_ms: int = 1_000
     asr_backend: str = "mock"
     asr_command: str | None = None
@@ -54,7 +54,7 @@ class AppConfig(BaseModel):
     asr_model_name: str = "sensevoice"
     asr_model_id: str = "iic/SenseVoiceSmall"
     asr_model_version: str = "funasr-sensevoice-local"
-    llm_backend: str = "mock"
+    llm_backend: str = "rule_based"
     llm_command: str | None = None
     send_person_names: bool = True
     send_speaker_labels: bool = True
@@ -62,6 +62,7 @@ class AppConfig(BaseModel):
     max_chunk_tokens: int = 6000
     archive_backend: str = "filesystem"
     archive_command: str | None = None
+    command_timeout_seconds: float = 3600.0
     edit_grace_seconds: int = 120
     task_lease_seconds: int = 1800
     task_max_retries: int = 3
@@ -83,6 +84,7 @@ class AppConfig(BaseModel):
         llm = raw.get("llm", {})
         obsidian = raw.get("obsidian", {})
         archive = raw.get("archive", {})
+        commands = raw.get("commands", {})
         identity = raw.get("identity", {})
         device = raw.get("device", {})
         dji_mic_3 = device.get("dji_mic_3", {})
@@ -95,8 +97,8 @@ class AppConfig(BaseModel):
             "raw_audio_path": _optional_resolve_path(base_dir, paths.get("raw_audio_dir")),
             "work_audio_path": _optional_resolve_path(base_dir, paths.get("work_audio_dir")),
             "database_file_path": _optional_resolve_path(base_dir, paths.get("sqlite_path")),
-            "obsidian_vault": Path(paths.get("obsidian_vault", cls.model_fields["obsidian_vault"].default)),
-            "nas_archive_root": Path(paths.get("nas_archive_root", cls.model_fields["nas_archive_root"].default)),
+            "obsidian_vault": _resolve_path(base_dir, paths.get("obsidian_vault", cls.model_fields["obsidian_vault"].default)),
+            "nas_archive_root": _resolve_path(base_dir, paths.get("nas_archive_root", cls.model_fields["nas_archive_root"].default)),
             "identity_dir_path": _optional_resolve_path(base_dir, paths.get("identity_dir")),
             "owner_did": identity.get("owner_did", cls.model_fields["owner_did"].default),
             "identity_key_path": _optional_resolve_path(base_dir, identity.get("signing_key_path")),
@@ -126,6 +128,9 @@ class AppConfig(BaseModel):
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
             "archive_backend": archive.get("backend", cls.model_fields["archive_backend"].default),
             "archive_command": archive.get("command", cls.model_fields["archive_command"].default),
+            "command_timeout_seconds": commands.get(
+                "timeout_seconds", cls.model_fields["command_timeout_seconds"].default
+            ),
             "edit_grace_seconds": obsidian.get("edit_grace_seconds", cls.model_fields["edit_grace_seconds"].default),
             "task_lease_seconds": tasks.get("lease_seconds", cls.model_fields["task_lease_seconds"].default),
             "task_max_retries": tasks.get("max_retries", cls.model_fields["task_max_retries"].default),

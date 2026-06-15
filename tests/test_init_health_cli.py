@@ -45,7 +45,7 @@ def test_init_cli_creates_local_directories_and_config(tmp_path) -> None:
     assert "send_speaker_labels = true" in config_text
     assert "max_chunk_tokens = 6000" in config_text
     assert '[vad]\nbackend = "mock"' in config_text
-    assert '[llm]\nbackend = "mock"' in config_text
+    assert '[llm]\nbackend = "rule_based"' in config_text
     assert "min_speech_ms = 300" in config_text
     assert "merge_gap_ms = 800" in config_text
     assert "chunk_overlap_ms = 1000" in config_text

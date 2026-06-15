@@ -47,7 +47,7 @@ model_id = "iic/SenseVoiceSmall"
 model_version = "funasr-sensevoice-local"
 
 [llm]
-backend = "mock"
+backend = "rule_based"
 # command = "python3 scripts/llm_wrapper_example.py"
 send_person_names = true
 send_speaker_labels = true

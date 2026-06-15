@@ -20,7 +20,7 @@ model_id = "iic/SenseVoiceSmall"
 model_version = "funasr-sensevoice-local"
 
 [llm]
-backend = "mock"
+backend = "rule_based"
 
 [archive]
 backend = "filesystem"
