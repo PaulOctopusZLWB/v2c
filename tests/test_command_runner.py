@@ -54,3 +54,22 @@ def test_run_command_timeout_kills_forked_grandchild(tmp_path: Path) -> None:
     # Wait past the grandchild's would-be write time; the marker must never appear.
     time.sleep(2.0)
     assert not marker.exists()
+
+
+def test_run_command_timeout_stays_bounded_with_detached_grandchild(tmp_path: Path) -> None:
+    # A grandchild that detaches into its own session escapes the group SIGKILL and keeps
+    # the inherited stdout pipe open; reaping must not block on it (was a ~10s stall).
+    script = tmp_path / "detacher.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'], start_new_session=True)\n"
+        "time.sleep(20)\n",
+        encoding="utf-8",
+    )
+
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_command([sys.executable, str(script)], timeout_seconds=0.5)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 5.0, f"timeout reaping blocked on a detached grandchild ({elapsed:.1f}s)"

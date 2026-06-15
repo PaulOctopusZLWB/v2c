@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import plistlib
 from pathlib import Path
 
@@ -10,6 +11,51 @@ from personal_context_node.launchd import (
     uninstall_launchd_plists,
     write_launchd_plists,
 )
+
+
+def test_write_launchd_plists_does_not_require_writable_data_dir(tmp_path) -> None:
+    # Generating templates must not depend on the data volume being writable/mounted; the
+    # log directory is created at install time, not during plist emission.
+    read_only = tmp_path / "ro"
+    read_only.mkdir()
+    os.chmod(read_only, 0o500)
+    try:
+        paths = write_launchd_plists(
+            output_dir=tmp_path / "plists",
+            working_directory=str(tmp_path),
+            data_dir=str(read_only / "data"),
+            obsidian_vault=str(tmp_path / "vault"),
+            source_dir=None,
+            archive_root=str(tmp_path / "nas"),
+            dry_run=True,
+        )
+    finally:
+        os.chmod(read_only, 0o700)
+
+    assert len(paths) == 5
+
+
+def test_install_launchd_plists_creates_log_directory(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    paths = write_launchd_plists(
+        output_dir=tmp_path / "generated",
+        working_directory="/repo",
+        data_dir=str(data_dir),
+        obsidian_vault="/vault",
+        source_dir="/Volumes/DJI",
+        archive_root="/nas",
+        dry_run=True,
+    )
+
+    install_launchd_plists(
+        plist_paths=paths[:1],
+        launch_agents_dir=tmp_path / "LaunchAgents",
+        uid=501,
+        runner=lambda command: None,
+        dry_run=False,
+    )
+
+    assert (data_dir / "logs" / "launchd").is_dir()
 
 
 def test_render_plist_contains_uv_pcn_command_and_logs() -> None:

@@ -82,7 +82,7 @@ def test_launchd_write_plists_cli_uses_config_path(tmp_path) -> None:
     assert str(archive_root) in archive["ProgramArguments"]
 
 
-def test_launchd_write_plists_uses_absolute_uv_and_creates_log_dir(tmp_path: Path) -> None:
+def test_launchd_write_plists_uses_absolute_uv(tmp_path: Path) -> None:
     runner = CliRunner()
     output_dir = tmp_path / "plists"
     data_dir = tmp_path / "data"
@@ -105,7 +105,6 @@ def test_launchd_write_plists_uses_absolute_uv_and_creates_log_dir(tmp_path: Pat
     )
 
     assert result.exit_code == 0
-    assert (data_dir / "logs" / "launchd").is_dir()
     plist = plistlib.loads((output_dir / "com.personal-context-node.process.plist").read_bytes())
     assert Path(plist["ProgramArguments"][0]).is_absolute()
 

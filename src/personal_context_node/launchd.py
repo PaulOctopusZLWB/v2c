@@ -74,10 +74,10 @@ def write_launchd_plists(
     dry_run: bool = True,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Only the log directory PATH is recorded in the plists here; it is created at install
+    # time (install_launchd_plists), so generating/previewing templates never depends on the
+    # data volume being mounted/writable.
     log_directory = str(Path(data_dir) / "logs" / "launchd")
-    # launchd will not create the log directory, so a missing dir silently drops job
-    # stdout/stderr; create it up front so scheduled-job output is observable.
-    Path(log_directory).mkdir(parents=True, exist_ok=True)
     # Resolve uv to an absolute path: launchd jobs run with a minimal PATH, so a bare
     # "uv" is not found and the job fails to even start.
     uv_bin = _resolve_uv()
@@ -211,9 +211,20 @@ def install_launchd_plists(
     launch_agents_dir.mkdir(parents=True, exist_ok=True)
     run = runner or _run_command
     for source, destination, command in zip(plist_paths, installed_paths, commands, strict=True):
+        _ensure_log_directory(source)
         shutil.copy2(source, destination)
         run(command)
     return LaunchdInstallResult(installed_paths=installed_paths, commands=commands)
+
+
+def _ensure_log_directory(plist_path: Path) -> None:
+    # launchd will not create the StandardOutPath/StandardErrorPath directory, so create it
+    # at activation time (on the machine where the data volume is mounted) — otherwise job
+    # stdout/stderr is silently dropped.
+    payload = plistlib.loads(plist_path.read_bytes())
+    out_path = payload.get("StandardOutPath")
+    if isinstance(out_path, str) and out_path:
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 
 
 def uninstall_launchd_plists(

@@ -32,11 +32,21 @@ def run_command(
         stdout, stderr = process.communicate(input=stdin_text, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         _kill_process_group(process)
-        # Reap the killed process so it does not linger as a zombie; output is discarded.
+        # Close our pipe ends before reaping: a grandchild that detached into its own
+        # session (escaping the group SIGKILL) may still hold the write ends, and reading
+        # them (communicate) would block until it exits. wait() reaps the killed child
+        # without reading, so the timeout stays bounded regardless of detached children.
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
         try:
-            process.communicate(timeout=10)
+            process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
+            process.wait()
         raise
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
