@@ -148,12 +148,18 @@ def day_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
               join audio_chunks ac on ac.chunk_id = t.target_id
               join audio_files af on af.audio_file_id = ac.audio_file_id
               where t.task_type = 'asr' and t.target_type = 'audio_chunk'
-              -- session/daily/publish tasks: keyed to date_key
+              -- session_derive / daily_generate / obsidian_publish: target_id IS the date_key
               union all
               select t.target_id as day, t.status, t.retry_count, t.max_retries
               from tasks t
-              where t.task_type in ('session_derive', 'summarize_session', 'daily_generate', 'obsidian_publish')
-                and t.target_type in ('date_key', 'session')
+              where t.task_type in ('session_derive', 'daily_generate', 'obsidian_publish')
+                and t.target_type = 'date_key'
+              -- summarize_session: target_id is a SESSION id; resolve it to the session's day
+              union all
+              select s.date_key as day, t.status, t.retry_count, t.max_retries
+              from tasks t
+              join sessions s on s.session_id = t.target_id
+              where t.task_type = 'summarize_session' and t.target_type = 'session'
             ),
             day_sessions as (
               select date_key as day, count(*) as session_count

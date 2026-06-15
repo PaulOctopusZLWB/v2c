@@ -99,3 +99,37 @@ def test_root_returns_api_marker_when_frontend_not_built(tmp_path: Path) -> None
     response = client.get("/")
     assert response.status_code == 200
     assert response.json()["app"] == "Personal Context Node"
+
+
+def test_day_status_resolves_summarize_session_to_its_day(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = "2026-06-02T10:00:00+00:00"
+        conn.execute(
+            """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id, created_at, updated_at
+            ) values ('ses_x', '2026-06-02', ?, ?, 'derived_from_segments', 1, 100, 'seg_x', ?, ?)
+            """,
+            (now, now, now, now),
+        )
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_sum', 'summarize_session', 'session', 'ses_x', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    rows = client.get("/api/transcripts/day-status").json()["days"]
+    days = {r["day"] for r in rows}
+
+    assert "2026-06-02" in days  # summarize_session resolved to the session's day
+    assert "ses_x" not in days  # no phantom day row keyed by the session id
