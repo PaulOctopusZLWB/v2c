@@ -3,6 +3,9 @@ from __future__ import annotations
 import wave
 from pathlib import Path
 
+import pytest
+
+from personal_context_node.adapters.file_import import local_directory as local_directory_module
 from personal_context_node.adapters.file_import.local_directory import (
     LocalDirectoryFileImportAdapter,
     _reserve_destination_path,
@@ -131,6 +134,23 @@ def test_reserve_destination_path_reserves_atomically(tmp_path: Path) -> None:
     assert first != second
     assert first.exists()
     assert second.exists()
+
+
+def test_copy_to_raw_store_cleans_up_reservation_when_copy_fails(tmp_path: Path, monkeypatch) -> None:
+    device = MountedDevice(device_id="dev", label="DJI Mic 3", root_path=tmp_path / "device")
+    source = _stable_source(device, tmp_path / "src" / "TX01_MIC001_20870510_120000_orig.wav")
+    adapter = LocalDirectoryFileImportAdapter(device_roots=[], device_label="DJI Mic 3")
+    destination = tmp_path / "data" / "audio" / "raw"
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(local_directory_module.shutil, "copy2", _boom)
+
+    with pytest.raises(OSError):
+        adapter.copy_to_raw_store(source, destination)
+
+    assert list(destination.rglob("*.wav")) == []  # reserved placeholder cleaned up
 
 
 def _stable_source(device: MountedDevice, path: Path) -> StableSourceAudioFile:

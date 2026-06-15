@@ -95,8 +95,15 @@ class LocalDirectoryFileImportAdapter:
         # non-colliding destination atomically (O_EXCL) so a second import — even a concurrent
         # process (scheduled ingest vs. manual run) — never overwrites the first copy.
         local_raw_path = _reserve_destination_path(target_dir, source.source.source_path.name)
-        shutil.copy2(source.source.source_path, local_raw_path)
-        _repair_wav_file_metadata(local_raw_path, recorded_at)
+        try:
+            shutil.copy2(source.source.source_path, local_raw_path)
+            _repair_wav_file_metadata(local_raw_path, recorded_at)
+        except BaseException:
+            # A failed copy/repair (source vanished, disk full, malformed WAV) must not strand
+            # the reserved 0-byte placeholder — it would never be registered/archived/cleaned
+            # and would bump the next same-named import to _2.wav. Remove it before propagating.
+            local_raw_path.unlink(missing_ok=True)
+            raise
         return ImportedRawAudio(
             source=source,
             local_raw_path=local_raw_path,
