@@ -79,6 +79,29 @@ def test_ingest_import_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> Non
     assert tasks == [{"task_type": "vad", "target_type": "audio_file", "status": "pending"}]
 
 
+def test_directory_import_stamps_vad_task_with_recorded_date_priority(tmp_path: Path) -> None:
+    # The web "导入" button goes through import_audio_files (the directory-scan path), which must
+    # ALSO stamp the per-file vad task with a date-derived priority so the backlog drains earliest
+    # day first. Pins the second of the two ingest call sites (the port path is pinned separately);
+    # dropping `priority=` here reverts the whole UI-imported backlog to the flat default 100.
+    from datetime import date
+
+    source = tmp_path / "sample_data"
+    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")  # parses to recorded 2025-06-10
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    assert import_audio_files(config=config, source_dir=source).imported_files == 1
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select priority from tasks where task_type = 'vad'")
+    finally:
+        conn.close()
+    expected = (date(2025, 6, 10) - date(2000, 1, 1)).days
+    assert expected == 9292
+    assert [r["priority"] for r in rows] == [expected]
+
+
 def test_ingest_import_marks_local_raw_audio_read_only(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")

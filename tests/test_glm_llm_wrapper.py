@@ -25,6 +25,11 @@ def test_call_glm_extracts_message_content_json() -> None:
     assert captured["auth"] == "Bearer sk-test"
     assert "chat/completions" in captured["url"]
     assert captured["body"]["model"] == "glm-4-flash"
+    # response_format json_object is the named guarantee that forces GLM to emit a parseable JSON
+    # object (call_glm does json.loads on the content); pin it + the low temperature so dropping
+    # either from the request body fails here instead of only blowing up against the live API.
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+    assert captured["body"]["temperature"] == 0.2
 
 
 def test_normalize_daily_context_constrains_claim_type_and_evidence() -> None:
@@ -99,6 +104,52 @@ def test_main_emits_contract_json_via_stubbed_transport(tmp_path) -> None:
     out = json.loads(proc.stdout)
     assert out["summary"] == "日报"
     assert out["memory_candidates"][0]["evidence_source_ids"] == ["ev_1"]
+
+
+def test_glm_wrapper_output_satisfies_real_command_llm_adapter_contract(tmp_path, monkeypatch) -> None:
+    # The wrapper's normalize_* tests are self-referential (they assert against the wrapper's own
+    # output). This drives the wrapper through the AUTHORITATIVE validator — CommandLLMAdapter,
+    # which run_command invokes as a subprocess inheriting os.environ — so any contract drift
+    # (e.g. a dropped candidate_claim/owner/required field) surfaces as the adapter raising a
+    # Terminal/RetryablePortError instead of silently passing the wrapper's hand-mirrored asserts.
+    from personal_context_node.adapters.llm.command import CommandLLMAdapter
+
+    daily_stub = tmp_path / "daily_stub.py"
+    daily_stub.write_text(
+        "import json\n"
+        "def post(url, headers, body):\n"
+        "    content = json.dumps({'summary': '日报', 'todos': ['t'], 'facts': ['f'],\n"
+        "        'inferences': [{'type': 'inference', 'text': 'i', 'confidence': 0.7}],\n"
+        "        'memory_candidates': [{'candidate_claim': 'c', 'claim_type': 'fact',\n"
+        "            'confidence': 0.9, 'evidence_source_ids': ['ev_1']}]}, ensure_ascii=False)\n"
+        "    return {'choices': [{'message': {'content': content}}]}\n",
+        encoding="utf-8",
+    )
+    session_stub = tmp_path / "session_stub.py"
+    session_stub.write_text(
+        "import json\n"
+        "def post(url, headers, body):\n"
+        "    content = json.dumps({'headline': 'h', 'summary': 's', 'topics': ['x'],\n"
+        "        'decisions': [{'text': 'd', 'evidence_refs': ['ev_1']}],\n"
+        "        'todos': [{'text': 't', 'owner': 'self', 'evidence_refs': ['ev_1']}],\n"
+        "        'open_questions': ['q']}, ensure_ascii=False)\n"
+        "    return {'choices': [{'message': {'content': content}}]}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GLM_API_KEY", "sk-test")
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}]
+    adapter = CommandLLMAdapter(command=[sys.executable, "scripts/glm_llm_wrapper.py"])
+
+    monkeypatch.setenv("GLM_STUB_TRANSPORT", str(daily_stub))
+    ctx = adapter.generate_daily_context(day="2026-06-07", transcript_segments=segments)
+    # The adapter ACCEPTED the wrapper output (no PortError) -> the daily contract is satisfied.
+    assert ctx.memory_candidates[0].candidate_claim == "c"
+    assert ctx.memory_candidates[0].claim_type == "fact"
+
+    monkeypatch.setenv("GLM_STUB_TRANSPORT", str(session_stub))
+    summary = adapter.generate_session_summary(session_id="ses_1", transcript_segments=segments)
+    assert summary.todos[0].owner == "self"
+    assert summary.decisions[0].evidence_refs == ["ev_1"]
 
 
 def test_main_fails_retryable_without_api_key() -> None:
