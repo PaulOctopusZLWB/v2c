@@ -159,6 +159,32 @@ describe("App container", () => {
     expect(await screen.findByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
   });
 
+  it("fetches the per-day status aggregate alongside the day list on the poll", async () => {
+    vi.useFakeTimers();
+    try {
+      const dayStatusSpy = vi.spyOn(api, "dayStatus");
+      (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+        if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
+        if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
+        if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
+        if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }));
+        if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }));
+        if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }));
+        return new Response(JSON.stringify({}));
+      });
+
+      render(<App />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // flush bootstrap
+      const afterBootstrap = dayStatusSpy.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); // one poll interval
+
+      // The live badge needs the aggregate refreshed alongside the day list during a run.
+      expect(dayStatusSpy.mock.calls.length).toBeGreaterThan(afterBootstrap);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("navigates day -> session and accepts a segment", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });

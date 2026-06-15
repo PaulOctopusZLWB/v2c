@@ -29,4 +29,28 @@ describe("WorkspaceNav", () => {
     await userEvent.click(screen.getByRole("button", { name: /ses_1/ }));
     expect(onSelectSession).toHaveBeenCalledWith("ses_1");
   });
+
+  it("renders a per-day 处理中 / 可审 badge from the dayStatus prop", () => {
+    const days = [
+      { day: "2087-05-10", session_count: 2 },
+      { day: "2087-05-11", session_count: 0 }
+    ];
+    const dayStatus = [
+      { day: "2087-05-10", session_count: 2, active_count: 0, total_count: 5, status: "ready" as const },
+      { day: "2087-05-11", session_count: 0, active_count: 3, total_count: 5, status: "processing" as const }
+    ];
+    render(
+      <WorkspaceNav
+        days={days}
+        dayStatus={dayStatus}
+        selectedDay={null}
+        onSelectDay={vi.fn()}
+        onSelectSession={vi.fn()}
+      />
+    );
+    const ready = screen.getByRole("button", { name: /2087-05-10/ });
+    expect(ready).toHaveTextContent("可审");
+    const processing = screen.getByRole("button", { name: /2087-05-11/ });
+    expect(processing).toHaveTextContent("处理中");
+  });
 });

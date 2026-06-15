@@ -40,17 +40,27 @@ export function WorkspaceNav({
       <div className="section-title">
         <Icon name="inbox" /> {t.nav.days}
       </div>
-      {days.map((d) => (
-        <button
-          key={d.day}
-          type="button"
-          className={`row-btn${d.day === selectedDay ? " selected" : ""}`}
-          onClick={() => onSelectDay(d.day)}
-        >
-          <span>{dayLabel(d.day)}</span>
-          <span className="count">{d.session_count}</span>
-        </button>
-      ))}
+      {days.map((d) => {
+        const status = statusByDay.get(d.day);
+        return (
+          <button
+            key={d.day}
+            type="button"
+            className={`row-btn${d.day === selectedDay ? " selected" : ""}`}
+            onClick={() => onSelectDay(d.day)}
+          >
+            <span>{dayLabel(d.day)}</span>
+            <span className="day-end">
+              {status ? (
+                <span className={`badge ${status === "ready" ? "s-accepted" : "s-pending_review"}`}>
+                  {status === "ready" ? t.day.ready : t.day.processing}
+                </span>
+              ) : null}
+              <span className="count">{d.session_count}</span>
+            </span>
+          </button>
+        );
+      })}
 
       {selectedDay ? (
         <>
