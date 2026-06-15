@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
 from personal_context_node.ingest import import_audio_files
-from personal_context_node.tasks import process_status_rows, retry_task
+from personal_context_node.tasks import process_status_rows, retry_failed_tasks, retry_task
 
 
 router = APIRouter(prefix="/api/pipeline")
@@ -65,6 +65,13 @@ def retry_task_route(request: Request, task_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     # RetryTaskResult is exactly (task_id, status) — see tasks.py:29-32.
     return {"task_id": result.task_id, "status": result.status}
+
+
+@router.post("/retry-failed")
+def retry_failed_route(request: Request) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    count = retry_failed_tasks(config=config)
+    return {"retried": count}
 
 
 # Task statuses that mean "more is still going to happen on its own" — the SSE stream

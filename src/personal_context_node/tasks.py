@@ -275,6 +275,39 @@ def retry_task(*, config: AppConfig, task_id: str) -> RetryTaskResult:
         conn.close()
 
 
+def retry_failed_tasks(*, config: AppConfig) -> int:
+    """Reset ALL failed tasks (failed_terminal or failed_retryable) to pending in one UPDATE.
+
+    Returns the number of tasks reset.  Mirrors the field set used by retry_task.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = _now()
+        cursor = conn.execute(
+            """
+            update tasks
+            set status = 'pending',
+                retry_count = 0,
+                attempt_count = 0,
+                available_at = ?,
+                claimed_by_run_id = null,
+                claimed_at = null,
+                lease_expires_at = null,
+                started_at = null,
+                finished_at = null,
+                updated_at = ?,
+                last_error = null
+            where status in ('failed_retryable', 'failed_terminal')
+            """,
+            (now, now),
+        )
+        conn.commit()
+        return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+    finally:
+        conn.close()
+
+
 def _rerun_asr_for_file(conn, *, target_type: str, target_id: str) -> EnqueueTaskResult | None:
     if target_type == "audio_file":
         audio_file_id: str | None = target_id

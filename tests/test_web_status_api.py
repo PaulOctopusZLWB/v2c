@@ -55,6 +55,44 @@ def test_status_overview_reports_counts_and_worker_idle(tmp_path: Path) -> None:
     assert "status_counts" in payload
 
 
+def test_day_status_returns_per_day_processing_or_ready(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = "2026-06-01T10:00:00+00:00"
+        # day 2026-06-01: audio file + a pending asr task -> processing
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+              local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("aud_day1", "test", "/s1.wav", 0, 0, "/l1.wav", "sha:1", 1000, "2026-06-01T10:00:00+00:00", now, "imported"),
+        )
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_asr1', 'asr', 'audio_file', 'aud_day1', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/transcripts/day-status")
+
+    assert response.status_code == 200
+    rows = response.json()["days"]
+    assert isinstance(rows, list)
+    day1 = next((r for r in rows if r["day"] == "2026-06-01"), None)
+    assert day1 is not None
+    assert day1["status"] == "processing"
+
+
 def test_root_returns_api_marker_when_frontend_not_built(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     client = TestClient(create_app(config=config))

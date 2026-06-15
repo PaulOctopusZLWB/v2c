@@ -91,6 +91,40 @@ def test_events_endpoint_is_served_at_api_events(tmp_path: Path) -> None:
     assert client.get("/api/pipeline/events").status_code == 404
 
 
+def test_retry_failed_resets_all_failed_tasks(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = "2026-06-01T10:00:00+00:00"
+        for task_id, status in [
+            ("task_ft1", "failed_terminal"),
+            ("task_fr1", "failed_retryable"),
+            ("task_ok1", "succeeded"),
+        ]:
+            conn.execute(
+                """
+                insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+                values (?, 'asr', 'audio_chunk', ?, ?, ?, ?, ?)
+                """,
+                (task_id, task_id, status, now, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    resp = client.post("/api/pipeline/retry-failed")
+    assert resp.status_code == 200
+    assert resp.json()["retried"] >= 1
+
+    # All formerly-failed tasks should now be pending (succeeded stays succeeded).
+    rows = client.get("/api/status/tasks").json()["tasks"]
+    assert not any(t["status"].startswith("failed") for t in rows)
+    still_succeeded = [t for t in rows if t["status"] == "succeeded"]
+    assert len(still_succeeded) == 1
+
+
 def _write_wav(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:

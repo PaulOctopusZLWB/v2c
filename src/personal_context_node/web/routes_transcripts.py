@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from personal_context_node.config import AppConfig
 from personal_context_node.transcript_review import (
     accept_remaining_segments,
+    day_status_rows,
     list_days,
     review_segment,
     reviewed_segments_for_session,
@@ -20,6 +21,12 @@ router = APIRouter(prefix="/api/transcripts")
 class ReviewSegmentRequest(BaseModel):
     status: str
     note: str = ""
+
+
+@router.get("/day-status")
+def transcript_day_status(request: Request) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    return {"days": day_status_rows(config=config)}
 
 
 @router.get("/days")
