@@ -204,7 +204,12 @@ def test_launchd_write_plists_includes_config_so_scheduled_runs_use_real_backend
     )
 
     assert result.exit_code == 0, result.output
-    for label in ("ingest", "process", "daily", "archive"):
+    # --config is a per-subcommand option in Typer, so it MUST follow the subcommand name;
+    # `pcn --config X <sub>` exits 2 ("No such option: --config") and the job never starts.
+    subcommand_for = {"ingest": "ingest-import", "process": "process-run", "daily": "process-run", "archive": "archive"}
+    for label, subcommand in subcommand_for.items():
         args = plistlib.loads((output_dir / f"com.personal-context-node.{label}.plist").read_bytes())["ProgramArguments"]
         assert "--config" in args, label
         assert str(config_path.resolve()) in args, label
+        assert subcommand in args, label
+        assert args.index(subcommand) < args.index("--config"), f"{label}: --config must come after {subcommand}"

@@ -406,7 +406,7 @@ def ingest_fix_metadata(
 def preprocess(
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
@@ -450,7 +450,7 @@ def preprocess(
 def transcribe(
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
-        Path("/Users/paul/Documents/Obsidian/PersonalContext"),
+        None,
         help="Dedicated PersonalContext Obsidian vault path.",
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
