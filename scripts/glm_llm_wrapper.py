@@ -135,3 +135,42 @@ def normalize_session_summary(raw: dict, segments: list[dict]) -> dict:
         "todos": keep(raw.get("todos"), owner=True),
         "open_questions": [str(q) for q in raw.get("open_questions", []) or []],
     }
+
+
+def _load_transport():
+    # Tests inject a stub transport via GLM_STUB_TRANSPORT to avoid real network calls.
+    stub_path = os.environ.get("GLM_STUB_TRANSPORT")
+    if not stub_path:
+        return _post_json
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("glm_stub", stub_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.post
+
+
+def main() -> int:
+    api_key = os.environ.get("GLM_API_KEY")
+    if not api_key:
+        print("GLM_API_KEY is not set", file=sys.stderr)
+        return 2
+    model = os.environ.get("GLM_MODEL", "glm-4-flash")
+    try:
+        payload = json.loads(sys.stdin.read())
+        segments = payload.get("transcript_segments", [])
+        post = _load_transport()
+        if payload.get("task") == "session_summary":
+            raw = call_glm({"messages": build_session_messages(payload)}, api_key=api_key, model=model, post=post)
+            out = normalize_session_summary(raw, segments)
+        else:
+            raw = call_glm({"messages": build_daily_messages(payload)}, api_key=api_key, model=model, post=post)
+            out = normalize_daily_context(raw, segments)
+    except Exception as exc:  # network / JSON / GLM errors -> retryable
+        print(f"GLM wrapper failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
