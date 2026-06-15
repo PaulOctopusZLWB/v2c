@@ -39,7 +39,7 @@ def main() -> int:
         with _ctx.redirect_stdout(sys.stderr):
             from funasr import AutoModel
             model = AutoModel(model=args.model, device=resolve_device(args.device))
-        return run_server(model, sys.stdin, sys.stdout, language=args.language)
+        return run_server(model, sys.stdin, sys.stdout, language=args.language, batch_size_s=args.batch_size_s)
 
     # Exit-code contract (mirrors CommandASRAdapter): 3 = permanently unsupported
     # input (terminal); 2 = transient/environment failure (retryable).
@@ -141,14 +141,14 @@ def _split_text_tags(value: object) -> tuple[str, list[str]]:
     return re.sub(r"<\|[^|>]+\|>", "", text).strip(), tags
 
 
-def run_server(model, stdin, stdout, *, language: str) -> int:
+def run_server(model, stdin, stdout, *, language: str, batch_size_s: int = 300) -> int:
     """Resident loop: one chunk path per input line -> one result JSON per output line."""
     for raw_line in stdin:
         path = raw_line.strip()
         if not path:
             continue
         try:
-            result = model.generate(input=path, language=language, use_itn=True, batch_size_s=300)
+            result = model.generate(input=path, language=language, use_itn=True, batch_size_s=batch_size_s)
             payload = {"model_name": "sensevoice", "model_version": "funasr-sensevoice-server",
                        "segments": _normalize_segments(result)}
         except Exception as exc:  # one bad chunk must not kill the resident server

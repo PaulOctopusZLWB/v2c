@@ -45,3 +45,22 @@ def test_persistent_adapter_raises_retryable_when_server_dies(tmp_path: Path) ->
         assert "ASR server" in str(exc)
     else:
         raise AssertionError("expected RetryablePortError when the server exits")
+
+
+def test_persistent_adapter_resets_process_on_timeout_to_prevent_desync(tmp_path: Path) -> None:
+    # A server that never replies in time: the adapter must kill the in-flight process on
+    # timeout so its late result line can never be read by the NEXT chunk (off-by-one desync).
+    script = tmp_path / "hang.py"
+    script.write_text("import sys, time\nfor line in sys.stdin:\n    time.sleep(30)\n", encoding="utf-8")
+    adapter = PersistentCommandASRAdapter(command=["python3", str(script)], timeout_seconds=0.2)
+    proc = adapter._ensure()
+
+    try:
+        adapter.transcribe(tmp_path / "chk_1.wav")
+    except RetryablePortError:
+        pass
+    else:
+        raise AssertionError("expected a timeout RetryablePortError")
+
+    assert adapter._proc is None  # poisoned process dropped; next transcribe spawns fresh
+    assert proc.poll() is not None  # the in-flight server was actually terminated

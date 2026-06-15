@@ -7,7 +7,7 @@ from pathlib import Path
 
 from personal_context_node.adapters.asr.command import _asr_segment
 from personal_context_node.core.ports.asr import ASRResult
-from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
+from personal_context_node.core.ports.errors import RetryablePortError
 
 
 class PersistentCommandASRAdapter:
@@ -40,6 +40,11 @@ class PersistentCommandASRAdapter:
             raise RetryablePortError("ASR server stdin closed") from exc
         ready, _, _ = select.select([proc.stdout], [], [], self.timeout_seconds)
         if not ready:
+            # The server is still working on this chunk; its result line would arrive later
+            # and desync the one-line-in/one-line-out protocol (the NEXT chunk would read this
+            # chunk's stale buffered line, silently corrupting transcripts). Kill the poisoned
+            # process so the next call spawns a fresh server with an empty pipe.
+            self.close()
             raise RetryablePortError(f"ASR server timed out after {self.timeout_seconds:g}s")
         line = proc.stdout.readline()
         if not line:
@@ -48,7 +53,10 @@ class PersistentCommandASRAdapter:
         try:
             payload = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise TerminalPortError(f"invalid ASR server JSON: {exc}") from exc
+            # A partial/garbled line means the resident server crashed mid-write; reset it so
+            # the pipe can't desync, and treat as retryable (a fresh server can recover).
+            self.close()
+            raise RetryablePortError(f"invalid ASR server JSON: {exc}") from exc
         if "error" in payload:
             raise RetryablePortError(f"ASR server error: {payload['error']}")
         self.model_name = str(payload.get("model_name", self.model_name))
@@ -64,14 +72,22 @@ class PersistentCommandASRAdapter:
         )
 
     def close(self) -> None:
-        if self._proc is not None and self._proc.poll() is None:
-            try:
-                if self._proc.stdin:
-                    self._proc.stdin.close()
-                self._proc.wait(timeout=10)
-            except (OSError, subprocess.TimeoutExpired):
-                self._proc.kill()
+        proc = self._proc
         self._proc = None
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except OSError:
+            pass
+        # The server may be blocked mid-inference, so don't wait on a graceful EOF exit —
+        # kill promptly (it is stateless) and reap so close() returns fast and leaves no zombie.
+        proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
 
     def __del__(self) -> None:  # best-effort cleanup if the drain forgets to close()
         try:

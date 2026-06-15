@@ -137,3 +137,16 @@ def test_funasr_sensevoice_wrapper_reports_missing_dependency(tmp_path: Path) ->
 
     assert result.returncode == 2
     assert "FunASR is not installed" in result.stderr
+
+
+def test_run_server_honors_batch_size_s() -> None:
+    captured: dict = {}
+
+    class FakeModel:
+        def generate(self, *, input, **kw):
+            captured.update(kw)
+            return [{"text": "x", "timestamp": [0, 1]}]
+
+    fw.run_server(FakeModel(), io.StringIO("a.wav\n"), io.StringIO(), language="zh", batch_size_s=42)
+
+    assert captured["batch_size_s"] == 42
