@@ -5,7 +5,7 @@ export const t = {
   nav: { days: "日期", sessions: "会话", tasks: "任务", device: "设备" },
   day: { processing: "处理中", ready: "可审" },
   device: { detected: "已接入", known: "已知源", newAudio: "个新录音", import: "导入", refresh: "自动刷新", none: "未检测到设备" },
-  run: { run: "开始", stop: "停止", retry: "重试", running: "运行中", idle: "空闲", tasks: "任务" },
+  run: { run: "开始", stop: "停止", retry: "重试", running: "运行中", idle: "空闲", tasks: "任务", failedOnly: "仅看失败", retryAllFailed: "重试全部失败" },
   review: { accepted: "接受", rejected: "拒绝", needs_fix: "存疑", pending_review: "待审", blocked: "受阻", acceptRemaining: "全部接受剩余" },
   speaker: { speaker: "发言人", assign: "指派发言人", newPerson: "新建人物", reassign: "改人" },
   viewpoint: { title: "观点", readOnly: "只读", confirmInObsidian: "确认/拒绝请在 Obsidian 完成", evidence: "证据", none: "暂无观点" },

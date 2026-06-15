@@ -115,6 +115,9 @@ input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 
 .progress-track { width: 120px; height: 6px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
 .progress-bar { height: 100%; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); border-radius: 999px; transition: width .35s ease; box-shadow: 0 0 12px -2px var(--accent-glow); }
 @media (prefers-reduced-motion: reduce) { .progress-bar { transition: none; } }
+.progress-eta { color: var(--text-dim); }
+.progress-stages { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--text-dim); }
+.progress-stage .num { color: var(--text-2); }
 
 /* ---- cards / sections ---- */
 .section-title { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin: var(--s5) 0 var(--s3); display: flex; align-items: center; gap: 6px; }
@@ -133,6 +136,11 @@ input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 
 .row-btn.selected { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }
 .row-btn .count { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
 .row-btn.selected .count { color: var(--accent); }
+.day-end { display: flex; align-items: center; gap: 6px; }
+
+/* ---- task list controls (filter + retry-all) ---- */
+.task-list-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 6px; font-size: 12px; }
+.task-filter { display: flex; align-items: center; gap: 5px; color: var(--text-2); cursor: pointer; }
 
 .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-dim); }
 .badge.s-accepted { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
