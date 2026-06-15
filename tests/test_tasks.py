@@ -510,6 +510,36 @@ def test_retry_task_resets_attempts_and_available_at_for_immediate_claim(tmp_pat
     assert reclaimed.attempt_count == 1
 
 
+def test_claim_prefers_lower_priority_value(tmp_path) -> None:
+    # A vad task with a lower priority integer (earlier date ordinal) must be claimed first.
+    # Insert both with the same available_at so only priority breaks the tie (mirrors the
+    # pattern of test_claim_next_task_uses_available_at_and_priority_with_lease).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        for task_id, target_id, priority in [
+            ("task_late", "late", 20300),
+            ("task_early", "early", 20260),
+        ]:
+            conn.execute(
+                """
+                insert into tasks (
+                  task_id, task_type, target_type, target_id, status, priority,
+                  available_at, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (task_id, "vad", "audio_file", target_id, "pending", priority, now, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    claimed = claim_next_task(config=config, task_type="vad", run_id="r")
+    assert claimed is not None
+    assert claimed.target_id == "early"
+
+
 def test_rerun_task_resets_available_at_for_immediate_claim(tmp_path) -> None:
     config = AppConfig(
         data_dir=tmp_path / "data",

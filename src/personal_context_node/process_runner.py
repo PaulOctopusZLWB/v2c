@@ -312,6 +312,14 @@ def _enqueue_downstream_tasks_in_conn(
     upstream_task_type: str,
     upstream_target_id: str,
 ) -> None:
+    # Carry the upstream task's priority forward so the whole day's pipeline (asr →
+    # session_derive → … → obsidian_publish) inherits the date ordinal and stays in
+    # date order relative to other days.
+    upstream_row = conn.execute(
+        "select priority from tasks where task_type = ? and target_id = ? order by created_at limit 1",
+        (upstream_task_type, upstream_target_id),
+    ).fetchone()
+    upstream_priority: int = int(upstream_row["priority"]) if upstream_row is not None else 100
     for edge in PIPELINE:
         if edge.upstream_task_type != upstream_task_type:
             continue
@@ -322,6 +330,7 @@ def _enqueue_downstream_tasks_in_conn(
                 target_type=edge.downstream_target_type,
                 target_id=target_id,
                 max_retries=config.task_max_retries,
+                priority=upstream_priority,
             )
             if not result.created:
                 _reset_downstream_task_in_conn(conn, task_id=result.task_id)

@@ -43,7 +43,7 @@ ALLOWED_TASK_TYPES = {
 }
 
 
-def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str) -> EnqueueTaskResult:
+def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str, priority: int = 100) -> EnqueueTaskResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -53,6 +53,7 @@ def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_
             target_type=target_type,
             target_id=target_id,
             max_retries=config.task_max_retries,
+            priority=priority,
         )
         conn.commit()
         return result
@@ -67,6 +68,7 @@ def enqueue_task_in_conn(
     target_type: str,
     target_id: str,
     max_retries: int = 3,
+    priority: int = 100,
 ) -> EnqueueTaskResult:
     _validate_task_type(task_type)
     existing = conn.execute(
@@ -80,10 +82,10 @@ def enqueue_task_in_conn(
     conn.execute(
         """
         insert into tasks (
-          task_id, task_type, target_type, target_id, status, max_retries, available_at, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          task_id, task_type, target_type, target_id, status, priority, max_retries, available_at, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (task_id, task_type, target_type, target_id, "pending", max_retries, now, now, now),
+        (task_id, task_type, target_type, target_id, "pending", priority, max_retries, now, now, now),
     )
     return EnqueueTaskResult(task_id=task_id, created=True)
 
