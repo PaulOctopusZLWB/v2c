@@ -225,24 +225,36 @@ def _convert_pcm_frames_blocked(
     block_frames: int = 16000,
 ) -> bytes:
     # Convert in bounded blocks so a long chunk never materializes its full decoded frame
-    # list at once. For equal sample rates this is bit-identical to a whole conversion; for
-    # resampling it accepts negligible block-boundary nearest-neighbor drift for bounded memory.
+    # list at once, while computing the nearest-neighbor source index from the GLOBAL target
+    # index so the output is bit-identical to a whole-buffer conversion at any sample rate
+    # (no per-block resampling phase reset).
+    if target_sample_width != 2:
+        raise ValueError(f"unsupported target sample width: {target_sample_width}")
+    if source_channels not in (1, 2) or target_channels not in (1, 2):
+        raise ValueError(f"unsupported channel conversion: {source_channels} -> {target_channels}")
     source_frame_width = source_sample_width * source_channels
-    block_bytes = max(source_frame_width, block_frames * source_frame_width)
+    total_source_frames = len(frames) // source_frame_width
+    if total_source_frames == 0:
+        return b""
+    target_total = max(1, round(total_source_frames * target_sample_rate / source_sample_rate))
+    block = max(1, block_frames)
     converted = bytearray()
-    for offset in range(0, len(frames), block_bytes):
-        block = frames[offset : offset + block_bytes]
-        converted.extend(
-            _convert_pcm_frames(
-                block,
-                source_sample_rate=source_sample_rate,
-                source_channels=source_channels,
-                source_sample_width=source_sample_width,
-                target_sample_rate=target_sample_rate,
-                target_channels=target_channels,
-                target_sample_width=target_sample_width,
-            )
+    target_index = 0
+    for source_start in range(0, total_source_frames, block):
+        source_end = min(total_source_frames, source_start + block)
+        decoded = _decode_pcm_frames(
+            frames[source_start * source_frame_width : source_end * source_frame_width],
+            sample_width=source_sample_width,
+            channels=source_channels,
         )
+        # Emit every target frame whose global nearest source frame falls in this block.
+        while target_index < target_total:
+            source_index = min(total_source_frames - 1, int(target_index * source_sample_rate / target_sample_rate))
+            if source_index >= source_end:
+                break
+            for sample in _mix_frame(decoded[source_index - source_start], target_channels):
+                converted.extend(_to_s16(sample))
+            target_index += 1
     return bytes(converted)
 
 
@@ -264,16 +276,17 @@ def _convert_decoded_frames(
     converted = bytearray()
     for target_index in range(target_frame_count):
         source_index = min(len(source_frames) - 1, int(target_index * source_sample_rate / target_sample_rate))
-        samples = source_frames[source_index]
-        if target_channels == 1:
-            output_samples = [round(sum(samples) / len(samples))]
-        elif len(samples) == 1:
-            output_samples = [samples[0], samples[0]]
-        else:
-            output_samples = samples[:2]
-        for sample in output_samples:
+        for sample in _mix_frame(source_frames[source_index], target_channels):
             converted.extend(_to_s16(sample))
     return bytes(converted)
+
+
+def _mix_frame(samples: list[int], target_channels: int) -> list[int]:
+    if target_channels == 1:
+        return [round(sum(samples) / len(samples))]
+    if len(samples) == 1:
+        return [samples[0], samples[0]]
+    return samples[:2]
 
 
 def _convert_ieee_float_wav_chunk(
@@ -317,39 +330,46 @@ def _convert_ieee_float_wav_chunk(
 
 
 def _read_wav_metadata(path: Path) -> dict[str, object]:
-    data = path.read_bytes()
-    if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
-        raise ValueError("unsupported WAV container")
-    offset = 12
+    # Parse only the RIFF/chunk headers (and the small fmt chunk), seeking past chunk
+    # bodies, so the audio payload is never read into memory — even though this runs once
+    # per chunk. Recording the data offset/size lets the conversion path seek the exact
+    # frame range it needs.
     fmt: dict[str, object] | None = None
     data_offset: int | None = None
     data_size = 0
-    while offset + 8 <= len(data):
-        chunk_id = data[offset : offset + 4]
-        chunk_size = struct.unpack_from("<I", data, offset + 4)[0]
-        chunk_start = offset + 8
-        chunk_end = chunk_start + chunk_size
-        if chunk_id == b"fmt ":
-            chunk_data = data[chunk_start:chunk_end]
-            if len(chunk_data) < 16:
-                raise ValueError("invalid WAV fmt chunk")
-            audio_format, channels, sample_rate, _byte_rate, _block_align, bits_per_sample = struct.unpack_from(
-                "<HHIIHH",
-                chunk_data,
-            )
-            fmt = {
-                "audio_format": audio_format,
-                "channels": channels,
-                "sample_rate": sample_rate,
-                "bits_per_sample": bits_per_sample,
-            }
-        elif chunk_id == b"data":
-            # Record where the audio payload lives instead of copying it: the conversion
-            # path seeks to the requested frame range, so the full payload never needs to
-            # be held in (or returned from) memory.
-            data_offset = chunk_start
-            data_size = chunk_size
-        offset = chunk_end + (chunk_size % 2)
+    with path.open("rb") as handle:
+        header = handle.read(12)
+        if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+            raise ValueError("unsupported WAV container")
+        while True:
+            chunk_header = handle.read(8)
+            if len(chunk_header) < 8:
+                break
+            chunk_id = chunk_header[:4]
+            chunk_size = struct.unpack("<I", chunk_header[4:8])[0]
+            chunk_start = handle.tell()
+            padding = chunk_size % 2
+            if chunk_id == b"fmt ":
+                chunk_data = handle.read(chunk_size)
+                if len(chunk_data) < 16:
+                    raise ValueError("invalid WAV fmt chunk")
+                audio_format, channels, sample_rate, _byte_rate, _block_align, bits_per_sample = struct.unpack_from(
+                    "<HHIIHH",
+                    chunk_data,
+                )
+                fmt = {
+                    "audio_format": audio_format,
+                    "channels": channels,
+                    "sample_rate": sample_rate,
+                    "bits_per_sample": bits_per_sample,
+                }
+                handle.seek(padding, 1)
+            elif chunk_id == b"data":
+                data_offset = chunk_start
+                data_size = chunk_size
+                handle.seek(chunk_size + padding, 1)
+            else:
+                handle.seek(chunk_size + padding, 1)
     if fmt is None or data_offset is None or data_size <= 0:
         raise ValueError("invalid WAV file")
     fmt["data_offset"] = data_offset

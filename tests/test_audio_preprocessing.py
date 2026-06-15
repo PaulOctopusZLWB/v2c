@@ -264,6 +264,42 @@ def test_pcm_conversion_matches_existing_output_for_small_blocks() -> None:
     assert blocked == whole
 
 
+def test_pcm_blocked_conversion_matches_whole_for_downsampling() -> None:
+    # The production path downsamples 48kHz -> 16kHz, so blocked output must equal a whole
+    # conversion (global resampling phase, no per-block reset), not just for equal rates.
+    frames = b"".join(int(((i % 7) - 3) * 1000).to_bytes(2, "little", signed=True) for i in range(48_000))
+    kwargs = dict(
+        source_sample_rate=48_000,
+        source_channels=1,
+        source_sample_width=2,
+        target_sample_rate=16_000,
+        target_channels=1,
+        target_sample_width=2,
+    )
+
+    whole = _convert_pcm_frames(frames, **kwargs)
+    blocked = _convert_pcm_frames_blocked(frames, block_frames=16_000, **kwargs)
+
+    assert blocked == whole
+
+
+def test_read_wav_metadata_does_not_read_full_payload(tmp_path: Path, monkeypatch) -> None:
+    # Header parsing must not pull the audio payload into memory: the data chunk is large,
+    # but metadata reads should stay tiny regardless of file size.
+    path = tmp_path / "big_float.wav"
+    _write_ieee_float_wav(path, samples=[0.0] * 200_000, sample_rate=16_000, channels=1)
+
+    real_read = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda self: (_ for _ in ()).throw(AssertionError("read whole file")))
+    try:
+        metadata = _read_wav_metadata(path)
+    finally:
+        monkeypatch.setattr(Path, "read_bytes", real_read)
+
+    assert metadata["data_size"] == 200_000 * 4
+    assert metadata["data_offset"] > 0
+
+
 def _write_ieee_float_wav(path: Path, *, samples: list[float], sample_rate: int, channels: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = b"".join(struct.pack("<f", sample) for sample in samples)
