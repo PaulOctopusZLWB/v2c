@@ -50,3 +50,20 @@ def test_normalize_daily_context_constrains_claim_type_and_evidence() -> None:
     assert out["memory_candidates"][0]["evidence_source_ids"] == ["ev_1"]
     # candidate with no surviving evidence is dropped entirely (adapter would reject it)
     assert len(out["memory_candidates"]) == 1
+
+
+def test_normalize_session_summary_drops_decisions_without_known_evidence() -> None:
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "继续本地 ASR。"}]
+    raw = {
+        "headline": "本地 ASR 推进", "summary": "讨论本地转写。", "topics": ["asr"],
+        "decisions": [{"text": "继续本地 ASR", "evidence_refs": ["ev_1"]},
+                      {"text": "无证据决定", "evidence_refs": ["ev_x"]}],
+        "todos": [{"text": "完成 smoke", "owner": "self", "evidence_refs": ["ev_1"]}],
+        "open_questions": ["是否需要备选模型"],
+    }
+
+    out = glm.normalize_session_summary(raw, segments)
+
+    assert out["headline"] == "本地 ASR 推进"
+    assert [d["text"] for d in out["decisions"]] == ["继续本地 ASR"]  # ev_x dropped
+    assert out["todos"][0]["owner"] == "self"

@@ -94,3 +94,44 @@ def _normalize_inferences(items: list) -> list:
         else:
             out.append(str(item))
     return out
+
+
+def build_session_messages(payload: dict) -> list[dict]:
+    segments = payload.get("transcript_segments", [])
+    ids = sorted(_evidence_ids(segments))
+    system = (
+        "你是会话纪要助手。只依据转写输出 JSON。decisions/todos 的 evidence_refs 只能引用下列 evidence_id 且非空: "
+        + ", ".join(ids)
+    )
+    user = (
+        f"会话: {payload.get('session_id')}\n转写:\n{_transcript_text(segments)}\n\n"
+        '输出 JSON: {"headline": str, "summary": str, "topics": [str], '
+        '"decisions": [{"text": str, "evidence_refs": [evidence_id]}], '
+        '"todos": [{"text": str, "owner": str, "evidence_refs": [evidence_id]}], "open_questions": [str]}'
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def normalize_session_summary(raw: dict, segments: list[dict]) -> dict:
+    valid = _evidence_ids(segments)
+
+    def keep(items, owner=False):
+        out = []
+        for it in items or []:
+            refs = [str(r) for r in (it.get("evidence_refs") or []) if str(r) in valid]
+            if not refs:
+                continue
+            row = {"text": str(it.get("text", "")), "evidence_refs": refs}
+            if owner:
+                row["owner"] = str(it.get("owner", "self"))
+            out.append(row)
+        return out
+
+    return {
+        "headline": str(raw.get("headline", "")),
+        "summary": str(raw.get("summary", "")),
+        "topics": [str(t) for t in raw.get("topics", []) or []],
+        "decisions": keep(raw.get("decisions")),
+        "todos": keep(raw.get("todos"), owner=True),
+        "open_questions": [str(q) for q in raw.get("open_questions", []) or []],
+    }
