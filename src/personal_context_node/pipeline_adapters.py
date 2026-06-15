@@ -94,9 +94,9 @@ def build_asr(
             shlex.split(asr_command)
             if asr_command
             else ["python3", "scripts/funasr_sensevoice_wrapper.py", "--server",
-                  "--model", model_id, "--device", asr_device, "--language", language]
+                  "--model", model_id, "--model-version", model_version, "--device", asr_device, "--language", language]
         )
-        return PersistentCommandASRAdapter(command=command, timeout_seconds=timeout_seconds)
+        return PersistentCommandASRAdapter(command=command, timeout_seconds=timeout_seconds, model_version=model_version)
     if asr_backend == "funasr":
         command = (
             shlex.split(asr_command)

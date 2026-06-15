@@ -150,3 +150,47 @@ def test_run_server_honors_batch_size_s() -> None:
     fw.run_server(FakeModel(), io.StringIO("a.wav\n"), io.StringIO(), language="zh", batch_size_s=42)
 
     assert captured["batch_size_s"] == 42
+
+
+def test_run_server_redirects_model_stdout_away_from_protocol() -> None:
+    # FunASR/tqdm may print to stdout during inference; run_server must redirect it so the
+    # one-line-per-result protocol stream stays pure JSON.
+    class NoisyModel:
+        def generate(self, *, input, **kw):
+            print("FUNASR PROGRESS noise")  # would corrupt the JSON line if not redirected
+            return [{"text": "x", "timestamp": [0, 1]}]
+
+    out = io.StringIO()
+    fw.run_server(NoisyModel(), io.StringIO("a.wav\n"), out, language="zh")
+
+    lines = out.getvalue().splitlines()
+    assert len(lines) == 1
+    json.loads(lines[0])  # pure JSON, no "noise" prefix
+    assert "noise" not in out.getvalue()
+
+
+def test_run_server_uses_given_model_version() -> None:
+    class FakeModel:
+        def generate(self, *, input, **kw):
+            return [{"text": "x", "timestamp": [0, 1]}]
+
+    out = io.StringIO()
+    fw.run_server(FakeModel(), io.StringIO("a.wav\n"), out, language="zh", model_version="custom-v9")
+
+    assert json.loads(out.getvalue())["model_version"] == "custom-v9"
+
+
+def test_server_mode_reports_missing_funasr_clearly(tmp_path: Path) -> None:
+    import os
+
+    # Shadow funasr with a stub that raises ImportError so the --server import-guard fires.
+    (tmp_path / "funasr.py").write_text("raise ImportError('blocked for test')\n", encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(tmp_path) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+
+    proc = subprocess.run(
+        [sys.executable, "scripts/funasr_sensevoice_wrapper.py", "--server"],
+        input="", capture_output=True, text=True, env=env,
+    )
+
+    assert proc.returncode == 2
+    assert "FunASR is not installed" in proc.stderr

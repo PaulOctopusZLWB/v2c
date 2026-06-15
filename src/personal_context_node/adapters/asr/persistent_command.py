@@ -14,13 +14,15 @@ class PersistentCommandASRAdapter:
     """Keeps a --server ASR wrapper resident: one chunk path in, one result JSON line out,
     so the model loads once per drain instead of once per chunk."""
 
-    def __init__(self, *, command: list[str], timeout_seconds: float = 3600.0) -> None:
+    def __init__(
+        self, *, command: list[str], timeout_seconds: float = 3600.0, model_version: str = "funasr-sensevoice-server"
+    ) -> None:
         if not command:
             raise ValueError("ASR server command must not be empty")
         self.command = command
         self.timeout_seconds = timeout_seconds
         self.model_name = "sensevoice"
-        self.model_version = "funasr-sensevoice-server"
+        self.model_version = model_version
         self._proc: subprocess.Popen[str] | None = None
 
     def _ensure(self) -> subprocess.Popen[str]:

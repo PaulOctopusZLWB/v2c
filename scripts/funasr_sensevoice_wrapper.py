@@ -36,10 +36,26 @@ def main() -> int:
 
     if args.server:
         import contextlib as _ctx
-        with _ctx.redirect_stdout(sys.stderr):
-            from funasr import AutoModel
-            model = AutoModel(model=args.model, device=resolve_device(args.device))
-        return run_server(model, sys.stdin, sys.stdout, language=args.language, batch_size_s=args.batch_size_s)
+
+        try:
+            with _ctx.redirect_stdout(sys.stderr):
+                from funasr import AutoModel
+        except ImportError:
+            print(
+                "FunASR is not installed. Install it in the uv/Docker runtime that runs this wrapper.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            with _ctx.redirect_stdout(sys.stderr):
+                model = AutoModel(model=args.model, device=resolve_device(args.device))
+        except Exception as exc:  # model download / device (MPS OOM) failure is environmental
+            print(f"FunASR model load failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 2
+        return run_server(
+            model, sys.stdin, sys.stdout,
+            language=args.language, batch_size_s=args.batch_size_s, model_version=args.model_version,
+        )
 
     # Exit-code contract (mirrors CommandASRAdapter): 3 = permanently unsupported
     # input (terminal); 2 = transient/environment failure (retryable).
@@ -141,15 +157,22 @@ def _split_text_tags(value: object) -> tuple[str, list[str]]:
     return re.sub(r"<\|[^|>]+\|>", "", text).strip(), tags
 
 
-def run_server(model, stdin, stdout, *, language: str, batch_size_s: int = 300) -> int:
+def run_server(
+    model, stdin, stdout, *, language: str, batch_size_s: int = 300, model_version: str = "funasr-sensevoice-server"
+) -> int:
     """Resident loop: one chunk path per input line -> one result JSON per output line."""
+    import contextlib as _ctx
+
     for raw_line in stdin:
         path = raw_line.strip()
         if not path:
             continue
         try:
-            result = model.generate(input=path, language=language, use_itn=True, batch_size_s=batch_size_s)
-            payload = {"model_name": "sensevoice", "model_version": "funasr-sensevoice-server",
+            # FunASR/tqdm may print to stdout during inference; redirect it to stderr so only
+            # our explicit JSON line reaches the one-line-per-result protocol stream.
+            with _ctx.redirect_stdout(sys.stderr):
+                result = model.generate(input=path, language=language, use_itn=True, batch_size_s=batch_size_s)
+            payload = {"model_name": "sensevoice", "model_version": model_version,
                        "segments": _normalize_segments(result)}
         except Exception as exc:  # one bad chunk must not kill the resident server
             payload = {"error": f"{type(exc).__name__}: {exc}"}
