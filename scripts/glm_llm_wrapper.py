@@ -63,6 +63,15 @@ def build_daily_messages(payload: dict) -> list[dict]:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+def _conf(value: object) -> float:
+    # GLM may return a non-numeric confidence ("high", "0.9 (high)", null); coerce defensively
+    # and clamp to [0,1] so one bad value doesn't crash the whole day's generation.
+    try:
+        return min(1.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.5
+
+
 def normalize_daily_context(raw: dict, segments: list[dict]) -> dict:
     valid = _evidence_ids(segments)
     candidates = []
@@ -74,7 +83,7 @@ def normalize_daily_context(raw: dict, segments: list[dict]) -> dict:
         candidates.append({
             "candidate_claim": str(c.get("candidate_claim", "")),
             "claim_type": claim_type,
-            "confidence": float(c.get("confidence", 0.5)),
+            "confidence": _conf(c.get("confidence", 0.5)),
             "evidence_source_ids": list(dict.fromkeys(str(r) for r in refs)),
         })
     return {
@@ -90,7 +99,7 @@ def _normalize_inferences(items: list) -> list:
     out = []
     for item in items:
         if isinstance(item, dict) and "text" in item:
-            out.append({"type": "inference", "text": str(item["text"]), "confidence": float(item.get("confidence", 0.5))})
+            out.append({"type": "inference", "text": str(item["text"]), "confidence": _conf(item.get("confidence", 0.5))})
         else:
             out.append(str(item))
     return out

@@ -108,3 +108,19 @@ def test_main_fails_retryable_without_api_key() -> None:
                           capture_output=True, text=True, env=env)
     assert proc.returncode != 0
     assert "GLM_API_KEY" in proc.stderr
+
+
+def test_normalize_daily_context_tolerates_non_numeric_confidence() -> None:
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}]
+    raw = {
+        "summary": "s", "todos": [], "facts": [],
+        "inferences": [{"type": "inference", "text": "i", "confidence": "very high"}],
+        "memory_candidates": [
+            {"candidate_claim": "c", "claim_type": "fact", "confidence": "high", "evidence_source_ids": ["ev_1"]}
+        ],
+    }
+
+    out = glm.normalize_daily_context(raw, segments)  # must not raise
+
+    assert out["memory_candidates"][0]["confidence"] == 0.5
+    assert out["inferences"][0]["confidence"] == 0.5
