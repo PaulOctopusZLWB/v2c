@@ -18,6 +18,8 @@ sample_data/
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
+web/test-results/
+web/playwright-report/
 
 # Design/docs are kept local only — GitHub holds code, not design (*.md untracked)
 *.md
