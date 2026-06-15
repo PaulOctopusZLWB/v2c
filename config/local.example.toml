@@ -31,7 +31,7 @@ model_id = "fsmn-vad"
 # model_revision = "v2.0.4"
 min_speech_ms = 300
 merge_gap_ms = 800
-max_chunk_ms = 900000
+max_chunk_ms = 120000
 chunk_overlap_ms = 1000
 
 [session]

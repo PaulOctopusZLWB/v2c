@@ -24,5 +24,9 @@ def build_archive_adapter(
     if resolved_backend == "command":
         if not resolved_command:
             raise ValueError("archive command is required when archive backend is command")
-        return CommandArchiveAdapter(root=resolved_root, command=shlex.split(resolved_command))
+        return CommandArchiveAdapter(
+            root=resolved_root,
+            command=shlex.split(resolved_command),
+            timeout_seconds=config.command_timeout_seconds,
+        )
     raise ValueError("archive backend must be 'filesystem' or 'command'")

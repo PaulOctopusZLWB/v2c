@@ -253,6 +253,7 @@ def _run_all(
         min_speech_ms=config.min_speech_ms,
         model_id=config.vad_model_id,
         model_revision=config.vad_model_revision,
+        timeout_seconds=config.command_timeout_seconds,
     )
     asr = _build_asr(
         asr_backend=asr_backend or config.asr_backend,
@@ -262,8 +263,13 @@ def _run_all(
         model_name=config.asr_model_name,
         model_id=config.asr_model_id,
         model_version=config.asr_model_version,
+        timeout_seconds=config.command_timeout_seconds,
     )
-    llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
+    llm = _build_llm(
+        llm_backend=llm_backend or config.llm_backend,
+        llm_command=llm_command or config.llm_command,
+        timeout_seconds=config.command_timeout_seconds,
+    )
     drain = drain_process_queue(
         config=config,
         vad=vad,
@@ -419,6 +425,7 @@ def preprocess(
         min_speech_ms=config.min_speech_ms,
         model_id=config.vad_model_id,
         model_revision=config.vad_model_revision,
+        timeout_seconds=config.command_timeout_seconds,
     )
     resolved_max_chunk_ms = max_chunk_ms or config.max_chunk_ms
     result = preprocess_imported_audio(
@@ -460,6 +467,7 @@ def transcribe(
         model_name=config.asr_model_name,
         model_id=config.asr_model_id,
         model_version=config.asr_model_version,
+        timeout_seconds=config.command_timeout_seconds,
     )
     result = transcribe_pending_chunks(config=config, asr=asr)
     typer.echo(
@@ -502,6 +510,7 @@ def model_smoke(
         min_speech_ms=config.min_speech_ms,
         model_id=config.vad_model_id,
         model_revision=config.vad_model_revision,
+        timeout_seconds=config.command_timeout_seconds,
     )
     asr = _build_asr(
         asr_backend=asr_backend or config.asr_backend,
@@ -511,6 +520,7 @@ def model_smoke(
         model_name=config.asr_model_name,
         model_id=config.asr_model_id,
         model_version=config.asr_model_version,
+        timeout_seconds=config.command_timeout_seconds,
     )
     vad_result = vad.detect(audio_path)
     asr_result = asr.transcribe(audio_path)
@@ -542,7 +552,11 @@ def summarize(
     llm_command: str | None = typer.Option(None, help="Command LLM wrapper."),
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
-    llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
+    llm = _build_llm(
+        llm_backend=llm_backend or config.llm_backend,
+        llm_command=llm_command or config.llm_command,
+        timeout_seconds=config.command_timeout_seconds,
+    )
     result = generate_daily_context(config=config, day=day, llm=llm)
     typer.echo(
         " ".join(
@@ -1497,6 +1511,7 @@ def _process_run(
         min_speech_ms=config.min_speech_ms,
         model_id=config.vad_model_id,
         model_revision=config.vad_model_revision,
+        timeout_seconds=config.command_timeout_seconds,
     )
     asr = _build_asr(
         asr_backend=asr_backend or config.asr_backend,
@@ -1506,8 +1521,13 @@ def _process_run(
         model_name=config.asr_model_name,
         model_id=config.asr_model_id,
         model_version=config.asr_model_version,
+        timeout_seconds=config.command_timeout_seconds,
     )
-    llm = _build_llm(llm_backend=llm_backend or config.llm_backend, llm_command=llm_command or config.llm_command)
+    llm = _build_llm(
+        llm_backend=llm_backend or config.llm_backend,
+        llm_command=llm_command or config.llm_command,
+        timeout_seconds=config.command_timeout_seconds,
+    )
     run_id = f"run_{uuid4().hex}"
     result = record_job_run(
         config=config,
@@ -1542,6 +1562,7 @@ def _build_vad(
     min_speech_ms: int = 300,
     model_id: str = "fsmn-vad",
     model_revision: str | None = None,
+    timeout_seconds: float = 3600.0,
 ):
     try:
         return _domain_build_vad(
@@ -1552,6 +1573,7 @@ def _build_vad(
             min_speech_ms=min_speech_ms,
             model_id=model_id,
             model_revision=model_revision,
+            timeout_seconds=timeout_seconds,
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -1566,6 +1588,7 @@ def _build_asr(
     model_name: str = "mock-asr",
     model_id: str = "iic/SenseVoiceSmall",
     model_version: str = "funasr-sensevoice-local",
+    timeout_seconds: float = 3600.0,
 ):
     try:
         return _domain_build_asr(
@@ -1576,14 +1599,15 @@ def _build_asr(
             model_name=model_name,
             model_id=model_id,
             model_version=model_version,
+            timeout_seconds=timeout_seconds,
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
 
-def _build_llm(*, llm_backend: str, llm_command: str | None):
+def _build_llm(*, llm_backend: str, llm_command: str | None, timeout_seconds: float = 3600.0):
     try:
-        return _domain_build_llm(llm_backend=llm_backend, llm_command=llm_command)
+        return _domain_build_llm(llm_backend=llm_backend, llm_command=llm_command, timeout_seconds=timeout_seconds)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
