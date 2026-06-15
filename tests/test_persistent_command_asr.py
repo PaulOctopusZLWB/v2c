@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
@@ -64,3 +65,53 @@ def test_persistent_adapter_resets_process_on_timeout_to_prevent_desync(tmp_path
 
     assert adapter._proc is None  # poisoned process dropped; next transcribe spawns fresh
     assert proc.poll() is not None  # the in-flight server was actually terminated
+
+
+def test_persistent_adapter_tolerates_verbose_server_stderr(tmp_path: Path) -> None:
+    # The funasr server floods stderr during model load; the adapter must not deadlock on an
+    # undrained stderr pipe (it discards stderr), so a noisy server still returns results.
+    script = tmp_path / "noisy.py"
+    script.write_text(
+        "import sys, json\n"
+        "sys.stderr.write('x' * 300000)\n"  # flood stderr BEFORE reading any chunk path
+        "sys.stderr.flush()\n"
+        "for line in sys.stdin:\n"
+        "    p = line.strip()\n"
+        "    if not p: continue\n"
+        "    print(json.dumps({'model_name':'x','model_version':'v','segments':"
+        "[{'text':'转 '+p,'start_ms':0,'end_ms':1,'language':'zh'}]}), flush=True)\n",
+        encoding="utf-8",
+    )
+    adapter = PersistentCommandASRAdapter(command=["python3", str(script)], timeout_seconds=10)
+
+    result = adapter.transcribe(tmp_path / "chk.wav")
+    adapter.close()
+
+    assert result.segments[0].text == f"转 {tmp_path / 'chk.wav'}"
+
+
+def test_persistent_adapter_times_out_on_partial_line_stall(tmp_path: Path) -> None:
+    # A server that flushes a partial (newline-less) line then stalls must still be bounded
+    # by timeout_seconds — the blocking readline can't hang on the missing newline.
+    script = tmp_path / "partial.py"
+    script.write_text(
+        "import sys, time\n"
+        "for line in sys.stdin:\n"
+        "    sys.stdout.write('{\"model_name\"')\n"  # partial JSON, no newline
+        "    sys.stdout.flush()\n"
+        "    time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    adapter = PersistentCommandASRAdapter(command=["python3", str(script)], timeout_seconds=0.3)
+
+    start = time.monotonic()
+    try:
+        adapter.transcribe(tmp_path / "chk.wav")
+    except RetryablePortError:
+        pass
+    else:
+        raise AssertionError("expected a timeout on the partial-line stall")
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 5.0, f"readline hung on a newline-less line ({elapsed:.1f}s)"
+    assert adapter._proc is None

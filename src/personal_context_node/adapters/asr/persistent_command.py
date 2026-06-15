@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import select
 import subprocess
+import threading
 from pathlib import Path
 
 from personal_context_node.adapters.asr.command import _asr_segment
@@ -25,28 +25,51 @@ class PersistentCommandASRAdapter:
 
     def _ensure(self) -> subprocess.Popen[str]:
         if self._proc is None or self._proc.poll() is not None:
+            # Discard the server's stderr: the funasr wrapper writes its (very verbose,
+            # multi-MB on first-run model download) load output there, and we never read it —
+            # an undrained PIPE fills the OS buffer and blocks the server before it reads a
+            # chunk path from stdin, wedging the daemon. We don't need the load noise.
             self._proc = subprocess.Popen(
-                self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 text=True, start_new_session=True,
             )
         return self._proc
+
+    def _readline_with_timeout(self, proc: "subprocess.Popen[str]") -> str | None:
+        # Bound the blocking readline so a server that stalls — including after flushing a
+        # partial, newline-less line — can't hang past timeout_seconds. Returns None on
+        # timeout, "" on EOF, or the line. The caller close()s on timeout, which unblocks
+        # the daemon reader thread.
+        holder: list[str] = []
+
+        def _read() -> None:
+            try:
+                holder.append(proc.stdout.readline())
+            except (OSError, ValueError):
+                pass
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(self.timeout_seconds)
+        if reader.is_alive():
+            return None
+        return holder[0] if holder else ""
 
     def transcribe(self, audio_path: Path) -> ASRResult:
         proc = self._ensure()
         try:
             proc.stdin.write(f"{audio_path}\n")
             proc.stdin.flush()
-        except BrokenPipeError as exc:
+        except (BrokenPipeError, OSError) as exc:
+            self.close()
             raise RetryablePortError("ASR server stdin closed") from exc
-        ready, _, _ = select.select([proc.stdout], [], [], self.timeout_seconds)
-        if not ready:
-            # The server is still working on this chunk; its result line would arrive later
-            # and desync the one-line-in/one-line-out protocol (the NEXT chunk would read this
-            # chunk's stale buffered line, silently corrupting transcripts). Kill the poisoned
-            # process so the next call spawns a fresh server with an empty pipe.
+        line = self._readline_with_timeout(proc)
+        if line is None:
+            # The server is still working (or stalled mid-line); its result would later
+            # desync the one-line-in/one-line-out protocol. Kill the poisoned process so the
+            # next call spawns a fresh server with an empty pipe.
             self.close()
             raise RetryablePortError(f"ASR server timed out after {self.timeout_seconds:g}s")
-        line = proc.stdout.readline()
         if not line:
             self.close()
             raise RetryablePortError("ASR server exited before returning a result")
