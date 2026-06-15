@@ -9,7 +9,13 @@ from pathlib import Path
 
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.adapters.vad.mock import MockVADAdapter
-from personal_context_node.audio_preprocessing import _split_range, preprocess_imported_audio
+from personal_context_node.audio_preprocessing import (
+    _convert_pcm_frames,
+    _convert_pcm_frames_blocked,
+    _read_wav_metadata,
+    _split_range,
+    preprocess_imported_audio,
+)
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.vad import SpeechRange
 from personal_context_node.ingest import import_audio_files
@@ -219,6 +225,53 @@ def test_preprocess_normalizes_ieee_float_wav_chunks(tmp_path: Path) -> None:
         assert chunk.getnchannels() == config.audio.target_channels
         assert chunk.getsampwidth() == 2
         assert chunk.getnframes() == 16_000
+
+
+def test_read_wav_metadata_stores_data_offset_not_payload(tmp_path: Path) -> None:
+    path = tmp_path / "float.wav"
+    _write_ieee_float_wav(path, samples=[0.1, 0.2, 0.3, 0.4], sample_rate=16000, channels=1)
+
+    metadata = _read_wav_metadata(path)
+
+    assert "data" not in metadata
+    assert metadata["data_offset"] > 0
+    assert metadata["data_size"] == 16
+
+
+def test_pcm_conversion_matches_existing_output_for_small_blocks() -> None:
+    frames = b"".join(int(sample).to_bytes(2, "little", signed=True) for sample in [100, -100, 200, -200])
+
+    whole = _convert_pcm_frames(
+        frames,
+        source_sample_rate=16000,
+        source_channels=1,
+        source_sample_width=2,
+        target_sample_rate=16000,
+        target_channels=1,
+        target_sample_width=2,
+    )
+    blocked = _convert_pcm_frames_blocked(
+        frames,
+        source_sample_rate=16000,
+        source_channels=1,
+        source_sample_width=2,
+        target_sample_rate=16000,
+        target_channels=1,
+        target_sample_width=2,
+        block_frames=2,
+    )
+
+    assert blocked == whole
+
+
+def _write_ieee_float_wav(path: Path, *, samples: list[float], sample_rate: int, channels: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = b"".join(struct.pack("<f", sample) for sample in samples)
+    byte_rate = sample_rate * channels * 4
+    block_align = channels * 4
+    fmt = struct.pack("<HHIIHH", 3, channels, sample_rate, byte_rate, block_align, 32)
+    payload = b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(data)) + data
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(payload) + 4) + b"WAVE" + payload)
 
 
 def _write_stereo_wav(path: Path, segments: list[tuple[float, int]], sample_rate: int) -> None:

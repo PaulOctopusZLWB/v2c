@@ -141,7 +141,7 @@ def _write_chunk(*, config: AppConfig, source_path: Path, recorded_day: str, sta
             frame_count = int((end_ms - start_ms) * sample_rate / 1000)
             source.setpos(start_frame)
             frames = source.readframes(frame_count)
-            frames = _convert_pcm_frames(
+            frames = _convert_pcm_frames_blocked(
                 frames,
                 source_sample_rate=sample_rate,
                 source_channels=channels,
@@ -213,6 +213,39 @@ def _convert_pcm_frames(
     )
 
 
+def _convert_pcm_frames_blocked(
+    frames: bytes,
+    *,
+    source_sample_rate: int,
+    source_channels: int,
+    source_sample_width: int,
+    target_sample_rate: int,
+    target_channels: int,
+    target_sample_width: int,
+    block_frames: int = 16000,
+) -> bytes:
+    # Convert in bounded blocks so a long chunk never materializes its full decoded frame
+    # list at once. For equal sample rates this is bit-identical to a whole conversion; for
+    # resampling it accepts negligible block-boundary nearest-neighbor drift for bounded memory.
+    source_frame_width = source_sample_width * source_channels
+    block_bytes = max(source_frame_width, block_frames * source_frame_width)
+    converted = bytearray()
+    for offset in range(0, len(frames), block_bytes):
+        block = frames[offset : offset + block_bytes]
+        converted.extend(
+            _convert_pcm_frames(
+                block,
+                source_sample_rate=source_sample_rate,
+                source_channels=source_channels,
+                source_sample_width=source_sample_width,
+                target_sample_rate=target_sample_rate,
+                target_channels=target_channels,
+                target_sample_width=target_sample_width,
+            )
+        )
+    return bytes(converted)
+
+
 def _convert_decoded_frames(
     source_frames: list[list[int]],
     *,
@@ -266,8 +299,13 @@ def _convert_ieee_float_wav_chunk(
     bytes_per_frame = channels * 4
     start_frame = int(start_ms * sample_rate / 1000)
     frame_count = int((end_ms - start_ms) * sample_rate / 1000)
-    data = metadata["data"]
-    segment = data[start_frame * bytes_per_frame : (start_frame + frame_count) * bytes_per_frame]
+    data_offset = int(metadata["data_offset"])
+    data_size = int(metadata["data_size"])
+    start_byte = min(data_size, start_frame * bytes_per_frame)
+    end_byte = min(data_size, (start_frame + frame_count) * bytes_per_frame)
+    with source_path.open("rb") as handle:
+        handle.seek(data_offset + start_byte)
+        segment = handle.read(max(0, end_byte - start_byte))
     decoded = _decode_ieee_float_frames(segment, channels=channels)
     return _convert_decoded_frames(
         decoded,
@@ -284,14 +322,15 @@ def _read_wav_metadata(path: Path) -> dict[str, object]:
         raise ValueError("unsupported WAV container")
     offset = 12
     fmt: dict[str, object] | None = None
-    payload = b""
+    data_offset: int | None = None
+    data_size = 0
     while offset + 8 <= len(data):
         chunk_id = data[offset : offset + 4]
         chunk_size = struct.unpack_from("<I", data, offset + 4)[0]
         chunk_start = offset + 8
         chunk_end = chunk_start + chunk_size
-        chunk_data = data[chunk_start:chunk_end]
         if chunk_id == b"fmt ":
+            chunk_data = data[chunk_start:chunk_end]
             if len(chunk_data) < 16:
                 raise ValueError("invalid WAV fmt chunk")
             audio_format, channels, sample_rate, _byte_rate, _block_align, bits_per_sample = struct.unpack_from(
@@ -305,11 +344,16 @@ def _read_wav_metadata(path: Path) -> dict[str, object]:
                 "bits_per_sample": bits_per_sample,
             }
         elif chunk_id == b"data":
-            payload = chunk_data
+            # Record where the audio payload lives instead of copying it: the conversion
+            # path seeks to the requested frame range, so the full payload never needs to
+            # be held in (or returned from) memory.
+            data_offset = chunk_start
+            data_size = chunk_size
         offset = chunk_end + (chunk_size % 2)
-    if fmt is None or not payload:
+    if fmt is None or data_offset is None or data_size <= 0:
         raise ValueError("invalid WAV file")
-    fmt["data"] = payload
+    fmt["data_offset"] = data_offset
+    fmt["data_size"] = data_size
     return fmt
 
 
