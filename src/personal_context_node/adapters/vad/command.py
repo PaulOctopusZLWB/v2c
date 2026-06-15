@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from personal_context_node.adapters.command_runner import run_command
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 from personal_context_node.core.ports.vad import SpeechRange, VADResult
 
@@ -25,13 +26,7 @@ class CommandVADAdapter:
 
     def detect(self, audio_path: Path) -> VADResult:
         try:
-            result = subprocess.run(
-                [*self.command, str(audio_path)],
-                check=False,
-                text=True,
-                capture_output=True,
-                timeout=self.timeout_seconds,
-            )
+            result = run_command([*self.command, str(audio_path)], timeout_seconds=self.timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             raise RetryablePortError(f"VAD command timed out after {self.timeout_seconds:g}s") from exc
         if result.returncode != 0:

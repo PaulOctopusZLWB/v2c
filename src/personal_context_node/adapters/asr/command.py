@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from personal_context_node.adapters.command_runner import run_command
 from personal_context_node.core.ports.asr import ASRResult, ASRSegment
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 
@@ -36,13 +37,7 @@ class CommandASRAdapter:
 
     def transcribe(self, audio_path: Path) -> ASRResult:
         try:
-            completed = subprocess.run(
-                [*self.command, str(audio_path)],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-            )
+            completed = run_command([*self.command, str(audio_path)], timeout_seconds=self.timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             raise RetryablePortError(f"ASR command timed out after {self.timeout_seconds:g}s") from exc
         if completed.returncode == TERMINAL_EXIT_CODE:

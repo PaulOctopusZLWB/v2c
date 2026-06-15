@@ -5,6 +5,7 @@ import re
 import subprocess
 from typing import get_args
 
+from personal_context_node.adapters.command_runner import run_command
 from personal_context_node.core.ports.errors import RetryablePortError, TerminalPortError
 from personal_context_node.core.ports.llm import (
     ClaimType,
@@ -65,13 +66,10 @@ class CommandLLMAdapter:
 
     def _run_json(self, payload: dict[str, object]) -> dict[str, object]:
         try:
-            completed = subprocess.run(
+            completed = run_command(
                 self.command,
-                input=json.dumps(payload, ensure_ascii=False),
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
+                stdin_text=json.dumps(payload, ensure_ascii=False),
+                timeout_seconds=self.timeout_seconds,
             )
         except subprocess.TimeoutExpired as exc:
             raise RetryablePortError(f"LLM command timed out after {self.timeout_seconds:g}s") from exc

@@ -4,6 +4,7 @@ import hashlib
 import subprocess
 from pathlib import Path
 
+from personal_context_node.adapters.command_runner import run_command
 from personal_context_node.core.ports.archive import ArchiveResult
 
 
@@ -33,9 +34,7 @@ class CommandArchiveAdapter:
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         command = self._archive_command(source_path=source_path, archive_path=archive_path, relative_path=relative_path)
         try:
-            completed = subprocess.run(
-                command, check=False, text=True, capture_output=True, timeout=self.timeout_seconds
-            )
+            completed = run_command(command, timeout_seconds=self.timeout_seconds)
         except subprocess.TimeoutExpired:
             return ArchiveResult(
                 archive_path=archive_path,
