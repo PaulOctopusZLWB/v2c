@@ -230,7 +230,16 @@ def archive_completed_audio(*, config: AppConfig, archive: ArchivePort) -> Archi
         conn.close()
 
 
-def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_before: datetime) -> CleanupArchivedAudioResult:
+_CLEANUP_RECHECK_COOLDOWN_SECONDS = 6 * 3600
+
+
+def cleanup_archived_audio(
+    *,
+    config: AppConfig,
+    archive: ArchivePort,
+    archived_before: datetime,
+    recheck_cooldown_seconds: float = _CLEANUP_RECHECK_COOLDOWN_SECONDS,
+) -> CleanupArchivedAudioResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -255,12 +264,13 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
         now = datetime.now(timezone.utc).isoformat()
         for row in rows:
             local_path = Path(row["local_raw_path"])
-            # A row already parked at cleanup_pending whose local file has not changed since
-            # we marked it is still in the same guarded state; skip it without re-hashing the
-            # whole file every run. A genuine restore/repair bumps the file's mtime and
-            # re-enters full evaluation (so transient mismatches still recover).
-            if str(row["archive_status"]) == "cleanup_pending" and not _local_modified_after(
-                local_path, row["archive_updated_at"]
+            # Skip a row already parked at cleanup_pending unless it is worth re-evaluating:
+            # either the local file changed (fast recovery for restores that touch mtime) or
+            # the recheck cooldown elapsed (so an mtime-preserving restore still recovers,
+            # while a permanently-mismatched file is re-hashed at most once per cooldown
+            # rather than on every run).
+            if str(row["archive_status"]) == "cleanup_pending" and not _should_recheck_parked(
+                local_path, row["archive_updated_at"], recheck_cooldown_seconds
             ):
                 continue
             archive_result = archive.verify_file(
@@ -311,6 +321,16 @@ def cleanup_archived_audio(*, config: AppConfig, archive: ArchivePort, archived_
         return CleanupArchivedAudioResult(files_removed=removed, files_pending=int(pending_rows[0]["count"]))
     finally:
         conn.close()
+
+
+def _should_recheck_parked(path: Path, updated_at: object, cooldown_seconds: float) -> bool:
+    if _local_modified_after(path, updated_at):
+        return True
+    try:
+        marked = datetime.fromisoformat(str(updated_at))
+    except (TypeError, ValueError):
+        return True
+    return (datetime.now(timezone.utc) - marked).total_seconds() >= cooldown_seconds
 
 
 def _local_modified_after(path: Path, iso_timestamp: object) -> bool:

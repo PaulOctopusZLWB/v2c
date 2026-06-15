@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -752,3 +753,41 @@ def test_cleanup_archived_audio_does_not_rehash_unchanged_mismatch_each_run(tmp_
     assert second.files_removed == 0
     assert raw.exists()
     assert counting.verify_calls == calls_after_first  # no repeat hashing of the unchanged row
+
+
+def test_cleanup_archived_audio_recovers_mtime_preserving_restore_after_cooldown(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    archive_root = tmp_path / "nas"
+    archive_root.mkdir()
+    raw = _write_raw(config, "preserve.wav", b"changed local bytes")
+    archive_path = archive_root / "audio" / "raw" / "2087-05-10" / "preserve.wav"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(b"archived bytes")
+    sha = _sha256(archive_path)
+    _insert_audio(config.database_path, raw, sha, status="cleanup_eligible", audio_file_id="aud_preserve")
+    _insert_archive_record(
+        config.database_path,
+        audio_file_id="aud_preserve",
+        source_path=raw,
+        archive_path=archive_path,
+        sha256=sha,
+        archived_at="2000-01-01T00:00:00+00:00",
+    )
+
+    # Run 1: mismatch -> parked at cleanup_pending.
+    first = cleanup_archived_audio(config=config, archive=LocalFilesystemArchiveAdapter(root=archive_root), archived_before=datetime.now(timezone.utc))
+    assert first.files_removed == 0
+
+    # Restore correct bytes but PRESERVE an older mtime (cp -p / rsync -a / tar restore).
+    raw.write_bytes(b"archived bytes")
+    os.utime(raw, (1.0, 1.0))
+
+    # mtime did not advance, but once the cooldown elapses the row is re-evaluated and reclaimed.
+    second = cleanup_archived_audio(
+        config=config,
+        archive=LocalFilesystemArchiveAdapter(root=archive_root),
+        archived_before=datetime.now(timezone.utc),
+        recheck_cooldown_seconds=0,
+    )
+    assert second.files_removed == 1
+    assert not raw.exists()
