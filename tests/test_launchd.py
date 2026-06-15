@@ -6,11 +6,29 @@ from pathlib import Path
 
 from personal_context_node.launchd import (
     LaunchdJob,
+    _environment_path,
     install_launchd_plists,
     render_plist,
     uninstall_launchd_plists,
     write_launchd_plists,
 )
+
+
+def test_environment_path_includes_resolved_uv_directory() -> None:
+    path = _environment_path("/Users/me/.local/bin/uv")
+
+    assert path.split(":")[0] == "/Users/me/.local/bin"  # uv's own dir is first on PATH
+    assert "/usr/bin" in path.split(":")  # default dirs still present
+
+
+def test_environment_path_does_not_duplicate_a_default_directory() -> None:
+    path = _environment_path("/opt/homebrew/bin/uv")
+
+    assert path.split(":").count("/opt/homebrew/bin") == 1
+
+
+def test_environment_path_falls_back_to_default_for_bare_uv() -> None:
+    assert _environment_path("uv") == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 def test_write_launchd_plists_does_not_require_writable_data_dir(tmp_path) -> None:
