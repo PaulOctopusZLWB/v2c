@@ -84,11 +84,41 @@ def test_events_endpoint_is_served_at_api_events(tmp_path: Path) -> None:
     with client.stream("GET", "/api/events") as response:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
-        first = next(response.iter_lines())
-        assert first == "event: status.snapshot"
+        lines = list(response.iter_lines())
+        # The stream must emit a status.summary event before it closes.
+        assert "event: status.summary" in lines, f"expected status.summary in stream lines: {lines}"
 
     # The wrong path must NOT exist.
     assert client.get("/api/pipeline/events").status_code == 404
+
+
+def test_events_status_summary_has_compact_shape(tmp_path: Path) -> None:
+    # The status.summary payload must contain status_counts, total, active_stage,
+    # current_target and import_progress — NOT a full tasks array.
+    import json
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    client = TestClient(create_app(config=config))
+
+    with client.stream("GET", "/api/events") as response:
+        assert response.status_code == 200
+        lines = list(response.iter_lines())
+
+    # Find the data line immediately after the first status.summary event line.
+    summary_data: dict | None = None
+    for i, line in enumerate(lines):
+        if line == "event: status.summary" and i + 1 < len(lines):
+            data_line = lines[i + 1]
+            assert data_line.startswith("data: ")
+            summary_data = json.loads(data_line[len("data: "):])
+            break
+
+    assert summary_data is not None, "no status.summary data found"
+    assert "status_counts" in summary_data
+    assert "total" in summary_data
+    assert "import_progress" in summary_data
+    # Must NOT be a full tasks dump — no 'tasks' key in the compact payload.
+    assert "tasks" not in summary_data
 
 
 def test_retry_failed_resets_all_failed_tasks(tmp_path: Path) -> None:

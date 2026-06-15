@@ -90,28 +90,46 @@ async def events_stream(request: Request) -> StreamingResponse:
 
     async def stream():
         last_signature: str | None = None
-        # Emit an immediate snapshot, then poll for changes.
+        # Emit an immediate compact summary, then poll for changes.
         for _ in range(10_000):
             if await request.is_disconnected():
                 break
             rows = process_status_rows(config=config)
             import_progress = worker.import_state()
-            # Fold import progress into the change-signature so the bar advances frame
-            # by frame while the (possibly multi-GB) copy is running.
+            worker_running = worker.is_running()
+
+            # Build a compact status summary (counts + max updated_at) — much smaller
+            # than the full 1881-row task array that was previously serialised every tick.
+            from collections import Counter
+            status_counts = dict(Counter(str(r["status"]) for r in rows))
+            total = len(rows)
+            # Determine the active stage and current target from the first running/claimed task.
+            active_stage: str | None = None
+            current_target: str | None = None
+            for r in rows:
+                if r["status"] in ("claimed", "running"):
+                    active_stage = str(r["task_type"])
+                    current_target = str(r["target_id"])
+                    break
+
+            # Compact change-signature: (sorted status counts, import_progress)
+            # We intentionally exclude task-level detail so the signature is small.
             signature = json.dumps(
-                [[r["task_id"], r["status"]] for r in rows] + [import_progress],
+                (sorted(status_counts.items()), import_progress),
                 sort_keys=True,
                 default=str,
             )
-            worker_running = worker.is_running()
             if signature != last_signature:
                 last_signature = signature
                 payload = {
-                    "tasks": rows,
-                    "worker_running": worker_running,
+                    "status_counts": status_counts,
+                    "total": total,
+                    "active_stage": active_stage,
+                    "current_target": current_target,
                     "import_progress": import_progress,
+                    "worker_running": worker_running,
                 }
-                yield "event: status.snapshot\n"
+                yield "event: status.summary\n"
                 yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
             # Nothing is in flight and no worker is running: no further change can occur
             # without a new request, so close the stream (the EventSource reconnects later).
