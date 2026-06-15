@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import tomllib
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class DeviceDiscoveryConfig(BaseModel):
@@ -73,6 +73,15 @@ class AppConfig(BaseModel):
     log_level: str = "INFO"
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
     audio: AudioProcessingConfig = AudioProcessingConfig()
+
+    @field_validator("command_timeout_seconds")
+    @classmethod
+    def _validate_command_timeout_seconds(cls, value: float) -> float:
+        # A non-positive timeout makes every external command time out before doing any work
+        # (burning ASR/VAD/LLM retries; archive always pending). Fail fast at config load.
+        if value <= 0:
+            raise ValueError("commands.timeout_seconds must be positive")
+        return value
 
     @classmethod
     def from_toml(cls, path: Path, **overrides: Any) -> "AppConfig":

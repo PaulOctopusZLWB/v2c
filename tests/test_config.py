@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from personal_context_node.config import AppConfig
 
 
@@ -199,3 +202,13 @@ timeout_seconds = 12
     config = AppConfig.from_toml(config_path)
 
     assert config.command_timeout_seconds == 12
+
+
+def test_app_config_rejects_non_positive_command_timeout_seconds(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(command_timeout_seconds=0)
+
+    config_path = tmp_path / "local.toml"
+    config_path.write_text("[commands]\ntimeout_seconds = -5\n", encoding="utf-8")
+    with pytest.raises(ValidationError):
+        AppConfig.from_toml(config_path)
