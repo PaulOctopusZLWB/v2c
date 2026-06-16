@@ -162,6 +162,58 @@ def _summary_lines(session: dict[str, object], summary: dict[str, object] | None
     lines.extend(_item_lines("Decision", summary.get("decisions", [])))
     lines.extend(_todo_lines(summary.get("todos", [])))
     lines.extend(_plain_lines("Open Question", summary.get("open_questions", [])))
+    lines.extend(_core_conclusion_lines(summary.get("core_conclusions", [])))
+    lines.extend(_per_speaker_lines(summary.get("per_speaker", [])))
+    return lines
+
+
+def _core_conclusion_lines(items: object) -> list[str]:
+    conclusions = [str(item) for item in items if str(item).strip()] if isinstance(items, list) else []
+    if not conclusions:
+        return []
+    lines = ["## 核心结论", ""]
+    lines.extend(f"- {text}" for text in conclusions)
+    lines.append("")
+    return lines
+
+
+def _per_speaker_lines(items: object) -> list[str]:
+    speakers = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+    if not speakers:
+        return []
+    lines = ["## 发言人分析", ""]
+    for speaker in speakers:
+        label = str(speaker.get("speaker_cluster_id") or "unknown")
+        lines.append(f"### 发言人 {label}")
+        lines.append("")
+        lines.extend(_speaker_viewpoint_lines(speaker.get("viewpoints", [])))
+        sentiment = str(speaker.get("sentiment") or "").strip()
+        if sentiment:
+            lines.append(f"- 情绪: {sentiment}")
+        stance = str(speaker.get("stance") or "").strip()
+        if stance:
+            lines.append(f"- 倾向: {stance}")
+        needs = [str(need) for need in speaker.get("latent_needs", []) if str(need).strip()] if isinstance(
+            speaker.get("latent_needs"), list
+        ) else []
+        if needs:
+            lines.append(f"- 潜在需求: {'、'.join(needs)}")
+        lines.append("")
+    return lines
+
+
+def _speaker_viewpoint_lines(items: object) -> list[str]:
+    lines: list[str] = []
+    viewpoints = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+    for viewpoint in viewpoints:
+        text = str(viewpoint.get("text") or "").strip()
+        if not text:
+            continue
+        refs = [str(ref) for ref in viewpoint.get("evidence_refs", []) if str(ref).strip()] if isinstance(
+            viewpoint.get("evidence_refs"), list
+        ) else []
+        suffix = f" (refs: {', '.join(refs)})" if refs else ""
+        lines.append(f"- 观点: {text}{suffix}")
     return lines
 
 
