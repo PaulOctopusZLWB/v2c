@@ -30,14 +30,23 @@ def _is_thinking(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUTHY
 
 
-def _extract_json(content: str) -> dict[str, object]:
+def _extract_json(content: str, *, prefer_keys: frozenset = frozenset()) -> dict[str, object]:
     """Recover a JSON object from model content, tolerating thinking-ON inline reasoning.
 
     Some OpenAI-compatible servers fold the chain-of-thought into message.content before the
     JSON (and leave reasoning_content empty), so the raw content is `reasoning… {json}` which
     breaks json.loads. Try the whole string first; on failure strip a leading <think>…</think>
-    block, then take the OUTERMOST balanced { … } (first '{' to its matching '}') and parse that.
-    Raise (ValueError) if no JSON object can be parsed so callers fail retryably."""
+    block, then scan every '{' with raw_decode (string-aware) to collect ALL decodable top-level
+    objects and pick the one that best matches the expected answer shape.
+
+    A model may append an "for reference / 示例格式" example or schema-stub object AFTER its real
+    answer (or embed one before it), so neither first-wins nor last-wins is reliable. When
+    prefer_keys is given, choose the object scoring highest on
+    (count of prefer_keys it contains, length of its JSON span) — the real answer carries the most
+    expected top-level keys and is richer/longer than a stub. With prefer_keys empty, fall back to
+    the longest object, then the last position (preserves the prior last-wins behaviour for callers
+    that don't pass a schema). Raise (ValueError) if no JSON object can be parsed so callers fail
+    retryably."""
     try:
         return json.loads(content)
     except (ValueError, TypeError):
@@ -46,13 +55,12 @@ def _extract_json(content: str) -> dict[str, object]:
     close = text.find("</think>")
     if text.lstrip().startswith("<think>") and close != -1:
         text = text[close + len("</think>"):]
-    # Try to JSON-decode an object at each '{' position and keep the LAST one that parses. We use
-    # raw_decode (string-aware) rather than counting raw braces, so a '}' or '{' inside a JSON
-    # string value (common in Chinese prose) — or stray/unbalanced braces in reasoning prose —
-    # can't miscount depth and drop the real answer. The answer follows the reasoning, so the last
-    # successfully-decoded object wins over any example object embedded earlier.
+    # Collect every top-level object via raw_decode (string-aware) rather than counting raw braces,
+    # so a '}' or '{' inside a JSON string value (common in Chinese prose) — or stray/unbalanced
+    # braces in reasoning prose — can't miscount depth and drop the real answer.
     decoder = json.JSONDecoder()
-    last: dict[str, object] | None = None
+    best: dict[str, object] | None = None
+    best_score: tuple[int, int] | None = None
     found = False
     i = 0
     while True:
@@ -64,9 +72,17 @@ def _extract_json(content: str) -> dict[str, object]:
         except ValueError:
             i = brace + 1
             continue
-        last, found, i = obj, True, end
+        # Score: (#expected keys present, JSON span length). Tie-break by span (longer = richer
+        # answer over a stub example). With prefer_keys empty the first term is 0 for every object,
+        # so this degrades to longest-wins; '>=' lets a later equal-length object win, preserving
+        # the prior last-position fallback.
+        n_keys = sum(1 for k in prefer_keys if isinstance(obj, dict) and k in obj)
+        score = (n_keys, end - brace)
+        if best_score is None or score >= best_score:
+            best, best_score, found = obj, score, True
+        i = end
     if found:
-        return last
+        return best
     raise ValueError("no JSON object found in model content")
 
 
@@ -89,6 +105,7 @@ def call_glm(
     base_url: str | None = None,
     thinking: bool = False,
     timeout: int | None = None,
+    prefer_keys: frozenset = frozenset(),
 ) -> dict[str, object]:
     base = (base_url or DEFAULT_BASE_URL).rstrip("/")
     url = f"{base}/chat/completions"
@@ -102,7 +119,7 @@ def call_glm(
         # Tests inject a 3-arg post(url, headers, body); fall back to omitting the timeout kwarg.
         data = post(url, {"Authorization": f"Bearer {api_key}"}, body)
     content = data["choices"][0]["message"]["content"]
-    return _extract_json(content)
+    return _extract_json(content, prefer_keys=prefer_keys)
 
 
 def _evidence_ids(segments: list[dict]) -> set[str]:
@@ -320,10 +337,12 @@ def main() -> int:
         kwargs = {"api_key": api_key, "model": model, "post": post, "base_url": base_url,
                   "thinking": thinking, "timeout": timeout}
         if payload.get("task") == "session_summary":
-            raw = call_glm({"messages": build_session_messages(payload)}, **kwargs)
+            keys = frozenset({"headline", "core_conclusions", "per_speaker", "open_questions"})
+            raw = call_glm({"messages": build_session_messages(payload)}, prefer_keys=keys, **kwargs)
             out = normalize_session_summary(raw, segments)
         else:
-            raw = call_glm({"messages": build_daily_messages(payload)}, **kwargs)
+            keys = frozenset({"summary", "todos", "facts", "inferences", "memory_candidates"})
+            raw = call_glm({"messages": build_daily_messages(payload)}, prefer_keys=keys, **kwargs)
             out = normalize_daily_context(raw, segments)
     except Exception as exc:  # network / JSON / GLM errors -> retryable
         print(f"GLM wrapper failed: {type(exc).__name__}: {exc}", file=sys.stderr)

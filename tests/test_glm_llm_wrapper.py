@@ -160,6 +160,43 @@ def test_extract_json_handles_unbalanced_brace_in_reasoning() -> None:
     assert glm._extract_json("示例代码 if (x) { do();\n{\"a\": 1}") == {"a": 1}
 
 
+def test_extract_json_prefers_object_with_expected_keys_over_trailing_example() -> None:
+    # The round-3 failure: the model emits its REAL answer, then appends a "for reference / 示例格式"
+    # schema-stub object AFTER it. last-wins returns the trailing stub and silently drops the answer.
+    # With prefer_keys, the object carrying the expected top-level keys must win regardless of position.
+    content = (
+        '{"headline": "真实答案", "core_conclusions": [], "per_speaker": []}\n'
+        'For reference the schema is {"headline": "str"}'
+    )
+    result = glm._extract_json(
+        content, prefer_keys={"headline", "core_conclusions", "per_speaker", "open_questions"}
+    )
+    assert result["headline"] == "真实答案"
+
+
+def test_extract_json_prefers_expected_keys_over_leading_example() -> None:
+    # A "参考/示例" example object precedes the real richer answer; prefer_keys must still pick the
+    # answer (it carries more expected keys and is the longer object).
+    content = '参考 {"summary": "示例"} 。\n{"summary": "真实", "facts": [], "memory_candidates": []}'
+    result = glm._extract_json(content, prefer_keys={"summary", "facts", "memory_candidates"})
+    assert result == {"summary": "真实", "facts": [], "memory_candidates": []}
+
+
+def test_call_glm_threads_prefer_keys_through_thinking_path() -> None:
+    # call_glm forwards prefer_keys to _extract_json so the thinking-ON inline-reasoning path can
+    # pick the schema-matching answer even when the model appends a trailing example object.
+    def fake_post(url, headers, body):
+        return {"choices": [{"message": {"content":
+            '推理……\n{"headline": "答案", "core_conclusions": [], "per_speaker": [], "open_questions": []}\n'
+            '参考示例 {"headline": "x"}'}}]}
+
+    result = glm.call_glm(
+        {"messages": []}, api_key="k", model="m", post=fake_post, thinking=True,
+        prefer_keys={"headline", "core_conclusions", "per_speaker", "open_questions"},
+    )
+    assert result["headline"] == "答案"
+
+
 def test_extract_json_raises_on_non_json() -> None:
     with pytest.raises(Exception):
         glm._extract_json("just some reasoning, no object here")
