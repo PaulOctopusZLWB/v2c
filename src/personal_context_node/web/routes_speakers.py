@@ -36,6 +36,11 @@ class ReclusterRequest(BaseModel):
     day: str | None = None
 
 
+class ExtractEmbeddingsRequest(BaseModel):
+    session_id: str | None = None
+    day: str | None = None
+
+
 def _assign_speaker_to_person(conn, *, speaker: str, person_id: str, person_label: str, now: str) -> None:
     """Map one speaker/cluster to a person (mirrors the single assign-person route).
 
@@ -228,6 +233,18 @@ def embedding_status_route(request: Request, day: str | None = None, session_id:
     total = int(rows[0]["total"] or 0)
     embedded = int(rows[0]["embedded"] or 0)
     return {"total": total, "embedded": embedded, "pending": total - embedded}
+
+
+@router.post("/speakers/extract-embeddings")
+def extract_embeddings_route(request: Request, payload: ExtractEmbeddingsRequest) -> dict[str, bool]:
+    """Kick off background CAM++ voiceprint extraction over pending segments (optionally scoped).
+
+    The resident model is loaded and released inside the worker thread; returns immediately with
+    started=False if an extraction (or any worker job) is already running.
+    """
+    worker = request.app.state.worker
+    started = worker.start_embedding_extraction(session_id=payload.session_id, day=payload.day)
+    return {"started": started}
 
 
 @router.post("/speakers/recluster")

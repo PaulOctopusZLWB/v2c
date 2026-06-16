@@ -303,6 +303,100 @@ def test_segments_for_labeling(tmp_path: Path) -> None:
     assert [s["segment_id"] for s in limited] == ["seg_a", "seg_b"]
 
 
+class _StubEmbedAdapter:
+    """Stand-in for PersistentCommandEmbedAdapter: returns a fixed vector, records close()."""
+
+    def __init__(self, vector: list[float]) -> None:
+        self._vector = vector
+        self.closed = False
+
+    def embed(self, audio_path: str) -> list[float]:
+        return list(self._vector)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _wait_for(predicate, timeout: float = 5.0) -> None:
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return
+        time.sleep(0.02)
+    raise AssertionError("condition not met within timeout")
+
+
+def test_extract_embeddings_starts(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    app = create_app(config=config)
+    client = TestClient(app)
+
+    # DI seam: inject a stub embed adapter + a stub segment audio path so NO real model and NO real
+    # audio slice is needed. segment_audio_path is imported lazily inside extract_pending_embeddings,
+    # so patch it at its definition module.
+    stub = _StubEmbedAdapter([0.1, 0.1, 0.1, 0.1])
+    app.state.worker._embed_factory = lambda: stub
+    monkeypatch.setattr(
+        "personal_context_node.transcription.segment_audio_path",
+        lambda *, config, segment_id: tmp_path / f"{segment_id}.wav",
+    )
+
+    before = client.get("/api/speakers/embedding-status").json()
+    assert before["pending"] == 3
+
+    started = client.post("/api/speakers/extract-embeddings", json={})
+    assert started.status_code == 200
+    assert started.json() == {"started": True}
+
+    # Background thread runs to completion: pending drops to 0 and the adapter was closed.
+    _wait_for(lambda: not app.state.worker.is_running())
+    after = client.get("/api/speakers/embedding-status").json()
+    assert after["pending"] == 0
+    assert after["embedded"] == 3
+    assert stub.closed is True
+
+
+def test_extract_embeddings_returns_false_when_running(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    app = create_app(config=config)
+    worker = app.state.worker
+
+    # A factory whose adapter blocks until released, so the first run is still "running".
+    import threading
+
+    release = threading.Event()
+
+    class _BlockingAdapter:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def embed(self, audio_path: str) -> list[float]:
+            release.wait(5.0)
+            return [0.0, 0.0]
+
+        def close(self) -> None:
+            self.closed = True
+
+    blocking = _BlockingAdapter()
+    worker._embed_factory = lambda: blocking
+    monkeypatch.setattr(
+        "personal_context_node.transcription.segment_audio_path",
+        lambda *, config, segment_id: tmp_path / f"{segment_id}.wav",
+    )
+
+    assert worker.start_embedding_extraction() is True
+    _wait_for(lambda: worker.embedding_state() is not None and worker.embedding_state().get("active"))
+    # Second call while the first is still running is rejected.
+    assert worker.start_embedding_extraction() is False
+    release.set()
+    _wait_for(lambda: not worker.is_running())
+    assert blocking.closed is True
+
+
 def _insert_labeling_day(database_path: Path) -> None:
     """Seed one session with three active segments (spk_a x2, spk_b x1) plus an inactive one."""
     conn = connect(database_path)

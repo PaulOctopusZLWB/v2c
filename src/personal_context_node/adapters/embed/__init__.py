@@ -1,0 +1,1 @@
+"""Speaker-embedding (voiceprint) adapters."""
