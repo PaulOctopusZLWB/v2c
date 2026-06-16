@@ -29,6 +29,28 @@ _TRUTHY = {"1", "true", "enabled"}
 ALLOW_LIST = {"asr_mode", "asr_preset_spk_num", "glm_model", "glm_base_url", "glm_thinking"}
 _ASR_MODES = {"chunk", "diarize"}
 
+# setting key -> wrapper env var. These reach the glm_llm_wrapper subprocess via os.environ.
+_GLM_ENV = {"glm_model": "GLM_MODEL", "glm_base_url": "GLM_BASE_URL", "glm_thinking": "GLM_THINKING"}
+# Snapshot the GLM env as it was at PROCESS LAUNCH (before any drain mutates it). A cleared web
+# override must revert to THIS, not to the last-applied override value — and effective_settings
+# reads this (not the live, worker-mutated os.environ) so GET never reports a stale override.
+_LAUNCH_GLM_ENV = {env: os.environ.get(env) for env in _GLM_ENV.values()}
+
+
+def apply_glm_env(overrides: dict[str, Any]) -> None:
+    """Set os.environ for the GLM_* wrapper vars from override -> launch baseline -> unset. Called
+    at the top of every drain so a setting change (or its removal) takes effect on the next run."""
+    for setting_key, env_name in _GLM_ENV.items():
+        if setting_key in overrides:
+            value = overrides[setting_key]
+            os.environ[env_name] = ("true" if value else "false") if setting_key == "glm_thinking" else str(value)
+        else:
+            baseline = _LAUNCH_GLM_ENV.get(env_name)
+            if baseline is None:
+                os.environ.pop(env_name, None)  # not set at launch -> unset so the wrapper default applies
+            else:
+                os.environ[env_name] = baseline
+
 
 def _parse_bool(value: object) -> bool:
     return str(value).strip().lower() in _TRUTHY
@@ -121,22 +143,23 @@ def effective_settings(config: AppConfig) -> dict[str, Any]:
     asr_mode = overrides.get("asr_mode", config.asr_mode)
     asr_preset_spk_num = overrides.get("asr_preset_spk_num", config.asr_preset_spk_num)
 
+    # GLM fallbacks use the LAUNCH baseline, NOT the live os.environ (which the worker mutates each
+    # drain) — otherwise a cleared override would report its own stale, last-applied value.
     if "glm_model" in overrides:
         glm_model = overrides["glm_model"]
     else:
-        glm_model = os.environ.get("GLM_MODEL", _DEFAULT_GLM_MODEL)
+        glm_model = _LAUNCH_GLM_ENV.get("GLM_MODEL") or _DEFAULT_GLM_MODEL
 
     if "glm_base_url" in overrides:
         glm_base_url = overrides["glm_base_url"]
     else:
-        glm_base_url = os.environ.get("GLM_BASE_URL", _DEFAULT_GLM_BASE_URL)
+        glm_base_url = _LAUNCH_GLM_ENV.get("GLM_BASE_URL") or _DEFAULT_GLM_BASE_URL
 
     if "glm_thinking" in overrides:
         glm_thinking = overrides["glm_thinking"]
-    elif "GLM_THINKING" in os.environ:
-        glm_thinking = _parse_bool(os.environ.get("GLM_THINKING"))
     else:
-        glm_thinking = False
+        baseline = _LAUNCH_GLM_ENV.get("GLM_THINKING")
+        glm_thinking = _parse_bool(baseline) if baseline is not None else False
 
     return {
         "asr_mode": asr_mode,

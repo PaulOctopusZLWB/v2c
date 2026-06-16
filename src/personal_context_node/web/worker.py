@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import threading
 from pathlib import Path
 
@@ -56,12 +55,8 @@ class PipelineWorker:
         effective = self._config.model_copy(
             update={k: v for k, v in overrides.items() if k in ("asr_mode", "asr_preset_spk_num")}
         )
-        if "glm_model" in overrides:
-            os.environ["GLM_MODEL"] = str(overrides["glm_model"])
-        if "glm_base_url" in overrides:
-            os.environ["GLM_BASE_URL"] = str(overrides["glm_base_url"])
-        if "glm_thinking" in overrides:
-            os.environ["GLM_THINKING"] = "true" if overrides["glm_thinking"] else "false"
+        # apply_glm_env reverts a cleared override to the launch baseline (not the last-applied value).
+        _settings.apply_glm_env(overrides)
         adapters = build_pipeline_adapters(config=effective)
         total_steps = 0
         total_succeeded = 0

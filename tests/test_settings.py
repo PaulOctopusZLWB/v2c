@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,39 @@ import pytest
 from personal_context_node import settings as _settings
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, get_settings, initialize, put_setting
+
+
+def test_apply_glm_env_reverts_cleared_override_to_launch_baseline(monkeypatch) -> None:
+    # Once a GLM override is set in os.environ, clearing it must revert to the LAUNCH baseline
+    # (the value the process started with) — not stick at the last-applied override forever.
+    monkeypatch.setattr(_settings, "_LAUNCH_GLM_ENV",
+                        {"GLM_MODEL": "glm-launch", "GLM_BASE_URL": "http://launch/v1", "GLM_THINKING": None})
+    for env in ("GLM_MODEL", "GLM_BASE_URL", "GLM_THINKING"):
+        monkeypatch.delenv(env, raising=False)
+
+    _settings.apply_glm_env({"glm_model": "glm-5.1", "glm_base_url": "http://x/v1", "glm_thinking": True})
+    assert os.environ["GLM_MODEL"] == "glm-5.1"
+    assert os.environ["GLM_BASE_URL"] == "http://x/v1"
+    assert os.environ["GLM_THINKING"] == "true"
+
+    _settings.apply_glm_env({})  # overrides cleared
+    assert os.environ["GLM_MODEL"] == "glm-launch"          # reverted to launch baseline
+    assert os.environ["GLM_BASE_URL"] == "http://launch/v1"
+    assert "GLM_THINKING" not in os.environ                  # baseline was unset -> unset (wrapper default)
+
+
+def test_effective_settings_uses_launch_baseline_not_mutated_env(monkeypatch, tmp_path) -> None:
+    # GET must reflect override -> launch-baseline -> default, NOT the os.environ the worker mutated
+    # (else a cleared override reports its own stale value).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    monkeypatch.setattr(_settings, "_LAUNCH_GLM_ENV",
+                        {"GLM_MODEL": "glm-launch", "GLM_BASE_URL": "http://launch/v1", "GLM_THINKING": None})
+    monkeypatch.setenv("GLM_MODEL", "glm-stale")  # a stale value a prior drain left in the env
+
+    eff = _settings.effective_settings(config)
+    assert eff["glm_model"] == "glm-launch"        # baseline, not the stale live env
+    assert eff["glm_base_url"] == "http://launch/v1"
+    assert eff["glm_thinking"] is False
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -149,11 +183,14 @@ def test_effective_settings_default_when_no_override(tmp_path: Path, monkeypatch
     assert eff["glm_thinking"] is False
 
 
-def test_effective_settings_env_fallback(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("GLM_MODEL", "glm-from-env")
+def test_effective_settings_launch_baseline_fallback(tmp_path: Path, monkeypatch) -> None:
+    # With no override, fall back to the LAUNCH baseline (the GLM env at process start), NOT the
+    # live os.environ (which the worker mutates each drain).
+    monkeypatch.setattr(_settings, "_LAUNCH_GLM_ENV",
+                        {"GLM_MODEL": "glm-from-launch", "GLM_BASE_URL": None, "GLM_THINKING": None})
     config = _config(tmp_path)
     eff = _settings.effective_settings(config)
-    assert eff["glm_model"] == "glm-from-env"
+    assert eff["glm_model"] == "glm-from-launch"
 
 
 def test_effective_settings_override_beats_env(tmp_path: Path, monkeypatch) -> None:
