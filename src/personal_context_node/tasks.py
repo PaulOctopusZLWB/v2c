@@ -34,6 +34,7 @@ class RetryTaskResult:
 
 ALLOWED_TASK_TYPES = {
     "vad",
+    "transcribe_diarize",
     "asr",
     "session_derive",
     "summarize_session",
@@ -43,7 +44,7 @@ ALLOWED_TASK_TYPES = {
 }
 
 
-def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str) -> EnqueueTaskResult:
+def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_id: str, priority: int = 100) -> EnqueueTaskResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -53,6 +54,7 @@ def enqueue_task(*, config: AppConfig, task_type: str, target_type: str, target_
             target_type=target_type,
             target_id=target_id,
             max_retries=config.task_max_retries,
+            priority=priority,
         )
         conn.commit()
         return result
@@ -67,6 +69,7 @@ def enqueue_task_in_conn(
     target_type: str,
     target_id: str,
     max_retries: int = 3,
+    priority: int = 100,
 ) -> EnqueueTaskResult:
     _validate_task_type(task_type)
     existing = conn.execute(
@@ -80,10 +83,10 @@ def enqueue_task_in_conn(
     conn.execute(
         """
         insert into tasks (
-          task_id, task_type, target_type, target_id, status, max_retries, available_at, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          task_id, task_type, target_type, target_id, status, priority, max_retries, available_at, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (task_id, task_type, target_type, target_id, "pending", max_retries, now, now, now),
+        (task_id, task_type, target_type, target_id, "pending", priority, max_retries, now, now, now),
     )
     return EnqueueTaskResult(task_id=task_id, created=True)
 
@@ -104,7 +107,7 @@ def claim_next_task(*, config: AppConfig, task_type: str, run_id: str, lease_sec
                 or (status = 'failed_retryable' and retry_count < max_retries)
               )
               and available_at <= ?
-            order by available_at, priority, created_at
+            order by priority, available_at, created_at
             limit 1
             """,
             (task_type, now),
@@ -273,6 +276,39 @@ def retry_task(*, config: AppConfig, task_id: str) -> RetryTaskResult:
         conn.close()
 
 
+def retry_failed_tasks(*, config: AppConfig) -> int:
+    """Reset ALL failed tasks (failed_terminal or failed_retryable) to pending in one UPDATE.
+
+    Returns the number of tasks reset.  Mirrors the field set used by retry_task.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = _now()
+        cursor = conn.execute(
+            """
+            update tasks
+            set status = 'pending',
+                retry_count = 0,
+                attempt_count = 0,
+                available_at = ?,
+                claimed_by_run_id = null,
+                claimed_at = null,
+                lease_expires_at = null,
+                started_at = null,
+                finished_at = null,
+                updated_at = ?,
+                last_error = null
+            where status in ('failed_retryable', 'failed_terminal')
+            """,
+            (now, now),
+        )
+        conn.commit()
+        return cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+    finally:
+        conn.close()
+
+
 def _rerun_asr_for_file(conn, *, target_type: str, target_id: str) -> EnqueueTaskResult | None:
     if target_type == "audio_file":
         audio_file_id: str | None = target_id
@@ -386,7 +422,7 @@ def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
             conn,
             """
             select task_id, task_type, target_type, target_id, status, attempt_count,
-                   last_error, started_at, finished_at,
+                   retry_count, max_retries, last_error, started_at, finished_at,
                    coalesce((
                      select group_concat(distinct transcript_segments.model_name)
                      from transcript_segments

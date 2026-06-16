@@ -117,5 +117,85 @@ def sessions_for_day(*, config: AppConfig, day: str) -> list[dict[str, object]]:
     return sessions
 
 
+def day_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
+    """Return one row per recorded day with a processing/ready status aggregate.
+
+    Status logic:
+    - 'ready': the day has at least one session AND all tasks whose target traces to
+      this day are in a terminal state (succeeded, failed_terminal, or retry-exhausted).
+    - 'processing': otherwise (still has pending/claimed/running/retryable tasks, or
+      no sessions yet).
+
+    Uses a single grouped query — no N+1.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            """
+            with day_tasks as (
+              -- vad / asr tasks: keyed to audio_file's recorded day
+              select substr(af.recorded_at, 1, 10) as day, t.status, t.retry_count, t.max_retries
+              from tasks t
+              join audio_files af on af.audio_file_id = t.target_id
+              where t.task_type in ('vad', 'asr')
+                and t.target_type in ('audio_file', 'audio_chunk')
+              -- for asr tasks keyed on audio_chunk, resolve the chunk's file day
+              union all
+              select substr(af.recorded_at, 1, 10) as day, t.status, t.retry_count, t.max_retries
+              from tasks t
+              join audio_chunks ac on ac.chunk_id = t.target_id
+              join audio_files af on af.audio_file_id = ac.audio_file_id
+              where t.task_type = 'asr' and t.target_type = 'audio_chunk'
+              -- session_derive / daily_generate / obsidian_publish: target_id IS the date_key
+              union all
+              select t.target_id as day, t.status, t.retry_count, t.max_retries
+              from tasks t
+              where t.task_type in ('session_derive', 'daily_generate', 'obsidian_publish')
+                and t.target_type = 'date_key'
+              -- summarize_session: target_id is a SESSION id; resolve it to the session's day
+              union all
+              select s.date_key as day, t.status, t.retry_count, t.max_retries
+              from tasks t
+              join sessions s on s.session_id = t.target_id
+              where t.task_type = 'summarize_session' and t.target_type = 'session'
+            ),
+            day_sessions as (
+              select date_key as day, count(*) as session_count
+              from sessions
+              group by date_key
+            ),
+            day_agg as (
+              select
+                dt.day,
+                sum(case
+                  when dt.status in ('pending', 'claimed', 'running') then 1
+                  when dt.status = 'failed_retryable' and dt.retry_count < dt.max_retries then 1
+                  else 0
+                end) as active_count,
+                count(*) as total_count
+              from day_tasks dt
+              group by dt.day
+            )
+            select
+              da.day,
+              coalesce(ds.session_count, 0) as session_count,
+              da.active_count,
+              da.total_count,
+              case
+                when coalesce(ds.session_count, 0) > 0 and da.active_count = 0 then 'ready'
+                else 'processing'
+              end as status
+            from day_agg da
+            left join day_sessions ds on ds.day = da.day
+            order by da.day desc
+            """,
+        )
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()

@@ -24,6 +24,23 @@ class SummaryTodo(BaseModel):
     evidence_refs: list[str] = []
 
 
+class SummarySpeakerViewpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    evidence_refs: list[str] = []
+
+
+class SummarySpeakerAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speaker_cluster_id: str
+    viewpoints: list[SummarySpeakerViewpoint] = []
+    sentiment: str = ""
+    stance: str = ""
+    latent_needs: list[str] = []
+
+
 class SessionSummarySchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -35,6 +52,9 @@ class SessionSummarySchema(BaseModel):
     decisions: list[SummaryDecision] = []
     todos: list[SummaryTodo] = []
     open_questions: list[str] = []
+    # Per-speaker analytical summary (diarized sessions); empty for non-diarized/rule_based paths.
+    core_conclusions: list[str] = []
+    per_speaker: list[SummarySpeakerAnalysis] = []
 
 
 class DailyDecisionRollup(BaseModel):

@@ -115,6 +115,111 @@ def transcribe_pending_chunks(*, config: AppConfig, asr: ASRPort, chunk_id: str 
         conn.close()
 
 
+def transcribe_audio_file_diarized(*, config: AppConfig, asr: ASRPort, audio_file_id: str) -> TranscriptionResult:
+    """Per-file diarized ASR sibling of transcribe_pending_chunks (§ whole-file diarization).
+
+    Runs ONCE per audio_file. ASR segments already carry ABSOLUTE source-file
+    start_ms/end_ms and a `.speaker` diarization cluster label ("spk_01", … or "self").
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        _ensure_transcript_columns(conn)
+        rows = fetch_all(
+            conn,
+            "select audio_file_id, local_raw_path, recorded_at from audio_files where audio_file_id = ?",
+            (audio_file_id,),
+        )
+        if not rows:
+            return TranscriptionResult(chunks_transcribed=0, segments_created=0)
+        audio = rows[0]
+        recorded_at = str(audio["recorded_at"])
+        # Whole-file scope: this runs once per file (segments are already in absolute
+        # source-file time), so retire ALL of this file's active segments before reinsert
+        # — re-run safe (deactivate-then-reinsert), no per-chunk scoping needed.
+        conn.execute(
+            "update transcript_segments set is_active = 0 where is_active = 1 and audio_file_id = ?",
+            (audio_file_id,),
+        )
+        asr_run_id = f"asrrun_{uuid4().hex}"
+        # local_raw_path is the already-rooted raw path (mirrors transcribe_pending_chunks'
+        # local_chunk_path handling — do NOT re-prefix config.data_dir).
+        asr_result = asr.transcribe(Path(str(audio["local_raw_path"])))
+        decode_config_json = json.dumps(asr_result.decode_config, ensure_ascii=False, sort_keys=True)
+        now = datetime.now(timezone.utc).isoformat()
+        segments_created = 0
+        clusters_upserted: set[str] = set()
+        for segment in asr_result.segments:
+            absolute_start_ms = int(segment.start_ms)
+            absolute_start_at = _absolute_time(recorded_at, absolute_start_ms)
+            absolute_end_at = _absolute_time(recorded_at, int(segment.end_ms))
+            # The diarized path has no per-VAD audio_chunk, so synthesize a chunk_id
+            # (transcript_segments.chunk_id is NOT NULL). It MUST be per-segment and
+            # deterministic from the segment's absolute start ms: distinct so that an
+            # internal silence gap splitting one file into multiple sessions gives each
+            # session a DISTINCT first-chunk_id (the session-id reuse anchor in
+            # sessions.py keys on first_chunk_id — a single file-wide chunk_id collapses
+            # that anchor and mints fresh ses_* ids on every re-run); and deterministic
+            # (the diarizer is deterministic → same audio → same start_ms → same
+            # chunk_id) so the anchor matches across ASR re-runs. NOT a uuid.
+            chunk_id = f"diar_{audio_file_id}_{absolute_start_ms:09d}"
+            # speaker and speaker_cluster_id MUST stay equal: the review path joins on
+            # `speaker`, the attribution view on `speaker_cluster_id`. Do NOT diverge them.
+            speaker_cluster_id = segment.speaker
+            conn.execute(
+                """
+                insert into transcript_segments (
+                  segment_id, audio_file_id, chunk_id, start_ms, end_ms,
+                  absolute_start_at, absolute_end_at, text,
+                  language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend,
+                  model_name, model_version, decode_config_json, asr_tags_json,
+                  asr_run_id, is_active, created_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"seg_{uuid4().hex}",
+                    audio_file_id,
+                    chunk_id,
+                    segment.start_ms,
+                    segment.end_ms,
+                    absolute_start_at,
+                    absolute_end_at,
+                    segment.text,
+                    segment.language,
+                    speaker_cluster_id,
+                    speaker_cluster_id,
+                    f"ev_seg_{uuid4().hex}",
+                    segment.confidence,
+                    asr_result.backend,
+                    asr_result.model_name,
+                    asr_result.model_version,
+                    decode_config_json,
+                    json.dumps(segment.tags, ensure_ascii=False, sort_keys=True),
+                    asr_run_id,
+                    1,
+                    now,
+                ),
+            )
+            segments_created += 1
+            # Upsert a speaker_clusters row for each DISTINCT non-"self" label. "self"
+            # gets NO cluster row (preserves the single-owner default; lazy-cluster
+            # behavior covers self), mirroring _upsert_speaker_cluster's insert shape.
+            if speaker_cluster_id != "self" and speaker_cluster_id not in clusters_upserted:
+                conn.execute(
+                    """
+                    insert into speaker_clusters (speaker_cluster_id, label, source_type, source_ref, created_at)
+                    values (?, ?, ?, ?, ?)
+                    on conflict(speaker_cluster_id) do nothing
+                    """,
+                    (speaker_cluster_id, speaker_cluster_id, "diarization", audio_file_id, now),
+                )
+                clusters_upserted.add(speaker_cluster_id)
+        conn.commit()
+        return TranscriptionResult(chunks_transcribed=1, segments_created=segments_created)
+    finally:
+        conn.close()
+
+
 def _ensure_transcript_columns(conn: sqlite3.Connection) -> None:
     existing = {row["name"] for row in conn.execute("pragma table_info(transcript_segments)").fetchall()}
     migrations = {

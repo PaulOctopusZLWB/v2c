@@ -80,6 +80,13 @@ def build_asr(
     model_id: str = "iic/SenseVoiceSmall",
     model_version: str = "funasr-sensevoice-local",
     timeout_seconds: float = 3600.0,
+    asr_device: str = "mps",
+    asr_mode: str = "chunk",
+    asr_diarize_model: str = "paraformer-zh",
+    asr_punc_model: str = "ct-punc",
+    asr_spk_model: str = "cam++",
+    asr_spk_mode: str = "punc_segment",
+    asr_preset_spk_num: int | None = None,
 ) -> ASRPort:
     if asr_backend == "mock":
         return MockASRAdapter(text=mock_text, language=language, model_name=model_name)
@@ -87,6 +94,30 @@ def build_asr(
         if not asr_command:
             raise ValueError("asr_command is required when asr_backend is 'command'")
         return CommandASRAdapter(command=shlex.split(asr_command), timeout_seconds=timeout_seconds)
+    if asr_backend == "funasr_server":
+        from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+        if asr_command:
+            command = shlex.split(asr_command)
+        elif asr_mode == "diarize":
+            # Opt-in whole-file Paraformer+CAM++ diarization server: emits per-sentence
+            # text+speaker+timestamps. Pin the full argv so the resident wrapper boots the
+            # configured models/device/language.
+            command = [
+                "python3", "scripts/funasr_paraformer_diarize_wrapper.py", "--server",
+                "--model", asr_diarize_model,
+                "--vad-model", "fsmn-vad",
+                "--punc-model", asr_punc_model,
+                "--spk-model", asr_spk_model,
+                "--spk-mode", asr_spk_mode,
+                "--device", asr_device,
+                "--language", language,
+            ]
+            if asr_preset_spk_num is not None:
+                command.extend(["--preset-spk-num", str(asr_preset_spk_num)])
+        else:
+            command = ["python3", "scripts/funasr_sensevoice_wrapper.py", "--server",
+                       "--model", model_id, "--model-version", model_version, "--device", asr_device, "--language", language]
+        return PersistentCommandASRAdapter(command=command, timeout_seconds=timeout_seconds, model_version=model_version)
     if asr_backend == "funasr":
         command = (
             shlex.split(asr_command)
@@ -103,7 +134,7 @@ def build_asr(
             ]
         )
         return CommandASRAdapter(command=command, timeout_seconds=timeout_seconds)
-    raise ValueError("asr_backend must be 'mock', 'command', or 'funasr'")
+    raise ValueError("asr_backend must be 'mock', 'command', 'funasr', or 'funasr_server'")
 
 
 def build_llm(*, llm_backend: str, llm_command: str | None, timeout_seconds: float = 3600.0) -> LLMPort:
@@ -139,6 +170,13 @@ def build_pipeline_adapters(*, config: AppConfig) -> PipelineAdapters:
             model_id=config.asr_model_id,
             model_version=config.asr_model_version,
             timeout_seconds=config.command_timeout_seconds,
+            asr_device=config.asr_device,
+            asr_mode=config.asr_mode,
+            asr_diarize_model=config.asr_diarize_model,
+            asr_punc_model=config.asr_punc_model,
+            asr_spk_model=config.asr_spk_model,
+            asr_spk_mode=config.asr_spk_mode,
+            asr_preset_spk_num=config.asr_preset_spk_num,
         ),
         llm=build_llm(
             llm_backend=config.llm_backend,

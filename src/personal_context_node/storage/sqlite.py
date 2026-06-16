@@ -521,7 +521,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.execute("update tasks set retry_count = attempt_count where retry_count = 0 and attempt_count > 0")
     conn.execute("update tasks set available_at = created_at where available_at = ''")
     conn.execute("update tasks set updated_at = created_at where updated_at = ''")
-    conn.execute("create index if not exists idx_tasks_claim on tasks(status, available_at, priority)")
+    # Matches claim_next_task's "where task_type/status ... order by priority, available_at" so the
+    # claim scan stays index-ordered. The prior index was keyed (status, available_at, priority); a
+    # same-named "create if not exists" would NOT replace it on an existing DB, so drop then recreate.
+    conn.execute("drop index if exists idx_tasks_claim")
+    conn.execute("create index if not exists idx_tasks_claim on tasks(task_type, status, priority, available_at)")
     conn.execute("create index if not exists idx_tasks_target on tasks(target_type, target_id)")
     _ensure_column(conn, "memory_candidates", "source_type", "text not null default 'llm_daily_context'")
     _ensure_column(conn, "memory_candidates", "edited_claim", "text")

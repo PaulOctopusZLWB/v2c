@@ -10,7 +10,7 @@ import tempfile
 import time
 import wave
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -157,7 +157,9 @@ def import_audio_files_in_conn(
                     "imported",
                 ),
             )
-            enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
+            date_priority = (date.fromisoformat(recorded_at[:10]) - date(2000, 1, 1)).days
+            import_task_type = "transcribe_diarize" if config.asr_mode == "diarize" else "vad"
+            enqueue_task_in_conn(conn, task_type=import_task_type, target_type="audio_file", target_id=audio_file_id, priority=date_priority)
             imported += 1
         finally:
             done += 1
@@ -203,7 +205,9 @@ def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: Ap
                     "imported",
                 ),
             )
-            enqueue_task_in_conn(conn, task_type="vad", target_type="audio_file", target_id=audio_file_id)
+            date_priority = (date.fromisoformat(raw_audio.recorded_at[:10]) - date(2000, 1, 1)).days
+            import_task_type = "transcribe_diarize" if config.asr_mode == "diarize" else "vad"
+            enqueue_task_in_conn(conn, task_type=import_task_type, target_type="audio_file", target_id=audio_file_id, priority=date_priority)
             imported += 1
     return imported
 

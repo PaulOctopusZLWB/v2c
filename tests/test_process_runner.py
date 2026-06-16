@@ -9,9 +9,40 @@ from personal_context_node.adapters.asr.mock import MockASRAdapter
 from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
 from personal_context_node.pipeline import run_first_milestone
-from personal_context_node.process_runner import process_once
-from personal_context_node.tasks import enqueue_task, process_status_rows
-from personal_context_node.storage.sqlite import connect, fetch_all
+from personal_context_node.process_runner import preview_next_process_task, process_once
+from personal_context_node.tasks import claim_next_task, enqueue_task, process_status_rows
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+
+def test_preview_matches_claim_order_when_priority_and_availability_disagree(tmp_path: Path) -> None:
+    # preview_next_process_task (the dry-run "next task" report) must order tasks IDENTICALLY to
+    # claim_next_task. Otherwise `pcn process run --dry-run` reports a different task than the one
+    # actually claimed whenever priority and availability disagree — exactly the date-major
+    # scheduling case (earlier recorded day = lower priority value, but maybe later available_at).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        earlier = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        for task_id, priority, available_at in [
+            ("t_other_day", 20300, earlier),   # later recorded day, but available sooner
+            ("t_priority_day", 20260, now),     # earlier recorded day -> lower priority value
+        ]:
+            conn.execute(
+                "insert into tasks (task_id, task_type, target_type, target_id, status, priority,"
+                " available_at, created_at, updated_at) values (?, 'vad', 'audio_file', ?, 'pending', ?, ?, ?, ?)",
+                (task_id, task_id, priority, available_at, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    preview = preview_next_process_task(config=config)
+    claimed = claim_next_task(config=config, task_type="vad", run_id="r")
+
+    assert preview.task_id == "t_priority_day"  # priority-first, not earliest-available
+    assert claimed is not None and claimed.task_id == preview.task_id  # preview agrees with the real claim
 
 
 def test_process_once_runs_vad_then_asr_tasks(tmp_path: Path) -> None:
@@ -218,6 +249,49 @@ def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000
             sample = int(10_000 * math.sin(2 * math.pi * 440 * index / sample_rate))
             frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
         wav.writeframes(bytes(frames))
+
+
+def test_process_once_prefers_finishing_a_day_over_more_asr(tmp_path: Path) -> None:
+    # Regression guard: after the PROCESS_TASK_ORDER reorder, a claimable session_derive
+    # (day A fully transcribed) must be picked before a pending asr (day B still transcribing).
+    from personal_context_node.storage.sqlite import initialize
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        # day A: seed a claimable session_derive task
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_sd_dayA', 'session_derive', 'date_key', '2026-06-01', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        # day B: seed a pending asr task (a chunk still to transcribe)
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_asr_dayB', 'asr', 'audio_chunk', 'chk_dayB_001', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = process_once(
+        config=config,
+        run_id="r_test_order",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="test"),
+    )
+
+    # The reordered PROCESS_TASK_ORDER must prefer session_derive over asr.
+    assert result.task_type == "session_derive", (
+        f"expected session_derive to preempt asr, got {result.task_type}"
+    )
 
 
 def test_terminal_failure_completing_fanin_still_enqueues_downstream(tmp_path: Path) -> None:

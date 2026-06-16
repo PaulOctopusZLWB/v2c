@@ -25,7 +25,7 @@ from personal_context_node.sessions import derive_sessions_for_day
 from personal_context_node.speaker_review import sync_speaker_review
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import claim_next_task, enqueue_task_in_conn, fail_task, reclaim_expired_tasks, start_task
-from personal_context_node.transcription import transcribe_pending_chunks
+from personal_context_node.transcription import transcribe_audio_file_diarized, transcribe_pending_chunks
 
 
 @dataclass(frozen=True)
@@ -46,17 +46,22 @@ class PipelineEdge:
 PIPELINE = (
     PipelineEdge("vad", "asr", "audio_chunk", lambda conn, config, target_id: _chunk_ids_for_audio_file_in_conn(conn, audio_file_id=target_id)),
     PipelineEdge("asr", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_in_conn(conn, chunk_id=target_id)),
+    # Diarize-mode sibling of the asr->session_derive edge: the whole-FILE transcribe_diarize
+    # stage fans into session_derive once every same-day file has settled (round-7 invariant,
+    # per audio_file). Only the active mode's tasks exist at runtime, so coexistence is safe.
+    PipelineEdge("transcribe_diarize", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=target_id)),
     PipelineEdge("session_derive", "summarize_session", "session", lambda conn, config, target_id: _session_ids_for_day_in_conn(conn, day=target_id)),
     PipelineEdge("summarize_session", "daily_generate", "date_key", lambda conn, config, target_id: _ready_daily_generate_dates_in_conn(conn, session_id=target_id)),
     PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
 )
 PROCESS_TASK_ORDER = (
     "vad",
-    "asr",
+    "transcribe_diarize",
     "session_derive",
     "summarize_session",
     "daily_generate",
     "obsidian_publish",
+    "asr",
     "archive",
 )
 
@@ -94,6 +99,8 @@ def process_once(
             )
         elif task.task_type == "asr":
             transcribe_pending_chunks(config=config, asr=asr, chunk_id=task.target_id)
+        elif task.task_type == "transcribe_diarize":
+            transcribe_audio_file_diarized(config=config, asr=asr, audio_file_id=task.target_id)
         elif task.task_type == "session_derive":
             derive_sessions_for_day(config=config, day=task.target_id, session_gap_minutes=config.session_gap_minutes)
         elif task.task_type == "summarize_session":
@@ -150,7 +157,10 @@ def preview_next_process_task(*, config: AppConfig) -> ProcessOnceResult:
                     or (status = 'failed_retryable' and retry_count < max_retries)
                   )
                   and available_at <= ?
-                order by available_at, priority, created_at
+                -- Must mirror claim_next_task's ORDER BY exactly (priority first), or the
+                -- dry-run preview reports a different "next task" than the one actually claimed
+                -- whenever priority and availability disagree (the date-major scheduling case).
+                order by priority, available_at, created_at
                 limit 1
                 """,
                 (task_type, now),
@@ -312,6 +322,14 @@ def _enqueue_downstream_tasks_in_conn(
     upstream_task_type: str,
     upstream_target_id: str,
 ) -> None:
+    # Carry the upstream task's priority forward so the whole day's pipeline (asr →
+    # session_derive → … → obsidian_publish) inherits the date ordinal and stays in
+    # date order relative to other days.
+    upstream_row = conn.execute(
+        "select priority from tasks where task_type = ? and target_id = ? order by created_at limit 1",
+        (upstream_task_type, upstream_target_id),
+    ).fetchone()
+    upstream_priority: int = int(upstream_row["priority"]) if upstream_row is not None else 100
     for edge in PIPELINE:
         if edge.upstream_task_type != upstream_task_type:
             continue
@@ -322,6 +340,7 @@ def _enqueue_downstream_tasks_in_conn(
                 target_type=edge.downstream_target_type,
                 target_id=target_id,
                 max_retries=config.task_max_retries,
+                priority=upstream_priority,
             )
             if not result.created:
                 _reset_downstream_task_in_conn(conn, task_id=result.task_id)
@@ -378,7 +397,7 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
     rows = fetch_all(
         conn,
         """
-        select ac.audio_file_id, substr(af.recorded_at, 1, 10) as date_key
+        select substr(af.recorded_at, 1, 10) as date_key
         from audio_chunks ac
         join audio_files af on af.audio_file_id = ac.audio_file_id
         where ac.chunk_id = ?
@@ -387,18 +406,24 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
     )
     if not rows:
         return []
-    audio_file_id = str(rows[0]["audio_file_id"])
-    # A chunk blocks session_derive only while its ASR work is still live; a chunk whose
-    # asr task is failed_terminal or retry-exhausted is "done (failed)" and must not
-    # block the file's sessions forever (liveness — mirrors the daily_generate fan-in).
+    date_key = str(rows[0]["date_key"])
+    # session_derive (and everything downstream of it — summarize_session, daily_generate,
+    # obsidian_publish) consumes the WHOLE day: derive_sessions_for_day rebuilds from every
+    # same-day file's segments. So the fan-in must wait until every chunk of EVERY audio file
+    # recorded on this day has finished ASR — not just the triggering chunk's own file. Gating
+    # per-file caused a premature, partial derive+publish for the first-completed recording on a
+    # multi-recording day (the common case — recorded_at carries HHMMSS), then a redundant full
+    # re-derive/re-summarize/re-publish once the later recordings transcribed. A chunk whose asr
+    # is failed_terminal or retry-exhausted is "done (failed)" and must not block forever.
     pending = fetch_all(
         conn,
         """
         select ac.chunk_id
         from audio_chunks ac
+        join audio_files af on af.audio_file_id = ac.audio_file_id
         left join tasks t
           on t.task_type = 'asr' and t.target_type = 'audio_chunk' and t.target_id = ac.chunk_id
-        where ac.audio_file_id = ?
+        where substr(af.recorded_at, 1, 10) = ?
           and ac.status != 'transcribed'
           and (
             t.status is null
@@ -408,11 +433,54 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
             )
           )
         """,
-        (audio_file_id,),
+        (date_key,),
     )
     if pending:
         return []
-    return sorted({str(row["date_key"]) for row in rows})
+    return [date_key]
+
+
+def _ready_session_derive_dates_for_file(*, config: AppConfig, audio_file_id: str) -> list[str]:
+    conn = connect(config.database_path)
+    try:
+        return _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=audio_file_id)
+    finally:
+        conn.close()
+
+
+def _ready_session_derive_dates_for_file_in_conn(conn: sqlite3.Connection, *, audio_file_id: str) -> list[str]:
+    rows = fetch_all(
+        conn,
+        "select substr(recorded_at,1,10) as date_key from audio_files where audio_file_id = ?",
+        (audio_file_id,),
+    )
+    if not rows:
+        return []
+    date_key = str(rows[0]["date_key"])
+    # The day is ready for session_derive only when EVERY audio file recorded that day has a
+    # transcribe_diarize task that is settled (succeeded, or terminally/retry-exhausted failed).
+    # A file with no task yet, or still pending/running/retryable-with-retries, blocks the day
+    # (the round-7 whole-day invariant, re-expressed per audio_file).
+    pending = fetch_all(
+        conn,
+        """
+        select af.audio_file_id
+        from audio_files af
+        left join tasks t
+          on t.task_type = 'transcribe_diarize' and t.target_type = 'audio_file'
+             and t.target_id = af.audio_file_id
+        where substr(af.recorded_at,1,10) = ?
+          and (
+            t.status is null
+            or (t.status not in ('succeeded','failed_terminal')
+                and not (t.status = 'failed_retryable' and t.retry_count >= t.max_retries))
+          )
+    """,
+        (date_key,),
+    )
+    if pending:
+        return []
+    return [date_key]
 
 
 def _session_ids_for_day(*, config: AppConfig, day: str) -> list[str]:

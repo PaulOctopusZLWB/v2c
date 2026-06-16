@@ -9,7 +9,7 @@ from personal_context_node.adapters.vad.energy import EnergyVadAdapter
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import DailyContext, SessionSummary
 from personal_context_node.pipeline import run_first_milestone
-from personal_context_node.process_runner import process_once
+from personal_context_node.process_runner import _ready_session_derive_dates, process_once
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import enqueue_task, process_status_rows
 
@@ -86,6 +86,87 @@ def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
         and row["status"] == "pending"
         for row in process_status_rows(config=config)
     )
+
+
+def test_session_derive_fan_in_waits_for_all_same_day_files(tmp_path: Path) -> None:
+    # session_derive (and everything downstream) rebuilds the WHOLE day, so its asr fan-in must
+    # wait until every recording on that day has finished ASR — not just the chunk's own file.
+    # Otherwise the first recording to finish on a multi-recording day triggers a premature,
+    # partial derive+publish, then a redundant re-derive/re-publish when the rest transcribe.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        # Two recordings on the SAME day (different HHMMSS — the normal case).
+        for aud, recorded_at in [("aud_1", "2026-06-14T09:00:00+08:00"), ("aud_2", "2026-06-14T15:00:00+08:00")]:
+            conn.execute(
+                "insert into audio_files (audio_file_id, source_device, source_path, local_raw_path, sha256,"
+                " duration_ms, recorded_at, imported_at, status) values (?, 'dev', ?, ?, ?, 1000, ?, ?, 'imported')",
+                (aud, f"/{aud}.wav", f"/l_{aud}.wav", f"sha:{aud}", recorded_at, recorded_at),
+            )
+
+        def _chunk(chunk_id: str, aud: str, status: str) -> None:
+            conn.execute(
+                "insert into audio_chunks (chunk_id, audio_file_id, source_start_ms, source_end_ms,"
+                " local_chunk_path, status) values (?, ?, 0, 1000, ?, ?)",
+                (chunk_id, aud, f"/{chunk_id}.wav", status),
+            )
+
+        _chunk("chk_1", "aud_1", "transcribed")   # first recording fully transcribed
+        _chunk("chk_2", "aud_2", "pending")         # second recording still pending ASR
+        conn.commit()
+    finally:
+        conn.close()
+
+    # aud_1 is done, but aud_2 (same day) is not -> the day is NOT ready for session_derive.
+    assert _ready_session_derive_dates(config=config, chunk_id="chk_1") == []
+
+    # Finish the second recording -> now the whole day is ready.
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update audio_chunks set status = 'transcribed' where chunk_id = 'chk_2'")
+        conn.commit()
+    finally:
+        conn.close()
+    assert _ready_session_derive_dates(config=config, chunk_id="chk_1") == ["2026-06-14"]
+
+
+def test_downstream_enqueue_carries_upstream_priority_forward(tmp_path: Path) -> None:
+    # ingest stamps the recording-day priority ONLY on the vad task; every later stage inherits it
+    # solely via _enqueue_downstream_tasks_in_conn carrying the upstream task's priority forward.
+    # Since claim_next_task now orders by priority first, losing this carry-forward would silently
+    # collapse date-major scheduling (all downstream tasks revert to the flat default 100).
+    from personal_context_node.process_runner import _enqueue_downstream_tasks_in_conn
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    at = "2026-06-14T09:00:00+08:00"
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, local_raw_path, sha256,"
+            " duration_ms, recorded_at, imported_at, status) values ('aud_1','dev','/a.wav','/l.wav','sha',1000,?,?,'imported')",
+            (at, at),
+        )
+        conn.execute(
+            "insert into audio_chunks (chunk_id, audio_file_id, source_start_ms, source_end_ms, local_chunk_path, status)"
+            " values ('chk_1','aud_1',0,1000,'/c.wav','transcribed')"
+        )
+        # The upstream asr task carries a distinctive, non-default recording-day priority.
+        conn.execute(
+            "insert into tasks (task_id, task_type, target_type, target_id, status, priority, available_at, created_at,"
+            " updated_at) values ('t_asr','asr','audio_chunk','chk_1','succeeded',9999,?,?,?)",
+            (at, at, at),
+        )
+        conn.commit()
+
+        _enqueue_downstream_tasks_in_conn(conn, config=config, upstream_task_type="asr", upstream_target_id="chk_1")
+        conn.commit()
+        rows = fetch_all(conn, "select priority from tasks where task_type = 'session_derive'")
+    finally:
+        conn.close()
+
+    assert [r["priority"] for r in rows] == [9999]  # inherited the upstream date ordinal, not 100
 
 
 def test_process_once_session_derive_uses_configured_gap_minutes(tmp_path: Path) -> None:

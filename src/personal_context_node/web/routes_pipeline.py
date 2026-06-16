@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
 from personal_context_node.ingest import import_audio_files
-from personal_context_node.tasks import process_status_rows, retry_task
+from personal_context_node.tasks import process_status_rows, retry_failed_tasks, retry_task
 
 
 router = APIRouter(prefix="/api/pipeline")
@@ -67,6 +67,13 @@ def retry_task_route(request: Request, task_id: str) -> dict[str, object]:
     return {"task_id": result.task_id, "status": result.status}
 
 
+@router.post("/retry-failed")
+def retry_failed_route(request: Request) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    count = retry_failed_tasks(config=config)
+    return {"retried": count}
+
+
 # Task statuses that mean "more is still going to happen on its own" — the SSE stream
 # stays open while any task is in flight or the worker is running. Once everything is
 # terminal AND the worker is idle, the stream closes after its final snapshot and the
@@ -76,6 +83,23 @@ def retry_task_route(request: Request, task_id: str) -> dict[str, object]:
 _ACTIVE_TASK_STATUSES = frozenset({"pending", "claimed", "running"})
 
 
+def _is_settled(row: dict[str, object]) -> bool:
+    """A task that won't progress on its own: succeeded, terminally failed, or a retryable
+    failure that has exhausted its retries (the claimer skips it once retry_count >= max_retries,
+    so it is effectively terminal even though its status string is still 'failed_retryable')."""
+    status = str(row["status"])
+    if status in ("succeeded", "failed_terminal"):
+        return True
+    if status == "failed_retryable":
+        return int(row["retry_count"]) >= int(row["max_retries"])
+    return False
+
+
+def _is_failed(row: dict[str, object]) -> bool:
+    """A settled task that ended in failure (a subset of _is_settled — excludes 'succeeded')."""
+    return _is_settled(row) and str(row["status"]) != "succeeded"
+
+
 @events_router.get("/events")
 async def events_stream(request: Request) -> StreamingResponse:
     config: AppConfig = request.app.state.config
@@ -83,28 +107,70 @@ async def events_stream(request: Request) -> StreamingResponse:
 
     async def stream():
         last_signature: str | None = None
-        # Emit an immediate snapshot, then poll for changes.
+        # Emit an immediate compact summary, then poll for changes.
         for _ in range(10_000):
             if await request.is_disconnected():
                 break
             rows = process_status_rows(config=config)
             import_progress = worker.import_state()
-            # Fold import progress into the change-signature so the bar advances frame
-            # by frame while the (possibly multi-GB) copy is running.
+            worker_running = worker.is_running()
+
+            # Build a compact status summary (counts + max updated_at) — much smaller
+            # than the full 1881-row task array that was previously serialised every tick.
+            from collections import Counter
+            status_counts = dict(Counter(str(r["status"]) for r in rows))
+            total = len(rows)
+            # Per-stage done/total + done/failed totals + an ETA, so the always-visible header
+            # can show the breakdown and remaining time WITHOUT fetching the full task list.
+            # "done" = settled (will not progress on its own); "failed" = settled-with-failure.
+            stage_counts: dict[str, dict[str, int]] = {}
+            done_total = 0
+            failed_total = 0
+            for r in rows:
+                bucket = stage_counts.setdefault(str(r["task_type"]), {"done": 0, "total": 0})
+                bucket["total"] += 1
+                if _is_settled(r):
+                    bucket["done"] += 1
+                    done_total += 1
+                    if _is_failed(r):
+                        failed_total += 1
+            durations = [int(r["duration_ms"]) for r in rows if r["duration_ms"] is not None]
+            remaining = total - done_total
+            eta_seconds = round(remaining * (sum(durations) / len(durations)) / 1000.0) if durations and remaining > 0 else None
+            # Determine the active stage and current target from the first running/claimed task.
+            active_stage: str | None = None
+            current_target: str | None = None
+            for r in rows:
+                if r["status"] in ("claimed", "running"):
+                    active_stage = str(r["task_type"])
+                    current_target = str(r["target_id"])
+                    break
+
+            # Compact change-signature: every field that the rendered payload shows must be
+            # part of it, or a transition that changes only that field (e.g. the worker going
+            # idle after the last task settled, or the active stage/target advancing) would be
+            # silently dropped and the UI would freeze on a stale frame. Still tiny — counts,
+            # not per-task detail.
             signature = json.dumps(
-                [[r["task_id"], r["status"]] for r in rows] + [import_progress],
+                (sorted(status_counts.items()), worker_running, active_stage, current_target, import_progress),
                 sort_keys=True,
                 default=str,
             )
-            worker_running = worker.is_running()
             if signature != last_signature:
                 last_signature = signature
                 payload = {
-                    "tasks": rows,
-                    "worker_running": worker_running,
+                    "status_counts": status_counts,
+                    "total": total,
+                    "stage_counts": stage_counts,
+                    "done_total": done_total,
+                    "failed_total": failed_total,
+                    "eta_seconds": eta_seconds,
+                    "active_stage": active_stage,
+                    "current_target": current_target,
                     "import_progress": import_progress,
+                    "worker_running": worker_running,
                 }
-                yield "event: status.snapshot\n"
+                yield "event: status.summary\n"
                 yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
             # Nothing is in flight and no worker is running: no further change can occur
             # without a new request, so close the stream (the EventSource reconnects later).

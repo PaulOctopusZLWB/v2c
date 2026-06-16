@@ -47,6 +47,35 @@ export interface StatusSnapshot {
   import_progress?: ImportProgress | null;
 }
 
+/**
+ * Compact per-tick status pushed over SSE (`status.summary`) — replaces the old
+ * full task array so the stream stays small at ~1881 tasks. Counts are keyed by
+ * task status; `active_stage` is the task_type of the in-flight task.
+ */
+export interface StatusSummary {
+  status_counts: Record<string, number>;
+  total: number;
+  stage_counts?: Record<string, { done: number; total: number }>;
+  /** Tasks that will not progress on their own (succeeded + terminal/exhausted failures). */
+  done_total?: number;
+  /** Subset of done_total that ended in failure (terminal, or retryable with retries exhausted). */
+  failed_total?: number;
+  eta_seconds?: number | null;
+  active_stage: string | null;
+  current_target: string | null;
+  import_progress?: ImportProgress | null;
+  worker_running: boolean;
+}
+
+/** Per-day processing/ready aggregate from `/api/transcripts/day-status`. */
+export interface DayStatusRow {
+  day: string;
+  session_count: number;
+  active_count: number;
+  total_count: number;
+  status: "processing" | "ready";
+}
+
 export interface Health {
   require_accepted_transcripts: boolean;
 }

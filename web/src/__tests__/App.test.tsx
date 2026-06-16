@@ -44,30 +44,148 @@ describe("App container", () => {
   });
 
   it("shows 运行中 when the worker is running", async () => {
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
-      if (url === "/api/status/tasks")
-        return new Response(
-          JSON.stringify({
-            tasks: [
-              {
-                task_id: "t1",
-                task_type: "asr",
-                target_type: "audio",
-                target_id: "a1",
-                status: "running",
-                attempt_count: 1,
-                last_error: null,
-                duration_ms: null
-              }
-            ]
-          }),
-          { status: 200 }
-        );
-      return new Response("{}", { status: 200 });
-    });
+    // Running state now derives from the compact SSE `status.summary`, not the lazily
+    // fetched full task array — so drive it through the summary event.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
 
     render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { running: 1, pending: 2 },
+          total: 3,
+          active_stage: "asr",
+          current_target: "a1",
+          import_progress: null,
+          worker_running: true
+        })
+      })
+    );
     expect(await screen.findAllByText("运行中")).not.toHaveLength(0);
+  });
+
+  it("shows per-stage breakdown, ETA, and task count from the summary without opening the task list", async () => {
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
+
+    render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { running: 200, succeeded: 1500 },
+          total: 1700,
+          stage_counts: { asr: { done: 1200, total: 1500 }, summarize_session: { done: 0, total: 200 } },
+          eta_seconds: 300,
+          active_stage: "asr",
+          current_target: "chk_1",
+          import_progress: null,
+          worker_running: true
+        })
+      })
+    );
+
+    // The TaskList panel is never opened, so the lazy task array stays empty — these must
+    // come from the compact summary.
+    expect(await screen.findByText("1200/1500")).toBeInTheDocument(); // asr stage breakdown
+    expect(screen.getByText(/剩余约/)).toBeInTheDocument(); // ETA
+    expect(screen.getByText("1700")).toBeInTheDocument(); // RunInspector count == summary total
+  });
+
+  it("derives the progress done count and failed count from summary.done_total / failed_total", async () => {
+    // doneCount = summary.done_total ?? fallback, failedCount = summary.failed_total ?? fallback.
+    // Feed values that DIFFER from the fallback so a regression (dropping the summary fields, or
+    // flipping done_total<->failed_total) changes a rendered value. Fallback done would be
+    // total - running = 1700 - 200 = 1500, so done_total=1234 only matches if the field is used.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
+
+    render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { running: 200, succeeded: 1500 },
+          total: 1700,
+          done_total: 1234,
+          failed_total: 42,
+          active_stage: "asr",
+          current_target: "chk_1",
+          import_progress: null,
+          worker_running: true
+        })
+      })
+    );
+
+    const bar = await screen.findByRole("progressbar");
+    expect(bar).toHaveAttribute("aria-valuenow", "1234"); // from done_total, not the 1500 fallback
+    expect(bar).toHaveAttribute("aria-valuemax", "1700");
+    // failed_total flows to the TaskList "重试全部失败 (N)" control (panel rendered via summary count).
+    expect(screen.getByRole("button", { name: /重试全部失败/ })).toHaveTextContent("42");
+  });
+
+  it("refreshes the task list after a retry (api.retry -> api.run -> refreshTasks)", async () => {
+    // The retry handlers end with `await refreshTasks()` so the open panel re-syncs. Open the
+    // panel, retry the failed row, and assert the retry + run calls fire AND a fresh GET
+    // /api/status/tasks follows — deleting refreshTasks() (or reordering it) fails this.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    const failedTask = {
+      task_id: "task_x", task_type: "asr", target_type: "audio_chunk", target_id: "chk_x",
+      status: "failed_retryable", attempt_count: 2, last_error: "model busy", duration_ms: 1200
+    };
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [failedTask] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const urls = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    const statusTasksCount = () => urls().filter((u) => u === "/api/status/tasks").length;
+
+    const { container } = render(<App />);
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    // A summary with a non-zero total makes the TaskList render (count = summaryTotal), so its
+    // panel can be opened to lazily load the rows.
+    act(() => summaryListener!({ data: JSON.stringify({ status_counts: { failed_retryable: 1 }, total: 1, active_stage: null, current_target: null, import_progress: null, worker_running: false }) }));
+
+    // Open the <details> panel -> onToggle(true) -> refreshTasks() loads the failed row.
+    const details = container.querySelector("details.task-list") as HTMLDetailsElement;
+    details.open = true;
+    act(() => { details.dispatchEvent(new Event("toggle")); });
+    await screen.findByText("model busy"); // the failed row is now loaded
+    const beforeRetry = statusTasksCount();
+
+    await userEvent.click(screen.getByRole("button", { name: /重试$/ }));
+
+    await waitFor(() => {
+      expect(urls()).toContain("/api/pipeline/tasks/task_x/retry");
+      expect(urls()).toContain("/api/pipeline/run");
+      expect(statusTasksCount()).toBeGreaterThan(beforeRetry); // refreshTasks ran after the retry
+    });
   });
 
   it("shows an actionable backend error when bootstrap API calls fail", async () => {
@@ -123,10 +241,13 @@ describe("App container", () => {
   });
 
   it("refreshes days when a run completes (running -> idle)", async () => {
-    let statusListener: ((event: { data: string }) => void) | null = null;
+    // Migrated from the removed per-tick `status.snapshot` (full task array) to the
+    // compact `status.summary`. Intent preserved: a running -> idle transition must
+    // re-list days without a manual refresh.
+    let summaryListener: ((event: { data: string }) => void) | null = null;
     vi.stubGlobal("EventSource", class {
       addEventListener(type: string, cb: (event: { data: string }) => void) {
-        if (type === "status.snapshot") statusListener = cb;
+        if (type === "status.summary") summaryListener = cb;
       }
       close() {}
     } as unknown as typeof EventSource);
@@ -137,20 +258,47 @@ describe("App container", () => {
       if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
       if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: runFinished ? [{ day: "2087-05-10", session_count: 1 }] : [] }));
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }));
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }));
       return new Response(JSON.stringify({}));
     });
 
     render(<App />);
-    await waitFor(() => expect(statusListener).not.toBeNull());
+    await waitFor(() => expect(summaryListener).not.toBeNull());
 
     // A run starts (pipeline becomes "running")...
-    act(() => statusListener!({ data: JSON.stringify({ tasks: [{ task_id: "t1", task_type: "asr", target_type: "audio", target_id: "a1", status: "running", attempt_count: 1, last_error: null, duration_ms: null }], worker_running: true }) }));
+    act(() => summaryListener!({ data: JSON.stringify({ status_counts: { running: 1 }, total: 1, active_stage: "asr", current_target: "a1", import_progress: null, worker_running: true }) }));
     // ...then finishes (running -> idle), which must re-list days without a manual refresh.
     runFinished = true;
-    act(() => statusListener!({ data: JSON.stringify({ tasks: [], worker_running: false }) }));
+    act(() => summaryListener!({ data: JSON.stringify({ status_counts: { succeeded: 1 }, total: 1, active_stage: null, current_target: null, import_progress: null, worker_running: false }) }));
 
     expect(await screen.findByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
+  });
+
+  it("fetches the per-day status aggregate alongside the day list on the poll", async () => {
+    vi.useFakeTimers();
+    try {
+      const dayStatusSpy = vi.spyOn(api, "dayStatus");
+      (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+        if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
+        if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
+        if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
+        if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }));
+        if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }));
+        if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }));
+        return new Response(JSON.stringify({}));
+      });
+
+      render(<App />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // flush bootstrap
+      const afterBootstrap = dayStatusSpy.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); // one poll interval
+
+      // The live badge needs the aggregate refreshed alongside the day list during a run.
+      expect(dayStatusSpy.mock.calls.length).toBeGreaterThan(afterBootstrap);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("navigates day -> session and accepts a segment", async () => {

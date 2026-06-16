@@ -142,3 +142,13 @@ def test_doctor_cli_uses_config_path(tmp_path: Path) -> None:
     assert "obsidian_vault=ok" in result.output
     assert "source_dir=ok" in result.output
     assert "archive_root=ok" in result.output
+
+
+def test_funasr_runtime_required_for_funasr_server_backend(tmp_path) -> None:
+    from personal_context_node.config import AppConfig
+    from personal_context_node.doctor import _funasr_runtime_status
+
+    # funasr_server needs the runtime even with a non-funasr VAD -> must NOT be skipped.
+    assert _funasr_runtime_status(AppConfig(vad_backend="energy", asr_backend="funasr_server")) != "skipped"
+    # all-mock -> skipped.
+    assert _funasr_runtime_status(AppConfig(vad_backend="mock", asr_backend="mock")) == "skipped"

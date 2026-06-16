@@ -13,6 +13,9 @@ class ASRSegment:
     confidence: float | None = None
     language: str = "zh"
     tags: list[str] = field(default_factory=list)
+    # Speaker cluster label from diarization ("spk_01", "spk_02", …). Defaults to "self" so the
+    # non-diarized SenseVoice/mock paths (which omit it) keep the single-owner default-self prior.
+    speaker: str = "self"
 
 
 @dataclass(frozen=True)

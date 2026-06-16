@@ -12,20 +12,40 @@ import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPan
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { usePipelineStatus } from "./hooks/usePipelineStatus";
-import { activeStage, STAGES } from "./lib/stages";
+import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
+import { taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, Health, ImportSource, Person, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, TaskRow, TranscriptSession } from "./api/types";
 
 const DEVICE_POLL_MS = 5000;
-const TERMINAL = ["succeeded", "failed_terminal", "failed_retryable", "failed"];
+const ACTIVE_STATUSES = ["pending", "claimed", "running"];
+
+/** Per-task_type done/total breakdown for the Progress bar, from the compact SSE summary
+ *  (so the always-visible header shows it without fetching the full task list). */
+function stageBreakdownFromSummary(
+  stageCounts: Record<string, { done: number; total: number }> | undefined
+): Array<{ label: string; done: number; total: number }> {
+  if (!stageCounts) return [];
+  // Only show stages that still have unfinished work, ordered by the pipeline DAG.
+  const order = ["vad", "asr", "session_derive", "summarize_session", "daily_generate", "obsidian_publish", "archive"];
+  return Object.entries(stageCounts)
+    .filter(([, c]) => c.done < c.total)
+    .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+    .map(([type, c]) => ({ label: taskTypeZh(type), done: c.done, total: c.total }));
+}
 
 export function App() {
-  const { tasks, worker_running, import_progress } = usePipelineStatus();
+  const { summary, worker_running, import_progress } = usePipelineStatus();
   const { toasts, push, dismiss } = useToasts();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [days, setDays] = useState<Array<{ day: string; session_count: number }>>([]);
+  const [dayStatus, setDayStatus] = useState<DayStatusRow[]>([]);
+  // The full task list is fetched lazily (only when the TaskList panel opens) — the
+  // per-tick SSE stream now carries a compact summary, not the ~1881-row array.
+  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [tasksOpen, setTasksOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [session, setSession] = useState<TranscriptSession | null>(null);
@@ -41,6 +61,11 @@ export function App() {
   useEffect(() => {
     bootstrappedRef.current = bootstrapped;
   }, [bootstrapped]);
+  // Mirror tasksOpen into a ref so the mount-time poll closure re-reads the latest value.
+  const tasksOpenRef = useRef(false);
+  useEffect(() => {
+    tasksOpenRef.current = tasksOpen;
+  }, [tasksOpen]);
 
   // Wrap any async action so a rejected api call surfaces a dismissable error toast.
   function guard<A extends unknown[]>(fn: (...args: A) => Promise<unknown>) {
@@ -62,8 +87,18 @@ export function App() {
   }
 
   async function refreshDays() {
-    const result = await api.days();
-    setDays(result.days ?? []);
+    // Fetch the day list and the per-day processing/ready aggregate together so the
+    // rail can render a live badge during a run, not only on running -> idle.
+    const [daysResult, statusResult] = await Promise.all([api.days(), api.dayStatus().catch(() => ({ days: [] }))]);
+    setDays(daysResult.days ?? []);
+    setDayStatus(statusResult.days ?? []);
+  }
+
+  // Lazily load the full task list — only when the TaskList panel is open. The SSE
+  // summary feeds counts/progress; the heavy per-row detail is fetched on demand.
+  async function refreshTasks() {
+    const result = await api.statusTasks();
+    setTasks(result.tasks ?? []);
   }
 
   // Load the initial workspace state. If the backend/API is unreachable, surface an
@@ -95,8 +130,11 @@ export function App() {
       if (!bootstrappedRef.current) return;
       void refreshDevices();
       // Backstop the running -> idle day refresh: if that single SSE transition is missed
-      // (dropped/coalesced frame), the poll still surfaces a freshly produced day.
+      // (dropped/coalesced frame), the poll still surfaces a freshly produced day. This also
+      // refreshes the per-day processing/ready badge live during a run.
       void refreshDays().catch(() => undefined);
+      // Keep the lazily-fetched task list fresh while its panel is open.
+      if (tasksOpenRef.current) void refreshTasks().catch(() => undefined);
     }, DEVICE_POLL_MS);
     return () => clearInterval(timer);
   }, []);
@@ -144,11 +182,22 @@ export function App() {
 
   const speakers = session ? Array.from(new Set(session.segments.map((s) => s.speaker))) : [];
   const gateOn = health?.require_accepted_transcripts ?? false;
-  const firstRun = tasks.length === 0 && days.length === 0;
+
+  // Summary-derived counts (the SSE stream no longer carries the full task array).
+  const counts = summary?.status_counts ?? {};
+  const summaryTotal = summary?.total ?? 0;
+  const activeCount = ACTIVE_STATUSES.reduce((n, s) => n + (counts[s] ?? 0), 0);
+  // Prefer the backend's settled-task count (it knows retryable-but-exhausted failures count
+  // as done); fall back to total-minus-active only for an older backend without done_total.
+  const doneCount =
+    summary?.done_total ??
+    (summaryTotal > 0 ? summaryTotal - (counts["pending"] ?? 0) - (counts["claimed"] ?? 0) - (counts["running"] ?? 0) : 0);
+
+  const firstRun = summaryTotal === 0 && days.length === 0;
 
   const importing = !!import_progress?.active;
   // The pipeline is "running" if importing, the worker is alive, OR a task is mid-flight.
-  const pipelineRunning = importing || worker_running || tasks.some((tk) => tk.status === "running");
+  const pipelineRunning = importing || worker_running || activeCount > 0;
 
   // Re-list days whenever the pipeline finishes (running -> idle), so a completed run
   // surfaces its new day without a manual refresh.
@@ -161,14 +210,25 @@ export function App() {
   }, [pipelineRunning]);
 
   // Live progress: import phase first (copying files), then transcription/processing
-  // from the SSE-fed task list. At idle / 100% the bar disappears.
-  const inFlight = worker_running || tasks.some((tk) => !TERMINAL.includes(tk.status));
-  const current = activeStage(tasks);
-  const total = importing ? import_progress!.total : inFlight ? tasks.length : 0;
-  const done = importing ? import_progress!.done : tasks.filter((tk) => TERMINAL.includes(tk.status)).length;
+  // driven by the compact summary counts. At idle / 100% the bar disappears.
+  const inFlight = worker_running || activeCount > 0;
+  const current: Stage = summary?.active_stage ? stageForTaskType(summary.active_stage) : "device";
+  const total = importing ? import_progress!.total : inFlight ? summaryTotal : 0;
+  const done = importing ? import_progress!.done : doneCount;
   const progressLabel = importing
     ? `导入 ${import_progress!.current || "…"}`
-    : STAGES.find((s) => s.id === current)?.label;
+    : summary?.active_stage
+      ? taskTypeZh(summary.active_stage)
+      : STAGES.find((s) => s.id === current)?.label;
+
+  // Per-stage breakdown + ETA need the full task list (durations live there, not in the
+  // summary), so they show in the always-visible header without the heavy task fetch.
+  const stageBreakdown = stageBreakdownFromSummary(summary?.stage_counts);
+  const etaSeconds = summary?.eta_seconds ?? null;
+  // The summary's failed_total counts terminal + retry-exhausted failures (matching the
+  // backend's "done" semantics); the task-list fallback over-counts retryable failures that
+  // still have attempts left, but only applies when the summary hasn't arrived yet.
+  const failedCount = summary?.failed_total ?? tasks.filter((tk) => tk.status.startsWith("failed")).length;
 
   // Map a pipeline stage to the DOM id of the panel that owns it, then scroll there.
   const STAGE_PANEL_ID: Record<Stage, string> = {
@@ -256,7 +316,13 @@ export function App() {
           {pipelineRunning ? t.app.running : t.app.idle}
         </span>
         <PipelineRail activeStage={current} focusedStage={focusedStage ?? undefined} onSelect={focusStage} />
-        <Progress done={done} total={total} label={progressLabel} />
+        <Progress
+          done={done}
+          total={total}
+          label={progressLabel}
+          stages={importing ? undefined : stageBreakdown}
+          etaSeconds={importing ? null : etaSeconds}
+        />
       </header>
 
       <aside className="rail-left">
@@ -265,12 +331,23 @@ export function App() {
         </div>
         <WorkspaceNav
           days={days}
+          dayStatus={dayStatus}
           selectedDay={selectedDay}
           selectedSessionId={selectedSessionId}
           onSelectDay={(d) => void guard(selectDay)(d)}
           onSelectSession={(id) => void guard(selectSession)(id)}
         />
-        <TaskList tasks={tasks} onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); })} />
+        <TaskList
+          tasks={tasks}
+          taskCount={summaryTotal}
+          failedCount={failedCount}
+          onToggle={(open) => {
+            setTasksOpen(open);
+            if (open) void refreshTasks().catch(() => undefined);
+          }}
+          onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); await refreshTasks(); })}
+          onRetryAllFailed={guard(async () => { await api.retryFailed(); await api.run(); await refreshTasks(); })}
+        />
       </aside>
 
       <section className="center-panel" id="panel-transcript">
@@ -281,7 +358,7 @@ export function App() {
         <div id="panel-run">
           <RunInspector
             workerRunning={pipelineRunning}
-            taskCount={tasks.length}
+            taskCount={summaryTotal}
             gateOn={gateOn}
             onRun={guard(() => api.run())}
             onStop={guard(() => api.stop())}

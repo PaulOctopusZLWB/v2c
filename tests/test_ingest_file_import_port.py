@@ -87,6 +87,39 @@ def test_import_audio_files_from_port_registers_stable_sources_and_enqueues_vad(
     assert tasks == [{"task_type": "vad", "target_type": "audio_file", "status": "pending"}]
 
 
+def test_import_enqueues_vad_task_with_recorded_date_priority(tmp_path: Path) -> None:
+    # The backlog is ordered by recorded date via tasks.priority (incremental-day-review Task 2):
+    # the import must stamp each vad task with a date-derived priority so earlier days drain first.
+    # A regression that drops `priority=` reverts to the flat default 100 and defeats date-major
+    # drain — this test pins the wiring. recorded_at 2025-06-10 -> (2025-06-10 - 2000-01-01).days.
+    from datetime import date
+
+    device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
+    source = SourceAudioFile(
+        device=device,
+        source_path=device.root_path / "TX02_MIC001_20870510_173550_orig.wav",
+        size_bytes=1024,
+        mtime_ns=123456789,
+    )
+    importer = RecordingFileImporter(device=device, source=source)  # copies with recorded_at 2025-06-10
+    config = AppConfig(
+        data_dir=tmp_path / "data",
+        obsidian_vault=tmp_path / "vault",
+        dji_mic_3=DeviceDiscoveryConfig(root_path=device.root_path, stable_seconds=7),
+    )
+
+    assert import_audio_files_from_port(config=config, importer=importer).imported_files == 1
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select priority from tasks where task_type = 'vad'")
+    finally:
+        conn.close()
+    expected = (date(2025, 6, 10) - date(2000, 1, 1)).days
+    assert expected == 9292  # derivation pinned: a flat default of 100 would not equal this
+    assert [r["priority"] for r in rows] == [expected]
+
+
 def test_import_audio_files_from_port_skips_existing_source_snapshot_before_copy(tmp_path: Path) -> None:
     device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
     source = SourceAudioFile(

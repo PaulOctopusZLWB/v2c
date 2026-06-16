@@ -55,9 +55,138 @@ def test_status_overview_reports_counts_and_worker_idle(tmp_path: Path) -> None:
     assert "status_counts" in payload
 
 
+def test_day_status_returns_per_day_processing_or_ready(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = "2026-06-01T10:00:00+00:00"
+        # day 2026-06-01: audio file + a pending asr task -> processing
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+              local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("aud_day1", "test", "/s1.wav", 0, 0, "/l1.wav", "sha:1", 1000, "2026-06-01T10:00:00+00:00", now, "imported"),
+        )
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_asr1', 'asr', 'audio_file', 'aud_day1', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/transcripts/day-status")
+
+    assert response.status_code == 200
+    rows = response.json()["days"]
+    assert isinstance(rows, list)
+    day1 = next((r for r in rows if r["day"] == "2026-06-01"), None)
+    assert day1 is not None
+    assert day1["status"] == "processing"
+
+
+def test_day_status_flips_to_ready_when_all_tasks_terminal_and_session_exists(tmp_path: Path) -> None:
+    # The incremental-day-review headline promise: a finished day flips to 'ready' (可审) so it can
+    # be reviewed WHILE later days still transcribe. Seed two days that differ ONLY in whether an
+    # active task remains, and assert the ready/processing split — this anchors BOTH halves of the
+    # SQL condition (session_count > 0 AND active_count = 0), so inverting either half fails here.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+
+        def _seed_day(day: str, *, aud_id: str, ses_id: str) -> None:
+            at = f"{day}T10:00:00+00:00"
+            conn.execute(
+                """
+                insert into audio_files (
+                  audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+                  local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+                ) values (?, 'test', ?, 0, 0, ?, ?, 1000, ?, ?, 'imported')
+                """,
+                (aud_id, f"/{aud_id}.wav", f"/l_{aud_id}.wav", f"sha:{aud_id}", at, at),
+            )
+            conn.execute(
+                """
+                insert into sessions (
+                  session_id, date_key, started_at, ended_at, source,
+                  segment_count, active_speech_ms, first_segment_id, created_at, updated_at
+                ) values (?, ?, ?, ?, 'derived_from_segments', 1, 100, ?, ?, ?)
+                """,
+                (ses_id, day, at, at, f"seg_{ses_id}", at, at),
+            )
+
+        # Day 2026-06-03: a session + a SUCCEEDED asr task, nothing active -> 'ready'.
+        _seed_day("2026-06-03", aud_id="aud_ready", ses_id="ses_ready")
+        conn.execute(
+            "insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)"
+            " values ('t_ok', 'asr', 'audio_file', 'aud_ready', 'succeeded', ?, ?, ?)",
+            ("2026-06-03T10:00:00+00:00",) * 3,
+        )
+        # Day 2026-06-04: a session AND a still-pending task -> 'processing' despite having sessions.
+        _seed_day("2026-06-04", aud_id="aud_proc", ses_id="ses_proc")
+        conn.execute(
+            "insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)"
+            " values ('t_pending', 'asr', 'audio_file', 'aud_proc', 'pending', ?, ?, ?)",
+            ("2026-06-04T10:00:00+00:00",) * 3,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    rows = {r["day"]: r for r in client.get("/api/transcripts/day-status").json()["days"]}
+
+    assert rows["2026-06-03"]["status"] == "ready"  # all terminal + has session
+    assert rows["2026-06-03"]["session_count"] == 1
+    assert rows["2026-06-04"]["status"] == "processing"  # one task still active
+
+
 def test_root_returns_api_marker_when_frontend_not_built(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     client = TestClient(create_app(config=config))
     response = client.get("/")
     assert response.status_code == 200
     assert response.json()["app"] == "Personal Context Node"
+
+
+def test_day_status_resolves_summarize_session_to_its_day(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = "2026-06-02T10:00:00+00:00"
+        conn.execute(
+            """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source,
+              segment_count, active_speech_ms, first_segment_id, created_at, updated_at
+            ) values ('ses_x', '2026-06-02', ?, ?, 'derived_from_segments', 1, 100, 'seg_x', ?, ?)
+            """,
+            (now, now, now, now),
+        )
+        conn.execute(
+            """
+            insert into tasks (task_id, task_type, target_type, target_id, status, available_at, created_at, updated_at)
+            values ('task_sum', 'summarize_session', 'session', 'ses_x', 'pending', ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    rows = client.get("/api/transcripts/day-status").json()["days"]
+    days = {r["day"] for r in rows}
+
+    assert "2026-06-02" in days  # summarize_session resolved to the session's day
+    assert "ses_x" not in days  # no phantom day row keyed by the session id

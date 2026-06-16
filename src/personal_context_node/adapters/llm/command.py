@@ -14,6 +14,8 @@ from personal_context_node.core.ports.llm import (
     SessionDecision,
     SessionSummary,
     SessionTodo,
+    SpeakerAnalysis,
+    SpeakerViewpoint,
 )
 
 
@@ -62,6 +64,8 @@ class CommandLLMAdapter:
             decisions=[_session_decision(item) for item in payload["decisions"]],
             todos=[_session_todo(item) for item in payload["todos"]],
             open_questions=[str(item) for item in payload["open_questions"]],
+            core_conclusions=[str(item) for item in _as_list(payload.get("core_conclusions"))],
+            per_speaker=_per_speaker(payload.get("per_speaker")),
         )
 
     def _run_json(self, payload: dict[str, object]) -> dict[str, object]:
@@ -144,6 +148,40 @@ def _session_todo(item: object) -> SessionTodo:
         text=str(item["text"]),
         owner=str(item["owner"]),
         evidence_refs=_evidence_refs(evidence_refs, "LLM session_summary todo evidence_refs"),
+    )
+
+
+def _as_list(value: object) -> list[object]:
+    # Round-7 hardening: tolerate malformed list shapes (dict-not-list, None, scalars)
+    # by treating them as empty rather than raising.
+    return value if isinstance(value, list) else []
+
+
+def _per_speaker(value: object) -> list[SpeakerAnalysis]:
+    # A malformed per_speaker (dict-not-list) is tolerated as empty (round-7 lesson);
+    # non-dict items are skipped. Only a dict item missing speaker_cluster_id raises.
+    return [_speaker_analysis(item) for item in _as_list(value) if isinstance(item, dict)]
+
+
+def _speaker_analysis(item: dict[str, object]) -> SpeakerAnalysis:
+    if "speaker_cluster_id" not in item:
+        raise TerminalPortError("LLM session_summary per_speaker missing required field: speaker_cluster_id")
+    viewpoints = [_speaker_viewpoint(viewpoint) for viewpoint in _as_list(item.get("viewpoints")) if isinstance(viewpoint, dict)]
+    return SpeakerAnalysis(
+        speaker_cluster_id=str(item["speaker_cluster_id"]),
+        viewpoints=viewpoints,
+        sentiment=str(item.get("sentiment", "")),
+        stance=str(item.get("stance", "")),
+        latent_needs=[str(need) for need in _as_list(item.get("latent_needs"))],
+    )
+
+
+def _speaker_viewpoint(item: dict[str, object]) -> SpeakerViewpoint:
+    if "text" not in item:
+        raise TerminalPortError("LLM session_summary per_speaker viewpoint missing required field: text")
+    return SpeakerViewpoint(
+        text=str(item["text"]),
+        evidence_refs=_evidence_refs(item.get("evidence_refs"), "LLM session_summary per_speaker viewpoint evidence_refs"),
     )
 
 

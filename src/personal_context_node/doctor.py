@@ -100,7 +100,9 @@ def _path_status(path: Path | None, *, required: bool) -> str:
 
 
 def _funasr_runtime_status(config: AppConfig) -> str:
-    if config.vad_backend != "funasr" and config.asr_backend != "funasr":
+    # funasr_server is the resident-daemon ASR backend; its wrapper also imports funasr, so it
+    # requires the runtime just like the one-shot "funasr" backend.
+    if config.vad_backend != "funasr" and config.asr_backend not in ("funasr", "funasr_server"):
         return "skipped"
     return "ok" if importlib.util.find_spec("funasr") is not None else "missing"
 

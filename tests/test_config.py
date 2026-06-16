@@ -29,6 +29,7 @@ signing_key_path = "keys/configured_ed25519.key"
 [asr]
 backend = "command"
 command = "python scripts/funasr_wrapper.py"
+device = "cpu"
 language = "zh"
 model_name = "sensevoice"
 model_id = "iic/SenseVoiceSmall"
@@ -95,6 +96,7 @@ stable_seconds = 10
     assert config.signing_key_path == tmp_path / "config" / "keys" / "configured_ed25519.key"
     assert config.asr_backend == "command"
     assert config.asr_command == "python scripts/funasr_wrapper.py"
+    assert config.asr_device == "cpu"  # from_toml must propagate [asr].device, not just the default
     assert config.asr_language == "zh"
     assert config.asr_model_name == "sensevoice"
     assert config.asr_model_id == "iic/SenseVoiceSmall"
@@ -212,3 +214,44 @@ def test_app_config_rejects_non_positive_command_timeout_seconds(tmp_path: Path)
     config_path.write_text("[commands]\ntimeout_seconds = -5\n", encoding="utf-8")
     with pytest.raises(ValidationError):
         AppConfig.from_toml(config_path)
+
+
+def test_app_config_has_default_asr_device_mps() -> None:
+    assert AppConfig().asr_device == "mps"
+
+
+def test_app_config_default_asr_mode_is_chunk() -> None:
+    # The whole-file diarize path is opt-in; the default must stay the per-chunk SenseVoice path.
+    config = AppConfig()
+    assert config.asr_mode == "chunk"
+    assert config.asr_diarize_model == "paraformer-zh"
+    assert config.asr_punc_model == "ct-punc"
+    assert config.asr_spk_model == "cam++"
+    assert config.asr_spk_mode == "punc_segment"
+    assert config.asr_preset_spk_num is None
+
+
+def test_app_config_loads_asr_diarize_block(tmp_path: Path) -> None:
+    config_path = tmp_path / "local.toml"
+    config_path.write_text(
+        """
+[asr]
+backend = "funasr_server"
+mode = "diarize"
+diarize_model = "paraformer-en"
+punc_model = "ct-punc-en"
+spk_model = "eres2net"
+spk_mode = "punc_segment"
+preset_spk_num = 3
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = AppConfig.from_toml(config_path)
+
+    assert config.asr_mode == "diarize"
+    assert config.asr_diarize_model == "paraformer-en"
+    assert config.asr_punc_model == "ct-punc-en"
+    assert config.asr_spk_model == "eres2net"
+    assert config.asr_spk_mode == "punc_segment"
+    assert config.asr_preset_spk_num == 3
