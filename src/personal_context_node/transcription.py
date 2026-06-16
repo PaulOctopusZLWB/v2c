@@ -4,12 +4,13 @@ import json
 import os
 import re
 import sqlite3
-import wave
+import struct
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from personal_context_node.audio_preprocessing import _read_wav_metadata
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -271,42 +272,76 @@ def _is_safe_segment_id(segment_id: str) -> bool:
     return bool(_SAFE_SEGMENT_ID.fullmatch(segment_id)) and os.sep not in segment_id and ".." not in segment_id
 
 
-def _slice_wav(source: Path, dest: Path, start_ms: int, end_ms: int) -> Path | None:
-    """Slice [start_ms, end_ms] out of a PCM WAV into a new standalone WAV at ``dest``.
+def _write_wav_header(out, *, audio_format: int, channels: int, sample_rate: int, bits_per_sample: int, data_size: int) -> None:
+    """Write a canonical 44-byte RIFF/WAVE header with a 16-byte fmt chunk, preserving the
+    source's audio_format (1=PCM incl. 24-bit, 3=IEEE float) so the browser decodes it as-is."""
+    block_align = channels * bits_per_sample // 8
+    byte_rate = sample_rate * block_align
+    out.write(b"RIFF")
+    out.write(struct.pack("<I", 36 + data_size))
+    out.write(b"WAVE")
+    out.write(b"fmt ")
+    out.write(struct.pack("<IHHIIHH", 16, audio_format, channels, sample_rate, byte_rate, block_align, bits_per_sample))
+    out.write(b"data")
+    out.write(struct.pack("<I", data_size))
 
-    Uses only stdlib ``wave``. Reads ONLY the requested frame range (never the whole,
-    possibly hundreds-of-MB, source into memory). Writes to a temp path then os.replace()s
-    into place so a concurrent reader never observes a half-written file (atomic). Returns
-    None on any wave/IO error (e.g. a non-PCM/compressed source) so the caller can yield a
-    graceful 404 instead of a 500.
+
+def _slice_wav(source: Path, dest: Path, start_ms: int, end_ms: int) -> Path | None:
+    """Slice [start_ms, end_ms] out of an uncompressed WAV into a new standalone WAV at ``dest``.
+
+    Works for every WAV the rest of the pipeline ingests — PCM (including 24-bit) AND IEEE-float
+    (audio_format 3) — by copying the source fmt verbatim and slicing raw frame bytes. (stdlib
+    ``wave`` can't even *open* a float WAV: ``unknown format: 3``; this dataset has one such
+    source.) Reads ONLY the requested byte range via seek (never the whole, possibly hundreds-of-
+    MB, source into memory). Writes to a temp path then os.replace()s into place so a concurrent
+    reader never observes a half-written file (atomic). Returns None on a zero-length window or any
+    parse/IO error (missing/compressed/corrupt source) so the caller yields a graceful 404 instead
+    of a 500 or an undecodable empty WAV (which would also poison the cache permanently).
     """
     try:
-        with wave.open(str(source), "rb") as src:
-            nchannels = src.getnchannels()
-            sampwidth = src.getsampwidth()
-            framerate = src.getframerate()
-            nframes = src.getnframes()
-            start_frame = max(0, min(start_ms * framerate // 1000, nframes))
-            end_frame = max(start_frame, min(end_ms * framerate // 1000, nframes))
-            src.setpos(start_frame)
-            frames = src.readframes(end_frame - start_frame)
+        meta = _read_wav_metadata(source)
+        channels = int(meta["channels"])
+        sample_rate = int(meta["sample_rate"])
+        bits = int(meta["bits_per_sample"])
+        audio_format = int(meta["audio_format"])
+        data_offset = int(meta["data_offset"])
+        data_size = int(meta["data_size"])
+        block_align = channels * bits // 8
+        if block_align <= 0 or sample_rate <= 0:
+            return None
+        total_frames = data_size // block_align
+        start_frame = max(0, min(start_ms * sample_rate // 1000, total_frames))
+        end_frame = max(start_frame, min(end_ms * sample_rate // 1000, total_frames))
+        if end_frame <= start_frame:
+            return None  # zero-length window -> graceful 404, never an undecodable empty WAV
+        with source.open("rb") as handle:
+            handle.seek(data_offset + start_frame * block_align)
+            frames = handle.read((end_frame - start_frame) * block_align)
+        frames = frames[: (len(frames) // block_align) * block_align]  # whole frames only
+        if not frames:
+            return None
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_name(f"{dest.name}.{uuid4().hex}.tmp")
         try:
-            with wave.open(str(tmp), "wb") as out:
-                out.setnchannels(nchannels)
-                out.setsampwidth(sampwidth)
-                out.setframerate(framerate)
-                out.writeframes(frames)
+            with tmp.open("wb") as out:
+                _write_wav_header(
+                    out, audio_format=audio_format, channels=channels,
+                    sample_rate=sample_rate, bits_per_sample=bits, data_size=len(frames),
+                )
+                out.write(frames)
             os.replace(tmp, dest)
         finally:
             tmp.unlink(missing_ok=True)
-    except (wave.Error, EOFError, OSError):
+    except (ValueError, struct.error, OSError):
         return None
     return dest
 
 
 def segment_audio_path(*, config: AppConfig, segment_id: str) -> Path | None:
+    # Reject unsafe ids up front: segment_id arrives from the URL and is later used to build the
+    # slice cache filename, so this guards path traversal independent of the DB lookup below.
+    if not _is_safe_segment_id(segment_id):
+        return None
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -345,8 +380,6 @@ def segment_audio_path(*, config: AppConfig, segment_id: str) -> Path | None:
         conn.close()
 
     if not fallback or not fallback[0]["local_raw_path"]:
-        return None
-    if not _is_safe_segment_id(segment_id):
         return None
     source = Path(str(fallback[0]["local_raw_path"]))
     if not source.exists():

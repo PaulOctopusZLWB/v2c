@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import struct
 import wave
 from pathlib import Path
 
+import pytest
+
+from personal_context_node.audio_preprocessing import _read_wav_metadata
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, initialize
 from personal_context_node.transcription import segment_audio_path
@@ -13,15 +17,35 @@ SAMPWIDTH = 2
 NCHANNELS = 1
 
 
-def _write_silence_wav(path: Path, duration_ms: int) -> None:
-    """Synthesize a tiny PCM WAV of silence (16kHz mono 16-bit)."""
+def _write_silence_wav(path: Path, duration_ms: int, *, sampwidth: int = SAMPWIDTH) -> None:
+    """Synthesize a tiny PCM WAV of silence (16kHz mono). sampwidth=3 mints a 24-bit source,
+    matching 88/89 of the real recordings."""
     path.parent.mkdir(parents=True, exist_ok=True)
     nframes = duration_ms * FRAMERATE // 1000
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(NCHANNELS)
-        wav.setsampwidth(SAMPWIDTH)
+        wav.setsampwidth(sampwidth)
         wav.setframerate(FRAMERATE)
-        wav.writeframes(b"\x00" * (nframes * SAMPWIDTH * NCHANNELS))
+        wav.writeframes(b"\x00" * (nframes * sampwidth * NCHANNELS))
+
+
+def _write_float32_wav(path: Path, duration_ms: int) -> None:
+    """Synthesize a 32-bit IEEE-float (audio_format=3) WAV — the encoding of the one real source
+    (TX01_MIC003_..._orig.wav) that stdlib ``wave`` refuses to open with 'unknown format: 3'."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    nframes = duration_ms * FRAMERATE // 1000
+    bits, channels = 32, NCHANNELS
+    block_align = channels * bits // 8
+    data = b"\x00\x00\x00\x00" * (nframes * channels)  # float32 0.0 == silence
+    with path.open("wb") as f:
+        f.write(b"RIFF")
+        f.write(struct.pack("<I", 36 + len(data)))
+        f.write(b"WAVE")
+        f.write(b"fmt ")
+        f.write(struct.pack("<IHHIIHH", 16, 3, channels, FRAMERATE, FRAMERATE * block_align, block_align, bits))
+        f.write(b"data")
+        f.write(struct.pack("<I", len(data)))
+        f.write(data)
 
 
 def _insert_audio_file(conn, audio_file_id: str, local_raw_path: str, duration_ms: int) -> None:
@@ -241,3 +265,101 @@ def test_cache_reuse_returns_same_path(tmp_path: Path) -> None:
     assert second == first
     # Idempotent reuse: the cache file was not re-written.
     assert second.stat().st_mtime_ns == mtime_first
+
+
+def test_float32_source_returns_decodable_slice(tmp_path: Path) -> None:
+    """The dataset contains one IEEE-float (format 3) source that stdlib `wave` cannot open;
+    the byte-level slicer must still serve a valid float WAV slice (else those segments 404)."""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    source = tmp_path / "raw" / "float.wav"
+    _write_float32_wav(source, duration_ms=10_000)
+    with pytest.raises(wave.Error):  # prove stdlib wave really refuses this source
+        wave.open(str(source), "rb").close()
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        _insert_audio_file(conn, "aud_float", str(source), duration_ms=10_000)
+        _insert_segment(
+            conn,
+            segment_id="seg_float",
+            audio_file_id="aud_float",
+            chunk_id="diar_aud_float_000001000",
+            start_ms=1_000,
+            end_ms=4_000,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    path = segment_audio_path(config=config, segment_id="seg_float")
+
+    assert path is not None
+    assert path.exists()
+    meta = _read_wav_metadata(path)
+    assert meta["audio_format"] == 3  # float encoding preserved (browser decodeAudioData handles it)
+    assert meta["bits_per_sample"] == 32
+    block_align = NCHANNELS * 32 // 8
+    nframes = int(meta["data_size"]) // block_align
+    expected = (4_000 - 1_000) * FRAMERATE // 1000
+    assert abs(nframes - expected) <= 1
+
+
+def test_24bit_pcm_source_slices(tmp_path: Path) -> None:
+    """88/89 real sources are 24-bit PCM; the frame-aligned byte slice must preserve width."""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    source = tmp_path / "raw" / "pcm24.wav"
+    _write_silence_wav(source, duration_ms=10_000, sampwidth=3)
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        _insert_audio_file(conn, "aud_24", str(source), duration_ms=10_000)
+        _insert_segment(
+            conn,
+            segment_id="seg_24",
+            audio_file_id="aud_24",
+            chunk_id="diar_aud_24_000002000",
+            start_ms=2_000,
+            end_ms=5_000,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    path = segment_audio_path(config=config, segment_id="seg_24")
+
+    assert path is not None
+    meta = _read_wav_metadata(path)
+    assert meta["bits_per_sample"] == 24
+    nframes = int(meta["data_size"]) // (NCHANNELS * 24 // 8)
+    expected = (5_000 - 2_000) * FRAMERATE // 1000
+    assert abs(nframes - expected) <= 1
+
+
+def test_zero_length_window_returns_none(tmp_path: Path) -> None:
+    """start_ms == end_ms must yield None (clean 404), never an undecodable empty 44-byte WAV
+    that would also permanently poison the cache."""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    source = tmp_path / "raw" / "src.wav"
+    _write_silence_wav(source, duration_ms=5_000)
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        _insert_audio_file(conn, "aud_zero", str(source), duration_ms=5_000)
+        _insert_segment(
+            conn,
+            segment_id="seg_zero",
+            audio_file_id="aud_zero",
+            chunk_id="diar_aud_zero_000002000",
+            start_ms=2_000,
+            end_ms=2_000,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert segment_audio_path(config=config, segment_id="seg_zero") is None
+    # No poisoned cache entry was written.
+    assert not (config.data_dir / "audio" / "segments" / "seg_zero.wav").exists()
