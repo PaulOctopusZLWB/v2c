@@ -183,6 +183,35 @@ def test_effective_settings_default_when_no_override(tmp_path: Path, monkeypatch
     assert eff["glm_thinking"] is False
 
 
+def test_effective_config_applies_asr_overrides(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_mode="chunk")
+    _settings.write_settings(config, {"asr_mode": "diarize", "asr_preset_spk_num": 3})
+    eff = _settings.effective_config(config)
+    assert eff.asr_mode == "diarize"
+    assert eff.asr_preset_spk_num == 3
+    assert config.asr_mode == "chunk"  # original untouched (frozen)
+
+
+def test_worker_import_uses_effective_asr_mode_override(tmp_path: Path, monkeypatch) -> None:
+    # A web asr_mode=diarize override must route NEW imports to transcribe_diarize — i.e. the worker
+    # imports with the EFFECTIVE config, not the launch config (ingest picks task_type from asr_mode).
+    import personal_context_node.web.worker as _worker_module
+    from personal_context_node.ingest import IngestImportResult
+    from personal_context_node.web.worker import PipelineWorker
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_mode="chunk")
+    _settings.write_settings(config, {"asr_mode": "diarize"})
+    captured: dict = {}
+
+    def fake_import(*, config, source_dir, progress=None):
+        captured["asr_mode"] = config.asr_mode
+        return IngestImportResult(imported_files=0)
+
+    monkeypatch.setattr(_worker_module, "import_audio_files", fake_import)
+    PipelineWorker(config=config)._import_then_drain(source_dir=str(tmp_path / "src"))
+    assert captured["asr_mode"] == "diarize"
+
+
 def test_effective_settings_launch_baseline_fallback(tmp_path: Path, monkeypatch) -> None:
     # With no override, fall back to the LAUNCH baseline (the GLM env at process start), NOT the
     # live os.environ (which the worker mutates each drain).

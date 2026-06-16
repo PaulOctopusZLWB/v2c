@@ -32,8 +32,11 @@ def import_stage(request: Request, payload: ImportRequest) -> dict[str, object]:
         # request returns immediately and the UI can render a live progress bar via SSE.
         started = worker.start_import(payload.source_dir)
         return {"started": started, "importing": True}
-    # wait=True: synchronous import + drain (tests / explicit "import and wait" only).
-    result = import_audio_files(config=config, source_dir=Path(payload.source_dir))
+    # wait=True: synchronous import + drain (tests / explicit "import and wait" only). Use the
+    # effective config so an asr_mode override routes the import to the right task_type too.
+    from personal_context_node import settings as _settings
+
+    result = import_audio_files(config=_settings.effective_config(config), source_dir=Path(payload.source_dir))
     response: dict[str, object] = {"imported_files": result.imported_files, "queued": True}
     drain = worker.drain_now()
     response["drain"] = {

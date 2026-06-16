@@ -83,6 +83,16 @@ def _coerce_for_storage(key: str, value: Any) -> str | None:
     return str(value)
 
 
+def effective_config(config: AppConfig) -> AppConfig:
+    """config with the ASR overrides (asr_mode/asr_preset_spk_num) applied. Used wherever config
+    drives behavior at RUNTIME — both the adapter build AND import-time task routing (ingest.py
+    chooses vad vs transcribe_diarize from config.asr_mode), so the diarize toggle takes effect on
+    the next import as well as the next drain."""
+    overrides = read_overrides(config)
+    asr = {k: v for k, v in overrides.items() if k in ("asr_mode", "asr_preset_spk_num")}
+    return config.model_copy(update=asr) if asr else config
+
+
 def read_overrides(config: AppConfig) -> dict[str, Any]:
     """Open a connection, read settings, return ONLY allow-listed keys, parsed & validated.
 
