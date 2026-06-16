@@ -115,8 +115,8 @@ def list_speaker_clusters(request: Request, day: str) -> dict[str, object]:
                 ts.text,
                 ts.end_ms - ts.start_ms as speech_ms
               from transcript_segments ts
-              join audio_files af on af.audio_file_id = ts.audio_file_id
-              where substr(af.recorded_at, 1, 10) = ? and ts.is_active = 1
+              join sessions sess on sess.session_id = ts.session_id
+              where sess.date_key = ? and ts.is_active = 1
             )
             select
               ds.speaker_cluster_id,

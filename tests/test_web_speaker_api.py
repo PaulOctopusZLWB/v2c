@@ -171,6 +171,36 @@ def test_assign_person_bulk_empty_speakers_returns_400(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
+def test_clusters_scoped_by_session_date_key_not_recorded_at(tmp_path: Path) -> None:
+    # Cross-midnight: a file recorded late on 2087-05-10 whose session date_key is 2087-05-11. The
+    # cluster list must follow the session date_key (the day the UI picker offers), not recorded_at.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aud_x", "dev", "/x.wav", 1, 1, "/raw/x.wav", "sha:x", 1000, "2087-05-10T23:50:00+08:00", "2087-05-10T23:50:00+08:00", "imported"),
+        )
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_x", "2087-05-11", "2087-05-11T00:05:00+08:00", "2087-05-11T00:06:00+08:00", "derived_from_segments", 1, 500, "seg_x", "2087-05-11T00:06:00+08:00", "2087-05-11T00:06:00+08:00"),
+        )
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("seg_x", "aud_x", "chk_x", "ses_x", 0, 500, "跨午夜", "zh", "spk_01", "spk_01", "ev_x", 1.0, "mock", "mock", "t", 1, "2087-05-11T00:06:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    by_date_key = client.get("/api/speakers/clusters", params={"day": "2087-05-11"}).json()["clusters"]
+    assert [c["speaker_cluster_id"] for c in by_date_key] == ["spk_01"]  # found under the session date_key
+    by_recorded_at = client.get("/api/speakers/clusters", params={"day": "2087-05-10"}).json()["clusters"]
+    assert by_recorded_at == []  # NOT scoped by the file's recorded_at day
+
+
 def _insert_diarized_day(database_path: Path) -> None:
     """Seed one audio_file on 2087-05-10 with active segments across spk_01/02/03."""
     conn = connect(database_path)
@@ -184,6 +214,12 @@ def _insert_diarized_day(database_path: Path) -> None:
             "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("aud_test", "DJI Mic 3", "/source/test.wav", 1, 1, "/raw/test.wav", "sha256:test", 5000, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00", "imported"),
         )
+        # The clusters endpoint scopes by the session date_key (the day the UI picker offers), so the
+        # segments must belong to a session on that day.
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_test", "2087-05-10", "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:05+08:00", "derived_from_segments", 4, 1700, "seg_01a", "2087-05-10T08:00:03+08:00", "2087-05-10T08:00:03+08:00"),
+        )
         # (segment_id, speaker_cluster_id, start_ms, end_ms, text, is_active)
         segments = [
             ("seg_01a", "spk_01", 0, 300, "spk01 short", 1),
@@ -196,7 +232,7 @@ def _insert_diarized_day(database_path: Path) -> None:
         for segment_id, cluster, start_ms, end_ms, text, is_active in segments:
             conn.execute(
                 "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (segment_id, "aud_test", "chk_1", None, start_ms, end_ms, text, "zh", cluster, cluster, f"ev_{segment_id}", 1.0, "MockASRAdapter", "mock-asr", "test", is_active, "2087-05-10T08:00:02+08:00"),
+                (segment_id, "aud_test", "chk_1", "ses_test", start_ms, end_ms, text, "zh", cluster, cluster, f"ev_{segment_id}", 1.0, "MockASRAdapter", "mock-asr", "test", is_active, "2087-05-10T08:00:02+08:00"),
             )
         conn.commit()
     finally:
