@@ -70,6 +70,27 @@ def test_persistent_adapter_raises_terminal_for_terminal_flagged_error(tmp_path:
         adapter.close()
 
 
+def test_persistent_adapter_carries_speaker_labels_from_diarized_server(tmp_path: Path) -> None:
+    # The paraformer diarize wrapper emits segments with a "speaker" cluster label; the resident
+    # adapter must surface it on ASRSegment (so transcription can write speaker_cluster_id).
+    script = tmp_path / "diar_server.py"
+    script.write_text(
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    p = line.strip()\n"
+        "    if not p: continue\n"
+        "    print(json.dumps({'model_name':'paraformer-diarize','model_version':'v','segments':["
+        "{'text':'你好','start_ms':0,'end_ms':1000,'speaker':'spk_01','language':'zh'},"
+        "{'text':'在','start_ms':1000,'end_ms':1500,'speaker':'spk_02','language':'zh'}]}), flush=True)\n",
+        encoding="utf-8",
+    )
+    adapter = PersistentCommandASRAdapter(command=["python3", str(script)], timeout_seconds=10)
+    result = adapter.transcribe(tmp_path / "file.wav")
+    adapter.close()
+
+    assert [s.speaker for s in result.segments] == ["spk_01", "spk_02"]
+
+
 def test_persistent_adapter_raises_retryable_when_server_dies(tmp_path: Path) -> None:
     script = tmp_path / "dies.py"
     script.write_text("import sys; sys.exit(1)\n", encoding="utf-8")

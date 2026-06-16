@@ -73,4 +73,6 @@ def _asr_segment(segment: object) -> ASRSegment:
         confidence=None if segment.get("confidence") is None else float(segment["confidence"]),
         language=str(segment.get("language", "zh") or "zh"),
         tags=[str(tag) for tag in segment.get("tags", [])],
+        # Diarized wrappers stamp a speaker cluster label; non-diarized ones omit it -> "self".
+        speaker=str(segment.get("speaker", "self") or "self"),
     )
