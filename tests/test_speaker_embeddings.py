@@ -4,8 +4,10 @@ from pathlib import Path
 
 import numpy as np
 
+from personal_context_node import transcription
 from personal_context_node.config import AppConfig
 from personal_context_node.speaker_embeddings import (
+    extract_pending_embeddings,
     get_embeddings,
     pending_embedding_segment_ids,
     put_embedding,
@@ -77,6 +79,89 @@ def test_pending_lists_active_without_embedding(tmp_path: Path) -> None:
     )
     assert pending_embedding_segment_ids(config=config, session_id="ses_other") == ["seg_o1", "seg_o2"]
     assert pending_embedding_segment_ids(config=config, session_id="ses_test") == []
+
+
+def test_extract_pending_embeds_all(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+
+    monkeypatch.setattr(
+        transcription,
+        "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+
+    result = extract_pending_embeddings(config=config, embed_fn=embed_fn)
+    assert result == {"embedded": 3, "skipped_missing_audio": 0, "total": 3}
+
+    stored = get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_3"])
+    assert set(stored) == {"seg_1", "seg_2", "seg_3"}
+
+    # A second pass has nothing left to embed.
+    second = extract_pending_embeddings(config=config, embed_fn=embed_fn)
+    assert second == {"embedded": 0, "skipped_missing_audio": 0, "total": 0}
+
+
+def test_extract_skips_missing_audio(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+
+    def fake_path(*, config, segment_id):
+        if segment_id == "seg_2":
+            return None
+        return Path(f"/slices/{segment_id}.wav")
+
+    monkeypatch.setattr(transcription, "segment_audio_path", fake_path)
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+
+    result = extract_pending_embeddings(config=config, embed_fn=embed_fn)
+    assert result == {"embedded": 2, "skipped_missing_audio": 1, "total": 3}
+
+    # The skipped segment stays pending; the embedded ones do not.
+    assert pending_embedding_segment_ids(config=config) == ["seg_2"]
+
+
+def test_extract_reports_progress(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+
+    monkeypatch.setattr(
+        transcription,
+        "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+
+    calls: list[tuple[int, int]] = []
+    extract_pending_embeddings(
+        config=config, embed_fn=embed_fn, progress=lambda done, total: calls.append((done, total))
+    )
+
+    assert len(calls) == 3
+    assert calls[-1] == (3, 3)
+
+
+def test_extract_scoped_by_session(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2"])
+    _insert_session_with_segments(
+        config.database_path, ["seg_o1", "seg_o2"], session_id="ses_other", audio_file_id="aud_other"
+    )
+
+    monkeypatch.setattr(
+        transcription,
+        "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+
+    result = extract_pending_embeddings(config=config, embed_fn=embed_fn, session_id="ses_other")
+    assert result == {"embedded": 2, "skipped_missing_audio": 0, "total": 2}
+
+    stored = get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_o1", "seg_o2"])
+    assert set(stored) == {"seg_o1", "seg_o2"}
+    assert pending_embedding_segment_ids(config=config, session_id="ses_test") == ["seg_1", "seg_2"]
 
 
 def _insert_session_with_segments(

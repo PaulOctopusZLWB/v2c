@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 
 import numpy as np
@@ -117,6 +117,54 @@ def pending_embedding_segment_ids(*, config: AppConfig, session_id: str | None =
     finally:
         conn.close()
     return [str(row["segment_id"]) for row in rows]
+
+
+def extract_pending_embeddings(
+    *,
+    config: AppConfig,
+    embed_fn: Callable[[str], list[float]],
+    session_id: str | None = None,
+    day: str | None = None,
+    model: str = "cam++",
+    batch_size: int = 32,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict:
+    """Embed every pending transcript segment over its existing audio slice.
+
+    ``embed_fn`` takes an audio file path (str) and returns the embedding vector; the heavy
+    CAM++ model is injected here so this orchestration stays model-free (and test-stubbable).
+    Segments whose audio slice is unavailable are skipped (kept pending) and counted separately.
+    """
+    # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
+    from personal_context_node.transcription import segment_audio_path
+
+    pending = pending_embedding_segment_ids(config=config, session_id=session_id, day=day)
+    total = len(pending)
+    embedded = 0
+    skipped = 0
+    done = 0
+    batch: list[tuple[str, Sequence[float]]] = []
+
+    def flush() -> None:
+        nonlocal embedded
+        if batch:
+            embedded += put_embeddings_bulk(config=config, items=batch, model=model)
+            batch.clear()
+
+    for segment_id in pending:
+        path = segment_audio_path(config=config, segment_id=segment_id)
+        if path is None:
+            skipped += 1
+        else:
+            batch.append((segment_id, embed_fn(str(path))))
+            if len(batch) >= batch_size:
+                flush()
+        done += 1
+        if progress is not None:
+            progress(done, total)
+
+    flush()
+    return {"embedded": embedded, "skipped_missing_audio": skipped, "total": total}
 
 
 def _now() -> str:
