@@ -280,6 +280,16 @@ create table if not exists segment_person_overrides (
   person_id text
 );
 
+create table if not exists segment_embeddings (
+  segment_id text primary key references transcript_segments(segment_id),
+  model text not null,
+  dim integer not null,
+  vector blob not null,
+  created_at text not null
+);
+
+create index if not exists idx_segment_embeddings_model on segment_embeddings(model);
+
 create table if not exists archive_records (
   archive_record_id text primary key,
   target_type text not null default '',
