@@ -111,8 +111,10 @@ def call_glm(
     url = f"{base}/chat/completions"
     body = {"model": model, "temperature": 0.2, "response_format": {"type": "json_object"}, **payload}
     effective_timeout = timeout if timeout is not None else (TIMEOUT_THINKING if thinking else TIMEOUT_DEFAULT)
-    if thinking:
-        body["chat_template_kwargs"] = {"enable_thinking": True}
+    # ALWAYS send enable_thinking explicitly. Reasoning models like GLM-5.1 default thinking ON, so
+    # omitting the flag (thinking off) leaves the server reasoning on every call — ~30x slower
+    # (measured 91s vs 3s). enable_thinking=False explicitly disables it.
+    body["chat_template_kwargs"] = {"enable_thinking": bool(thinking)}
     try:
         data = post(url, {"Authorization": f"Bearer {api_key}"}, body, timeout=effective_timeout)
     except TypeError:

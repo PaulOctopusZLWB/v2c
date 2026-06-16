@@ -102,7 +102,9 @@ def test_call_glm_thinking_on_adds_chat_template_kwargs() -> None:
     assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": True}
 
 
-def test_call_glm_thinking_off_omits_chat_template_kwargs() -> None:
+def test_call_glm_thinking_off_explicitly_disables() -> None:
+    # Must send enable_thinking=False explicitly (not omit it): reasoning models like glm-5.1
+    # default thinking ON, so omitting the flag leaves it reasoning on every call (~30x slower).
     captured = {}
 
     def fake_post(url, headers, body):
@@ -110,7 +112,7 @@ def test_call_glm_thinking_off_omits_chat_template_kwargs() -> None:
         return {"choices": [{"message": {"content": "{}"}}]}
 
     glm.call_glm({"messages": []}, api_key="k", model="m", post=fake_post, thinking=False)
-    assert "chat_template_kwargs" not in captured["body"]
+    assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 def test_call_glm_thinking_on_parses_inline_reasoning_content() -> None:
