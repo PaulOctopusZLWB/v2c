@@ -11,25 +11,87 @@ import os
 import sys
 import urllib.request
 
-GLM_ENDPOINT = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+# Kept for back-compat (it is the default base + the chat/completions path).
+GLM_ENDPOINT = f"{DEFAULT_BASE_URL}/chat/completions"
+# urlopen timeouts: thinking folds long reasoning into the response, so it needs much longer.
+TIMEOUT_DEFAULT = 120
+TIMEOUT_THINKING = 600
 ALLOWED_CLAIM_TYPES = {
     "fact", "preference", "decision", "commitment", "requirement", "observation", "todo", "relationship",
 }
 
+_TRUTHY = {"1", "true", "enabled"}
 
-def _post_json(url: str, headers: dict[str, str], body: dict[str, object]) -> dict[str, object]:
+
+def _is_thinking(value: str | None) -> bool:
+    return (value or "").strip().lower() in _TRUTHY
+
+
+def _extract_json(content: str) -> dict[str, object]:
+    """Recover a JSON object from model content, tolerating thinking-ON inline reasoning.
+
+    Some OpenAI-compatible servers fold the chain-of-thought into message.content before the
+    JSON (and leave reasoning_content empty), so the raw content is `reasoning… {json}` which
+    breaks json.loads. Try the whole string first; on failure strip a leading <think>…</think>
+    block, then take the OUTERMOST balanced { … } (first '{' to its matching '}') and parse that.
+    Raise (ValueError) if no JSON object can be parsed so callers fail retryably."""
+    try:
+        return json.loads(content)
+    except (ValueError, TypeError):
+        pass
+    text = content
+    close = text.find("</think>")
+    if text.lstrip().startswith("<think>") and close != -1:
+        text = text[close + len("</think>"):]
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("no JSON object found in model content")
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start:i + 1])
+    raise ValueError("no balanced JSON object found in model content")
+
+
+def _post_json(
+    url: str, headers: dict[str, str], body: dict[str, object], *, timeout: int = TIMEOUT_DEFAULT
+) -> dict[str, object]:
     request = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers={**headers, "Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310 (fixed GLM endpoint)
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 (configurable GLM endpoint)
         return json.loads(response.read().decode("utf-8"))
 
 
-def call_glm(payload: dict[str, object], *, api_key: str, model: str, post=_post_json) -> dict[str, object]:
+def call_glm(
+    payload: dict[str, object],
+    *,
+    api_key: str,
+    model: str,
+    post=_post_json,
+    base_url: str | None = None,
+    thinking: bool = False,
+) -> dict[str, object]:
+    base = (base_url or DEFAULT_BASE_URL).rstrip("/")
+    url = f"{base}/chat/completions"
     body = {"model": model, "temperature": 0.2, "response_format": {"type": "json_object"}, **payload}
-    data = post(GLM_ENDPOINT, {"Authorization": f"Bearer {api_key}"}, body)
+    timeout = TIMEOUT_DEFAULT
+    if thinking:
+        body["chat_template_kwargs"] = {"enable_thinking": True}
+        timeout = TIMEOUT_THINKING
+    try:
+        data = post(url, {"Authorization": f"Bearer {api_key}"}, body, timeout=timeout)
+    except TypeError:
+        # Tests inject a 3-arg post(url, headers, body); fall back to omitting the timeout kwarg.
+        data = post(url, {"Authorization": f"Bearer {api_key}"}, body)
     content = data["choices"][0]["message"]["content"]
-    return json.loads(content)
+    return _extract_json(content)
 
 
 def _evidence_ids(segments: list[dict]) -> set[str]:
@@ -236,15 +298,18 @@ def main() -> int:
         print("GLM_API_KEY is not set", file=sys.stderr)
         return 2
     model = os.environ.get("GLM_MODEL", "glm-4-flash")
+    base_url = os.environ.get("GLM_BASE_URL", DEFAULT_BASE_URL)
+    thinking = _is_thinking(os.environ.get("GLM_THINKING"))
     try:
         payload = json.loads(sys.stdin.read())
         segments = payload.get("transcript_segments", [])
         post = _load_transport()
+        kwargs = {"api_key": api_key, "model": model, "post": post, "base_url": base_url, "thinking": thinking}
         if payload.get("task") == "session_summary":
-            raw = call_glm({"messages": build_session_messages(payload)}, api_key=api_key, model=model, post=post)
+            raw = call_glm({"messages": build_session_messages(payload)}, **kwargs)
             out = normalize_session_summary(raw, segments)
         else:
-            raw = call_glm({"messages": build_daily_messages(payload)}, api_key=api_key, model=model, post=post)
+            raw = call_glm({"messages": build_daily_messages(payload)}, **kwargs)
             out = normalize_daily_context(raw, segments)
     except Exception as exc:  # network / JSON / GLM errors -> retryable
         print(f"GLM wrapper failed: {type(exc).__name__}: {exc}", file=sys.stderr)

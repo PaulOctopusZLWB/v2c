@@ -32,6 +32,95 @@ def test_call_glm_extracts_message_content_json() -> None:
     assert captured["body"]["temperature"] == 0.2
 
 
+def test_call_glm_uses_configurable_base_url() -> None:
+    captured = {}
+
+    def fake_post(url, headers, body):
+        captured["url"] = url
+        captured["body"] = body
+        return {"choices": [{"message": {"content": '{"summary": "ok"}'}}]}
+
+    base = "http://10.16.12.28:8077/v1"
+    result = glm.call_glm(
+        {"messages": []}, api_key="sk-test", model="glm-5.1", post=fake_post, base_url=base
+    )
+
+    assert result == {"summary": "ok"}
+    # endpoint is <base>/chat/completions (trailing slash tolerated)
+    assert captured["url"] == "http://10.16.12.28:8077/v1/chat/completions"
+    assert captured["body"]["model"] == "glm-5.1"
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+    assert captured["body"]["temperature"] == 0.2
+
+
+def test_call_glm_base_url_strips_trailing_slash() -> None:
+    captured = {}
+
+    def fake_post(url, headers, body):
+        captured["url"] = url
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    glm.call_glm(
+        {"messages": []}, api_key="k", model="m", post=fake_post,
+        base_url="http://10.16.12.28:8077/v1/",
+    )
+    assert captured["url"] == "http://10.16.12.28:8077/v1/chat/completions"
+
+
+def test_call_glm_thinking_on_adds_chat_template_kwargs() -> None:
+    captured = {}
+
+    def fake_post(url, headers, body):
+        captured["body"] = body
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    glm.call_glm({"messages": []}, api_key="k", model="m", post=fake_post, thinking=True)
+    assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": True}
+
+
+def test_call_glm_thinking_off_omits_chat_template_kwargs() -> None:
+    captured = {}
+
+    def fake_post(url, headers, body):
+        captured["body"] = body
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    glm.call_glm({"messages": []}, api_key="k", model="m", post=fake_post, thinking=False)
+    assert "chat_template_kwargs" not in captured["body"]
+
+
+def test_call_glm_thinking_on_parses_inline_reasoning_content() -> None:
+    # thinking-ON server folds reasoning into message.content before the JSON object;
+    # call_glm must still recover the JSON via _extract_json.
+    def fake_post(url, headers, body):
+        return {"choices": [{"message": {"content": '推理过程……\n{"summary": "x"}'}}]}
+
+    result = glm.call_glm({"messages": []}, api_key="k", model="m", post=fake_post, thinking=True)
+    assert result == {"summary": "x"}
+
+
+def test_extract_json_parses_clean_json() -> None:
+    assert glm._extract_json('{"summary": "x"}') == {"summary": "x"}
+
+
+def test_extract_json_strips_think_block() -> None:
+    assert glm._extract_json('<think>推理…</think>{"summary":"x"}') == {"summary": "x"}
+
+
+def test_extract_json_recovers_object_after_inline_reasoning() -> None:
+    assert glm._extract_json('推理过程…\n{"a":1}') == {"a": 1}
+
+
+def test_extract_json_finds_outermost_balanced_object() -> None:
+    # nested braces: the outermost { … } must be returned whole, not just the first inner pair
+    assert glm._extract_json('think…{"a":{"b":2},"c":3} trailing') == {"a": {"b": 2}, "c": 3}
+
+
+def test_extract_json_raises_on_non_json() -> None:
+    with pytest.raises(Exception):
+        glm._extract_json("just some reasoning, no object here")
+
+
 def test_normalize_daily_context_constrains_claim_type_and_evidence() -> None:
     segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "数据不出本机。"}]
     raw = {
