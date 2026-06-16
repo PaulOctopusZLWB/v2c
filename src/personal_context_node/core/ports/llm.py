@@ -52,6 +52,23 @@ class SessionTodo:
 
 
 @dataclass(frozen=True)
+class SpeakerViewpoint:
+    text: str
+    evidence_refs: list[str]
+
+
+@dataclass(frozen=True)
+class SpeakerAnalysis:
+    """Per-speaker analysis over a session: the viewpoints they expressed, their sentiment,
+    their stance/leaning, and any latent needs — keyed to a diarization cluster id (spk_NN)."""
+    speaker_cluster_id: str
+    viewpoints: list[SpeakerViewpoint]
+    sentiment: str
+    stance: str
+    latent_needs: list[str]
+
+
+@dataclass(frozen=True)
 class SessionSummary:
     session_id: str
     headline: str
@@ -60,6 +77,10 @@ class SessionSummary:
     decisions: list[SessionDecision]
     todos: list[SessionTodo]
     open_questions: list[str]
+    # Per-speaker analytical summary (diarized sessions). Defaults empty so the rule_based and
+    # non-diarized GLM paths — which don't produce per-speaker analysis — stay valid.
+    core_conclusions: list[str] = field(default_factory=list)
+    per_speaker: list[SpeakerAnalysis] = field(default_factory=list)
 
 
 class LLMPort(Protocol):
