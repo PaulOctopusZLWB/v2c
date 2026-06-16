@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 from pathlib import Path
 
@@ -46,7 +47,22 @@ class PipelineWorker:
         """Build adapters, loop drain_process_queue in batches of max_steps until the queue is
         empty (status 'complete') or a stop is requested, then close any resident adapter.
         Shared by every drain entry point so the funasr_server subprocess is always released."""
-        adapters = build_pipeline_adapters(config=self._config)
+        # Re-read DB-backed runtime overrides each drain so web config changes take effect on the
+        # NEXT drain without a restart. ASR overrides go through model_copy; GLM_* overrides are
+        # exported to os.environ, which the glm_llm_wrapper subprocess inherits (no env= is passed).
+        from personal_context_node import settings as _settings
+
+        overrides = _settings.read_overrides(self._config)
+        effective = self._config.model_copy(
+            update={k: v for k, v in overrides.items() if k in ("asr_mode", "asr_preset_spk_num")}
+        )
+        if "glm_model" in overrides:
+            os.environ["GLM_MODEL"] = str(overrides["glm_model"])
+        if "glm_base_url" in overrides:
+            os.environ["GLM_BASE_URL"] = str(overrides["glm_base_url"])
+        if "glm_thinking" in overrides:
+            os.environ["GLM_THINKING"] = "true" if overrides["glm_thinking"] else "false"
+        adapters = build_pipeline_adapters(config=effective)
         total_steps = 0
         total_succeeded = 0
         total_failed = 0

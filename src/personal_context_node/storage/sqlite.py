@@ -311,6 +311,12 @@ create table if not exists note_digests (
   updated_at text not null default ''
 );
 
+create table if not exists settings (
+  key text primary key,
+  value text not null,
+  updated_at text not null default ''
+);
+
 create table if not exists sync_logs (
   sync_log_id text primary key,
   source text not null,
@@ -608,6 +614,23 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
 def fetch_all(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def get_settings(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return all rows of the settings table as a key->value string map."""
+    return {row["key"]: row["value"] for row in conn.execute("select key, value from settings").fetchall()}
+
+
+def put_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Upsert a single setting, stamping updated_at."""
+    conn.execute(
+        """
+        insert into settings (key, value, updated_at)
+        values (?, ?, current_timestamp)
+        on conflict(key) do update set value = excluded.value, updated_at = current_timestamp
+        """,
+        (key, value),
+    )
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
