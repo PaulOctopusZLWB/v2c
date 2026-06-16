@@ -5,7 +5,12 @@ from pathlib import Path
 
 from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.config import AppConfig
-from personal_context_node.core.ports.llm import SessionDecision, SessionSummary
+from personal_context_node.core.ports.llm import (
+    SessionDecision,
+    SessionSummary,
+    SpeakerAnalysis,
+    SpeakerViewpoint,
+)
 from personal_context_node.obsidian_sessions import publish_session_notes
 from personal_context_node.session_summaries import summarize_session
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -64,6 +69,54 @@ class MissingEvidenceSessionLLM:
             todos=[],
             open_questions=[],
         )
+
+
+class PerSpeakerSessionLLM:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+        return SessionSummary(
+            session_id=session_id,
+            headline="带说话人分析",
+            summary="带说话人分析的摘要。",
+            topics=[],
+            decisions=[],
+            todos=[],
+            open_questions=[],
+            core_conclusions=["核心结论"],
+            per_speaker=[
+                SpeakerAnalysis(
+                    speaker_cluster_id="spk_01",
+                    viewpoints=[SpeakerViewpoint(text="观点", evidence_refs=["ev_1"])],
+                    sentiment="积极",
+                    stance="支持",
+                    latent_needs=["更快"],
+                )
+            ],
+        )
+
+
+def test_summarize_session_persists_per_speaker_and_core_conclusions(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+
+    result = summarize_session(config=config, session_id="ses_test", llm=PerSpeakerSessionLLM())
+
+    assert result.summaries_created == 1
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(conn, "select content_json from summaries")
+    finally:
+        conn.close()
+    content = json.loads(str(summaries[0]["content_json"]))
+    assert content["core_conclusions"] == ["核心结论"]
+    assert content["per_speaker"] == [
+        {
+            "speaker_cluster_id": "spk_01",
+            "viewpoints": [{"text": "观点", "evidence_refs": ["ev_1"]}],
+            "sentiment": "积极",
+            "stance": "支持",
+            "latent_needs": ["更快"],
+        }
+    ]
 
 
 def test_summarize_session_persists_schema_and_renders_note(tmp_path: Path) -> None:

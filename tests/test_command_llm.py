@@ -532,6 +532,124 @@ print(json.dumps({
         raise AssertionError("CommandLLMAdapter accepted a session decision without evidence refs")
 
 
+def test_command_llm_adapter_parses_per_speaker_and_core_conclusions(tmp_path: Path) -> None:
+    script = tmp_path / "per_speaker_llm.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "h",
+  "summary": "s",
+  "topics": [],
+  "decisions": [],
+  "todos": [],
+  "open_questions": [],
+  "core_conclusions": ["结论"],
+  "per_speaker": [
+    {
+      "speaker_cluster_id": "spk_01",
+      "viewpoints": [{"text": "观点", "evidence_refs": ["ev_1"]}],
+      "sentiment": "积极",
+      "stance": "支持",
+      "latent_needs": ["更快"]
+    }
+  ]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    summary = adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+
+    assert summary.core_conclusions == ["结论"]
+    assert len(summary.per_speaker) == 1
+    speaker = summary.per_speaker[0]
+    assert speaker.speaker_cluster_id == "spk_01"
+    assert speaker.sentiment == "积极"
+    assert speaker.stance == "支持"
+    assert speaker.latent_needs == ["更快"]
+    assert len(speaker.viewpoints) == 1
+    assert speaker.viewpoints[0].text == "观点"
+    assert speaker.viewpoints[0].evidence_refs == ["ev_1"]
+
+
+def test_command_llm_adapter_tolerates_per_speaker_dict_not_list(tmp_path: Path) -> None:
+    script = tmp_path / "per_speaker_dict.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "h",
+  "summary": "s",
+  "topics": [],
+  "decisions": [],
+  "todos": [],
+  "open_questions": [],
+  "per_speaker": {"speaker_cluster_id": "spk_01"}
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    summary = adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+
+    assert summary.per_speaker == []
+    assert summary.core_conclusions == []
+
+
+def test_command_llm_adapter_tolerates_per_speaker_non_dict_item(tmp_path: Path) -> None:
+    script = tmp_path / "per_speaker_non_dict_item.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "h",
+  "summary": "s",
+  "topics": [],
+  "decisions": [],
+  "todos": [],
+  "open_questions": [],
+  "per_speaker": ["not-a-dict"]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    summary = adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+
+    assert summary.per_speaker == []
+
+
+def test_command_llm_adapter_rejects_per_speaker_dict_missing_cluster_id(tmp_path: Path) -> None:
+    script = tmp_path / "per_speaker_missing_cluster.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "h",
+  "summary": "s",
+  "topics": [],
+  "decisions": [],
+  "todos": [],
+  "open_questions": [],
+  "per_speaker": [{"viewpoints": [], "sentiment": "积极"}]
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    try:
+        adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+    except TerminalPortError as exc:
+        assert "speaker_cluster_id" in str(exc)
+    else:
+        raise AssertionError("CommandLLMAdapter accepted a per_speaker item without speaker_cluster_id")
+
+
 def test_command_llm_adapter_rejects_blank_session_todo_evidence_refs(tmp_path: Path) -> None:
     script = tmp_path / "blank_session_todo_evidence.py"
     script.write_text(
