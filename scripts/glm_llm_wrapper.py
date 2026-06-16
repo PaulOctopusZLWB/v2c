@@ -49,8 +49,14 @@ def build_daily_messages(payload: dict) -> list[dict]:
     segments = payload.get("transcript_segments", [])
     ids = sorted(_evidence_ids(segments))
     system = (
-        "你是个人上下文助手。只依据给定转写文本输出 JSON，禁止编造证据。"
-        "claim_type 只能取: fact, preference, decision, commitment, requirement, observation, todo, relationship。"
+        "你是个人上下文助手。只依据给定转写文本输出 JSON，禁止编造证据。\n"
+        "语言要求：所有文本字段（summary、todos、facts、inferences 内文本、memory_candidates 的 candidate_claim）"
+        "一律使用简体中文；即使转写内容为英文，也必须用简体中文表述。JSON 的键名(key)保持英文原样，不要翻译键名。\n"
+        "claim_type 只能取: fact, preference, decision, commitment, requirement, observation, todo, relationship；"
+        "请根据语义选择最贴切的类型，不要一律用 observation。\n"
+        "质量要求：每条 memory_candidate 只表达一个不可再拆分的观点(原子化)，避免用「并且/同时」把多件事合并；"
+        "candidate_claim 写成可独立审阅的完整陈述句，使审阅者无需回看转写即可判断接受或拒绝；"
+        "confidence 依据证据强度赋值(明确陈述取高值，推测取低值)；去除语义重复的候选。\n"
         "memory_candidates 的 evidence_source_ids 只能引用下列 evidence_id 之一，且必须非空: "
         + ", ".join(ids)
     )
@@ -118,7 +124,11 @@ def build_session_messages(payload: dict) -> list[dict]:
     segments = payload.get("transcript_segments", [])
     ids = sorted(_evidence_ids(segments))
     system = (
-        "你是会话纪要助手。只依据转写输出 JSON。decisions/todos 的 evidence_refs 只能引用下列 evidence_id 且非空: "
+        "你是会话纪要助手。只依据转写输出 JSON。\n"
+        "语言要求：所有文本字段（headline、summary、topics、decisions 内 text、todos 内 text、open_questions）"
+        "一律使用简体中文；即使转写为英文也用简体中文表述。JSON 键名保持英文不变。\n"
+        "质量要求：headline 为一句中文要点；每条 decision/todo 只表达一个原子化、可独立审阅的事项，text 写成完整陈述句。\n"
+        "decisions/todos 的 evidence_refs 只能引用下列 evidence_id 且非空: "
         + ", ".join(ids)
     )
     user = (
