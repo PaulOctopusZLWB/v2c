@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sqlite3
+import wave
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -257,6 +260,52 @@ def _absolute_time(recorded_at: str, offset_ms: int) -> str:
     return (datetime.fromisoformat(recorded_at) + timedelta(milliseconds=offset_ms)).isoformat()
 
 
+# Segment ids are minted as "seg_<hex>" (see _segment_id / diarized inserts). The cache
+# filename below is derived from the URL-supplied segment_id, so we only ever materialize a
+# slice for an id matching this safe pattern — defense-in-depth against path traversal even
+# though the DB has already confirmed an active segment with this exact id.
+_SAFE_SEGMENT_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _is_safe_segment_id(segment_id: str) -> bool:
+    return bool(_SAFE_SEGMENT_ID.fullmatch(segment_id)) and os.sep not in segment_id and ".." not in segment_id
+
+
+def _slice_wav(source: Path, dest: Path, start_ms: int, end_ms: int) -> Path | None:
+    """Slice [start_ms, end_ms] out of a PCM WAV into a new standalone WAV at ``dest``.
+
+    Uses only stdlib ``wave``. Reads ONLY the requested frame range (never the whole,
+    possibly hundreds-of-MB, source into memory). Writes to a temp path then os.replace()s
+    into place so a concurrent reader never observes a half-written file (atomic). Returns
+    None on any wave/IO error (e.g. a non-PCM/compressed source) so the caller can yield a
+    graceful 404 instead of a 500.
+    """
+    try:
+        with wave.open(str(source), "rb") as src:
+            nchannels = src.getnchannels()
+            sampwidth = src.getsampwidth()
+            framerate = src.getframerate()
+            nframes = src.getnframes()
+            start_frame = max(0, min(start_ms * framerate // 1000, nframes))
+            end_frame = max(start_frame, min(end_ms * framerate // 1000, nframes))
+            src.setpos(start_frame)
+            frames = src.readframes(end_frame - start_frame)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(f"{dest.name}.{uuid4().hex}.tmp")
+        try:
+            with wave.open(str(tmp), "wb") as out:
+                out.setnchannels(nchannels)
+                out.setsampwidth(sampwidth)
+                out.setframerate(framerate)
+                out.writeframes(frames)
+            os.replace(tmp, dest)
+        finally:
+            tmp.unlink(missing_ok=True)
+    except (wave.Error, EOFError, OSError):
+        return None
+    return dest
+
+
 def segment_audio_path(*, config: AppConfig, segment_id: str) -> Path | None:
     conn = connect(config.database_path)
     try:
@@ -271,12 +320,38 @@ def segment_audio_path(*, config: AppConfig, segment_id: str) -> Path | None:
             """,
             (segment_id,),
         )
+        if rows and rows[0]["local_chunk_path"]:
+            # local_chunk_path is stored as the already-rooted work path (work_audio_dir/...),
+            # exactly as transcribe_pending_chunks reads it — do NOT re-prefix config.data_dir
+            # (that would double a relative data_dir; see the §32 note in transcribe_pending_chunks).
+            chunk_path = Path(str(rows[0]["local_chunk_path"]))
+            if chunk_path.exists():
+                return chunk_path
+
+        # Diarize mode is whole-file and writes NO audio_chunks rows; its segments carry a
+        # synthetic chunk_id with no matching chunk. Fall back to slicing the source raw wav
+        # over the segment's absolute [start_ms, end_ms] window.
+        fallback = fetch_all(
+            conn,
+            """
+            select ts.start_ms, ts.end_ms, af.local_raw_path
+            from transcript_segments ts
+            join audio_files af on af.audio_file_id = ts.audio_file_id
+            where ts.segment_id = ? and ts.is_active = 1
+            """,
+            (segment_id,),
+        )
     finally:
         conn.close()
-    if not rows or not rows[0]["local_chunk_path"]:
+
+    if not fallback or not fallback[0]["local_raw_path"]:
         return None
-    # local_chunk_path is stored as the already-rooted work path (work_audio_dir/...),
-    # exactly as transcribe_pending_chunks reads it — do NOT re-prefix config.data_dir
-    # (that would double a relative data_dir; see the §32 note in transcribe_pending_chunks).
-    path = Path(str(rows[0]["local_chunk_path"]))
-    return path if path.exists() else None
+    if not _is_safe_segment_id(segment_id):
+        return None
+    source = Path(str(fallback[0]["local_raw_path"]))
+    if not source.exists():
+        return None
+    cache_path = config.data_dir / "audio" / "segments" / f"{segment_id}.wav"
+    if cache_path.exists():
+        return cache_path  # idempotent reuse — no re-slice
+    return _slice_wav(source, cache_path, int(fallback[0]["start_ms"]), int(fallback[0]["end_ms"]))
