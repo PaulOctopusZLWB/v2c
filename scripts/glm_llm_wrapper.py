@@ -46,19 +46,28 @@ def _extract_json(content: str) -> dict[str, object]:
     close = text.find("</think>")
     if text.lstrip().startswith("<think>") and close != -1:
         text = text[close + len("</think>"):]
-    start = text.find("{")
-    if start == -1:
-        raise ValueError("no JSON object found in model content")
+    # Collect every TOP-LEVEL balanced { … } span, then return the LAST one that parses. The real
+    # answer follows the reasoning, and the reasoning itself may contain an example JSON object —
+    # so the first balanced span can be the example, not the answer.
+    spans: list[str] = []
     depth = 0
-    for i in range(start, len(text)):
-        ch = text[i]
+    start = -1
+    for i, ch in enumerate(text):
         if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
             if depth == 0:
-                return json.loads(text[start:i + 1])
-    raise ValueError("no balanced JSON object found in model content")
+                start = i
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start != -1:
+                spans.append(text[start:i + 1])
+                start = -1
+    for span in reversed(spans):
+        try:
+            return json.loads(span)
+        except ValueError:
+            continue
+    raise ValueError("no JSON object found in model content")
 
 
 def _post_json(

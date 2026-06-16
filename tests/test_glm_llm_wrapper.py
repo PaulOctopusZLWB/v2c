@@ -140,6 +140,13 @@ def test_extract_json_finds_outermost_balanced_object() -> None:
     assert glm._extract_json('think…{"a":{"b":2},"c":3} trailing') == {"a": {"b": 2}, "c": 3}
 
 
+def test_extract_json_returns_last_object_when_reasoning_has_example() -> None:
+    # A thinking model may embed an EXAMPLE json object in its reasoning before the real answer.
+    # The answer is the LAST top-level object, so grabbing the FIRST '{' would return the example.
+    content = '推理：参考格式如 {"summary": "示例"}。\n最终答案：\n{"summary": "真实", "per_speaker": []}'
+    assert glm._extract_json(content) == {"summary": "真实", "per_speaker": []}
+
+
 def test_extract_json_raises_on_non_json() -> None:
     with pytest.raises(Exception):
         glm._extract_json("just some reasoning, no object here")
