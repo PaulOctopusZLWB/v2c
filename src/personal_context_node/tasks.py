@@ -34,6 +34,7 @@ class RetryTaskResult:
 
 ALLOWED_TASK_TYPES = {
     "vad",
+    "transcribe_diarize",
     "asr",
     "session_derive",
     "summarize_session",

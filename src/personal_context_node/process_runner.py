@@ -25,7 +25,7 @@ from personal_context_node.sessions import derive_sessions_for_day
 from personal_context_node.speaker_review import sync_speaker_review
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import claim_next_task, enqueue_task_in_conn, fail_task, reclaim_expired_tasks, start_task
-from personal_context_node.transcription import transcribe_pending_chunks
+from personal_context_node.transcription import transcribe_audio_file_diarized, transcribe_pending_chunks
 
 
 @dataclass(frozen=True)
@@ -46,12 +46,17 @@ class PipelineEdge:
 PIPELINE = (
     PipelineEdge("vad", "asr", "audio_chunk", lambda conn, config, target_id: _chunk_ids_for_audio_file_in_conn(conn, audio_file_id=target_id)),
     PipelineEdge("asr", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_in_conn(conn, chunk_id=target_id)),
+    # Diarize-mode sibling of the asr->session_derive edge: the whole-FILE transcribe_diarize
+    # stage fans into session_derive once every same-day file has settled (round-7 invariant,
+    # per audio_file). Only the active mode's tasks exist at runtime, so coexistence is safe.
+    PipelineEdge("transcribe_diarize", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=target_id)),
     PipelineEdge("session_derive", "summarize_session", "session", lambda conn, config, target_id: _session_ids_for_day_in_conn(conn, day=target_id)),
     PipelineEdge("summarize_session", "daily_generate", "date_key", lambda conn, config, target_id: _ready_daily_generate_dates_in_conn(conn, session_id=target_id)),
     PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
 )
 PROCESS_TASK_ORDER = (
     "vad",
+    "transcribe_diarize",
     "session_derive",
     "summarize_session",
     "daily_generate",
@@ -94,6 +99,8 @@ def process_once(
             )
         elif task.task_type == "asr":
             transcribe_pending_chunks(config=config, asr=asr, chunk_id=task.target_id)
+        elif task.task_type == "transcribe_diarize":
+            transcribe_audio_file_diarized(config=config, asr=asr, audio_file_id=task.target_id)
         elif task.task_type == "session_derive":
             derive_sessions_for_day(config=config, day=task.target_id, session_gap_minutes=config.session_gap_minutes)
         elif task.task_type == "summarize_session":
@@ -426,6 +433,49 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
             )
           )
         """,
+        (date_key,),
+    )
+    if pending:
+        return []
+    return [date_key]
+
+
+def _ready_session_derive_dates_for_file(*, config: AppConfig, audio_file_id: str) -> list[str]:
+    conn = connect(config.database_path)
+    try:
+        return _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=audio_file_id)
+    finally:
+        conn.close()
+
+
+def _ready_session_derive_dates_for_file_in_conn(conn: sqlite3.Connection, *, audio_file_id: str) -> list[str]:
+    rows = fetch_all(
+        conn,
+        "select substr(recorded_at,1,10) as date_key from audio_files where audio_file_id = ?",
+        (audio_file_id,),
+    )
+    if not rows:
+        return []
+    date_key = str(rows[0]["date_key"])
+    # The day is ready for session_derive only when EVERY audio file recorded that day has a
+    # transcribe_diarize task that is settled (succeeded, or terminally/retry-exhausted failed).
+    # A file with no task yet, or still pending/running/retryable-with-retries, blocks the day
+    # (the round-7 whole-day invariant, re-expressed per audio_file).
+    pending = fetch_all(
+        conn,
+        """
+        select af.audio_file_id
+        from audio_files af
+        left join tasks t
+          on t.task_type = 'transcribe_diarize' and t.target_type = 'audio_file'
+             and t.target_id = af.audio_file_id
+        where substr(af.recorded_at,1,10) = ?
+          and (
+            t.status is null
+            or (t.status not in ('succeeded','failed_terminal')
+                and not (t.status = 'failed_retryable' and t.retry_count >= t.max_retries))
+          )
+    """,
         (date_key,),
     )
     if pending:

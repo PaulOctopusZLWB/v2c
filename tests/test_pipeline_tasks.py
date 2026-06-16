@@ -33,6 +33,9 @@ def test_pipeline_declares_all_task_edges() -> None:
     assert edges == [
         ("vad", "asr", "audio_chunk"),
         ("asr", "session_derive", "date_key"),
+        # Diarize-mode sibling: the whole-FILE transcribe_diarize stage fans into session_derive
+        # (round-7 invariant per audio_file). Only the active mode's tasks exist at runtime.
+        ("transcribe_diarize", "session_derive", "date_key"),
         ("session_derive", "summarize_session", "session"),
         ("summarize_session", "daily_generate", "date_key"),
         ("daily_generate", "obsidian_publish", "date_key"),
