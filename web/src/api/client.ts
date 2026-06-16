@@ -1,4 +1,12 @@
-import type { DailyLlmResult, DayStatusRow, Health, Person, ReviewStatus, Settings, SpeakerCluster, TaskRow, TranscriptSession } from "./types";
+import type { DailyLlmResult, DayStatusRow, EmbeddingStatus, Health, LabelSegment, Person, ReclusterResult, ReviewStatus, Settings, SpeakerCluster, TaskRow, TranscriptSession } from "./types";
+
+/** Build a `?a=1&b=2` query string, dropping null/undefined values. */
+function query(params: Record<string, string | number | null | undefined>): string {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
+  return parts.length ? `?${parts.join("&")}` : "";
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
@@ -41,6 +49,15 @@ export const api = {
     request<{ clusters: SpeakerCluster[] }>(`/api/speakers/clusters?day=${encodeURIComponent(day)}`),
   assignPersonBulk: (speakers: string[], person_id: string) =>
     request<{ assigned: number }>("/api/speakers/assign-person-bulk", { method: "POST", body: JSON.stringify({ speakers, person_id }) }),
+  // voiceprint (CAM++) re-clustering: extract embeddings, label anchors, propagate by similarity
+  embeddingStatus: (scope: { session_id?: string | null; day?: string | null }) =>
+    request<EmbeddingStatus>(`/api/speakers/embedding-status${query(scope)}`),
+  extractEmbeddings: (scope: { session_id?: string | null; day?: string | null }) =>
+    request<{ started: boolean }>("/api/speakers/extract-embeddings", { method: "POST", body: JSON.stringify(scope) }),
+  recluster: (body: { anchors: Record<string, string>; threshold: number; session_id?: string | null; day?: string | null }) =>
+    request<ReclusterResult>("/api/speakers/recluster", { method: "POST", body: JSON.stringify(body) }),
+  speakerSegments: (params: { session_id?: string | null; speaker?: string | null; limit?: number | null }) =>
+    request<{ segments: LabelSegment[] }>(`/api/speakers/segments${query(params)}`),
   // settings (model/runtime overrides; take effect on the next run)
   settings: () => request<Settings>("/api/settings"),
   updateSettings: (body: Partial<Settings>) =>

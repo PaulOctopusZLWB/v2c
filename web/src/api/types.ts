@@ -115,6 +115,31 @@ export interface SpeakerCluster {
   sample_text: string;
 }
 
+/** Embedding (voiceprint) extraction coverage for a session/day. */
+export interface EmbeddingStatus {
+  total: number;
+  embedded: number;
+  pending: number;
+}
+
+/** Outcome of a CAM++ similarity re-cluster pass driven by labeled anchors. */
+export interface ReclusterResult {
+  assigned: number;
+  unassigned: number;
+  total: number;
+  per_person: Record<string, number>;
+  threshold: number;
+}
+
+/** A candidate segment to label as an anchor (voiceprint flow). */
+export interface LabelSegment {
+  segment_id: string;
+  text: string;
+  speaker: string;
+  absolute_start_at: string | null;
+  has_embedding: boolean;
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;
