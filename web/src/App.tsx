@@ -3,6 +3,8 @@ import { api } from "./api/client";
 import { PipelineRail } from "./components/PipelineRail";
 import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { ClusterPanel } from "./components/ClusterPanel";
 import { TaskList } from "./components/TaskList";
 import { Icon } from "./components/Icon";
 import { Toasts, useToasts } from "./components/Toasts";
@@ -47,6 +49,9 @@ export function App() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // The day the 声纹聚类 panel inspects: defaults to the currently-selected day, but the user
+  // can pick any day via a date input when no day is selected from the rail.
+  const [clusterDay, setClusterDay] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [session, setSession] = useState<TranscriptSession | null>(null);
   const [persons, setPersons] = useState<Person[]>([]);
@@ -150,6 +155,7 @@ export function App() {
 
   async function selectDay(day: string) {
     setSelectedDay(day);
+    setClusterDay(day); // keep the 声纹聚类 panel in sync with the rail selection
     setSelectedSessionId(null);
     setSession(null);
     setHighlightedSegmentId(null);
@@ -366,6 +372,34 @@ export function App() {
         </div>
         <div id="panel-llm">
           {llm ? <LlmResultPanel result={llm} onHighlightEvidence={highlightEvidence} /> : null}
+        </div>
+        <div id="panel-config">
+          {bootstrapped ? (
+          <>
+          <SettingsPanel />
+          <section className="cluster-day card">
+            <div className="section-title">{t.cluster.title}</div>
+            <label className="settings-field">
+              <span>{t.cluster.day}</span>
+              <input
+                type="date"
+                aria-label={t.cluster.day}
+                value={selectedDay ?? clusterDay}
+                onChange={(e) => setClusterDay(e.target.value)}
+              />
+            </label>
+          </section>
+          {(selectedDay ?? clusterDay) ? (
+            <ClusterPanel
+              key={selectedDay ?? clusterDay}
+              day={selectedDay ?? clusterDay}
+              persons={persons ?? []}
+              onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
+              onPlaybackError={(message) => push("音频播放失败", message)}
+            />
+          ) : null}
+          </>
+          ) : null}
         </div>
       </aside>
 
