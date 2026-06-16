@@ -88,6 +88,29 @@ export interface ImportSource {
   audio_count: number;
 }
 
+export type AsrMode = "chunk" | "diarize";
+
+/** Web-settable model/runtime overrides. Effective current values (overrides merged over
+ *  env/config defaults). `GLM_API_KEY` is intentionally NOT here — it stays env-managed. */
+export interface Settings {
+  asr_mode: AsrMode;
+  asr_preset_spk_num: number | null;
+  glm_model: string;
+  glm_base_url: string;
+  glm_thinking: boolean;
+}
+
+/** One diarization cluster (`spk_NN`) for a day, with its current person mapping + a sample. */
+export interface SpeakerCluster {
+  speaker_cluster_id: string;
+  person_id: string | null;
+  person_label: string | null;
+  segment_count: number;
+  total_speech_ms: number;
+  sample_segment_id: string;
+  sample_text: string;
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;

@@ -1,4 +1,4 @@
-import type { DailyLlmResult, DayStatusRow, Health, Person, ReviewStatus, TaskRow, TranscriptSession } from "./types";
+import type { DailyLlmResult, DayStatusRow, Health, Person, ReviewStatus, Settings, SpeakerCluster, TaskRow, TranscriptSession } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
@@ -35,6 +35,14 @@ export const api = {
     request(`/api/speakers/${speaker}/assign-person`, { method: "POST", body: JSON.stringify({ person_id }) }),
   overridePerson: (segmentId: string, person_id: string) =>
     request(`/api/transcripts/segments/${segmentId}/person-override`, { method: "POST", body: JSON.stringify({ person_id }) }),
+  speakerClusters: (day: string) =>
+    request<{ clusters: SpeakerCluster[] }>(`/api/speakers/clusters?day=${encodeURIComponent(day)}`),
+  assignPersonBulk: (speakers: string[], person_id: string) =>
+    request<{ assigned: number }>("/api/speakers/assign-person-bulk", { method: "POST", body: JSON.stringify({ speakers, person_id }) }),
+  // settings (model/runtime overrides; take effect on the next run)
+  settings: () => request<Settings>("/api/settings"),
+  updateSettings: (body: Partial<Settings>) =>
+    request<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   // read-only llm
   dailyLlm: (day: string) => request<DailyLlmResult>(`/api/llm/days/${day}`),
   audioUrl: (segmentId: string) => `/api/audio/segments/${segmentId}`,

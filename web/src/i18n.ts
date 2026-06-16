@@ -10,6 +10,32 @@ export const t = {
   speaker: { speaker: "发言人", assign: "指派发言人", newPerson: "新建人物", reassign: "改人" },
   viewpoint: { title: "观点", readOnly: "只读", confirmInObsidian: "确认/拒绝请在 Obsidian 完成", evidence: "证据", none: "暂无观点" },
   gate: { on: "仅消费已验收转写", off: "消费全部转写" },
+  settings: {
+    title: "模型设置",
+    asrMode: "ASR 模式",
+    asrChunk: "一次性",
+    asrDiarize: "声纹",
+    presetSpkNum: "预设人数",
+    presetSpkNumAuto: "留空自动",
+    glmModel: "LLM 模型",
+    glmBaseUrl: "GLM Base URL",
+    glmThinking: "深度思考",
+    save: "保存",
+    saving: "正在保存…",
+    nextRunHint: "下次运行生效"
+  },
+  cluster: {
+    title: "声纹聚类",
+    day: "日期",
+    unassigned: "未分配",
+    segments: "段",
+    listen: "听样本",
+    merge: "合并/指派为同一人",
+    merging: "正在指派…",
+    newPerson: "新建人物",
+    pickPerson: "选择人物",
+    empty: "当天暂无聚类"
+  },
   empty: {
     firstRun: "先在「设备」接入录音器并导入",
     firstRunHint: "导入后会自动转写，转写完成即可在此审核。",

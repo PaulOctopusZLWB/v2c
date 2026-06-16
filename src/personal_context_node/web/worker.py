@@ -46,7 +46,16 @@ class PipelineWorker:
         """Build adapters, loop drain_process_queue in batches of max_steps until the queue is
         empty (status 'complete') or a stop is requested, then close any resident adapter.
         Shared by every drain entry point so the funasr_server subprocess is always released."""
-        adapters = build_pipeline_adapters(config=self._config)
+        # Re-read DB-backed runtime overrides each drain so web config changes take effect on the
+        # NEXT drain without a restart. ASR overrides go through model_copy; GLM_* overrides are
+        # exported to os.environ, which the glm_llm_wrapper subprocess inherits (no env= is passed).
+        from personal_context_node import settings as _settings
+
+        overrides = _settings.read_overrides(self._config)
+        effective = _settings.effective_config(self._config)
+        # apply_glm_env reverts a cleared override to the launch baseline (not the last-applied value).
+        _settings.apply_glm_env(overrides)
+        adapters = build_pipeline_adapters(config=effective)
         total_steps = 0
         total_succeeded = 0
         total_failed = 0
@@ -113,13 +122,17 @@ class PipelineWorker:
         self._last_result = self._drain_to_completion(max_steps=max_steps)
 
     def _import_then_drain(self, *, source_dir: str) -> None:
+        from personal_context_node import settings as _settings
+
         def _cb(done: int, total: int, name: str) -> None:
             self._import = {"active": True, "done": done, "total": total, "current": name}
 
         try:
             try:
+                # Use the effective config so a web asr_mode=diarize override routes new imports to
+                # transcribe_diarize (ingest picks the task_type from config.asr_mode).
                 import_audio_files(
-                    config=self._config, source_dir=Path(source_dir), progress=_cb,
+                    config=_settings.effective_config(self._config), source_dir=Path(source_dir), progress=_cb,
                 )
             finally:
                 # Mark import phase inactive (even on error) before draining; the SSE
