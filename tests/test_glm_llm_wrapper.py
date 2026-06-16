@@ -32,6 +32,30 @@ def test_call_glm_extracts_message_content_json() -> None:
     assert captured["body"]["temperature"] == 0.2
 
 
+def test_call_glm_default_timeout_is_generous_for_self_hosted() -> None:
+    # A self-hosted glm-5.1 summarizing a big session takes minutes (measured ~380s on a
+    # ~41k-token prompt); the default HTTP timeout must be generous so it doesn't time out.
+    captured = {}
+
+    def fake_post(url, headers, body, timeout=None):
+        captured["timeout"] = timeout
+        return {"choices": [{"message": {"content": '{"summary": "ok"}'}}]}
+
+    glm.call_glm({"messages": []}, api_key="k", model="glm-5.1", post=fake_post)
+    assert captured["timeout"] >= 600
+
+
+def test_call_glm_timeout_is_configurable() -> None:
+    captured = {}
+
+    def fake_post(url, headers, body, timeout=None):
+        captured["timeout"] = timeout
+        return {"choices": [{"message": {"content": '{"summary": "ok"}'}}]}
+
+    glm.call_glm({"messages": []}, api_key="k", model="glm-5.1", post=fake_post, timeout=1200)
+    assert captured["timeout"] == 1200
+
+
 def test_call_glm_uses_configurable_base_url() -> None:
     captured = {}
 

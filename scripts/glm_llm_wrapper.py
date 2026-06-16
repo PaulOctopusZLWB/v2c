@@ -15,8 +15,10 @@ DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 # Kept for back-compat (it is the default base + the chat/completions path).
 GLM_ENDPOINT = f"{DEFAULT_BASE_URL}/chat/completions"
 # urlopen timeouts: thinking folds long reasoning into the response, so it needs much longer.
-TIMEOUT_DEFAULT = 120
-TIMEOUT_THINKING = 600
+# Generous defaults: a self-hosted glm-5.1 summarizing a big diarized session takes minutes
+# (measured ~380s on a ~41k-token per-speaker prompt). Override with GLM_TIMEOUT for bigger ones.
+TIMEOUT_DEFAULT = 600
+TIMEOUT_THINKING = 900
 ALLOWED_CLAIM_TYPES = {
     "fact", "preference", "decision", "commitment", "requirement", "observation", "todo", "relationship",
 }
@@ -77,16 +79,16 @@ def call_glm(
     post=_post_json,
     base_url: str | None = None,
     thinking: bool = False,
+    timeout: int | None = None,
 ) -> dict[str, object]:
     base = (base_url or DEFAULT_BASE_URL).rstrip("/")
     url = f"{base}/chat/completions"
     body = {"model": model, "temperature": 0.2, "response_format": {"type": "json_object"}, **payload}
-    timeout = TIMEOUT_DEFAULT
+    effective_timeout = timeout if timeout is not None else (TIMEOUT_THINKING if thinking else TIMEOUT_DEFAULT)
     if thinking:
         body["chat_template_kwargs"] = {"enable_thinking": True}
-        timeout = TIMEOUT_THINKING
     try:
-        data = post(url, {"Authorization": f"Bearer {api_key}"}, body, timeout=timeout)
+        data = post(url, {"Authorization": f"Bearer {api_key}"}, body, timeout=effective_timeout)
     except TypeError:
         # Tests inject a 3-arg post(url, headers, body); fall back to omitting the timeout kwarg.
         data = post(url, {"Authorization": f"Bearer {api_key}"}, body)
@@ -300,11 +302,14 @@ def main() -> int:
     model = os.environ.get("GLM_MODEL", "glm-4-flash")
     base_url = os.environ.get("GLM_BASE_URL", DEFAULT_BASE_URL)
     thinking = _is_thinking(os.environ.get("GLM_THINKING"))
+    timeout_env = os.environ.get("GLM_TIMEOUT")
+    timeout = int(timeout_env) if timeout_env else None
     try:
         payload = json.loads(sys.stdin.read())
         segments = payload.get("transcript_segments", [])
         post = _load_transport()
-        kwargs = {"api_key": api_key, "model": model, "post": post, "base_url": base_url, "thinking": thinking}
+        kwargs = {"api_key": api_key, "model": model, "post": post, "base_url": base_url,
+                  "thinking": thinking, "timeout": timeout}
         if payload.get("task") == "session_summary":
             raw = call_glm({"messages": build_session_messages(payload)}, **kwargs)
             out = normalize_session_summary(raw, segments)
