@@ -6,6 +6,10 @@ export interface TranscriptSegment {
   speaker: string;
   start_ms: number;
   end_ms: number;
+  // Absolute wall-clock timeline (a session can fan in many files, so start_ms is per-file
+  // and not comparable across them). May be null/"" for legacy chunk-mode rows.
+  absolute_start_at: string | null;
+  absolute_end_at: string | null;
   review_status: ReviewStatus;
   note: string | null;
 }

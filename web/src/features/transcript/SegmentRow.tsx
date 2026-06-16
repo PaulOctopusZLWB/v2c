@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Person, ReviewStatus, TranscriptSegment } from "../../api/types";
 import { t } from "../../i18n";
-import { clock, reviewStatusZh } from "../../lib/format";
+import { clock, clockOfDay, reviewStatusZh } from "../../lib/format";
 import { speakerColor } from "../../lib/speakerColors";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
@@ -74,7 +74,7 @@ export function SegmentRow({
         <span className="chip" style={{ background: speakerColor(segment.speaker) }}>
           <Icon name="person" /> {segment.speaker}
         </span>
-        <time className="num dim">{clock(segment.start_ms)}</time>
+        <time className="num dim">{clockOfDay(segment.absolute_start_at) || clock(segment.start_ms)}</time>
         <button className="icon-btn ghost" aria-label="播放" title="播放" onClick={handlePlay}>
           <Icon name="play" />
         </button>

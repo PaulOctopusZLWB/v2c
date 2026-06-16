@@ -51,11 +51,15 @@ def reviewed_segments_for_session(*, config: AppConfig, session_id: str) -> list
             conn,
             """
             select ts.segment_id, ts.text, ts.speaker, ts.start_ms, ts.end_ms,
+                   ts.absolute_start_at, ts.absolute_end_at,
                    coalesce(r.status, 'pending_review') as review_status, r.note
             from transcript_segments ts
             left join transcript_segment_reviews r on r.segment_id = ts.segment_id
             where ts.session_id = ? and ts.is_active = 1
-            order by ts.start_ms, ts.segment_id
+            -- A whole-day session fans in many audio files; start_ms is per-file, so it would
+            -- interleave files and show 00:00 for each file's opening segments. Order by the
+            -- absolute wall-clock timeline; start_ms is a tiebreak for any untimed (chunk-mode) rows.
+            order by ts.absolute_start_at, ts.start_ms, ts.segment_id
             """,
             (session_id,),
         )

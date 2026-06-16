@@ -13,6 +13,14 @@ export function timeOfDay(iso: string | null | undefined): string {
   return m ? `${m[1]}:${m[2]}` : "";
 }
 
+/** "14:32:07" (with seconds) from an ISO timestamp; "" if unparseable. Used for per-utterance
+ *  rows where seconds-level granularity matters. */
+export function clockOfDay(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const m = /T(\d{2}):(\d{2}):(\d{2})/.exec(iso);
+  return m ? `${m[1]}:${m[2]}:${m[3]}` : "";
+}
+
 const TASK_STATUS_ZH: Record<string, string> = {
   pending: "待处理",
   pending_asr: "待转写",
@@ -57,13 +65,15 @@ export function sessionListLabel(s: { started_at: string; segment_count: number 
   return `${t || "会话"} · ${s.segment_count}段`;
 }
 
-/** Open-session header derived from its segments: "14:32–14:48 · 12段 · 2人". */
+/** Open-session header derived from its segments: "14:32–14:48 · 12段 · 2人".
+ *  Prefer the absolute wall-clock span (segments fan in across files); fall back to per-file
+ *  mm:ss for legacy chunk-mode rows that carry no absolute timestamp. */
 export function sessionHeader(segments: TranscriptSegment[]): { time: string; segs: number; speakers: number } {
   const segs = segments.length;
   const speakers = new Set(segments.map((x) => x.speaker)).size;
   if (segs === 0) return { time: "", segs: 0, speakers: 0 };
-  const first = clock(segments[0].start_ms);
-  const last = clock(segments[segs - 1].end_ms);
+  const first = timeOfDay(segments[0].absolute_start_at) || clock(segments[0].start_ms);
+  const last = timeOfDay(segments[segs - 1].absolute_end_at) || clock(segments[segs - 1].end_ms);
   return { time: `${first}–${last}`, segs, speakers };
 }
 
