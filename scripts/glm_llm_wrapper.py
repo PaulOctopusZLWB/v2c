@@ -126,6 +126,20 @@ def _evidence_ids(segments: list[dict]) -> set[str]:
     return {str(s["evidence_id"]) for s in segments if s.get("evidence_id")}
 
 
+def _cap_segments(segments: list[dict]) -> list[dict]:
+    """Bound the prompt for very large (multi-file) sessions/days: if there are more than
+    GLM_MAX_SEGMENTS (default 400) segments, evenly sample down to that many so the prompt stays
+    well within context and fast on any model. Even sampling preserves whole-session coverage."""
+    try:
+        cap = int(os.environ.get("GLM_MAX_SEGMENTS", "400"))
+    except (TypeError, ValueError):
+        cap = 400
+    if cap <= 0 or len(segments) <= cap:
+        return segments
+    step = len(segments) / cap
+    return [segments[int(i * step)] for i in range(cap)]
+
+
 def _transcript_text(segments: list[dict]) -> str:
     lines = []
     for s in segments:
@@ -157,7 +171,7 @@ def _transcript_by_speaker(segments: list[dict]) -> str:
 
 
 def build_daily_messages(payload: dict) -> list[dict]:
-    segments = payload.get("transcript_segments", [])
+    segments = _cap_segments(payload.get("transcript_segments", []))
     ids = sorted(_evidence_ids(segments))
     system = (
         "你是个人上下文助手。只依据给定转写文本输出 JSON，禁止编造证据。\n"
@@ -232,7 +246,7 @@ def _normalize_inferences(items: list) -> list:
 
 
 def build_session_messages(payload: dict) -> list[dict]:
-    segments = payload.get("transcript_segments", [])
+    segments = _cap_segments(payload.get("transcript_segments", []))
     ids = sorted(_evidence_ids(segments))
     labels = _speaker_labels(segments)
     system = (

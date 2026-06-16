@@ -202,6 +202,29 @@ def test_extract_json_raises_on_non_json() -> None:
         glm._extract_json("just some reasoning, no object here")
 
 
+def test_cap_segments_bounds_large_sessions(monkeypatch) -> None:
+    # Multi-file sessions can have thousands of segments (a ~200k-token prompt). The wrapper must
+    # evenly sample down to GLM_MAX_SEGMENTS so the prompt stays bounded and fast on any model.
+    monkeypatch.delenv("GLM_MAX_SEGMENTS", raising=False)
+    segs = [{"evidence_id": f"ev_{i}", "speaker": "spk_01", "text": str(i)} for i in range(2000)]
+    capped = glm._cap_segments(segs)
+    assert len(capped) == 400
+    assert capped[0]["evidence_id"] == "ev_0"  # even sampling keeps whole-session coverage
+    assert glm._cap_segments(segs[:50]) == segs[:50]  # <= cap: unchanged
+
+    monkeypatch.setenv("GLM_MAX_SEGMENTS", "10")
+    assert len(glm._cap_segments(segs)) == 10  # configurable
+
+
+def test_build_session_messages_caps_huge_transcript(monkeypatch) -> None:
+    monkeypatch.setenv("GLM_MAX_SEGMENTS", "5")
+    segs = [{"segment_id": f"s{i}", "evidence_id": f"ev_{i}", "speaker": "spk_01", "text": f"句子{i}"} for i in range(500)]
+    msgs = glm.build_session_messages({"session_id": "x", "transcript_segments": segs})
+    # only the 5 sampled segments' evidence ids reach the prompt (not all 500)
+    transcript = msgs[1]["content"]
+    assert transcript.count("[spk_01]") == 5
+
+
 def test_normalize_daily_context_constrains_claim_type_and_evidence() -> None:
     segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "数据不出本机。"}]
     raw = {
