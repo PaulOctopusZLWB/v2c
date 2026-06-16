@@ -63,6 +63,95 @@ def test_build_asr_funasr_server_returns_persistent_adapter() -> None:
     assert adapter.model_version == "v9"
 
 
+def test_build_asr_diarize_mode_returns_persistent_adapter_with_full_argv() -> None:
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_mode="diarize", asr_command=None, mock_text=None,
+        asr_device="mps", language="zh",
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    # Pin the WHOLE diarize argv: dropping/mis-wiring any flag silently breaks the resident
+    # diarization server (wrong model/punc/spk model, wrong device, wrong language).
+    assert adapter.command == [
+        "python3", "scripts/funasr_paraformer_diarize_wrapper.py", "--server",
+        "--model", "paraformer-zh",
+        "--vad-model", "fsmn-vad",
+        "--punc-model", "ct-punc",
+        "--spk-model", "cam++",
+        "--spk-mode", "punc_segment",
+        "--device", "mps",
+        "--language", "zh",
+    ]
+
+
+def test_build_asr_diarize_mode_appends_preset_spk_num() -> None:
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_mode="diarize", asr_command=None, mock_text=None,
+        asr_device="mps", language="zh", asr_preset_spk_num=2,
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert adapter.command == [
+        "python3", "scripts/funasr_paraformer_diarize_wrapper.py", "--server",
+        "--model", "paraformer-zh",
+        "--vad-model", "fsmn-vad",
+        "--punc-model", "ct-punc",
+        "--spk-model", "cam++",
+        "--spk-mode", "punc_segment",
+        "--device", "mps",
+        "--language", "zh",
+        "--preset-spk-num", "2",
+    ]
+
+
+def test_build_asr_diarize_mode_threads_configured_diarize_knobs() -> None:
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_mode="diarize", asr_command=None, mock_text=None,
+        asr_device="cpu", language="ja", model_version="diarize-v9",
+        asr_diarize_model="paraformer-en", asr_punc_model="ct-punc-en",
+        asr_spk_model="eres2net", asr_spk_mode="vad_segment",
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert adapter.command == [
+        "python3", "scripts/funasr_paraformer_diarize_wrapper.py", "--server",
+        "--model", "paraformer-en",
+        "--vad-model", "fsmn-vad",
+        "--punc-model", "ct-punc-en",
+        "--spk-model", "eres2net",
+        "--spk-mode", "vad_segment",
+        "--device", "cpu",
+        "--language", "ja",
+    ]
+    assert adapter.model_version == "diarize-v9"
+
+
+def test_build_asr_chunk_mode_keeps_sensevoice_argv() -> None:
+    # The default asr_mode="chunk" must leave the existing SenseVoice server argv byte-for-byte.
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_mode="chunk", asr_command=None, mock_text=None,
+        asr_device="cpu", language="ja", model_id="iic/Custom", model_version="v9",
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert adapter.command == [
+        "python3", "scripts/funasr_sensevoice_wrapper.py", "--server",
+        "--model", "iic/Custom", "--model-version", "v9",
+        "--device", "cpu", "--language", "ja",
+    ]
+
+
+def test_build_asr_diarize_command_override_wins() -> None:
+    # An explicit asr_command still overrides the diarize argv (shlex.split), as in chunk mode.
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_mode="diarize",
+        asr_command="uv run python scripts/diarize.py --server", mock_text=None,
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert adapter.command == ["uv", "run", "python", "scripts/diarize.py", "--server"]
+
+
 def test_command_with_quoted_space_path_is_one_token() -> None:
     # A repo path containing a space (e.g. "v2c 本地部署") must survive command parsing:
     # shlex honours the quotes so the interpreter path stays a single argv token.

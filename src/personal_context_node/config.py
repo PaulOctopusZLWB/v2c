@@ -55,6 +55,12 @@ class AppConfig(BaseModel):
     asr_model_id: str = "iic/SenseVoiceSmall"
     asr_model_version: str = "funasr-sensevoice-local"
     asr_device: str = "mps"
+    asr_mode: str = "chunk"
+    asr_diarize_model: str = "paraformer-zh"
+    asr_punc_model: str = "ct-punc"
+    asr_spk_model: str = "cam++"
+    asr_spk_mode: str = "punc_segment"
+    asr_preset_spk_num: int | None = None
     llm_backend: str = "rule_based"
     llm_command: str | None = None
     send_person_names: bool = True
@@ -128,6 +134,12 @@ class AppConfig(BaseModel):
             "asr_model_id": asr.get("model_id", cls.model_fields["asr_model_id"].default),
             "asr_model_version": asr.get("model_version", cls.model_fields["asr_model_version"].default),
             "asr_device": asr.get("device", cls.model_fields["asr_device"].default),
+            "asr_mode": asr.get("mode", cls.model_fields["asr_mode"].default),
+            "asr_diarize_model": asr.get("diarize_model", cls.model_fields["asr_diarize_model"].default),
+            "asr_punc_model": asr.get("punc_model", cls.model_fields["asr_punc_model"].default),
+            "asr_spk_model": asr.get("spk_model", cls.model_fields["asr_spk_model"].default),
+            "asr_spk_mode": asr.get("spk_mode", cls.model_fields["asr_spk_mode"].default),
+            "asr_preset_spk_num": asr.get("preset_spk_num", cls.model_fields["asr_preset_spk_num"].default),
             "llm_backend": llm.get("backend", cls.model_fields["llm_backend"].default),
             "llm_command": llm.get("command", cls.model_fields["llm_command"].default),
             "send_person_names": llm.get("send_person_names", cls.model_fields["send_person_names"].default),
