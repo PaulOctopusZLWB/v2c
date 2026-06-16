@@ -119,6 +119,170 @@ def pending_embedding_segment_ids(*, config: AppConfig, session_id: str | None =
     return [str(row["segment_id"]) for row in rows]
 
 
+def scoped_embedding_segment_ids(*, config: AppConfig, session_id: str | None = None, day: str | None = None) -> list[str]:
+    """Active transcript segments that DO have an embedding row, optionally scoped.
+
+    Ordered by (absolute_start_at, segment_id) for deterministic processing.
+    """
+    where = [
+        "ts.is_active = 1",
+        "exists (select 1 from segment_embeddings se where se.segment_id = ts.segment_id)",
+    ]
+    params: list[object] = []
+    join = ""
+    if session_id is not None:
+        where.append("ts.session_id = ?")
+        params.append(session_id)
+    if day is not None:
+        join = "join sessions s on s.session_id = ts.session_id"
+        where.append("s.date_key = ?")
+        params.append(day)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            f"""
+            select ts.segment_id
+            from transcript_segments ts
+            {join}
+            where {" and ".join(where)}
+            order by ts.absolute_start_at, ts.segment_id
+            """,
+            tuple(params),
+        )
+    finally:
+        conn.close()
+    return [str(row["segment_id"]) for row in rows]
+
+
+def recluster_by_anchors(
+    *,
+    config: AppConfig,
+    anchors: dict[str, str],
+    threshold: float,
+    scope_session_id: str | None = None,
+    scope_day: str | None = None,
+    model: str = "cam++",
+) -> dict:
+    """Attribute every in-scope segment to a person by voiceprint nearest-centroid.
+
+    ``anchors`` maps ``segment_id -> person_id`` (a few labelled examples; multiple anchors per
+    person allowed). Per-person centroids are the mean of the L2-normalized anchor vectors,
+    re-normalized to unit length. Each in-scope segment is assigned to the person whose centroid
+    it is most cosine-similar to, provided that best cosine is >= ``threshold``; otherwise it is
+    left unassigned. Anchors are always assigned to their labelled person regardless of threshold.
+
+    Writes ONLY segment_person_overrides (reusing the upsert helper) in a single transaction;
+    never touches transcript_segments.speaker or speaker_cluster_id.
+    """
+    if not anchors:
+        raise ValueError("anchors must be non-empty")
+    if not (0.0 <= threshold <= 1.0):
+        raise ValueError("threshold must be in [0, 1]")
+
+    anchor_segment_ids = list(anchors.keys())
+    anchor_embeddings = get_embeddings(config=config, segment_ids=anchor_segment_ids)
+    if not anchor_embeddings:
+        raise ValueError("no embeddings found for any anchor segment")
+
+    # Build per-person centroids from L2-normalized anchor vectors.
+    per_person_vectors: dict[str, list[np.ndarray]] = {}
+    for segment_id, person_id in anchors.items():
+        vector = anchor_embeddings.get(segment_id)
+        if vector is None:
+            continue
+        per_person_vectors.setdefault(person_id, []).append(_normalize(vector))
+    if not per_person_vectors:
+        raise ValueError("no embeddings found for any anchor segment")
+
+    person_ids: list[str] = list(per_person_vectors.keys())
+    centroids = np.vstack([_normalize(np.mean(per_person_vectors[pid], axis=0)) for pid in person_ids])
+
+    # All active in-scope segments that have an embedding.
+    scope_ids = scoped_embedding_segment_ids(config=config, session_id=scope_session_id, day=scope_day)
+    scope_embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+
+    # Anchors are forced to their labelled person even if they fall outside the scope query.
+    candidate_ids = list(dict.fromkeys(scope_ids + anchor_segment_ids))
+
+    now = _now()
+    person_labels = _person_labels(config=config, person_ids=person_ids)
+
+    assigned = 0
+    per_person: dict[str, int] = {pid: 0 for pid in person_ids}
+    writes: list[tuple[str, str]] = []  # (segment_id, person_id)
+
+    for segment_id in candidate_ids:
+        if segment_id in anchors:
+            assigned_person = anchors[segment_id]
+        else:
+            vector = scope_embeddings.get(segment_id)
+            if vector is None:
+                continue
+            sims = centroids @ _normalize(vector)
+            best = int(np.argmax(sims))
+            if float(sims[best]) < threshold:
+                continue
+            assigned_person = person_ids[best]
+        writes.append((segment_id, assigned_person))
+        assigned += 1
+        per_person[assigned_person] = per_person.get(assigned_person, 0) + 1
+
+    total = len(candidate_ids)
+    unassigned = total - assigned
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        from personal_context_node.speaker_review import upsert_segment_person_override
+
+        for segment_id, person_id in writes:
+            upsert_segment_person_override(
+                conn,
+                segment_id=segment_id,
+                person_id=person_id,
+                person_label=person_labels.get(person_id, person_id),
+                now=now,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "assigned": assigned,
+        "unassigned": unassigned,
+        "total": total,
+        "per_person": per_person,
+        "threshold": threshold,
+    }
+
+
+def _normalize(vector: np.ndarray) -> np.ndarray:
+    array = np.asarray(vector, dtype=np.float64)
+    norm = float(np.linalg.norm(array))
+    if norm == 0.0:
+        return array
+    return array / norm
+
+
+def _person_labels(*, config: AppConfig, person_ids: list[str]) -> dict[str, str]:
+    if not person_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in person_ids)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            f"select person_id, display_name from persons where person_id in ({placeholders})",
+            tuple(person_ids),
+        )
+    finally:
+        conn.close()
+    return {str(row["person_id"]): str(row["display_name"]) for row in rows}
+
+
 def extract_pending_embeddings(
     *,
     config: AppConfig,

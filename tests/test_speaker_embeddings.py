@@ -12,6 +12,7 @@ from personal_context_node.speaker_embeddings import (
     pending_embedding_segment_ids,
     put_embedding,
     put_embeddings_bulk,
+    recluster_by_anchors,
 )
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -162,6 +163,153 @@ def test_extract_scoped_by_session(tmp_path: Path, monkeypatch) -> None:
     stored = get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_o1", "seg_o2"])
     assert set(stored) == {"seg_o1", "seg_o2"}
     assert pending_embedding_segment_ids(config=config, session_id="ses_test") == ["seg_1", "seg_2"]
+
+
+def _unit_axis(index: int, *, noise: float = 0.0, dim: int = 192) -> list[float]:
+    """A near-unit vector pointing along axis ``index`` with a little noise on a few other axes.
+
+    Vectors built around different axes stay clearly separable (cosine ordering unambiguous)
+    while the small noise makes them non-degenerate.
+    """
+    vec = np.zeros(dim, dtype=np.float64)
+    vec[index] = 1.0
+    # Sprinkle a small, deterministic amount of noise on neighbouring axes.
+    for offset in (1, 2, 3):
+        vec[(index + offset) % dim] += noise * (offset / 3.0)
+    return vec.tolist()
+
+
+def _insert_persons(database_path: Path, persons: dict[str, str]) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        for person_id, display_name in persons.items():
+            conn.execute(
+                "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+                (person_id, display_name, "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _override_rows(database_path: Path) -> dict[str, dict[str, str]]:
+    conn = connect(database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id, person_id, person_label from segment_person_overrides")
+    finally:
+        conn.close()
+    return {str(r["segment_id"]): {"person_id": str(r["person_id"]), "person_label": str(r["person_label"])} for r in rows}
+
+
+def _setup_two_clusters(tmp_path: Path) -> AppConfig:
+    """6 segments: seg_1..3 near axis e0 (personA), seg_4..6 near axis e1 (personB)."""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3", "seg_4", "seg_5", "seg_6"])
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+
+    put_embeddings_bulk(
+        config=config,
+        items=[
+            ("seg_1", _unit_axis(0, noise=0.05)),
+            ("seg_2", _unit_axis(0, noise=0.20)),
+            ("seg_3", _unit_axis(0, noise=0.30)),
+            ("seg_4", _unit_axis(1, noise=0.05)),
+            ("seg_5", _unit_axis(1, noise=0.20)),
+            ("seg_6", _unit_axis(1, noise=0.30)),
+        ],
+    )
+    return config
+
+
+def test_recluster_two_clear_clusters(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+
+    result = recluster_by_anchors(
+        config=config,
+        anchors={"seg_1": "per_a", "seg_4": "per_b"},
+        threshold=0.5,
+    )
+
+    assert result["total"] == 6
+    assert result["assigned"] == 6
+    assert result["unassigned"] == 0
+    assert result["per_person"] == {"per_a": 3, "per_b": 3}
+    assert result["threshold"] == 0.5
+
+    overrides = _override_rows(config.database_path)
+    assert overrides["seg_1"]["person_id"] == "per_a"
+    assert overrides["seg_2"]["person_id"] == "per_a"
+    assert overrides["seg_3"]["person_id"] == "per_a"
+    assert overrides["seg_4"]["person_id"] == "per_b"
+    assert overrides["seg_5"]["person_id"] == "per_b"
+    assert overrides["seg_6"]["person_id"] == "per_b"
+    # person_label resolved from persons.display_name.
+    assert overrides["seg_1"]["person_label"] == "Alice"
+    assert overrides["seg_4"]["person_label"] == "Bob"
+
+
+def test_recluster_high_threshold_leaves_unassigned(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+
+    result = recluster_by_anchors(
+        config=config,
+        anchors={"seg_1": "per_a", "seg_4": "per_b"},
+        threshold=0.999,
+    )
+
+    assert result["total"] == 6
+    assert result["unassigned"] > 0
+    # Anchors are always assigned to their labelled person regardless of threshold.
+    overrides = _override_rows(config.database_path)
+    assert overrides["seg_1"]["person_id"] == "per_a"
+    assert overrides["seg_4"]["person_id"] == "per_b"
+    assert result["assigned"] >= 2
+    assert result["assigned"] + result["unassigned"] == result["total"]
+
+
+def test_recluster_empty_anchors_raises(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    try:
+        recluster_by_anchors(config=config, anchors={}, threshold=0.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for empty anchors")
+
+
+def test_recluster_bad_threshold_raises(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    try:
+        recluster_by_anchors(config=config, anchors={"seg_1": "per_a"}, threshold=1.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for out-of-range threshold")
+
+
+def test_recluster_does_not_touch_speaker_columns(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+
+    conn = connect(config.database_path)
+    try:
+        before = fetch_all(conn, "select segment_id, speaker, speaker_cluster_id from transcript_segments order by segment_id")
+    finally:
+        conn.close()
+
+    recluster_by_anchors(
+        config=config,
+        anchors={"seg_1": "per_a", "seg_4": "per_b"},
+        threshold=0.5,
+    )
+
+    conn = connect(config.database_path)
+    try:
+        after = fetch_all(conn, "select segment_id, speaker, speaker_cluster_id from transcript_segments order by segment_id")
+    finally:
+        conn.close()
+
+    assert before == after
 
 
 def _insert_session_with_segments(
