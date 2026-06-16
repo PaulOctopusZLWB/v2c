@@ -46,27 +46,27 @@ def _extract_json(content: str) -> dict[str, object]:
     close = text.find("</think>")
     if text.lstrip().startswith("<think>") and close != -1:
         text = text[close + len("</think>"):]
-    # Collect every TOP-LEVEL balanced { … } span, then return the LAST one that parses. The real
-    # answer follows the reasoning, and the reasoning itself may contain an example JSON object —
-    # so the first balanced span can be the example, not the answer.
-    spans: list[str] = []
-    depth = 0
-    start = -1
-    for i, ch in enumerate(text):
-        if ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}" and depth > 0:
-            depth -= 1
-            if depth == 0 and start != -1:
-                spans.append(text[start:i + 1])
-                start = -1
-    for span in reversed(spans):
+    # Try to JSON-decode an object at each '{' position and keep the LAST one that parses. We use
+    # raw_decode (string-aware) rather than counting raw braces, so a '}' or '{' inside a JSON
+    # string value (common in Chinese prose) — or stray/unbalanced braces in reasoning prose —
+    # can't miscount depth and drop the real answer. The answer follows the reasoning, so the last
+    # successfully-decoded object wins over any example object embedded earlier.
+    decoder = json.JSONDecoder()
+    last: dict[str, object] | None = None
+    found = False
+    i = 0
+    while True:
+        brace = text.find("{", i)
+        if brace == -1:
+            break
         try:
-            return json.loads(span)
+            obj, end = decoder.raw_decode(text, brace)
         except ValueError:
+            i = brace + 1
             continue
+        last, found, i = obj, True, end
+    if found:
+        return last
     raise ValueError("no JSON object found in model content")
 
 

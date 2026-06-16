@@ -147,6 +147,19 @@ def test_extract_json_returns_last_object_when_reasoning_has_example() -> None:
     assert glm._extract_json(content) == {"summary": "真实", "per_speaker": []}
 
 
+def test_extract_json_handles_brace_inside_string_value() -> None:
+    # A '}' (or '{') inside a JSON string VALUE must not prematurely close the scan — common in
+    # Chinese prose summaries. A raw brace-counter would truncate the span; a string-aware parse won't.
+    assert glm._extract_json('推理\n{"text": "函数体 } 的用法", "ok": 1}') == {"text": "函数体 } 的用法", "ok": 1}
+    assert glm._extract_json('推理\n{"text": "左花括号 { 开头", "ok": 1}') == {"text": "左花括号 { 开头", "ok": 1}
+
+
+def test_extract_json_handles_unbalanced_brace_in_reasoning() -> None:
+    # Stray/unbalanced braces in the reasoning prose must not swallow the real trailing JSON.
+    assert glm._extract_json("格式：左花括号 { 开始。\n{\"a\": 1}") == {"a": 1}
+    assert glm._extract_json("示例代码 if (x) { do();\n{\"a\": 1}") == {"a": 1}
+
+
 def test_extract_json_raises_on_non_json() -> None:
     with pytest.raises(Exception):
         glm._extract_json("just some reasoning, no object here")
