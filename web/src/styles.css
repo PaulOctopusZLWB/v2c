@@ -30,6 +30,16 @@
 .stage { padding: 6px 8px; border-radius: 6px; }
 .stage.active { font-weight: 600; }
 
+/* ---- workspace tabs ---- */
+.tabs { display: flex; align-items: center; gap: 4px; }
+.tab {
+  background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  color: var(--text-2); padding: 6px 12px; cursor: pointer; font: inherit; font-size: 13px;
+  transition: color .12s, border-color .12s;
+}
+.tab:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
 .segment-list { display: grid; gap: 8px; }
 .segment-row {
   display: grid;
