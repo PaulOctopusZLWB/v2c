@@ -45,6 +45,27 @@ def _transcript_text(segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _speaker_labels(segments: list[dict]) -> list[str]:
+    # Distinct diarization cluster labels present in the transcript, in first-seen order.
+    labels: list[str] = []
+    for s in segments:
+        spk = str(s.get("speaker", "")).strip()
+        if spk and spk not in labels:
+            labels.append(spk)
+    return labels
+
+
+def _transcript_by_speaker(segments: list[dict]) -> str:
+    # Group lines by speaker so the model sees WHO said what, e.g. `[spk_01] [ev_3] 文本`.
+    # Evidence ids stay visible because they gate evidence_refs.
+    lines = []
+    for s in segments:
+        ev = s.get("evidence_id", "")
+        spk = str(s.get("speaker", "")).strip() or "unknown"
+        lines.append(f"[{spk}] [{ev}] {s.get('text', '')}")
+    return "\n".join(lines)
+
+
 def build_daily_messages(payload: dict) -> list[dict]:
     segments = payload.get("transcript_segments", [])
     ids = sorted(_evidence_ids(segments))
@@ -123,47 +144,77 @@ def _normalize_inferences(items: list) -> list:
 def build_session_messages(payload: dict) -> list[dict]:
     segments = payload.get("transcript_segments", [])
     ids = sorted(_evidence_ids(segments))
+    labels = _speaker_labels(segments)
     system = (
-        "你是会话纪要助手。只依据转写输出 JSON。\n"
-        "语言要求：所有文本字段（headline、summary、topics、decisions 内 text、todos 内 text、open_questions）"
-        "一律使用简体中文；即使转写为英文也用简体中文表述。JSON 键名保持英文不变。\n"
-        "质量要求：headline 为一句中文要点；每条 decision/todo 只表达一个原子化、可独立审阅的事项，text 写成完整陈述句。\n"
-        "decisions/todos 的 evidence_refs 只能引用下列 evidence_id 且非空: "
+        "你是会话分析助手。只依据给定转写输出 JSON，禁止编造证据。\n"
+        "本会话已做说话人聚类(diarization)：转写每行形如 [说话人] [evidence_id] 文本。请按说话人(说话人聚类标签)分别分析。\n"
+        "语言要求：所有文本字段（headline、core_conclusions、per_speaker 内 viewpoints 的 text、sentiment、stance、"
+        "latent_needs、open_questions）一律使用简体中文；即使转写为英文也用简体中文表述。JSON 键名保持英文不变。\n"
+        "质量要求：headline 为一句中文要点；core_conclusions 是整场会话层面的结论，每条一句完整中文陈述句；\n"
+        "每个 per_speaker 项对应一个说话人：viewpoints 中每条观点只表达一个不可再拆分的原子化观点，"
+        "写成可独立审阅、无需回看转写即可理解的完整陈述句；sentiment(情绪)与 stance(立场/倾向)为简短中文短语；"
+        "latent_needs 为该说话人潜在需求的简体中文短句列表。\n"
+        "约束：speaker_cluster_id 必须是转写中出现过的说话人标签之一: "
+        + ", ".join(labels) + "。\n"
+        "每条 viewpoint 的 evidence_refs 只能引用下列 evidence_id 且必须非空: "
         + ", ".join(ids)
     )
     user = (
-        f"会话: {payload.get('session_id')}\n转写:\n{_transcript_text(segments)}\n\n"
-        '输出 JSON: {"headline": str, "summary": str, "topics": [str], '
-        '"decisions": [{"text": str, "evidence_refs": [evidence_id]}], '
-        '"todos": [{"text": str, "owner": str, "evidence_refs": [evidence_id]}], "open_questions": [str]}'
+        f"会话: {payload.get('session_id')}\n"
+        f"说话人标签: {', '.join(labels)}\n"
+        f"转写(每行 [说话人] [evidence_id] 文本):\n{_transcript_by_speaker(segments)}\n\n"
+        '输出 JSON: {"headline": str, "core_conclusions": [str], '
+        '"per_speaker": [{"speaker_cluster_id": str, '
+        '"viewpoints": [{"text": str, "evidence_refs": [evidence_id]}], '
+        '"sentiment": str, "stance": str, "latent_needs": [str]}], '
+        '"open_questions": [str]}'
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+def _speaker_viewpoints(items: object, valid: set[str]) -> list[dict]:
+    out = []
+    for it in _as_list(items):
+        if not isinstance(it, dict):
+            continue  # a bare string / wrong shape: drop the entry, don't fail the session
+        refs = [str(r) for r in (it.get("evidence_refs") or []) if str(r) in valid]
+        if not refs:
+            continue  # adapter rejects empty evidence_refs; drop the viewpoint (mirror memory_candidates)
+        out.append({
+            "text": str(it.get("text", "")),
+            "evidence_refs": list(dict.fromkeys(refs)),
+        })
+    return out
+
+
+def _normalize_per_speaker(items: object, valid: set[str]) -> list[dict]:
+    out = []
+    for sp in _as_list(items):
+        if not isinstance(sp, dict):
+            continue  # GLM may collapse the list to a bare object / emit a non-dict element
+        out.append({
+            "speaker_cluster_id": str(sp.get("speaker_cluster_id", "")),
+            "viewpoints": _speaker_viewpoints(sp.get("viewpoints"), valid),
+            "sentiment": str(sp.get("sentiment", "")),
+            "stance": str(sp.get("stance", "")),
+            "latent_needs": [str(n) for n in _as_list(sp.get("latent_needs"))],
+        })
+    return out
+
+
 def normalize_session_summary(raw: dict, segments: list[dict]) -> dict:
     valid = _evidence_ids(segments)
-
-    def keep(items, owner=False):
-        out = []
-        for it in _as_list(items):
-            if not isinstance(it, dict):
-                continue  # a bare string / wrong shape: drop the entry, don't fail the session
-            refs = [str(r) for r in (it.get("evidence_refs") or []) if str(r) in valid]
-            if not refs:
-                continue
-            row = {"text": str(it.get("text", "")), "evidence_refs": refs}
-            if owner:
-                row["owner"] = str(it.get("owner", "self"))
-            out.append(row)
-        return out
-
     return {
         "headline": str(raw.get("headline", "")),
         "summary": str(raw.get("summary", "")),
         "topics": [str(t) for t in _as_list(raw.get("topics"))],
-        "decisions": keep(raw.get("decisions")),
-        "todos": keep(raw.get("todos"), owner=True),
+        "core_conclusions": [str(c) for c in _as_list(raw.get("core_conclusions"))],
+        "per_speaker": _normalize_per_speaker(raw.get("per_speaker"), valid),
         "open_questions": [str(q) for q in _as_list(raw.get("open_questions"))],
+        # The per-speaker viewpoints replace decisions/todos, but the SessionSummary/adapter
+        # contract still carries decisions/todos — emit them as empty lists to stay valid.
+        "decisions": [],
+        "todos": [],
     }
 
 

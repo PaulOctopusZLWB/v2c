@@ -75,9 +75,11 @@ def test_normalize_daily_context_tolerates_malformed_memory_candidates() -> None
     assert out["todos"] == []
 
 
-def test_normalize_session_summary_tolerates_malformed_decisions_and_todos() -> None:
-    # A decisions/todos that is a single object (LLM collapsing a one-element list) or contains a
-    # bare string must drop the bad entry, not raise AttributeError and fail the summarize task.
+def test_normalize_session_summary_emits_empty_decisions_todos_for_backcompat() -> None:
+    # The per-speaker schema replaces decisions/todos with per_speaker viewpoints, but the
+    # SessionSummary/adapter contract still carries decisions/todos. normalize must always emit them
+    # as empty lists (it no longer parses any raw decisions/todos) so the contract stays satisfied,
+    # and it must never raise on a malformed/garbage decisions/todos shape from the model.
     segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}]
     raw = {
         "headline": "h", "summary": "s", "topics": [],
@@ -93,21 +95,93 @@ def test_normalize_session_summary_tolerates_malformed_decisions_and_todos() -> 
     assert out["headline"] == "h"
 
 
-def test_normalize_session_summary_drops_decisions_without_known_evidence() -> None:
-    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "继续本地 ASR。"}]
+def test_normalize_session_summary_builds_per_speaker_and_core_conclusions() -> None:
+    segments = [
+        {"segment_id": "seg_1", "evidence_id": "ev_1", "speaker": "spk_01", "text": "全部本地处理。"},
+        {"segment_id": "seg_2", "evidence_id": "ev_2", "speaker": "spk_02", "text": "成本是个问题。"},
+    ]
     raw = {
-        "headline": "本地 ASR 推进", "summary": "讨论本地转写。", "topics": ["asr"],
-        "decisions": [{"text": "继续本地 ASR", "evidence_refs": ["ev_1"]},
-                      {"text": "无证据决定", "evidence_refs": ["ev_x"]}],
-        "todos": [{"text": "完成 smoke", "owner": "self", "evidence_refs": ["ev_1"]}],
+        "headline": "本地部署推进",
+        "core_conclusions": ["团队倾向数据不出本机。", "需评估成本。"],
+        "per_speaker": [
+            {
+                "speaker_cluster_id": "spk_01",
+                "viewpoints": [
+                    {"text": "主张全部本地处理。", "evidence_refs": ["ev_1"]},
+                    {"text": "无证据的观点。", "evidence_refs": ["ev_unknown"]},  # dropped
+                ],
+                "sentiment": "积极",
+                "stance": "支持本地部署、对成本敏感",
+                "latent_needs": ["更快的转写速度"],
+            },
+            {
+                "speaker_cluster_id": "spk_02",
+                "viewpoints": [{"text": "担心成本上升。", "evidence_refs": ["ev_2", "ev_unknown"]}],
+                "sentiment": "谨慎",
+                "stance": "关注成本",
+                "latent_needs": [],
+            },
+        ],
         "open_questions": ["是否需要备选模型"],
     }
 
     out = glm.normalize_session_summary(raw, segments)
 
-    assert out["headline"] == "本地 ASR 推进"
-    assert [d["text"] for d in out["decisions"]] == ["继续本地 ASR"]  # ev_x dropped
-    assert out["todos"][0]["owner"] == "self"
+    assert out["headline"] == "本地部署推进"
+    assert out["core_conclusions"] == ["团队倾向数据不出本机。", "需评估成本。"]
+    assert out["open_questions"] == ["是否需要备选模型"]
+    # decisions/todos kept as empty lists for the back-compat contract
+    assert out["decisions"] == []
+    assert out["todos"] == []
+
+    speakers = out["per_speaker"]
+    assert [s["speaker_cluster_id"] for s in speakers] == ["spk_01", "spk_02"]
+    # spk_01: the unknown-evidence viewpoint is dropped, the valid one survives
+    assert [v["text"] for v in speakers[0]["viewpoints"]] == ["主张全部本地处理。"]
+    assert speakers[0]["viewpoints"][0]["evidence_refs"] == ["ev_1"]
+    assert speakers[0]["sentiment"] == "积极"
+    assert speakers[0]["stance"] == "支持本地部署、对成本敏感"
+    assert speakers[0]["latent_needs"] == ["更快的转写速度"]
+    # spk_02: unknown evidence id filtered out of the surviving viewpoint
+    assert speakers[1]["viewpoints"][0]["evidence_refs"] == ["ev_2"]
+
+
+def test_normalize_session_summary_drops_viewpoints_without_known_evidence() -> None:
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "speaker": "spk_01", "text": "x"}]
+    raw = {
+        "headline": "h", "core_conclusions": [],
+        "per_speaker": [
+            {
+                "speaker_cluster_id": "spk_01",
+                "viewpoints": [{"text": "无证据观点", "evidence_refs": ["ev_x"]}],  # all dropped
+                "sentiment": "中立", "stance": "无", "latent_needs": [],
+            }
+        ],
+        "open_questions": [],
+    }
+
+    out = glm.normalize_session_summary(raw, segments)
+
+    # the speaker survives with an empty viewpoints list (no viewpoint had a known evidence id)
+    assert out["per_speaker"][0]["speaker_cluster_id"] == "spk_01"
+    assert out["per_speaker"][0]["viewpoints"] == []
+
+
+def test_normalize_session_summary_tolerates_malformed_per_speaker() -> None:
+    # GLM (json_object mode) may collapse a one-element per_speaker list to a bare object, or emit a
+    # list containing a non-dict element. Both must drop to empty rather than crash the summarize task.
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "speaker": "spk_01", "text": "x"}]
+    base = {"headline": "h", "core_conclusions": [], "open_questions": []}
+
+    # per_speaker as a dict (not a list)
+    out = glm.normalize_session_summary({**base, "per_speaker": {"speaker_cluster_id": "spk_01"}}, segments)
+    assert out["per_speaker"] == [] and out["headline"] == "h"
+    # per_speaker list containing a non-dict element
+    out = glm.normalize_session_summary({**base, "per_speaker": ["not-a-dict"]}, segments)
+    assert out["per_speaker"] == []
+    # missing per_speaker entirely defaults to empty
+    out = glm.normalize_session_summary(base, segments)
+    assert out["per_speaker"] == [] and out["core_conclusions"] == []
 
 
 import json
@@ -162,18 +236,21 @@ def test_glm_wrapper_output_satisfies_real_command_llm_adapter_contract(tmp_path
         encoding="utf-8",
     )
     session_stub = tmp_path / "session_stub.py"
+    # The session schema is now PER-SPEAKER: the stub returns the new analytical shape (headline,
+    # core_conclusions, per_speaker[…viewpoints/sentiment/stance/latent_needs], open_questions).
     session_stub.write_text(
         "import json\n"
         "def post(url, headers, body):\n"
-        "    content = json.dumps({'headline': 'h', 'summary': 's', 'topics': ['x'],\n"
-        "        'decisions': [{'text': 'd', 'evidence_refs': ['ev_1']}],\n"
-        "        'todos': [{'text': 't', 'owner': 'self', 'evidence_refs': ['ev_1']}],\n"
+        "    content = json.dumps({'headline': 'h', 'core_conclusions': ['结论'],\n"
+        "        'per_speaker': [{'speaker_cluster_id': 'spk_01',\n"
+        "            'viewpoints': [{'text': '主张全部本地处理。', 'evidence_refs': ['ev_1']}],\n"
+        "            'sentiment': '积极', 'stance': '支持', 'latent_needs': ['更快的转写速度']}],\n"
         "        'open_questions': ['q']}, ensure_ascii=False)\n"
         "    return {'choices': [{'message': {'content': content}}]}\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("GLM_API_KEY", "sk-test")
-    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}]
+    segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "speaker": "spk_01", "text": "x"}]
     adapter = CommandLLMAdapter(command=[sys.executable, "scripts/glm_llm_wrapper.py"])
 
     monkeypatch.setenv("GLM_STUB_TRANSPORT", str(daily_stub))
@@ -184,8 +261,16 @@ def test_glm_wrapper_output_satisfies_real_command_llm_adapter_contract(tmp_path
 
     monkeypatch.setenv("GLM_STUB_TRANSPORT", str(session_stub))
     summary = adapter.generate_session_summary(session_id="ses_1", transcript_segments=segments)
-    assert summary.todos[0].owner == "self"
-    assert summary.decisions[0].evidence_refs == ["ev_1"]
+    # The adapter ACCEPTED the wrapper's per-speaker output -> wrapper↔adapter contract agreement.
+    assert summary.core_conclusions == ["结论"]
+    assert summary.per_speaker[0].speaker_cluster_id == "spk_01"
+    assert summary.per_speaker[0].viewpoints[0].text == "主张全部本地处理。"
+    assert summary.per_speaker[0].viewpoints[0].evidence_refs == ["ev_1"]
+    assert summary.per_speaker[0].sentiment == "积极"
+    assert summary.per_speaker[0].latent_needs == ["更快的转写速度"]
+    # decisions/todos remain empty lists under the per-speaker schema (back-compat contract)
+    assert summary.decisions == []
+    assert summary.todos == []
 
 
 def test_main_fails_retryable_without_api_key() -> None:
