@@ -43,6 +43,35 @@ def review_segment(*, config: AppConfig, segment_id: str, status: str, note: str
         conn.close()
 
 
+def batch_review_segments(*, config: AppConfig, segment_ids: list[str], status: str, note: str = "", reviewer: str = "local_user") -> int:
+    if status not in VALID_REVIEW_STATUSES - {"pending_review"}:
+        raise ValueError(f"invalid transcript review status: {status}")
+    if not segment_ids:
+        return 0
+    now = _now()
+    values_clause = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in segment_ids)
+    params: list[object] = []
+    for segment_id in segment_ids:
+        params.extend((segment_id, status, reviewer, note, now, now))
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            f"""
+            insert into transcript_segment_reviews (segment_id, status, reviewer, note, reviewed_at, updated_at)
+            values {values_clause}
+            on conflict(segment_id) do update set
+              status = excluded.status, reviewer = excluded.reviewer, note = excluded.note,
+              reviewed_at = excluded.reviewed_at, updated_at = excluded.updated_at
+            """,
+            params,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return len(segment_ids)
+
+
 def reviewed_segments_for_session(*, config: AppConfig, session_id: str) -> list[dict[str, object]]:
     conn = connect(config.database_path)
     try:
@@ -79,11 +108,8 @@ def session_review_status(*, config: AppConfig, session_id: str) -> str:
 
 def accept_remaining_segments(*, config: AppConfig, session_id: str) -> dict[str, int]:
     rows = reviewed_segments_for_session(config=config, session_id=session_id)
-    accepted = 0
-    for row in rows:
-        if row["review_status"] == "pending_review":
-            review_segment(config=config, segment_id=str(row["segment_id"]), status="accepted", note="")
-            accepted += 1
+    pending_ids = [str(row["segment_id"]) for row in rows if row["review_status"] == "pending_review"]
+    accepted = batch_review_segments(config=config, segment_ids=pending_ids, status="accepted", note="")
     return {"accepted": accepted}
 
 

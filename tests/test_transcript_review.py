@@ -7,10 +7,13 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.transcript_review import (
     accept_remaining_segments,
     accepted_segments_clause,
+    batch_review_segments,
     review_segment,
     reviewed_segments_for_session,
     session_review_status,
 )
+
+import pytest
 
 
 def test_config_defaults_gate_off() -> None:
@@ -51,6 +54,51 @@ def test_accept_remaining_accepts_only_pending(tmp_path: Path) -> None:
     _insert_session_with_segments(config.database_path)
     review_segment(config=config, segment_id="seg_1", status="rejected", note="噪音")
     assert accept_remaining_segments(config=config, session_id="ses_test") == {"accepted": 1}
+    rows = reviewed_segments_for_session(config=config, session_id="ses_test")
+    assert [(r["segment_id"], r["review_status"]) for r in rows] == [("seg_1", "rejected"), ("seg_2", "accepted")]
+
+
+def test_batch_review_segments_one_upsert(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+
+    assert batch_review_segments(config=config, segment_ids=["seg_1", "seg_2"], status="accepted") == 2
+
+    rows = reviewed_segments_for_session(config=config, session_id="ses_test")
+    assert [(r["segment_id"], r["review_status"]) for r in rows] == [("seg_1", "accepted"), ("seg_2", "accepted")]
+
+
+def test_batch_review_rejects_pending_status(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+
+    with pytest.raises(ValueError):
+        batch_review_segments(config=config, segment_ids=["seg_1"], status="pending_review")
+    with pytest.raises(ValueError):
+        batch_review_segments(config=config, segment_ids=["seg_1"], status="bogus")
+
+
+def test_batch_review_empty_is_noop(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+
+    assert batch_review_segments(config=config, segment_ids=[], status="accepted") == 0
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id from transcript_segment_reviews")
+    finally:
+        conn.close()
+    assert rows == []
+
+
+def test_accept_remaining_still_accepts_only_pending(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    review_segment(config=config, segment_id="seg_1", status="rejected", note="噪音")
+
+    assert accept_remaining_segments(config=config, session_id="ses_test") == {"accepted": 1}
+
     rows = reviewed_segments_for_session(config=config, session_id="ses_test")
     assert [(r["segment_id"], r["review_status"]) for r in rows] == [("seg_1", "rejected"), ("seg_2", "accepted")]
 
