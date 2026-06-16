@@ -40,6 +40,26 @@
 .tab:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
+/* ---- merged-turn review ---- */
+.session-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 14px; }
+.chip-btn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.chip-btn:hover:not(:disabled) { background: var(--surface-2, rgba(255,255,255,.04)); }
+
+.turn-list { display: grid; gap: 14px; }
+.turn { border-left: 3px solid var(--border); padding: 8px 0 10px 12px; }
+.turn-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.turn-summary { font-size: 11px; margin-left: auto; }
+.turn-text { margin: 0; line-height: 1.7; }
+.turn-text .evi {
+  cursor: pointer; border-radius: 3px; padding: 0 1px;
+  transition: background .12s, color .12s;
+}
+.turn-text .evi:hover { background: var(--accent-dim); }
+.turn-text .evi:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.turn-text .evi.playing { background: var(--accent-dim); color: var(--accent); }
+.turn-text .evi.hl { background: color-mix(in srgb, var(--warn) 25%, transparent); }
+.turn-actions { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+
 .segment-list { display: grid; gap: 8px; }
 .segment-row {
   display: grid;

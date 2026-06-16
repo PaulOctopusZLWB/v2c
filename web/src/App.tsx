@@ -181,11 +181,6 @@ export function App() {
     setHighlightedSegmentId(candidate?.evidence_segment_ids?.[0] ?? null);
   }
 
-  // All segment ids cited by any viewpoint candidate get an evidence badge.
-  const evidenceSegmentIds = new Set(
-    (llm?.memory_candidates ?? []).flatMap((c) => c.evidence_segment_ids ?? [])
-  );
-
   const speakers = session ? Array.from(new Set(session.segments.map((s) => s.speaker))) : [];
   const gateOn = health?.require_accepted_transcripts ?? false;
 
@@ -271,10 +266,8 @@ export function App() {
             session={session}
             persons={persons ?? []}
             highlightedSegmentId={highlightedSegmentId}
-            evidenceSegmentIds={evidenceSegmentIds}
-            onReview={guard(async (id, status) => { await api.reviewSegment(id, status); await reloadSession(); })}
-            onOverride={guard(async (id, personId) => { await api.overridePerson(id, personId); await reloadSession(); })}
-            onPlay={() => undefined}
+            onBatchReview={guard(async (ids, status) => { await api.batchReview(ids, status); await reloadSession(); })}
+            onAcceptSession={guard(async () => { await api.acceptRemaining(session.session_id); await reloadSession(); })}
             onPlaybackError={(message) => push("音频播放失败", message)}
           />
           <SpeakerPanel

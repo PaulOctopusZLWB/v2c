@@ -301,7 +301,7 @@ describe("App container", () => {
     }
   });
 
-  it("navigates day -> session and accepts a segment", async () => {
+  it("navigates day -> session and batch-accepts a turn", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
@@ -309,17 +309,17 @@ describe("App container", () => {
       if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
       if (url === "/api/llm/days/2087-05-10") return new Response(JSON.stringify({ day: "2087-05-10", context: null, memory_candidates: [] }), { status: 200 });
       if (url === "/api/transcripts/sessions/ses_1") return new Response(JSON.stringify({ session_id: "ses_1", review_status: "pending_review", segments: [{ segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review", note: null }] }), { status: 200 });
-      if (url === "/api/transcripts/segments/seg_1/review") return new Response(JSON.stringify({ segment_id: "seg_1", status: "accepted" }), { status: 200 });
+      if (url === "/api/transcripts/segments/batch-review") return new Response(JSON.stringify({ updated: 1 }), { status: 200 });
       return new Response("{}", { status: 200 });
     });
 
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
-    await userEvent.click(await screen.findByRole("button", { name: "接受" }));
+    await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
 
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(calls).toContain("/api/transcripts/sessions/ses_1");
-    expect(calls).toContain("/api/transcripts/segments/seg_1/review");
+    expect(calls).toContain("/api/transcripts/segments/batch-review");
   });
 });

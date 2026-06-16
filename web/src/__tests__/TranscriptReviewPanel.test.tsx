@@ -6,26 +6,62 @@ import { TranscriptReviewPanel } from "../features/transcript/TranscriptReviewPa
 const session = {
   session_id: "ses_1",
   review_status: "pending_review" as const,
-  segments: [{ segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review" as const, note: null }]
+  segments: [
+    { segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review" as const, note: null },
+    { segment_id: "seg_2", text: "在的", speaker: "spk_1", start_ms: 1000, end_ms: 2000, absolute_start_at: "2026-06-13T09:33:01+08:00", absolute_end_at: "2026-06-13T09:33:02+08:00", review_status: "pending_review" as const, note: null },
+    { segment_id: "seg_3", text: "我们开始吧", speaker: "spk_2", start_ms: 2000, end_ms: 3000, absolute_start_at: "2026-06-13T09:33:02+08:00", absolute_end_at: "2026-06-13T09:33:03+08:00", review_status: "pending_review" as const, note: null }
+  ]
 };
 
 describe("TranscriptReviewPanel", () => {
-  it("accepts a segment and overrides its person", async () => {
-    const onReview = vi.fn();
-    const onOverride = vi.fn();
+  it("groups segments into turns and batch-accepts a whole turn", async () => {
+    const onBatchReview = vi.fn().mockResolvedValue(undefined);
     render(
       <TranscriptReviewPanel
         session={session}
         persons={[{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }]}
-        onReview={onReview}
-        onOverride={onOverride}
-        onPlay={() => undefined}
+        onBatchReview={onBatchReview}
+        onAcceptSession={vi.fn()}
       />
     );
-    await userEvent.click(screen.getByRole("button", { name: "接受" }));
-    expect(onReview).toHaveBeenCalledWith("seg_1", "accepted");
+    // First turn (spk_1) merges seg_1 + seg_2 into one paragraph; second turn (spk_2) is seg_3.
+    expect(screen.getByText("你好")).toBeInTheDocument();
+    expect(screen.getByText("在的")).toBeInTheDocument();
+    expect(screen.getByText("我们开始吧")).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText("改人 seg_1"), "per_paul");
-    expect(onOverride).toHaveBeenCalledWith("seg_1", "per_paul");
+    // Accept the first turn -> both of its segment ids in one batch call.
+    await userEvent.click(screen.getAllByRole("button", { name: "接受整段" })[0]);
+    expect(onBatchReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
+  });
+
+  it("accepts all of one speaker's segments via a per-speaker control", async () => {
+    const onBatchReview = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TranscriptReviewPanel
+        session={session}
+        persons={[]}
+        onBatchReview={onBatchReview}
+        onAcceptSession={vi.fn()}
+      />
+    );
+    // One "接受此人全部" control per distinct speaker (spk_1, spk_2).
+    const perSpeaker = screen.getAllByRole("button", { name: /接受此人全部/ });
+    expect(perSpeaker).toHaveLength(2);
+    await userEvent.click(perSpeaker[0]); // spk_1 -> seg_1 + seg_2
+    expect(onBatchReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
+  });
+
+  it("accepts the whole session via accept-remaining", async () => {
+    const onAcceptSession = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TranscriptReviewPanel
+        session={session}
+        persons={[]}
+        onBatchReview={vi.fn()}
+        onAcceptSession={onAcceptSession}
+      />
+    );
+    await userEvent.click(screen.getByRole("button", { name: "接受整场" }));
+    expect(onAcceptSession).toHaveBeenCalled();
   });
 });
