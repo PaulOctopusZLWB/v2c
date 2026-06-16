@@ -44,6 +44,49 @@ def test_review_segment_rejects_invalid_status(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
+def test_batch_review_endpoint_accepts(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post(
+        "/api/transcripts/segments/batch-review",
+        json={"segment_ids": ["seg_1"], "status": "accepted"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"updated": 1}
+
+    transcript = client.get("/api/transcripts/sessions/ses_test").json()
+    assert transcript["segments"][0]["review_status"] == "accepted"
+
+
+def test_batch_review_empty_ids_400(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post(
+        "/api/transcripts/segments/batch-review",
+        json={"segment_ids": [], "status": "accepted"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_batch_review_bad_status_400(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post(
+        "/api/transcripts/segments/batch-review",
+        json={"segment_ids": ["seg_1"], "status": "bogus"},
+    )
+
+    assert response.status_code == 400
+
+
 def test_days_and_sessions_for_day_navigation(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session(config.database_path)

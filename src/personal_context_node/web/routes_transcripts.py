@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from personal_context_node.config import AppConfig
 from personal_context_node.transcript_review import (
     accept_remaining_segments,
+    batch_review_segments,
     day_status_rows,
     list_days,
     review_segment,
@@ -19,6 +20,12 @@ router = APIRouter(prefix="/api/transcripts")
 
 
 class ReviewSegmentRequest(BaseModel):
+    status: str
+    note: str = ""
+
+
+class BatchReviewRequest(BaseModel):
+    segment_ids: list[str]
     status: str
     note: str = ""
 
@@ -59,6 +66,23 @@ def review_segment_route(request: Request, segment_id: str, payload: ReviewSegme
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"segment_id": segment_id, "status": payload.status}
+
+
+@router.post("/segments/batch-review")
+def batch_review_route(request: Request, payload: BatchReviewRequest) -> dict[str, int]:
+    config: AppConfig = request.app.state.config
+    if not payload.segment_ids:
+        raise HTTPException(status_code=400, detail="segment_ids must not be empty")
+    try:
+        updated = batch_review_segments(
+            config=config,
+            segment_ids=payload.segment_ids,
+            status=payload.status,
+            note=payload.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"updated": updated}
 
 
 @router.post("/sessions/{session_id}/accept-remaining")
