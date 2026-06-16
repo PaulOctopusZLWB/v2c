@@ -146,15 +146,23 @@ def transcribe_audio_file_diarized(*, config: AppConfig, asr: ASRPort, audio_fil
         # local_chunk_path handling — do NOT re-prefix config.data_dir).
         asr_result = asr.transcribe(Path(str(audio["local_raw_path"])))
         decode_config_json = json.dumps(asr_result.decode_config, ensure_ascii=False, sort_keys=True)
-        # The diarized path has no per-VAD audio_chunk; use a stable synthetic chunk_id
-        # (transcript_segments.chunk_id is NOT NULL) so re-runs target the same file scope.
-        chunk_id = f"diar_{audio_file_id}"
         now = datetime.now(timezone.utc).isoformat()
         segments_created = 0
         clusters_upserted: set[str] = set()
         for segment in asr_result.segments:
-            absolute_start_at = _absolute_time(recorded_at, int(segment.start_ms))
+            absolute_start_ms = int(segment.start_ms)
+            absolute_start_at = _absolute_time(recorded_at, absolute_start_ms)
             absolute_end_at = _absolute_time(recorded_at, int(segment.end_ms))
+            # The diarized path has no per-VAD audio_chunk, so synthesize a chunk_id
+            # (transcript_segments.chunk_id is NOT NULL). It MUST be per-segment and
+            # deterministic from the segment's absolute start ms: distinct so that an
+            # internal silence gap splitting one file into multiple sessions gives each
+            # session a DISTINCT first-chunk_id (the session-id reuse anchor in
+            # sessions.py keys on first_chunk_id — a single file-wide chunk_id collapses
+            # that anchor and mints fresh ses_* ids on every re-run); and deterministic
+            # (the diarizer is deterministic → same audio → same start_ms → same
+            # chunk_id) so the anchor matches across ASR re-runs. NOT a uuid.
+            chunk_id = f"diar_{audio_file_id}_{absolute_start_ms:09d}"
             # speaker and speaker_cluster_id MUST stay equal: the review path joins on
             # `speaker`, the attribution view on `speaker_cluster_id`. Do NOT diverge them.
             speaker_cluster_id = segment.speaker
