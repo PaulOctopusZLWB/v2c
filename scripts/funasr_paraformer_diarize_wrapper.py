@@ -35,6 +35,9 @@ def main() -> int:
     parser.add_argument("--model-version", default="funasr-paraformer-diarize-local")
     parser.add_argument("--language", default="zh")
     parser.add_argument("--batch-size-s", type=int, default=300)
+    # Force the CAM++ clusterer to a known speaker count (mitigates auto-clustering's tendency to
+    # over-segment one speaker into several). Omitted -> FunASR auto-determines the count.
+    parser.add_argument("--preset-spk-num", type=int, default=None)
     parser.add_argument("--device", default="mps")
     parser.add_argument("--server", action="store_true")
     args = parser.parse_args()
@@ -66,6 +69,7 @@ def main() -> int:
         return run_server(
             model, sys.stdin, sys.stdout,
             language=args.language, batch_size_s=args.batch_size_s, model_version=args.model_version,
+            preset_spk_num=args.preset_spk_num,
         )
 
     # Exit-code contract (mirrors CommandASRAdapter): 3 = permanently unsupported
@@ -97,7 +101,10 @@ def main() -> int:
             device=resolve_device(args.device),
             disable_update=True,
         )
-        raw_result = model.generate(input=str(args.audio_path), batch_size_s=args.batch_size_s)
+        gen_kwargs = {"batch_size_s": args.batch_size_s}
+        if args.preset_spk_num is not None:
+            gen_kwargs["preset_spk_num"] = args.preset_spk_num
+        raw_result = model.generate(input=str(args.audio_path), **gen_kwargs)
     payload = {
         "model_name": "paraformer-diarize",
         "model_version": args.model_version,
@@ -178,9 +185,12 @@ def _split_text_tags(value: object) -> tuple[str, list[str]]:
 
 def run_server(
     model, stdin, stdout, *, language: str, batch_size_s: int = 300,
-    model_version: str = "funasr-paraformer-diarize-server",
+    model_version: str = "funasr-paraformer-diarize-server", preset_spk_num: int | None = None,
 ) -> int:
     """Resident loop: one audio path per input line -> one result JSON per output line."""
+    gen_kwargs = {"batch_size_s": batch_size_s}
+    if preset_spk_num is not None:
+        gen_kwargs["preset_spk_num"] = preset_spk_num
     for raw_line in stdin:
         path = raw_line.strip()
         if not path:
@@ -199,7 +209,7 @@ def run_server(
             # FunASR/tqdm may print to stdout during inference; redirect it to stderr so only
             # our explicit JSON line reaches the one-line-per-result protocol stream.
             with contextlib.redirect_stdout(sys.stderr):
-                result = model.generate(input=path, batch_size_s=batch_size_s)
+                result = model.generate(input=path, **gen_kwargs)
             payload = {
                 "model_name": "paraformer-diarize",
                 "model_version": model_version,

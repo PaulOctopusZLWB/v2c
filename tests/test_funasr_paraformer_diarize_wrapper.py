@@ -3,6 +3,9 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -70,6 +73,49 @@ def test_normalize_diarized_skips_non_dict_and_defaults_missing_keys() -> None:
     assert [s["text"] for s in segments] == ["有效", "另一个"]
     assert [s["speaker"] for s in segments] == ["spk_01", "spk_02"]
     assert segments[0]["start_ms"] == 0 and segments[0]["end_ms"] == 0
+
+
+def test_server_mode_accepts_preset_spk_num_flag(tmp_path: Path) -> None:
+    # build_asr appends --preset-spk-num when config.asr_preset_spk_num is set; the wrapper's
+    # argparse MUST accept it, or the resident server exits 2 on "unrecognized arguments" before
+    # it can boot and every diarize task fails. Shadow funasr so we reach the import guard fast
+    # (argparse runs BEFORE the funasr import, so an unrecognized flag would fail earlier).
+    (tmp_path / "funasr.py").write_text("raise ImportError('blocked for test')\n", encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(tmp_path) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+
+    proc = subprocess.run(
+        [sys.executable, "scripts/funasr_paraformer_diarize_wrapper.py", "--server", "--preset-spk-num", "2"],
+        input="", capture_output=True, text=True, env=env,
+    )
+
+    assert "unrecognized arguments" not in proc.stderr  # argparse accepted --preset-spk-num
+    assert proc.returncode == 2 and "FunASR is not installed" in proc.stderr  # reached the import guard
+
+
+def test_run_server_forwards_preset_spk_num_to_generate(tmp_path: Path) -> None:
+    captured: dict = {}
+
+    class FakeModel:
+        def generate(self, *, input, **kw):
+            captured.update(kw)
+            return [{"sentence_info": [{"text": "x", "start": 0, "end": 1, "spk": 0}]}]
+
+    a = tmp_path / "a.wav"; a.write_bytes(b"")
+    fw.run_server(FakeModel(), io.StringIO(f"{a}\n"), io.StringIO(), language="zh", preset_spk_num=3)
+    assert captured.get("preset_spk_num") == 3
+
+
+def test_run_server_omits_preset_spk_num_when_none(tmp_path: Path) -> None:
+    captured: dict = {}
+
+    class FakeModel:
+        def generate(self, *, input, **kw):
+            captured.update(kw)
+            return [{"sentence_info": []}]
+
+    a = tmp_path / "a.wav"; a.write_bytes(b"")
+    fw.run_server(FakeModel(), io.StringIO(f"{a}\n"), io.StringIO(), language="zh")
+    assert "preset_spk_num" not in captured  # not passed when unset (FunASR auto-clusters)
 
 
 def test_run_server_emits_one_result_line_per_path_with_speakers(tmp_path: Path) -> None:
