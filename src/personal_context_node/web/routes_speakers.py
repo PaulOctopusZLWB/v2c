@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
+from personal_context_node.speaker_embeddings import recluster_by_anchors
 from personal_context_node.speaker_review import upsert_segment_person_override, upsert_speaker_mapping
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -26,6 +27,13 @@ class CreatePersonRequest(BaseModel):
 class AssignPersonBulkRequest(BaseModel):
     speakers: list[str]
     person_id: str
+
+
+class ReclusterRequest(BaseModel):
+    anchors: dict[str, str]
+    threshold: float = 0.5
+    session_id: str | None = None
+    day: str | None = None
 
 
 def _assign_speaker_to_person(conn, *, speaker: str, person_id: str, person_label: str, now: str) -> None:
@@ -185,3 +193,98 @@ def segment_override_route(request: Request, segment_id: str, payload: AssignPer
     finally:
         conn.close()
     return {"segment_id": segment_id, "person_id": payload.person_id, "person_label": label}
+
+
+@router.get("/speakers/embedding-status")
+def embedding_status_route(request: Request, day: str | None = None, session_id: str | None = None) -> dict[str, int]:
+    config: AppConfig = request.app.state.config
+    where = ["ts.is_active = 1"]
+    params: list[object] = []
+    join = ""
+    if session_id is not None:
+        where.append("ts.session_id = ?")
+        params.append(session_id)
+    if day is not None:
+        join = "join sessions s on s.session_id = ts.session_id"
+        where.append("s.date_key = ?")
+        params.append(day)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            f"""
+            select
+              count(*) as total,
+              sum(case when exists (select 1 from segment_embeddings se where se.segment_id = ts.segment_id) then 1 else 0 end) as embedded
+            from transcript_segments ts
+            {join}
+            where {" and ".join(where)}
+            """,
+            tuple(params),
+        )
+    finally:
+        conn.close()
+    total = int(rows[0]["total"] or 0)
+    embedded = int(rows[0]["embedded"] or 0)
+    return {"total": total, "embedded": embedded, "pending": total - embedded}
+
+
+@router.post("/speakers/recluster")
+def recluster_route(request: Request, payload: ReclusterRequest) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    try:
+        return recluster_by_anchors(
+            config=config,
+            anchors=payload.anchors,
+            threshold=payload.threshold,
+            scope_session_id=payload.session_id,
+            scope_day=payload.day,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/speakers/segments")
+def segments_for_labeling_route(
+    request: Request, session_id: str, speaker: str | None = None, limit: int = 200
+) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    where = ["ts.is_active = 1", "ts.session_id = ?"]
+    params: list[object] = [session_id]
+    if speaker is not None:
+        where.append("ts.speaker = ?")
+        params.append(speaker)
+    params.append(limit)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            f"""
+            select
+              ts.segment_id,
+              ts.text,
+              ts.speaker,
+              ts.absolute_start_at,
+              exists (select 1 from segment_embeddings se where se.segment_id = ts.segment_id) as has_embedding
+            from transcript_segments ts
+            where {" and ".join(where)}
+            order by ts.absolute_start_at, ts.segment_id
+            limit ?
+            """,
+            tuple(params),
+        )
+    finally:
+        conn.close()
+    segments = [
+        {
+            "segment_id": row["segment_id"],
+            "text": row["text"],
+            "speaker": row["speaker"],
+            "absolute_start_at": row["absolute_start_at"],
+            "has_embedding": bool(row["has_embedding"]),
+        }
+        for row in rows
+    ]
+    return {"segments": segments}
