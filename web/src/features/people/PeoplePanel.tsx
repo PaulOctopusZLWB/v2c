@@ -191,7 +191,9 @@ export function PeoplePanel({
 
       {loadError ? <p className="muted" role="alert">{loadError}</p> : null}
 
-      <ul className="people-list" role="list">
+      <details className="people-roster" open>
+        <summary>人物 · <span className="num">{speakers.length}</span> 人(点击折叠)</summary>
+        <ul className="people-list" role="list">
         {speakers.map((p) => (
           <li className="person-row" key={p.person_id} role="listitem">
             <span className="chip" style={{ background: speakerColor(p.person_id) }}>
@@ -225,7 +227,8 @@ export function PeoplePanel({
           </li>
         ))}
         {people.length === 0 && !loadError ? <li className="muted">暂无人物</li> : null}
-      </ul>
+        </ul>
+      </details>
 
       {/* 非发言人 (噪音/多人/无效): labelable buckets, NOT voiceprint identities — no 登记声纹.
           A one-tap "+ 噪音/多人 类别" seeds the first bucket when none exists yet. */}

@@ -846,3 +846,9 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 .llm-daypick { display: flex; align-items: center; gap: 10px; }
 .llm-daypick label { color: var(--text-2); font-size: 13px; }
 .llm-daypick select { flex: 0 1 320px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface, transparent); color: inherit; }
+
+/* Foldable people roster (collapse when there are many people) */
+.people-roster > summary { cursor: pointer; list-style: none; font-size: 12px; color: var(--text-2); padding: 2px 0; user-select: none; }
+.people-roster > summary::-webkit-details-marker { display: none; }
+.people-roster > summary::before { content: "▾ "; color: var(--text-dim); }
+.people-roster:not([open]) > summary::before { content: "▸ "; }
