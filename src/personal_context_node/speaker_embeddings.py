@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 
 import numpy as np
+
+# UMAP runs on numba's workqueue threading layer, which is NOT threadsafe — two concurrent
+# UMAP runs (the web server serves projection requests on multiple threads) abort the whole
+# process ("Concurrent access has been detected"). Serialize every UMAP fit behind this lock.
+_UMAP_LOCK = threading.Lock()
 
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -746,7 +752,8 @@ def embedding_projection(
                 metric="cosine",
                 random_state=42,
             )
-            coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
+            with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two UMAPs at once
+                coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
             used_method = "umap"
         except Exception:
             coords = None  # any import/runtime failure -> deterministic PCA fallback below
