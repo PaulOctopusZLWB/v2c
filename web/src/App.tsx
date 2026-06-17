@@ -16,6 +16,8 @@ import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { PeoplePanel } from "./features/people/PeoplePanel";
 import { VoiceprintMap } from "./features/viz/VoiceprintMap";
+import { ScopeSelector, type Scope } from "./features/viz/ScopeSelector";
+import { ProjectionControls, PROJ_DEFAULTS, type ProjParams } from "./features/viz/ProjectionControls";
 import { DynamicsCharts } from "./features/viz/DynamicsCharts";
 import { EmotionCharts } from "./features/viz/EmotionCharts";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
@@ -29,7 +31,7 @@ import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
 import { dayLabel, taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, PersonRow, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
 
 const DEVICE_POLL_MS = 5000;
 const ACTIVE_STATUSES = ["pending", "claimed", "running"];
@@ -46,6 +48,18 @@ function stageBreakdownFromSummary(
     .filter(([, c]) => c.done < c.total)
     .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
     .map(([type, c]) => ({ label: taskTypeZh(type), done: c.done, total: c.total }));
+}
+
+/** Build the multi-scope projection request from the 声纹 scope + tuning params, keeping only
+ *  the params relevant to the chosen method. Returns null when nothing is selected (→ the map's
+ *  pick/empty state) so we never fire an empty projection. */
+function buildRequest(scope: Scope, params: ProjParams): ProjectionRequest | null {
+  if (scope.session_ids.length === 0 && scope.days.length === 0) return null;
+  const method = params.method ?? "umap";
+  const base: ProjectionRequest = { session_ids: scope.session_ids, days: scope.days, method };
+  if (method === "umap") return { ...base, n_neighbors: params.n_neighbors, min_dist: params.min_dist };
+  if (method === "pca") return { ...base, pca_x: params.pca_x, pca_y: params.pca_y };
+  return { ...base, perplexity: params.perplexity };
 }
 
 /** Bold the (case-insensitive) first occurrence of `q` within `text` for a search snippet.
@@ -90,6 +104,14 @@ export function App() {
   // plus a key that, when bumped, remounts the voiceprint map so it refetches recoloured points.
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [mapKey, setMapKey] = useState(0);
+  // 声纹 projection — fully decoupled from 审核: a multi-day/session scope + tunable params, and
+  // the applied request that the map actually fetches. Param edits update projParams but DON'T
+  // refetch; method/scope changes auto-apply, while slider drags wait for the 投射 button.
+  const [scope, setScope] = useState<Scope>({ session_ids: [], days: [] });
+  const [projParams, setProjParams] = useState<ProjParams>({ ...PROJ_DEFAULTS });
+  const [appliedRequest, setAppliedRequest] = useState<ProjectionRequest | null>(null);
+  // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
+  const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -694,13 +716,35 @@ export function App() {
           </div>
         </section>
 
-        {/* Main row: the map (hero) on the left, the labeling/identify controls on the right. */}
-        <div className="speakers-main">
+        {/* Main row: the projection controls rail, the map (hero), the labeling/identify controls. */}
+        <div className="speakers-main speakers-main-proj">
+          <div className="speakers-proj-rail">
+            <ScopeSelector
+              value={scope}
+              onChange={(next) => {
+                setScope(next);
+                // A scope change auto-applies (re-projects with the current params).
+                setAppliedRequest(buildRequest(next, projParams));
+              }}
+            />
+            <ProjectionControls
+              value={projParams}
+              onChange={(next) => {
+                setProjParams(next);
+                // A method switch auto-applies; pure param (slider/dropdown) edits wait for 投射.
+                if (next.method !== projParams.method) setAppliedRequest(buildRequest(scope, next));
+              }}
+              onApply={() => setAppliedRequest(buildRequest(scope, projParams))}
+              capped={projCapped?.capped}
+              n={projCapped?.n}
+              total={projCapped?.total}
+            />
+          </div>
           <div className="speakers-map">
             <VoiceprintMap
               key={mapKey}
-              sessionId={selectedSessionId}
-              day={inspectDay}
+              request={appliedRequest}
+              onResult={(r) => setProjCapped(r)}
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
               onLabel={async (personId, segmentIds) => {

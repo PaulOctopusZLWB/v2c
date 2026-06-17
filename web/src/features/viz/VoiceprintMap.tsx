@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
-import type { PersonRow, ProjectionPoint } from "../../api/types";
+import type { PersonRow, ProjectionPoint, ProjectionRequest } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
 import { emotionColor, emotionMeta } from "../../lib/emotionColors";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 
-type Method = "umap" | "pca";
-type ColorMode = "person" | "emotion";
+type ColorMode = "person" | "session" | "emotion";
 
 /** Default emotion for a point with no extracted emotion row (so it still draws a colour). */
 const DEFAULT_EMOTION = "中立/neutral";
+
+/** A stable short label for a session id (last 6 chars when long), for the 会话 legend. */
+function sessionKey(p: ProjectionPoint): string {
+  return p.session_id ?? "未知会话";
+}
 
 /** The stable cluster key for a point: prefer the labelled person, else the raw speaker. */
 function clusterKey(p: ProjectionPoint): string {
@@ -38,15 +42,19 @@ const IDENTITY: View = { scale: 1, tx: 0, ty: 0 };
  * cluster. Self-contained and lazy-friendly.
  */
 export function VoiceprintMap({
-  sessionId,
-  day,
+  request,
+  onResult,
   onPlaybackError,
   people,
   onLabel,
   onChanged
 }: {
-  sessionId?: string | null;
-  day?: string | null;
+  /** The multi-scope, tunable projection to fetch + render. `null` → the pick/empty state.
+   *  The parent rebuilds this only on 投射 / scope / method change, so dragging a slider in
+   *  ProjectionControls never refetches here. */
+  request: ProjectionRequest | null;
+  /** Report each result's subsample state up (lets the parent's controls show the capped note). */
+  onResult?: (r: { capped: boolean; n: number; total: number } | null) => void;
   onPlaybackError?: (message: string) => void;
   /** When provided alongside onLabel, enables a 框选 (lasso) → 标注 teaching toolbar. */
   people?: PersonRow[];
@@ -56,10 +64,14 @@ export function VoiceprintMap({
   onChanged?: () => void;
 }) {
   const audio = useSegmentAudio();
-  const [method, setMethod] = useState<Method>("umap");
   const [points, setPoints] = useState<ProjectionPoint[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Subsampling note from the last result (the scope had more points than max_points).
+  const [capped, setCapped] = useState<{ n: number; total: number } | null>(null);
+  // Keep onResult out of the fetch effect's deps (it may change identity each render).
+  const onResultRef = useRef(onResult);
+  useEffect(() => { onResultRef.current = onResult; }, [onResult]);
 
   // Colour mode: by person/speaker cluster (default) or by acoustic emotion. In 情绪 mode the
   // per-segment dominant-emotion labels are fetched for the scope and drive both the point
@@ -107,56 +119,91 @@ export function VoiceprintMap({
   const playingIdRef = useRef(playingId);
   useEffect(() => { playingIdRef.current = playingId; }, [playingId]);
 
-  // --- fetch the projection on scope/method change ---
+  // A stable scope signature so the emotion-labels effect (and any memo) only re-runs when the
+  // actual session/day union changes — not on every new request object identity.
+  const scopeKey = useMemo(() => {
+    if (!request) return "";
+    const s = [...(request.session_ids ?? [])].sort();
+    const d = [...(request.days ?? [])].sort();
+    return `s:${s.join(",")}|d:${d.join(",")}`;
+  }, [request]);
+
+  // --- fetch the projection whenever the request changes (parent rebuilds it on 投射/scope/
+  //     method — never on a slider drag, so this stays cheap). `null` → empty pick state. ---
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
     setHover(null);
     setFocusKey(null);
     setSelectedIds(new Set());
     rectRef.current = null;
     setRect(null);
     viewRef.current = { ...IDENTITY };
+    if (!request) {
+      setPoints(null);
+      setError(null);
+      setCapped(null);
+      onResultRef.current?.(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     api
-      .embeddingProjection({ session_id: sessionId ?? null, day: day ?? null, method })
+      .projection(request)
       .then((res) => {
         if (cancelled) return;
+        const n = res.n ?? res.points?.length ?? 0;
+        const total = res.total_in_scope ?? 0;
         setPoints(res.points ?? []);
+        setCapped(res.capped ? { n, total } : null);
+        onResultRef.current?.({ capped: !!res.capped, n, total });
         setLoading(false);
       })
       .catch((err) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "投影失败");
         setPoints([]);
+        setCapped(null);
+        onResultRef.current?.(null);
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [sessionId, day, method]);
+  }, [request]);
 
   // --- fetch per-segment emotion labels when in 情绪 mode (lazily, on scope/mode change) ---
+  // The labels endpoint is single-scope, so over a multi-scope request we fetch per session +
+  // per day and merge the maps. Keyed off scopeKey so it doesn't re-run on param-only changes.
   useEffect(() => {
-    if (colorMode !== "emotion") return;
+    if (colorMode !== "emotion" || !request) return;
     let cancelled = false;
-    api
-      .emotionLabels({ session_id: sessionId ?? null, day: day ?? null })
-      .then((res) => {
-        if (!cancelled) setEmotionLabels(res.labels ?? {});
-      })
-      .catch(() => {
-        if (!cancelled) setEmotionLabels({});
+    const scopes: Array<{ session_id?: string | null; day?: string | null }> = [
+      ...(request.session_ids ?? []).map((id) => ({ session_id: id })),
+      ...(request.days ?? []).map((d) => ({ day: d }))
+    ];
+    if (scopes.length === 0) scopes.push({});
+    Promise.all(scopes.map((s) => api.emotionLabels(s).then((r) => r.labels ?? {}).catch(() => ({}))))
+      .then((maps) => {
+        if (cancelled) return;
+        const merged: Record<string, string> = {};
+        for (const m of maps) Object.assign(merged, m);
+        setEmotionLabels(merged);
       });
     return () => { cancelled = true; };
-  }, [colorMode, sessionId, day]);
+  }, [colorMode, scopeKey, request]);
 
-  // The focus/colour key for a point: emotion class in 情绪 mode, else the person/speaker cluster.
+  // The focus/colour key for a point: emotion class in 情绪 mode, session id in 会话 mode, else
+  // the person/speaker cluster.
   const keyOf = useCallback(
     (p: ProjectionPoint): string =>
-      colorMode === "emotion" ? (emotionLabels[p.segment_id] ?? DEFAULT_EMOTION) : clusterKey(p),
+      colorMode === "emotion"
+        ? (emotionLabels[p.segment_id] ?? DEFAULT_EMOTION)
+        : colorMode === "session"
+          ? sessionKey(p)
+          : clusterKey(p),
     [colorMode, emotionLabels]
   );
 
-  // --- legend: in 人物 mode, distinct cluster keys; in 情绪 mode, distinct emotion classes ---
+  // --- legend: distinct cluster keys (人物) / emotion classes (情绪) / session ids (会话) ---
   const legend = useMemo(() => {
     if (colorMode === "emotion") {
       const by = new Map<string, { key: string; label: string; color: string; emoji: string; count: number }>();
@@ -166,6 +213,16 @@ export function VoiceprintMap({
         const entry = by.get(label) ?? { key: label, label: meta.zh, color: meta.color, emoji: meta.emoji, count: 0 };
         entry.count += 1;
         by.set(label, entry);
+      }
+      return Array.from(by.values()).sort((a, b) => b.count - a.count);
+    }
+    if (colorMode === "session") {
+      const by = new Map<string, { key: string; label: string; color: string; emoji: string; count: number }>();
+      for (const p of points ?? []) {
+        const key = sessionKey(p);
+        const entry = by.get(key) ?? { key, label: key, color: speakerColor(key), emoji: "", count: 0 };
+        entry.count += 1;
+        by.set(key, entry);
       }
       return Array.from(by.values()).sort((a, b) => b.count - a.count);
     }
@@ -228,15 +285,15 @@ export function VoiceprintMap({
     });
 
     const selected = selectedIdsRef.current;
-    const byEmotion = colorModeRef.current === "emotion";
+    const mode = colorModeRef.current;
     const emoLabels = emotionLabelsRef.current;
     const r = 3.4;
     for (const p of pts) {
       const { px, py } = project(p);
-      // The "key" governs both colour and focus; it's the emotion class in 情绪 mode.
-      const key = byEmotion ? (emoLabels[p.segment_id] ?? DEFAULT_EMOTION) : clusterKey(p);
+      // The "key" governs both colour and focus; emotion class in 情绪, session id in 会话.
+      const key = mode === "emotion" ? (emoLabels[p.segment_id] ?? DEFAULT_EMOTION) : mode === "session" ? sessionKey(p) : clusterKey(p);
       const dim = focus !== null && key !== focus;
-      const color = byEmotion ? emotionColor(key) : speakerColor(key);
+      const color = mode === "emotion" ? emotionColor(key) : speakerColor(key);
       const isSel = selected.has(p.segment_id);
       ctx.globalAlpha = dim ? 0.08 : isSel ? 0.95 : 0.78;
       ctx.fillStyle = color;
@@ -488,13 +545,16 @@ export function VoiceprintMap({
       await onLabel(labelPersonId, Array.from(selectedIds));
       clearSelection();
       // Refetch the projection so the just-labelled points recolour to the person.
-      const res = await api.embeddingProjection({ session_id: sessionId ?? null, day: day ?? null, method });
-      setPoints(res.points ?? []);
+      if (request) {
+        const res = await api.projection(request);
+        setPoints(res.points ?? []);
+        setCapped(res.capped ? { n: res.n ?? res.points?.length ?? 0, total: res.total_in_scope ?? 0 } : null);
+      }
       onChanged?.();
     } finally {
       setLabeling(false);
     }
-  }, [onLabel, labelPersonId, selectedIds, clearSelection, sessionId, day, method, onChanged]);
+  }, [onLabel, labelPersonId, selectedIds, clearSelection, request, onChanged]);
 
   const n = points?.length ?? 0;
 
@@ -505,25 +565,6 @@ export function VoiceprintMap({
           <Icon name="mic" /> 声纹云图
         </div>
         <div className="vmap-actions">
-          <div className="vmap-method" role="group" aria-label="投影方法">
-            <button
-              type="button"
-              className={method === "umap" ? "active" : ""}
-              aria-pressed={method === "umap"}
-              onClick={() => setMethod("umap")}
-            >
-              UMAP
-            </button>
-            <button
-              type="button"
-              className={method === "pca" ? "active" : ""}
-              aria-pressed={method === "pca"}
-              title="快速预览"
-              onClick={() => setMethod("pca")}
-            >
-              PCA
-            </button>
-          </div>
           <div className="vmap-colormode" role="group" aria-label="着色">
             <span className="vmap-colormode-label">着色:</span>
             <button
@@ -533,6 +574,15 @@ export function VoiceprintMap({
               onClick={() => switchColorMode("person")}
             >
               人物
+            </button>
+            <button
+              type="button"
+              className={colorMode === "session" ? "active" : ""}
+              aria-pressed={colorMode === "session"}
+              title="按会话着色 — 跨会话对比"
+              onClick={() => switchColorMode("session")}
+            >
+              会话
             </button>
             <button
               type="button"
@@ -622,8 +672,16 @@ export function VoiceprintMap({
           </div>
         ) : error ? (
           <div className="vmap-overlay error" role="alert">投影失败:{error}</div>
+        ) : !request ? (
+          <div className="vmap-overlay" role="status">选择日期/会话后点「投射」</div>
         ) : n === 0 ? (
           <div className="vmap-overlay" role="status">该范围还没有声纹,请先在上方提取</div>
+        ) : null}
+
+        {capped && !loading ? (
+          <div className="vmap-capped-note num" role="note" title="点数过多,已均匀采样以保持流畅">
+            已采样 {capped.n}/{capped.total}
+          </div>
         ) : null}
 
         {hover && !loading ? (
@@ -635,12 +693,22 @@ export function VoiceprintMap({
             <div className="vmap-tip-head">
               <span
                 className="vmap-swatch"
-                style={{ background: colorMode === "emotion" ? emotionColor(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION) : speakerColor(clusterKey(hover.point)) }}
+                style={{
+                  background:
+                    colorMode === "emotion"
+                      ? emotionColor(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION)
+                      : colorMode === "session"
+                        ? speakerColor(sessionKey(hover.point))
+                        : speakerColor(clusterKey(hover.point))
+                }}
               />
               {colorMode === "emotion"
                 ? `${emotionMeta(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION).emoji} ${clusterLabel(hover.point)}`
                 : clusterLabel(hover.point)}
             </div>
+            {colorMode === "session" && hover.point.session_id ? (
+              <div className="vmap-tip-meta muted">{sessionKey(hover.point)}</div>
+            ) : null}
             {hover.point.text ? <div className="vmap-tip-text">{hover.point.text}</div> : null}
           </div>
         ) : null}

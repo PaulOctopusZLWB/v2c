@@ -563,12 +563,104 @@
   grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
   align-items: start;
 }
-.speakers-map, .speakers-people { min-width: 0; }
+/* The decoupled 声纹 view adds a projection-controls rail: [rail | map | people]. */
+.speakers-main-proj {
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.8fr) minmax(300px, 1fr);
+}
+.speakers-map, .speakers-people, .speakers-proj-rail { min-width: 0; }
+.speakers-proj-rail { display: grid; gap: var(--s4); align-content: start; }
 /* Let the hero map breathe with a taller stage. */
 .speakers-map .vmap-stage { min-height: 460px; }
+@media (max-width: 1280px) {
+  .speakers-main-proj { grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.6fr); }
+  .speakers-main-proj .speakers-people { grid-column: 1 / -1; }
+}
 @media (max-width: 1024px) {
   .speakers-main { grid-template-columns: minmax(0, 1fr); }
+  .speakers-main-proj { grid-template-columns: minmax(0, 1fr); }
+  .speakers-main-proj .speakers-people { grid-column: auto; }
 }
+
+/* ---- 投射范围 (ScopeSelector): multi-day/session picker, compact + scrollable ---- */
+.scope-selector { display: grid; gap: var(--s3); }
+.scope-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.scope-hint { font-size: 11.5px; line-height: 1.5; margin: 0; }
+.scope-loading { display: flex; align-items: center; gap: var(--s2); font-size: 12px; color: var(--text-dim); }
+.scope-list {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 2px;
+  max-height: 42vh; overflow-y: auto; scrollbar-gutter: stable;
+}
+.scope-day { display: grid; gap: 2px; }
+.scope-day-row {
+  display: flex; align-items: center; gap: var(--s2);
+  border-radius: var(--r1); padding: 2px 4px;
+}
+.scope-day-row:hover { background: var(--elev); }
+.scope-check {
+  display: flex; align-items: center; gap: var(--s2); flex: 1; min-width: 0;
+  font-size: 12.5px; color: var(--text-2); cursor: pointer;
+}
+.scope-check input { accent-color: var(--accent); flex: none; }
+.scope-day-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope-day-count { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+.scope-expander {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex: none; border: 0; background: transparent;
+  color: var(--text-dim); cursor: pointer; border-radius: var(--r1);
+}
+.scope-expander:hover { color: var(--text); background: var(--elev); }
+.scope-expander .icon { width: 14px; height: 14px; transition: transform .15s ease; }
+.scope-expander.open .icon { transform: rotate(90deg); }
+.scope-sessions {
+  list-style: none; margin: 0 0 2px; padding: 0 0 0 22px; display: grid; gap: 1px;
+  border-left: 1px solid var(--border); margin-left: 10px;
+}
+.scope-session-loading, .scope-session-empty { font-size: 11.5px; padding: 2px 4px; display: flex; align-items: center; gap: var(--s2); }
+.scope-session .scope-check { padding: 2px 4px; border-radius: var(--r1); }
+.scope-session .scope-check:hover { background: var(--elev); }
+.scope-session-time { color: var(--text); font-variant-numeric: tabular-nums; }
+.scope-session-name { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope-session-count { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+
+/* ---- 投射方式 (ProjectionControls): segmented method toggle + per-method params ---- */
+.projection-controls { display: grid; gap: var(--s4); }
+.proj-method { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r1); overflow: hidden; }
+.proj-method button {
+  flex: 1; font-size: 12px; padding: 5px 0; border: 0; background: var(--panel-2);
+  color: var(--text-dim); cursor: pointer;
+}
+.proj-method button + button { border-left: 1px solid var(--border-strong); }
+.proj-method button:hover:not(:disabled) { color: var(--text); background: var(--elev); }
+.proj-method button.active { background: var(--accent-dim); color: var(--accent-2); }
+.proj-params { display: grid; gap: var(--s4); }
+.proj-slider { display: grid; gap: var(--s2); font-size: 12px; color: var(--text-2); }
+.proj-slider-head { display: flex; align-items: center; justify-content: space-between; }
+.proj-slider-head .num { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.proj-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
+.proj-pca { grid-template-columns: 1fr 1fr; }
+.proj-dropdown { display: grid; gap: var(--s2); font-size: 12px; color: var(--text-2); }
+.proj-dropdown select { width: 100%; font-size: 12px; }
+.proj-hint { font-size: 11px; margin: 0; }
+.proj-apply {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; font-size: 13px; font-weight: 600;
+}
+.proj-apply .icon { width: 15px; height: 15px; }
+.proj-capped {
+  font-size: 11px; margin: 0; text-align: center;
+  color: var(--text-dim);
+}
+.proj-capped .num { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+
+/* Subsample overlay note inside the map (top-right). */
+.vmap-capped-note {
+  position: absolute; top: 8px; right: 8px; z-index: 3;
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  color: var(--accent-2); background: color-mix(in srgb, var(--panel) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.vmap-tip-meta { font-size: 11px; margin-top: 2px; font-variant-numeric: tabular-nums; }
 
 /* Collapsible 对话分析 + 高级 sections — tucked away, default collapsed. */
 .speakers-analysis > summary,
