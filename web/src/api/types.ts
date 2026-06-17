@@ -204,6 +204,8 @@ export interface ProjectionResult {
 export interface PersonRow {
   person_id: string;
   display_name: string;
+  /** 'contact' | 'self' | 'non_speaker' (噪音/多人) — render non_speaker specially / exclude from speaker analytics. */
+  person_type: string;
   is_self: number;
   /** Has a stored voiceprint centroid (person_voiceprints row). */
   enrolled: boolean;

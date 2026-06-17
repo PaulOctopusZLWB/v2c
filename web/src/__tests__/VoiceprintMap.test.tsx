@@ -168,8 +168,8 @@ describe("VoiceprintMap", () => {
 
   // --- lasso-to-label (slice 5b) ---
   const labelPeople: PersonRow[] = [
-    { person_id: "per_a", display_name: "李雷", is_self: 0, enrolled: true, attributed_count: 4, manual_count: 2 },
-    { person_id: "per_b", display_name: "韩文巧", is_self: 0, enrolled: false, attributed_count: 0, manual_count: 0 }
+    { person_id: "per_a", display_name: "李雷", person_type: "contact", is_self: 0, enrolled: true, attributed_count: 4, manual_count: 2 },
+    { person_id: "per_b", display_name: "韩文巧", person_type: "contact", is_self: 0, enrolled: false, attributed_count: 0, manual_count: 0 }
   ];
 
   it("does not show the select toolbar until 框选 is toggled on (and the map still works without people)", async () => {

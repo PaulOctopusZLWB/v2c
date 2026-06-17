@@ -11,6 +11,7 @@ from personal_context_node.speaker_embeddings import (
     clear_projection_cache,
     embedding_projection,
     enroll_person,
+    ensure_person,
     extract_pending_embeddings,
     get_embeddings,
     get_person_centroids,
@@ -615,14 +616,15 @@ def test_suggest_people_no_enrolled_is_empty(tmp_path: Path) -> None:
 
 def test_auto_attribute_enrolled_assigns_all(tmp_path: Path) -> None:
     config = _setup_two_clusters(tmp_path)
-    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
-    enroll_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5", "seg_6"])
+    # kNN needs labeled (manual) segments: one seed per cluster.
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_4"])
 
     result = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
     assert result["total"] == 6
-    assert result["assigned"] == 6
-    assert result["unassigned"] == 0
-    assert result["per_person"] == {"per_a": 3, "per_b": 3}
+    # The 4 unlabeled segments are all assigned by voiceprint (manual seeds counted separately).
+    assert result["assigned"] == 4
+    assert result["per_person"] == {"per_a": 2, "per_b": 2}
     assert result["threshold"] == 0.5
 
     overrides = _override_rows(config.database_path)
@@ -634,13 +636,12 @@ def test_auto_attribute_enrolled_assigns_all(tmp_path: Path) -> None:
 
 def test_auto_attribute_high_threshold_leaves_unassigned(tmp_path: Path) -> None:
     config = _setup_two_clusters(tmp_path)
-    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
-    enroll_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5", "seg_6"])
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_4"])
 
     result = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.999)
     assert result["total"] == 6
     assert result["unassigned"] > 0
-    assert result["assigned"] + result["unassigned"] == result["total"]
 
 
 def test_auto_attribute_no_enrolled_raises(tmp_path: Path) -> None:
@@ -650,7 +651,7 @@ def test_auto_attribute_no_enrolled_raises(tmp_path: Path) -> None:
     except ValueError:
         pass
     else:
-        raise AssertionError("expected ValueError when no people enrolled")
+        raise AssertionError("expected ValueError when no labeled segments")
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +776,177 @@ def test_identify_idempotent_and_manual_always_wins(tmp_path: Path) -> None:
     # Idempotent counts: total stays 6 across re-runs.
     assert first["total"] == 6
     assert second["total"] == 6
+
+
+# ---------------------------------------------------------------------------
+# kNN global identify (items 4): nearest labeled-segment vote, not single centroid
+# ---------------------------------------------------------------------------
+
+
+def test_knn_identify_two_clusters_by_nearest_labels(tmp_path: Path) -> None:
+    # One manual label per cluster; kNN over labeled segments assigns the rest by nearest-labels
+    # vote. e0-cluster -> per_a, e1-cluster -> per_b. Manual rows keep source='manual'.
+    config = _setup_two_clusters(tmp_path)
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_4"])
+
+    result = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+
+    sources = _override_sources(config.database_path)
+    overrides = _override_rows(config.database_path)
+    assert sources["seg_1"] == "manual"
+    assert sources["seg_4"] == "manual"
+    for seg in ("seg_2", "seg_3"):
+        assert sources[seg] == "voiceprint"
+        assert overrides[seg]["person_id"] == "per_a"
+    for seg in ("seg_5", "seg_6"):
+        assert sources[seg] == "voiceprint"
+        assert overrides[seg]["person_id"] == "per_b"
+    assert result["per_person"] == {"per_a": 2, "per_b": 2}
+    assert result["assigned"] == 4
+    assert result["threshold"] == 0.5
+
+
+def test_knn_identify_idempotent_on_rerun(tmp_path: Path) -> None:
+    # Re-running clears prior voiceprint guesses (no accumulation) and never touches manual labels.
+    config = _setup_two_clusters(tmp_path)
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_4"])
+
+    first = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+    second = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+
+    sources = _override_sources(config.database_path)
+    assert set(sources) == {"seg_1", "seg_2", "seg_3", "seg_4", "seg_5", "seg_6"}
+    assert sources["seg_1"] == "manual"
+    assert sources["seg_4"] == "manual"
+    assert first == second
+
+
+def test_knn_far_point_stays_unassigned_by_cosine_floor(tmp_path: Path) -> None:
+    # A third point far from BOTH labeled axes (axis e100) must stay unassigned: even though kNN
+    # would vote it to the nearest cluster, its best single cosine is below the 0.25 floor.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3", "seg_4", "seg_far"])
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+    put_embeddings_bulk(
+        config=config,
+        items=[
+            ("seg_1", _unit_axis(0, noise=0.05)),
+            ("seg_2", _unit_axis(0, noise=0.20)),
+            ("seg_3", _unit_axis(1, noise=0.05)),
+            ("seg_4", _unit_axis(1, noise=0.20)),
+            ("seg_far", _unit_axis(100, noise=0.0)),  # orthogonal to both labeled axes
+        ],
+    )
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_3"])
+
+    auto_attribute_enrolled(config=config, threshold=0.5)
+
+    overrides = _override_rows(config.database_path)
+    assert "seg_far" not in overrides  # below cosine floor -> unassigned
+
+
+def test_knn_multimodal_person_handled(tmp_path: Path) -> None:
+    # per_a is multi-modal: TWO labeled segments on different axes (e0 and e50). An unlabeled seg
+    # near e50 still goes to per_a — a kNN nearest-label vote handles this where a single centroid
+    # (averaging e0 and e50) would sit between them and miss.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_a0", "seg_a50", "seg_b", "seg_q50"])
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+    put_embeddings_bulk(
+        config=config,
+        items=[
+            ("seg_a0", _unit_axis(0, noise=0.05)),    # per_a mode 1
+            ("seg_a50", _unit_axis(50, noise=0.05)),  # per_a mode 2
+            ("seg_b", _unit_axis(1, noise=0.05)),     # per_b
+            ("seg_q50", _unit_axis(50, noise=0.10)),  # query near per_a's second mode
+        ],
+    )
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_a0", "seg_a50"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_b"])
+
+    auto_attribute_enrolled(config=config, threshold=0.5)
+
+    overrides = _override_rows(config.database_path)
+    assert overrides["seg_q50"]["person_id"] == "per_a"
+
+
+def test_knn_no_labeled_segments_raises(tmp_path: Path) -> None:
+    # Enrolled centroids alone are not enough — kNN needs labeled (manual) segments.
+    config = _setup_two_clusters(tmp_path)
+    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    try:
+        auto_attribute_enrolled(config=config, threshold=0.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError when no labeled segments")
+
+
+def test_knn_non_speaker_class_classifies_noise(tmp_path: Path) -> None:
+    # A non_speaker person is a real labeled class for kNN: a segment near labeled-noise gets
+    # classified as that noise person.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_a", "seg_n", "seg_qn"])
+    _insert_persons(config.database_path, {"per_a": "Alice"})
+    noise_id = ensure_person(config=config, display_name="噪音/多人", person_type="non_speaker")
+    put_embeddings_bulk(
+        config=config,
+        items=[
+            ("seg_a", _unit_axis(0, noise=0.05)),
+            ("seg_n", _unit_axis(70, noise=0.05)),   # labeled noise
+            ("seg_qn", _unit_axis(70, noise=0.10)),  # query near labeled noise
+        ],
+    )
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_a"])
+    label_segments_as_person(config=config, person_id=noise_id, segment_ids=["seg_n"])
+
+    auto_attribute_enrolled(config=config, threshold=0.5)
+
+    overrides = _override_rows(config.database_path)
+    assert overrides["seg_qn"]["person_id"] == noise_id
+
+
+def test_ensure_person_idempotent(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    first = ensure_person(config=config, display_name="噪音/多人", person_type="non_speaker")
+    second = ensure_person(config=config, display_name="噪音/多人", person_type="non_speaker")
+    assert first == second
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select person_type from persons where person_id = ?", (first,))
+    finally:
+        conn.close()
+    assert rows == [{"person_type": "non_speaker"}]
+
+
+def test_suggest_excludes_non_speaker(tmp_path: Path) -> None:
+    # suggest_people_for_session must not suggest a non_speaker person as a cluster's identity.
+    config = _setup_two_clusters(tmp_path)
+    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    enroll_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5", "seg_6"])
+    # Enroll a non_speaker person whose centroid sits near e1 (where per_b's query cluster is).
+    noise_id = ensure_person(config=config, display_name="噪音/多人", person_type="non_speaker")
+    enroll_person(config=config, person_id=noise_id, segment_ids=["seg_4", "seg_5", "seg_6"])
+
+    _insert_session_with_segments(
+        config.database_path, ["seg_qa", "seg_qb"], session_id="ses_query", audio_file_id="aud_query"
+    )
+    _set_speaker(config.database_path, "seg_qa", "spk_qa")
+    _set_speaker(config.database_path, "seg_qb", "spk_qb")
+    put_embeddings_bulk(
+        config=config,
+        items=[("seg_qa", _unit_axis(0, noise=0.1)), ("seg_qb", _unit_axis(1, noise=0.1))],
+    )
+
+    result = suggest_people_for_session(config=config, session_id="ses_query")
+    suggested_ids = {s["person_id"] for s in result["suggestions"]}
+    assert noise_id not in suggested_ids
+    by_speaker = {s["speaker"]: s for s in result["suggestions"]}
+    assert by_speaker["spk_qa"]["person_id"] == "per_a"
+    assert by_speaker["spk_qb"]["person_id"] == "per_b"
 
 
 def _set_speaker(database_path: Path, segment_id: str, speaker: str) -> None:

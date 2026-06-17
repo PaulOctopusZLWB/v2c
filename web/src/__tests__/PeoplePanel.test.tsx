@@ -5,8 +5,8 @@ import { PeoplePanel } from "../features/people/PeoplePanel";
 import type { PersonRow } from "../api/types";
 
 const people: PersonRow[] = [
-  { person_id: "per_a", display_name: "韩文巧", is_self: 0, enrolled: true, attributed_count: 12, manual_count: 4 },
-  { person_id: "per_b", display_name: "李雷", is_self: 0, enrolled: false, attributed_count: 0, manual_count: 0 }
+  { person_id: "per_a", display_name: "韩文巧", person_type: "contact", is_self: 0, enrolled: true, attributed_count: 12, manual_count: 4 },
+  { person_id: "per_b", display_name: "李雷", person_type: "contact", is_self: 0, enrolled: false, attributed_count: 0, manual_count: 0 }
 ];
 
 /** Drive the People-panel endpoints; everything unmatched is `{}`. */

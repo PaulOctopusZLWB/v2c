@@ -408,6 +408,10 @@ def suggest_people_for_session(*, config: AppConfig, session_id: str) -> dict:
     suggestion list is empty.
     """
     centroids = get_person_centroids(config=config)
+    # Never suggest a non_speaker (噪音/多人) person as a cluster's identity — it's a noise class,
+    # not a real voiceprint identity, so drop its centroid from the suggestion candidates.
+    non_speaker_ids = _non_speaker_person_ids(config=config)
+    centroids = {pid: vec for pid, vec in centroids.items() if pid not in non_speaker_ids}
     if not centroids:
         return {"suggestions": []}
     person_ids = list(centroids.keys())
@@ -447,6 +451,10 @@ def suggest_people_for_session(*, config: AppConfig, session_id: str) -> dict:
     return {"suggestions": suggestions}
 
 
+_KNN_K = 15  # neighbours considered in the kNN vote (capped at the labeled-set size)
+_KNN_COSINE_FLOOR = 0.25  # a far-away isolated point (best single cosine below this) stays unassigned
+
+
 def auto_attribute_enrolled(
     *,
     config: AppConfig,
@@ -456,80 +464,132 @@ def auto_attribute_enrolled(
 ) -> dict:
     """Global, manual-respecting "identify": assign every in-scope embedded segment to a person.
 
-    The supervised loop is: a few segments are labelled manually (ground truth) -> each labelled
-    person's voiceprint enrolls from those manual labels only -> identify assigns every OTHER
-    embedded segment to the nearest person voiceprint (cosine >= ``threshold``), consistently across
-    all sessions. Manual labels always win and are never overwritten.
+    Unlike a single per-person centroid (which is mediocre on multi-modal voices and ignores the
+    local cluster structure the UMAP map shows), this is a **kNN over labelled segments**: every
+    ``source='manual'`` override is a labelled exemplar, and each unlabelled in-scope segment is
+    classified by a similarity-weighted vote of its K nearest labelled exemplars. This respects
+    multi-modal voices (a person with two distinct vocal modes is two clusters of exemplars) and
+    lets a ``non_speaker`` person act as a real "noise" class.
 
     Steps:
-      a. Re-enroll EVERY person with >=1 manual label so centroids reflect the latest labels.
-      b. Load ``get_person_centroids()``; raise ``ValueError`` if none.
-      c. In scope, DELETE prior ``source='voiceprint'`` attributions (idempotent re-runs never
+      a. Build the LABELLED set from every ``source='manual'`` override -> a matrix ``L`` of
+         L2-normalized exemplar rows with a parallel ``labeled_person`` list. Raise ``ValueError``
+         if there are no labelled segments.
+      b. In scope, DELETE prior ``source='voiceprint'`` attributions (idempotent re-runs never
          accumulate stale guesses); ``source='manual'`` rows are NEVER touched.
-      d. For each in-scope embedded segment that is NOT manually labelled, assign the nearest person
-         centroid by cosine if best >= threshold (else leave unassigned), writing ``source='voiceprint'``.
-         Non-finite / dim-mismatched vectors are guarded (skipped).
-      e. Returns ``{"assigned", "unassigned", "total", "per_person", "threshold"}`` where per_person
+      c. For each in-scope embedded segment that is NOT manually labelled, cosine to every labelled
+         exemplar (one batched ``S @ L.T`` matmul), take the top-K nearest, and vote by their
+         person_id. The winner's confidence = (sum of the winner's cosines among the top-K) /
+         (sum of all top-K cosines) in [0, 1]. Assign the winner if confidence >= ``threshold`` AND
+         the winner's best single cosine >= the cosine floor; else leave unassigned. Assigned rows
+         are written ``source='voiceprint'``. Non-finite / dim-mismatched vectors are skipped.
+      d. Returns ``{"assigned", "unassigned", "total", "per_person", "threshold"}`` where per_person
          counts only the voiceprint assignments (manual labels are separate).
     """
     if not (0.0 <= threshold <= 1.0):
         raise ValueError("threshold must be in [0, 1]")
 
-    # (a) Re-enroll every person that has at least one manual label.
+    # (a) Build the labelled exemplar set from every manual override.
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        manual_person_rows = fetch_all(
-            conn, "select distinct person_id from segment_person_overrides where source = 'manual'"
+        manual_rows = fetch_all(
+            conn,
+            "select segment_id, person_id from segment_person_overrides "
+            "where source = 'manual' and person_id is not null",
         )
     finally:
         conn.close()
-    for row in manual_person_rows:
-        person_id = row["person_id"]
-        if person_id is None:
+    labeled_pairs = [(str(r["segment_id"]), str(r["person_id"])) for r in manual_rows]
+    if not labeled_pairs:
+        raise ValueError("no labeled segments to attribute against")
+
+    labeled_embeddings = get_embeddings(config=config, segment_ids=[sid for sid, _ in labeled_pairs])
+    # Determine the labelled dimensionality from the exemplars themselves (skip any with no
+    # embedding yet). All usable exemplars must agree on dim, else the matmul is ill-defined.
+    labeled_dims = {int(v.shape[0]) for v in labeled_embeddings.values() if np.all(np.isfinite(v))}
+    if not labeled_dims:
+        raise ValueError("no labeled segments have a usable embedding")
+    labeled_dim = max(labeled_dims, key=lambda d: sum(1 for v in labeled_embeddings.values() if int(v.shape[0]) == d))
+
+    labeled_vectors: list[np.ndarray] = []
+    labeled_person: list[str] = []
+    for segment_id, person_id in labeled_pairs:
+        vector = labeled_embeddings.get(segment_id)
+        if vector is None or int(vector.shape[0]) != labeled_dim or not np.all(np.isfinite(vector)):
             continue
-        try:
-            enroll_person(config=config, person_id=str(person_id))
-        except ValueError:
-            # A manual label whose segment has no embedding yet -> nothing to enroll for them.
-            pass
+        labeled_vectors.append(_normalize(vector))
+        labeled_person.append(person_id)
+    if not labeled_vectors:
+        raise ValueError("no labeled segments have a usable embedding")
 
-    # (b) Load enrolled centroids.
-    centroids = get_person_centroids(config=config)
-    if not centroids:
-        raise ValueError("no enrolled people to attribute against")
+    L = np.vstack(labeled_vectors)  # [num_labeled x dim], rows L2-normalized
+    labeled_person_arr = np.asarray(labeled_person, dtype=object)
+    num_labeled = L.shape[0]
+    K = min(_KNN_K, num_labeled)
 
-    person_ids = list(centroids.keys())
-    centroid_matrix = np.vstack([centroids[pid] for pid in person_ids])
-    centroid_dim = int(centroid_matrix.shape[1])
-
-    scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id, day=day)
-    embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+    person_ids = list(dict.fromkeys(labeled_person))  # stable unique person order
     person_labels = _person_labels(config=config, person_ids=person_ids)
     now = _now()
 
+    scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id, day=day)
+    embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+
     # Manually-labelled in-scope segments: ground truth, never overwritten.
     manual_segment_ids = _manual_override_segment_ids(config=config, segment_ids=scope_ids)
+
+    # (c) Gather the unlabelled in-scope candidates whose vector is finite and dim-matched, then do
+    # the kNN vote in one batched matmul (S @ L.T) rather than a Python per-pair loop.
+    candidate_ids: list[str] = []
+    candidate_rows: list[np.ndarray] = []
+    for segment_id in scope_ids:
+        if segment_id in manual_segment_ids:
+            continue  # manual labels always win
+        vector = embeddings.get(segment_id)
+        if vector is None or int(vector.shape[0]) != labeled_dim or not np.all(np.isfinite(vector)):
+            continue
+        candidate_ids.append(segment_id)
+        candidate_rows.append(_normalize(vector))
 
     assigned = 0
     per_person: dict[str, int] = {pid: 0 for pid in person_ids}
     writes: list[tuple[str, str]] = []  # (segment_id, person_id)
 
-    for segment_id in scope_ids:
-        if segment_id in manual_segment_ids:
-            continue  # (d) skip manual labels — they always win
-        vector = embeddings.get(segment_id)
-        if vector is None or int(vector.shape[0]) != centroid_dim:
-            continue
-        sims = centroid_matrix @ _normalize(vector)
-        best = int(np.argmax(sims))
-        best_sim = float(sims[best])
-        if not np.isfinite(best_sim) or best_sim < threshold:
-            continue
-        assigned_person = person_ids[best]
-        writes.append((segment_id, assigned_person))
-        assigned += 1
-        per_person[assigned_person] = per_person.get(assigned_person, 0) + 1
+    if candidate_rows:
+        S = np.vstack(candidate_rows)  # [N x dim], rows L2-normalized
+        sims = S @ L.T  # [N x num_labeled] cosine similarities
+        # Indices of the top-K labelled exemplars per row (unordered within the partition is fine —
+        # we sum over them and pick the winning person, order-independent).
+        if K < num_labeled:
+            top_idx = np.argpartition(-sims, K - 1, axis=1)[:, :K]
+        else:
+            top_idx = np.tile(np.arange(num_labeled), (sims.shape[0], 1))
+
+        for row in range(S.shape[0]):
+            idx = top_idx[row]
+            top_sims = sims[row, idx]
+            top_people = labeled_person_arr[idx]
+            # Similarity-weighted vote: sum cosines per person among the top-K.
+            denom = float(top_sims.sum())
+            if not np.isfinite(denom) or denom <= 0.0:
+                continue
+            best_person: str | None = None
+            best_weight = -1.0
+            for pid in set(top_people.tolist()):
+                weight = float(top_sims[top_people == pid].sum())
+                if weight > best_weight:
+                    best_weight = weight
+                    best_person = pid
+            if best_person is None:
+                continue
+            confidence = best_weight / denom
+            # The winner's best single cosine must clear the floor (far-away isolated points stay out).
+            best_single = float(top_sims[top_people == best_person].max())
+            if confidence < threshold or best_single < _KNN_COSINE_FLOOR:
+                continue
+            writes.append((candidate_ids[row], best_person))
+            assigned += 1
+            per_person[best_person] = per_person.get(best_person, 0) + 1
 
     total = len(scope_ids)
     unassigned = total - assigned
@@ -777,6 +837,45 @@ def _normalize(vector: np.ndarray) -> np.ndarray:
     if norm == 0.0:
         return array
     return array / norm
+
+
+def ensure_person(*, config: AppConfig, display_name: str, person_type: str = "contact") -> str:
+    """Return the existing person with ``display_name``, or create one and return its id.
+
+    Idempotent: used so a canonical noise person (``person_type='non_speaker'``) can be created
+    without duplicating it on repeated calls. If a person with that display name already exists its
+    id is returned unchanged (the existing person_type is NOT overwritten).
+    """
+    from uuid import uuid4
+
+    now = _now()
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(conn, "select person_id from persons where display_name = ?", (display_name,))
+        if rows:
+            return str(rows[0]["person_id"])
+        person_id = f"per_{uuid4().hex}"
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) "
+            "values (?, ?, ?, 0, ?, ?)",
+            (person_id, display_name, person_type, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return person_id
+
+
+def _non_speaker_person_ids(*, config: AppConfig) -> set[str]:
+    """Ids of persons whose ``person_type='non_speaker'`` (噪音/多人 — not a real voiceprint identity)."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(conn, "select person_id from persons where person_type = 'non_speaker'")
+    finally:
+        conn.close()
+    return {str(row["person_id"]) for row in rows}
 
 
 def _person_labels(*, config: AppConfig, person_ids: list[str]) -> dict[str, str]:

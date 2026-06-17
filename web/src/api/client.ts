@@ -51,8 +51,11 @@ export const api = {
     request<{ accepted: number }>(`/api/transcripts/sessions/${sessionId}/accept-remaining`, { method: "POST" }),
   // persons / speakers
   persons: () => request<{ persons: Person[] }>("/api/persons"),
-  createPerson: (display_name: string) =>
-    request<Person>("/api/persons", { method: "POST", body: JSON.stringify({ display_name }) }),
+  createPerson: (display_name: string, person_type?: string) =>
+    request<Person>("/api/persons", {
+      method: "POST",
+      body: JSON.stringify(person_type ? { display_name, person_type } : { display_name }),
+    }),
   assignPerson: (speaker: string, person_id: string) =>
     request(`/api/speakers/${speaker}/assign-person`, { method: "POST", body: JSON.stringify({ person_id }) }),
   overridePerson: (segmentId: string, person_id: string) =>

@@ -588,12 +588,17 @@ def test_auto_attribute_route(tmp_path: Path) -> None:
     _enroll_two_clusters(config)
     client = TestClient(create_app(config=config))
 
+    # kNN needs labeled (manual) segments: one seed per person.
+    assert client.post("/api/people/per_alice/label-segments", json={"segment_ids": ["seg_a"]}).status_code == 200
+    assert client.post("/api/people/per_bob/label-segments", json={"segment_ids": ["seg_c"]}).status_code == 200
+
     response = client.post("/api/people/auto-attribute", json={"session_id": "ses_lab", "threshold": 0.5})
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 3
-    assert body["assigned"] == 3
-    assert body["per_person"] == {"per_alice": 2, "per_bob": 1}
+    # seg_b is the only unlabeled segment; it goes to Alice by nearest-labels vote.
+    assert body["assigned"] == 1
+    assert body["per_person"] == {"per_alice": 1, "per_bob": 0}
     assert body["threshold"] == 0.5
 
 
@@ -602,8 +607,74 @@ def test_auto_attribute_no_enrolled_400(tmp_path: Path) -> None:
     _insert_labeling_day(config.database_path)
     client = TestClient(create_app(config=config))
 
+    # No labeled segments -> ValueError -> 400.
     response = client.post("/api/people/auto-attribute", json={"session_id": "ses_lab"})
     assert response.status_code == 400
+
+
+def test_create_person_with_non_speaker_type(tmp_path: Path) -> None:
+    # POST /api/persons accepts an optional person_type; default stays 'contact'.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_and_segment(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    created = client.post("/api/persons", json={"display_name": "噪音/多人", "person_type": "non_speaker"})
+    assert created.status_code == 200
+    assert created.json()["person_type"] == "non_speaker"
+
+    # Default person_type is 'contact' when omitted.
+    default = client.post("/api/persons", json={"display_name": "王芳"})
+    assert default.status_code == 200
+    assert default.json()["person_type"] == "contact"
+
+
+def test_people_route_includes_person_type(tmp_path: Path) -> None:
+    # GET /api/people exposes person_type so the frontend can render non_speaker specially.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _enroll_two_clusters(config)
+    client = TestClient(create_app(config=config))
+    client.post("/api/persons", json={"display_name": "噪音/多人", "person_type": "non_speaker"})
+
+    people = {p["display_name"]: p for p in client.get("/api/people").json()["people"]}
+    assert people["Alice"]["person_type"] == "contact"
+    assert people["噪音/多人"]["person_type"] == "non_speaker"
+
+
+def test_non_speaker_labeled_segment_classified_by_identify(tmp_path: Path) -> None:
+    # Labeling a segment to a non_speaker person and running identify classifies a near-noise
+    # segment as that person (non_speaker is a real kNN class).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_alice", "Alice", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    # seg_a near +x (Alice); seg_b/seg_c near +y -> labeled noise + a near-noise query.
+    put_embedding(config=config, segment_id="seg_a", vector=[1.0, 0.0, 0.0])
+    put_embedding(config=config, segment_id="seg_b", vector=[0.0, 1.0, 0.0])
+    put_embedding(config=config, segment_id="seg_c", vector=[0.0, 0.95, 0.05])
+    client = TestClient(create_app(config=config))
+
+    noise = client.post("/api/persons", json={"display_name": "噪音/多人", "person_type": "non_speaker"})
+    noise_id = noise.json()["person_id"]
+    assert client.post("/api/people/per_alice/label-segments", json={"segment_ids": ["seg_a"]}).status_code == 200
+    assert client.post(f"/api/people/{noise_id}/label-segments", json={"segment_ids": ["seg_b"]}).status_code == 200
+
+    response = client.post("/api/people/auto-attribute", json={"session_id": "ses_lab", "threshold": 0.5})
+    assert response.status_code == 200
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id, person_id from segment_person_overrides where segment_id = 'seg_c'")
+    finally:
+        conn.close()
+    assert rows == [{"segment_id": "seg_c", "person_id": noise_id}]
 
 
 def test_people_route_exposes_manual_count(tmp_path: Path) -> None:
