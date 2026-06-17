@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -64,6 +64,11 @@ export const api = {
     request<EmbeddingStatus>(`/api/speakers/embedding-status${query(scope)}`),
   extractEmbeddings: (scope: { session_id?: string | null; day?: string | null }) =>
     request<{ started: boolean }>("/api/speakers/extract-embeddings", { method: "POST", body: JSON.stringify(scope) }),
+  // acoustic emotion (emotion2vec): per-segment 8-class emotion over existing audio slices
+  emotionStatus: (scope: { session_id?: string | null; day?: string | null }) =>
+    request<EmotionStatus>(`/api/emotions/status${query(scope)}`),
+  extractEmotions: (scope: { session_id?: string | null; day?: string | null }) =>
+    request<{ started: boolean }>("/api/emotions/extract", { method: "POST", body: JSON.stringify(scope) }),
   recluster: (body: { anchors: Record<string, string>; threshold: number; session_id?: string | null; day?: string | null }) =>
     request<ReclusterResult>("/api/speakers/recluster", { method: "POST", body: JSON.stringify(body) }),
   speakerSegments: (params: { session_id?: string | null; speaker?: string | null; limit?: number | null }) =>

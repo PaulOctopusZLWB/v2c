@@ -139,6 +139,13 @@ export interface EmbeddingStatus {
   pending: number;
 }
 
+/** Acoustic-emotion (emotion2vec) extraction coverage for a session/day. */
+export interface EmotionStatus {
+  total: number;
+  emoted: number;
+  pending: number;
+}
+
 /** Outcome of a CAM++ similarity re-cluster pass driven by labeled anchors. */
 export interface ReclusterResult {
   assigned: number;

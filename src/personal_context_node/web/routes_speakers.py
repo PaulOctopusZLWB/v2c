@@ -48,6 +48,11 @@ class ExtractEmbeddingsRequest(BaseModel):
     day: str | None = None
 
 
+class ExtractEmotionsRequest(BaseModel):
+    session_id: str | None = None
+    day: str | None = None
+
+
 class LabelSegmentsRequest(BaseModel):
     segment_ids: list[str]
 
@@ -280,6 +285,53 @@ def extract_embeddings_route(request: Request, payload: ExtractEmbeddingsRequest
     """
     worker = request.app.state.worker
     started = worker.start_embedding_extraction(session_id=payload.session_id, day=payload.day)
+    return {"started": started}
+
+
+@router.get("/emotions/status")
+def emotion_status_route(request: Request, day: str | None = None, session_id: str | None = None) -> dict[str, int]:
+    config: AppConfig = request.app.state.config
+    where = ["ts.is_active = 1"]
+    params: list[object] = []
+    join = ""
+    if session_id is not None:
+        where.append("ts.session_id = ?")
+        params.append(session_id)
+    if day is not None:
+        join = "join sessions s on s.session_id = ts.session_id"
+        where.append("s.date_key = ?")
+        params.append(day)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            f"""
+            select
+              count(*) as total,
+              sum(case when exists (select 1 from segment_emotions se where se.segment_id = ts.segment_id) then 1 else 0 end) as emoted
+            from transcript_segments ts
+            {join}
+            where {" and ".join(where)}
+            """,
+            tuple(params),
+        )
+    finally:
+        conn.close()
+    total = int(rows[0]["total"] or 0)
+    emoted = int(rows[0]["emoted"] or 0)
+    return {"total": total, "emoted": emoted, "pending": total - emoted}
+
+
+@router.post("/emotions/extract")
+def extract_emotions_route(request: Request, payload: ExtractEmotionsRequest) -> dict[str, bool]:
+    """Kick off background acoustic-emotion (emotion2vec) extraction over pending segments.
+
+    The resident model is loaded and released inside the worker thread; returns immediately with
+    started=False if an extraction (or any worker job) is already running.
+    """
+    worker = request.app.state.worker
+    started = worker.start_emotion_extraction(session_id=payload.session_id, day=payload.day)
     return {"started": started}
 
 

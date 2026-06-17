@@ -290,6 +290,16 @@ create table if not exists segment_embeddings (
 
 create index if not exists idx_segment_embeddings_model on segment_embeddings(model);
 
+create table if not exists segment_emotions (
+  segment_id text primary key references transcript_segments(segment_id),
+  model text not null,
+  label text not null,
+  scores_json text not null,
+  created_at text not null
+);
+
+create index if not exists idx_segment_emotions_label on segment_emotions(label);
+
 create table if not exists person_voiceprints (
   person_id text primary key references persons(person_id),
   dim integer not null,
