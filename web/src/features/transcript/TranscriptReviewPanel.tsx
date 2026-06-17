@@ -28,7 +28,19 @@ export function TranscriptReviewPanel({
   onPlaybackError?: (message: string) => void;
 }) {
   const head = sessionHeader(session.segments);
-  const turns = groupIntoTurns(session.segments);
+
+  // ── Noise filters ────────────────────────────────────────────────────────
+  // Two additive toggles recompute the visible turn list (without losing any data):
+  //  · 隐藏碎语: drop turns whose segments are ALL ≤2 chars (the "呃/啊" fillers, ~1400 of them).
+  //  · 仅未审:   drop turns that are already fully reviewed (every segment has a decision).
+  const [hideFiller, setHideFiller] = useState(false);
+  const [onlyPending, setOnlyPending] = useState(false);
+  const allTurns = groupIntoTurns(session.segments);
+  const turns = allTurns.filter((turn) => {
+    if (hideFiller && turn.segments.every((s) => s.text.trim().length <= 2)) return false;
+    if (onlyPending && turn.segments.every((s) => s.review_status !== "pending_review")) return false;
+    return true;
+  });
 
   // Distinct speakers (in first-seen order) → all of that speaker's segment ids, for the
   // per-speaker "接受此人全部" control.
@@ -113,6 +125,17 @@ export function TranscriptReviewPanel({
         <button className="primary" disabled={acceptSession.pending} onClick={() => void acceptSession.run()}>
           <Icon name="check_circle" /> 接受整场
         </button>
+      </div>
+
+      <div className="review-filters">
+        <label className="rf-toggle">
+          <input type="checkbox" checked={hideFiller} onChange={(e) => setHideFiller(e.target.checked)} />
+          <span>隐藏碎语 (≤2字)</span>
+        </label>
+        <label className="rf-toggle">
+          <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />
+          <span>仅未审</span>
+        </label>
       </div>
 
       <div className="turn-list">

@@ -144,6 +144,49 @@ def accept_remaining_segments(*, config: AppConfig, session_id: str) -> dict[str
     return {"accepted": accepted}
 
 
+def review_queue(*, config: AppConfig, limit: int = 100) -> list[dict[str, object]]:
+    """One ranked queue of sessions that still need review, across every day.
+
+    For each session with >=1 pending segment (an active segment with NO review row), return:
+      session_id, day (sessions.date_key), started_at,
+      pending  — count of active segments with no review row,
+      total    — count of active segments,
+      speakers — distinct speaker count among active segments,
+      has_flag — 1 if any of the session's reviews is 'needs_fix', else 0.
+
+    Ordered by has_flag desc, pending desc, started_at desc, and capped at `limit`. Single
+    grouped query (no N+1): a left join over reviews lets `count(... filter where r.status is
+    null)` express "pending" and a `having pending > 0` drops fully-reviewed sessions.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        return fetch_all(
+            conn,
+            """
+            select
+              s.session_id as session_id,
+              s.date_key as day,
+              s.started_at as started_at,
+              count(*) filter (where r.status is null) as pending,
+              count(*) as total,
+              count(distinct ts.speaker) as speakers,
+              max(case when r.status = 'needs_fix' then 1 else 0 end) as has_flag
+            from transcript_segments ts
+            join sessions s on s.session_id = ts.session_id
+            left join transcript_segment_reviews r on r.segment_id = ts.segment_id
+            where ts.is_active = 1
+            group by s.session_id, s.date_key, s.started_at
+            having pending > 0
+            order by has_flag desc, pending desc, started_at desc
+            limit ?
+            """,
+            (limit,),
+        )
+    finally:
+        conn.close()
+
+
 def search_transcripts(*, config: AppConfig, query: str, limit: int = 30) -> list[dict[str, object]]:
     """Case-insensitive substring search over active segment text, across every day.
 

@@ -71,6 +71,23 @@ export interface StatusSummary {
   worker_running: boolean;
 }
 
+/** One session in the global review queue (`/api/transcripts/review-queue`): everything the
+ *  inbox needs to rank + render a row without a per-session fetch. */
+export interface ReviewQueueItem {
+  session_id: string;
+  /** sessions.date_key — the day this session belongs to. */
+  day: string;
+  started_at: string;
+  /** Active segments with no review row yet. */
+  pending: number;
+  /** Active segment count. */
+  total: number;
+  /** Distinct speaker count among active segments. */
+  speakers: number;
+  /** 1 if any of the session's reviews is 'needs_fix', else 0. */
+  has_flag: number;
+}
+
 /** Per-day processing/ready aggregate from `/api/transcripts/day-status`. */
 export interface DayStatusRow {
   day: string;

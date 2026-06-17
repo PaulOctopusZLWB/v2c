@@ -9,6 +9,7 @@ import { Icon } from "./components/Icon";
 import { Toasts, useToasts } from "./components/Toasts";
 import { DevicePanel } from "./features/device/DevicePanel";
 import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
+import { ReviewQueue } from "./features/transcript/ReviewQueue";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
@@ -78,6 +79,10 @@ export function App() {
   const [clusterDay, setClusterDay] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [session, setSession] = useState<TranscriptSession | null>(null);
+  // 审核 tab left column: the global review queue (default) vs. the by-day browser. `queueVersion`
+  // bumps after a review action so the queue refetches and a finished session leaves the list.
+  const [reviewMode, setReviewMode] = useState<"queue" | "days">("queue");
+  const [queueVersion, setQueueVersion] = useState(0);
   const [persons, setPersons] = useState<Person[]>([]);
   // "People taught once": the enriched person roster (enrollment + attribution) for the 声纹 tab,
   // plus a key that, when bumped, remounts the voiceprint map so it refetches recoloured points.
@@ -326,12 +331,15 @@ export function App() {
         await restorePriorStatuses(priorById);
         patchSegmentStatuses(priorById);
         await reloadSession();
+        setQueueVersion((v) => v + 1);
       })();
     });
 
     // Reconcile session-level review_status in the background (AFTER the optimistic update,
     // so the UI never blocks on it).
     void reloadSession().catch(() => undefined);
+    // Refetch the review queue so a session that just lost its last pending segment drops out.
+    setQueueVersion((v) => v + 1);
   }
 
   // OPTIMISTIC accept-整场: mark every still-pending segment accepted at once, call
@@ -358,10 +366,13 @@ export function App() {
         await api.clearReview(pendingIds);
         patchSegmentStatuses(priorById);
         await reloadSession();
+        setQueueVersion((v) => v + 1);
       })();
     });
 
     void reloadSession().catch(() => undefined);
+    // The whole session is now reviewed — refetch the queue so it leaves the inbox.
+    setQueueVersion((v) => v + 1);
   }
 
   function highlightEvidence(candidateId: string) {
@@ -528,14 +539,47 @@ export function App() {
     return (
       <div className="tab-page two-col">
         <aside className="col-nav">
-          <WorkspaceNav
-            days={days}
-            dayStatus={dayStatus}
-            selectedDay={selectedDay}
-            selectedSessionId={selectedSessionId}
-            onSelectDay={(d) => void guard(selectDay)(d)}
-            onSelectSession={(id) => void guard(selectSession)(id)}
-          />
+          <div className="nav-mode" role="tablist" aria-label="审核浏览方式">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={reviewMode === "queue"}
+              className={`nav-mode-btn${reviewMode === "queue" ? " active" : ""}`}
+              onClick={() => setReviewMode("queue")}
+            >
+              待审队列
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={reviewMode === "days"}
+              className={`nav-mode-btn${reviewMode === "days" ? " active" : ""}`}
+              onClick={() => setReviewMode("days")}
+            >
+              按天浏览
+            </button>
+          </div>
+          {reviewMode === "queue" ? (
+            <ReviewQueue
+              activeSessionId={selectedSessionId}
+              version={queueVersion}
+              onOpen={(sid, day) => {
+                void guard(async () => {
+                  await selectDay(day);
+                  await selectSession(sid);
+                })();
+              }}
+            />
+          ) : (
+            <WorkspaceNav
+              days={days}
+              dayStatus={dayStatus}
+              selectedDay={selectedDay}
+              selectedSessionId={selectedSessionId}
+              onSelectDay={(d) => void guard(selectDay)(d)}
+              onSelectSession={(id) => void guard(selectSession)(id)}
+            />
+          )}
         </aside>
         <section className="col-content" id="panel-transcript">
           {session ? (

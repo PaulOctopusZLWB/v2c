@@ -159,6 +159,33 @@ def test_search_endpoint_empty_query_returns_empty(tmp_path: Path) -> None:
     assert missing.json() == {"results": []}
 
 
+def test_review_queue_endpoint_lists_then_drops_session(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    queue = client.get("/api/transcripts/review-queue").json()["queue"]
+    assert len(queue) == 1
+    assert queue[0]["session_id"] == "ses_test"
+    assert queue[0]["day"] == "2087-05-10"
+    assert queue[0]["pending"] == 1
+    assert queue[0]["has_flag"] == 0
+
+    # Accept the only segment -> the session leaves the queue.
+    client.post("/api/transcripts/segments/batch-review", json={"segment_ids": ["seg_1"], "status": "accepted"})
+    assert client.get("/api/transcripts/review-queue").json()["queue"] == []
+
+
+def test_review_queue_endpoint_honors_limit(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/transcripts/review-queue", params={"limit": 0})
+    assert response.status_code == 200
+    assert response.json()["queue"] == []
+
+
 def _insert_session(database_path: Path) -> None:
     conn = connect(database_path)
     try:

@@ -9,6 +9,12 @@ async function gotoTab(label: string) {
   await userEvent.click(await screen.findByRole("tab", { name: label }));
 }
 
+/** The 审核 tab defaults to the global review queue; switch to the by-day browser (WorkspaceNav)
+ *  so day/session buttons render. The toggle is a role="tab" within the nav rail. */
+async function useDayBrowser() {
+  await userEvent.click(await screen.findByRole("tab", { name: "按天浏览" }));
+}
+
 describe("App container", () => {
   beforeEach(() => {
     // Each test starts on a known tab regardless of the previous hash (useTab is hash-backed).
@@ -280,6 +286,8 @@ describe("App container", () => {
 
     render(<App />);
     await waitFor(() => expect(summaryListener).not.toBeNull());
+    // The day button lives in the by-day browser (WorkspaceNav), not the default review queue.
+    await useDayBrowser();
 
     // A run starts (pipeline becomes "running")...
     act(() => summaryListener!({ data: JSON.stringify({ status_counts: { running: 1 }, total: 1, active_stage: "asr", current_target: "a1", import_progress: null, worker_running: true }) }));
@@ -329,6 +337,7 @@ describe("App container", () => {
     });
 
     render(<App />);
+    await useDayBrowser();
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
     await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
@@ -355,6 +364,7 @@ describe("App container", () => {
     });
 
     render(<App />);
+    await useDayBrowser();
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
     expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
@@ -386,6 +396,7 @@ describe("App container", () => {
     });
 
     render(<App />);
+    await useDayBrowser();
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
     await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
@@ -454,7 +465,9 @@ describe("App container", () => {
 
     const { container } = render(<App />);
 
-    // Default tab is 审核 — pick a day + session; the transcript panel mounts.
+    // Default tab is 审核 — switch to the by-day browser, then pick a day + session; the
+    // transcript panel mounts.
+    await useDayBrowser();
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
     await screen.findByText("你好"); // transcript content rendered

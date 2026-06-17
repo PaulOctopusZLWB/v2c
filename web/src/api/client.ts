@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -28,6 +28,9 @@ export const api = {
   // transcript navigation + review
   days: () => request<{ days: Array<{ day: string; session_count: number }> }>("/api/transcripts/days"),
   dayStatus: () => request<{ days: DayStatusRow[] }>("/api/transcripts/day-status"),
+  // global review queue: one ranked list of sessions still needing review, across every day
+  reviewQueue: (limit?: number) =>
+    request<{ queue: ReviewQueueItem[] }>(`/api/transcripts/review-queue${query({ limit })}`),
   sessionsForDay: (day: string) =>
     request<{ day: string; sessions: Array<{ session_id: string; started_at: string; segment_count: number; review_status: string }> }>(`/api/transcripts/days/${day}/sessions`),
   session: (id: string) => request<TranscriptSession>(`/api/transcripts/sessions/${id}`),

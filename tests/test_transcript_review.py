@@ -9,6 +9,7 @@ from personal_context_node.transcript_review import (
     accepted_segments_clause,
     batch_review_segments,
     clear_review_segments,
+    review_queue,
     review_segment,
     reviewed_segments_for_session,
     search_transcripts,
@@ -306,6 +307,122 @@ def test_search_transcripts_empty_query_returns_empty(tmp_path: Path) -> None:
 
     assert search_transcripts(config=config, query="") == []
     assert search_transcripts(config=config, query="   ") == []
+
+
+def test_review_queue_surfaces_sessions_with_pending_segments(tmp_path: Path) -> None:
+    # A 2-segment session with no review rows -> one queue row, pending=2, total=2, speakers=1.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+
+    queue = review_queue(config=config)
+
+    assert len(queue) == 1
+    item = queue[0]
+    assert item["session_id"] == "ses_test"
+    assert item["day"] == "2087-05-10"
+    assert item["started_at"] == "2087-05-10T08:00:00+08:00"
+    assert item["pending"] == 2
+    assert item["total"] == 2
+    assert item["speakers"] == 1
+    assert item["has_flag"] == 0
+
+
+def test_review_queue_counts_only_unreviewed_as_pending(tmp_path: Path) -> None:
+    # Accept one of two segments -> still in the queue, pending drops to 1.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    review_segment(config=config, segment_id="seg_1", status="accepted", note="")
+
+    queue = review_queue(config=config)
+
+    assert len(queue) == 1
+    assert queue[0]["pending"] == 1
+    assert queue[0]["total"] == 2
+
+
+def test_review_queue_drops_fully_reviewed_session(tmp_path: Path) -> None:
+    # Accept every segment -> the session leaves the queue (having pending > 0 fails).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    accept_remaining_segments(config=config, session_id="ses_test")
+
+    assert review_queue(config=config) == []
+
+
+def test_review_queue_ranks_flagged_session_first(tmp_path: Path) -> None:
+    # Two sessions both with pending segments; the one carrying a needs_fix flag ranks first.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_two_sessions(config.database_path)
+    # Flag a segment in the EARLIER session so order can't be explained by started_at alone.
+    review_segment(config=config, segment_id="a_seg_1", status="needs_fix", note="听不清")
+
+    queue = review_queue(config=config)
+
+    assert [item["session_id"] for item in queue] == ["ses_a", "ses_b"]
+    assert queue[0]["has_flag"] == 1
+    # The flagged segment still has no... it HAS a review row, so it isn't pending: pending counts
+    # only un-reviewed segments. ses_a has seg_2 pending; ses_b has both pending.
+    assert queue[0]["session_id"] == "ses_a"
+    assert queue[0]["pending"] == 1
+    assert queue[1]["session_id"] == "ses_b"
+    assert queue[1]["has_flag"] == 0
+    assert queue[1]["pending"] == 2
+
+
+def test_review_queue_respects_limit(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_two_sessions(config.database_path)
+
+    assert len(review_queue(config=config, limit=1)) == 1
+
+
+def test_review_queue_ignores_inactive_segments(tmp_path: Path) -> None:
+    # An inactive (superseded) segment must not count toward pending/total.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_texts(
+        config.database_path,
+        [("seg_1", "保留"), ("seg_2", "作废")],
+        inactive={"seg_2"},
+    )
+
+    queue = review_queue(config=config)
+
+    assert len(queue) == 1
+    assert queue[0]["session_id"] == "ses_text"
+    assert queue[0]["pending"] == 1
+    assert queue[0]["total"] == 1
+
+
+def _insert_two_sessions(database_path: Path) -> None:
+    """Two sessions on the same day: ses_a (started 08:00, 2 segs) then ses_b (09:00, 2 segs)."""
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aud_two", "DJI Mic 3", "/source/two.wav", 1, 1, "/raw/two.wav", "sha256:two", 600000, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00", "imported"),
+        )
+        sessions = [
+            ("ses_a", "08:00:00", "a_seg_1"),
+            ("ses_b", "09:00:00", "b_seg_1"),
+        ]
+        for session_id, hms, first in sessions:
+            conn.execute(
+                "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (session_id, "2087-05-10", f"2087-05-10T{hms}+08:00", f"2087-05-10T{hms}+08:00", "derived_from_segments", 2, 2000, first, "2087-05-10T10:00:00+08:00", "2087-05-10T10:00:00+08:00"),
+            )
+        seg_specs = [
+            ("a_seg_1", "ses_a"), ("a_seg_2", "ses_a"),
+            ("b_seg_1", "ses_b"), ("b_seg_2", "ses_b"),
+        ]
+        for index, (segment_id, session_id) in enumerate(seg_specs):
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (segment_id, "aud_two", f"chk_{segment_id}", session_id, index * 1000, (index + 1) * 1000, "t", "zh", "self", "self", f"ev_{segment_id}", 1.0, "MockASRAdapter", "mock-asr", "test", 1, "2087-05-10T10:00:01+08:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _insert_session_with_texts(
