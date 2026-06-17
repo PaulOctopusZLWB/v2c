@@ -28,6 +28,8 @@ const segs = [
 
 const turn: Turn = {
   speaker: "spk_1",
+  label: "spk_1",
+  personId: null,
   segments: segs,
   segment_ids: ["seg_1", "seg_2"],
   start: segs[0].absolute_start_at,
@@ -41,6 +43,23 @@ describe("TurnBlock", () => {
     expect(screen.getByText("数据不出本机")).toBeInTheDocument();
     expect(screen.getByText("全部在本地处理")).toBeInTheDocument();
     expect(screen.getByText(/09:33:09/)).toBeInTheDocument(); // turn start wall clock
+  });
+
+  it("renders the attributed person name on its chip (not the spk label)", () => {
+    const attributed: Turn = { ...turn, label: "韩文巧", personId: "per_han" };
+    render(<TurnBlock turn={attributed} persons={[]} onBatchReview={vi.fn()} />);
+    expect(screen.getByText("韩文巧")).toBeInTheDocument();
+    expect(screen.queryByText("spk_1")).not.toBeInTheDocument();
+    // An attributed chip is NOT marked unattributed.
+    const chip = screen.getByText("韩文巧").closest(".chip") as HTMLElement;
+    expect(chip.classList.contains("unattributed")).toBe(false);
+  });
+
+  it("renders an unattributed turn with the muted spk label + 未识别 hint", () => {
+    render(<TurnBlock turn={turn} persons={[]} onBatchReview={vi.fn()} />);
+    const chip = screen.getByText("spk_1").closest(".chip") as HTMLElement;
+    expect(chip.classList.contains("unattributed")).toBe(true);
+    expect(chip.textContent).toContain("未识别");
   });
 
   it("plays a sentence's own audio when its span is clicked", async () => {

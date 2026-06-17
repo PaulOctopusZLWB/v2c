@@ -50,15 +50,25 @@ export function TurnBlock({
     </button>
   );
 
+  // Resolved identity drives both the colour and the chip label: a person when attributed
+  // (turn.personId set), else the raw spk label rendered as "未识别".
+  const color = speakerColor(turn.personId ?? turn.speaker);
+  const attributed = turn.personId !== null;
+
   return (
     <article
       ref={articleRef}
       className={`turn${focused ? " focused" : ""}`}
-      style={{ borderLeftColor: speakerColor(turn.speaker) }}
+      style={{ borderLeftColor: color }}
     >
       <header className="turn-head">
-        <span className="chip" style={{ background: speakerColor(turn.speaker) }}>
-          <Icon name="person" /> {turn.speaker}
+        <span
+          className={`chip${attributed ? "" : " unattributed"}`}
+          style={{ background: color }}
+          title={attributed ? undefined : "未识别说话人(尚未归属到人物)"}
+        >
+          <Icon name="person" /> {turn.label}
+          {attributed ? null : <span className="unattributed-hint">未识别</span>}
         </span>
         <time className="num dim">
           {clockOfDay(turn.start)} – {clockOfDay(turn.end)}

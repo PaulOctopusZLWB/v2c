@@ -90,6 +90,17 @@
 .turn-list { display: grid; gap: 14px; }
 .turn { border-left: 3px solid var(--border); padding: 8px 0 10px 12px; }
 .turn-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+/* Unattributed turn: the diarizer's raw spk_NN with no resolved person. Dim the chip and tack on
+   a quiet 未识别 hint so it reads as "not yet a person" vs an attributed name chip. */
+.turn-head .chip.unattributed {
+  background: transparent !important;
+  border: 1px dashed var(--border);
+  color: var(--text-2);
+}
+.turn-head .chip.unattributed .unattributed-hint {
+  font-size: 10px; opacity: .75; margin-left: 4px;
+  padding-left: 5px; border-left: 1px solid var(--border);
+}
 .turn-summary { font-size: 11px; margin-left: auto; }
 .turn-text { margin: 0; line-height: 1.7; }
 .turn-text .evi {
@@ -462,6 +473,12 @@
 .person-enrolled .icon { width: 13px; height: 13px; }
 .person-count { font-size: 12px; margin-left: auto; }
 .person-row > button { margin-left: var(--s2); }
+/* Delete a duplicate person: a quiet ghost button that warms to a danger tint on hover. */
+.person-delete { color: var(--text-2); }
+.person-delete:hover:not(:disabled) {
+  color: var(--danger, #f87171);
+  border-color: color-mix(in srgb, var(--danger, #f87171) 60%, transparent);
+}
 
 .people-add { display: flex; gap: var(--s3); }
 .people-add input { flex: 1; min-width: 0; }

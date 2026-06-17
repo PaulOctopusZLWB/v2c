@@ -184,6 +184,51 @@ describe("PeoplePanel", () => {
     });
   });
 
+  it("删除 a person (confirm stubbed) calls deletePerson then reloads + onChanged", async () => {
+    vi.stubGlobal("fetch", mockFetch({ "/api/persons/per_a": { deleted: true } }));
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onChanged = vi.fn();
+    render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
+
+    const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
+    await userEvent.click(within(hanRow).getByRole("button", { name: /删除/ }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    await waitFor(() => {
+      const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
+      const del = calls.find((c) => c.url === "/api/persons/per_a" && c.init?.method === "DELETE");
+      expect(del).toBeTruthy();
+    });
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("does not delete when the confirm is dismissed", async () => {
+    vi.stubGlobal("fetch", mockFetch({ "/api/persons/per_a": { deleted: true } }));
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
+    await userEvent.click(within(hanRow).getByRole("button", { name: /删除/ }));
+
+    const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
+    expect(calls.find((c) => c.url === "/api/persons/per_a" && c.init?.method === "DELETE")).toBeUndefined();
+  });
+
+  it("hides the 删除 button for a 本人 (is_self) person", async () => {
+    const withSelf = [
+      { person_id: "per_self", display_name: "我", person_type: "self", is_self: 1, enrolled: true, attributed_count: 3, manual_count: 3 },
+      ...people
+    ];
+    vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withSelf } }));
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    const selfRow = (await screen.findByText("我")).closest(".person-row") as HTMLElement;
+    expect(within(selfRow).queryByRole("button", { name: /删除/ })).toBeNull();
+    // a normal person still has the delete button.
+    const hanRow = screen.getByText("韩文巧").closest(".person-row") as HTMLElement;
+    expect(within(hanRow).getByRole("button", { name: /删除/ })).toBeInTheDocument();
+  });
+
   it("新建人物 creates a person then reloads the list", async () => {
     vi.stubGlobal(
       "fetch",

@@ -64,6 +64,19 @@ export function PeoplePanel({
     await load();
   });
 
+  // Delete an accidental duplicate person: confirm, cascade-delete on the backend, then reload
+  // the roster + recolor the map. Never offered for 本人 (is_self) — the button is hidden for them.
+  const remove = useAsyncAction(async (p: PersonRow) => {
+    if (!window.confirm(`删除人物「${p.display_name}」?其声纹与归属将被清除。`)) return;
+    try {
+      await api.deletePerson(p.person_id);
+      push(`已删除人物「${p.display_name}」`);
+      await refresh();
+    } catch (err) {
+      push("删除失败", err instanceof Error ? err.message : undefined);
+    }
+  });
+
   const enroll = useAsyncAction(async (personId: string) => {
     try {
       const res = await api.enrollPerson(personId);
@@ -175,6 +188,19 @@ export function PeoplePanel({
               {enroll.pending ? <span className="spinner" aria-hidden /> : <Icon name="mic" />}
               {p.enrolled ? "重新登记声纹" : "登记声纹"}
             </button>
+            {/* Delete a duplicate person — never offered for 本人 (is_self). */}
+            {p.is_self ? null : (
+              <button
+                className="ghost ghost-sm person-delete"
+                onClick={() => void remove.run(p)}
+                disabled={remove.pending}
+                aria-busy={remove.pending}
+                title="删除该人物(其声纹与归属将被清除)"
+              >
+                {remove.pending ? <span className="spinner" aria-hidden /> : <Icon name="trash" />}
+                删除
+              </button>
+            )}
           </li>
         ))}
         {people.length === 0 && !loadError ? <li className="muted">暂无人物</li> : null}

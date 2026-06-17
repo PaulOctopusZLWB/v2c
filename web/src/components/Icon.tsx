@@ -17,6 +17,7 @@ const P: Record<string, React.ReactNode> = {
   link: <><path d="M9 15l6-6" /><path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1" /><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1" /></>,
   check_circle: <><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></>,
   inbox: <><path d="M4 13l2-8h12l2 8v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /><path d="M4 13h4l1 2h6l1-2h4" /></>,
+  trash: <><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" /><path d="M10 11v6M14 11v6" /></>,
 };
 
 export function Icon({ name, className = "icon" }: { name: keyof typeof P | string; className?: string }) {
