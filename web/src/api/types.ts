@@ -82,6 +82,8 @@ export interface ReviewQueueItem {
   /** sessions.date_key — the day this session belongs to. */
   day: string;
   started_at: string;
+  /** User-chosen session name, or null when unnamed (then show the time label). */
+  name?: string | null;
   /** Active segments with no review row yet. */
   pending: number;
   /** Active segment count. */

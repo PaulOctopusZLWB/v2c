@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from personal_context_node import speaker_embeddings
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -172,6 +173,7 @@ def review_queue(*, config: AppConfig, limit: int = 100) -> list[dict[str, objec
               s.session_id as session_id,
               s.date_key as day,
               s.started_at as started_at,
+              s.name as name,
               count(*) filter (where r.status is null) as pending,
               count(*) as total,
               count(distinct ts.speaker) as speakers,
@@ -180,7 +182,7 @@ def review_queue(*, config: AppConfig, limit: int = 100) -> list[dict[str, objec
             join sessions s on s.session_id = ts.session_id
             left join transcript_segment_reviews r on r.segment_id = ts.segment_id
             where ts.is_active = 1
-            group by s.session_id, s.date_key, s.started_at
+            group by s.session_id, s.date_key, s.started_at, s.name
             having pending > 0
             order by has_flag desc, pending desc, started_at desc
             limit ?
@@ -248,7 +250,7 @@ def sessions_for_day(*, config: AppConfig, day: str) -> list[dict[str, object]]:
         initialize(conn)
         sessions = fetch_all(
             conn,
-            "select session_id, started_at, segment_count from sessions where date_key = ? order by started_at",
+            "select session_id, started_at, segment_count, name from sessions where date_key = ? order by started_at",
             (day,),
         )
     finally:
@@ -337,6 +339,69 @@ def day_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
         return [dict(row) for row in rows]
     finally:
         conn.close()
+
+
+def rename_session(*, config: AppConfig, session_id: str, name: str) -> bool:
+    """Set (or clear) a session's display name. A trimmed empty string clears it back to NULL.
+
+    Returns whether a session row actually matched (False -> the caller can 404 an unknown id).
+    """
+    trimmed = name.strip()
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        cursor = conn.execute(
+            "update sessions set name = ?, updated_at = ? where session_id = ?",
+            (trimmed or None, _now(), session_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_session(*, config: AppConfig, session_id: str) -> dict[str, object]:
+    """Cascading delete of a session and all of its segments' dependent rows.
+
+    Gathers the session's segment_ids, then in ONE transaction deletes the dependent rows keyed by
+    segment_id (reviews, person overrides, embeddings, emotions), the transcript_segments rows, and
+    finally the sessions row. Returns {deleted, segments}. An unknown id is a no-op
+    ({deleted: False, segments: 0}). Clears the projection cache afterward (the 2D voiceprint map's
+    segment set changed).
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        exists = conn.execute("select 1 from sessions where session_id = ?", (session_id,)).fetchone()
+        if exists is None:
+            return {"deleted": False, "segments": 0}
+        segment_ids = [
+            str(row["segment_id"])
+            for row in conn.execute(
+                "select segment_id from transcript_segments where session_id = ?", (session_id,)
+            ).fetchall()
+        ]
+        # All dependent deletes + the session row share one transaction. Chunk the segment-id
+        # deletes (one bind var each) so a multi-thousand-segment session never trips SQLite's
+        # per-statement variable limit.
+        for start in range(0, len(segment_ids), 500):
+            chunk = segment_ids[start : start + 500]
+            placeholders = ", ".join("?" for _ in chunk)
+            for table in (
+                "transcript_segment_reviews",
+                "segment_person_overrides",
+                "segment_embeddings",
+                "segment_emotions",
+            ):
+                conn.execute(f"delete from {table} where segment_id in ({placeholders})", chunk)
+        conn.execute("delete from transcript_segments where session_id = ?", (session_id,))
+        conn.execute("delete from sessions where session_id = ?", (session_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    # The map's segment set changed -> any cached 2D projection is now stale.
+    speaker_embeddings.clear_projection_cache()
+    return {"deleted": True, "segments": len(segment_ids)}
 
 
 def _now() -> str:

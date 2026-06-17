@@ -231,6 +231,7 @@ create table if not exists sessions (
   segment_count integer not null,
   active_speech_ms integer not null,
   primary_person_id text,
+  name text,
   first_segment_id text not null unique,
   exclude_from_memory integer not null default 0,
   created_at text not null,
@@ -550,6 +551,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     # confirmed labels and enrollment works immediately.
     _ensure_column(conn, "segment_person_overrides", "source", "text not null default 'manual'")
     _ensure_column(conn, "sessions", "primary_person_id", "text")
+    # User-chosen session name surfaced in the 审核 list + 声纹 scope picker (nullable: most sessions
+    # stay unnamed and show their time label instead).
+    _ensure_column(conn, "sessions", "name", "text")
     conn.execute("create index if not exists idx_sessions_date on sessions(date_key, started_at)")
     _ensure_column(conn, "tasks", "priority", "integer not null default 100")
     _ensure_column(conn, "tasks", "retry_count", "integer not null default 0")

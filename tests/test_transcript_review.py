@@ -9,11 +9,14 @@ from personal_context_node.transcript_review import (
     accepted_segments_clause,
     batch_review_segments,
     clear_review_segments,
+    delete_session,
+    rename_session,
     review_queue,
     review_segment,
     reviewed_segments_for_session,
     search_transcripts,
     session_review_status,
+    sessions_for_day,
 )
 
 import pytest
@@ -424,6 +427,103 @@ def test_reviewed_segments_surface_resolved_person(tmp_path: Path) -> None:
     # Existing fields are still present and ordering is preserved.
     assert [r["segment_id"] for r in rows] == ["seg_1", "seg_2"]
     assert by_id["seg_1"]["review_status"] == "pending_review"
+
+
+def test_rename_session_sets_and_clears_name(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+
+    # Set a name; matched -> True. Surfaces in sessions_for_day.
+    assert rename_session(config=config, session_id="ses_test", name="  团队晨会  ") is True
+    sessions = sessions_for_day(config=config, day="2087-05-10")
+    assert sessions[0]["name"] == "团队晨会"  # trimmed
+
+    # Empty string clears it back to NULL.
+    assert rename_session(config=config, session_id="ses_test", name="   ") is True
+    sessions = sessions_for_day(config=config, day="2087-05-10")
+    assert sessions[0]["name"] is None
+
+
+def test_rename_session_unknown_returns_false(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    assert rename_session(config=config, session_id="ses_missing", name="x") is False
+
+
+def test_sessions_for_day_surfaces_name(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    # Unset name is None.
+    assert sessions_for_day(config=config, day="2087-05-10")[0]["name"] is None
+
+
+def test_review_queue_surfaces_name(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    rename_session(config=config, session_id="ses_test", name="周会")
+    queue = review_queue(config=config)
+    assert queue[0]["name"] == "周会"
+
+
+def test_delete_session_cascades_all_segment_tables(tmp_path: Path) -> None:
+    # Insert a session with 2 segments plus a review, an embedding, an emotion and an override on
+    # seg_1; delete_session must remove the session row AND every dependent row in one transaction.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    review_segment(config=config, segment_id="seg_1", status="accepted", note="")
+
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into segment_embeddings (segment_id, model, dim, vector, created_at) values (?, ?, ?, ?, ?)",
+            ("seg_1", "campplus", 2, b"\x00\x01", "2087-05-10T08:00:05+08:00"),
+        )
+        conn.execute(
+            "insert into segment_emotions (segment_id, model, label, scores_json, created_at) values (?, ?, ?, ?, ?)",
+            ("seg_2", "emotion2vec", "neutral", "{}", "2087-05-10T08:00:05+08:00"),
+        )
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, ?, ?, ?, ?)",
+            ("seg_1", "Paul", "2087-05-10T08:00:05+08:00", "per_paul", "manual"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = delete_session(config=config, session_id="ses_test")
+    assert result == {"deleted": True, "segments": 2}
+
+    conn = connect(config.database_path)
+    try:
+        assert fetch_all(conn, "select session_id from sessions") == []
+        assert fetch_all(conn, "select segment_id from transcript_segments where session_id = 'ses_test'") == []
+        assert fetch_all(conn, "select segment_id from transcript_segment_reviews") == []
+        assert fetch_all(conn, "select segment_id from segment_embeddings") == []
+        assert fetch_all(conn, "select segment_id from segment_emotions") == []
+        assert fetch_all(conn, "select segment_id from segment_person_overrides") == []
+    finally:
+        conn.close()
+
+
+def test_delete_session_unknown_returns_not_deleted(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+
+    result = delete_session(config=config, session_id="ses_missing")
+    assert result == {"deleted": False, "segments": 0}
+    # The real session is untouched.
+    assert sessions_for_day(config=config, day="2087-05-10")[0]["session_id"] == "ses_test"
+
+
+def test_delete_session_clears_projection_cache(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    calls: list[int] = []
+    import personal_context_node.transcript_review as tr
+
+    monkeypatch.setattr(tr.speaker_embeddings, "clear_projection_cache", lambda: calls.append(1))
+    delete_session(config=config, session_id="ses_test")
+    assert calls == [1]
 
 
 def _insert_two_sessions(database_path: Path) -> None:

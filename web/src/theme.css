@@ -138,6 +138,14 @@ input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 
 .row-btn.selected .count { color: var(--accent); }
 .day-end { display: flex; align-items: center; gap: 6px; }
 
+/* ---- session row: select button + inline rename/delete icon buttons ---- */
+.session-row { display: flex; align-items: center; gap: 2px; border-radius: var(--r1); }
+.session-row .session-row-main { flex: 1 1 auto; min-width: 0; }
+.session-row-action { flex: 0 0 auto; opacity: 0; color: var(--text-dim); font-size: 12px; line-height: 1; }
+.session-row:hover .session-row-action,
+.session-row.selected .session-row-action { opacity: 1; }
+.session-row-action:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
+
 /* ---- task list controls (filter + retry-all) ---- */
 .task-list-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 6px; font-size: 12px; }
 .task-filter { display: flex; align-items: center; gap: 5px; color: var(--text-2); cursor: pointer; }

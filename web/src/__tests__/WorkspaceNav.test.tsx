@@ -30,6 +30,76 @@ describe("WorkspaceNav", () => {
     expect(onSelectSession).toHaveBeenCalledWith("ses_1");
   });
 
+  it("renders a session's name when set, else the time label", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/transcripts/days/2087-05-10/sessions")
+        return new Response(JSON.stringify({ day: "2087-05-10", sessions: [
+          { session_id: "ses_named", started_at: "2087-05-10T08:00:00+08:00", segment_count: 3, review_status: "pending_review", name: "团队晨会" }
+        ] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    }));
+    const days = [{ day: "2087-05-10", session_count: 1 }];
+    render(<WorkspaceNav days={days} selectedDay="2087-05-10" onSelectDay={vi.fn()} onSelectSession={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(/团队晨会/)).toBeInTheDocument());
+  });
+
+  it("rename: clicking ✎ calls onRenameSession with the new name, then refreshes", async () => {
+    const onRenameSession = vi.fn(async () => undefined);
+    const days = [{ day: "2087-05-10", session_count: 1 }];
+    vi.spyOn(window, "prompt").mockReturnValue("新名字");
+    render(
+      <WorkspaceNav
+        days={days}
+        selectedDay="2087-05-10"
+        onSelectDay={vi.fn()}
+        onSelectSession={vi.fn()}
+        onRenameSession={onRenameSession}
+        onDeleteSession={vi.fn()}
+      />
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: /ses_1/ })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /重命名/ }));
+    expect(onRenameSession).toHaveBeenCalledWith("ses_1", "新名字");
+  });
+
+  it("delete: clicking 🗑 (confirm true) calls onDeleteSession with the id", async () => {
+    const onDeleteSession = vi.fn(async () => undefined);
+    const days = [{ day: "2087-05-10", session_count: 1 }];
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <WorkspaceNav
+        days={days}
+        selectedDay="2087-05-10"
+        onSelectDay={vi.fn()}
+        onSelectSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onDeleteSession={onDeleteSession}
+      />
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: /ses_1/ })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /删除/ }));
+    expect(onDeleteSession).toHaveBeenCalledWith("ses_1");
+  });
+
+  it("delete: confirm false does NOT call onDeleteSession", async () => {
+    const onDeleteSession = vi.fn(async () => undefined);
+    const days = [{ day: "2087-05-10", session_count: 1 }];
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <WorkspaceNav
+        days={days}
+        selectedDay="2087-05-10"
+        onSelectDay={vi.fn()}
+        onSelectSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onDeleteSession={onDeleteSession}
+      />
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: /ses_1/ })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /删除/ }));
+    expect(onDeleteSession).not.toHaveBeenCalled();
+  });
+
   it("renders a per-day 处理中 / 可审 badge from the dayStatus prop", () => {
     const days = [
       { day: "2087-05-10", session_count: 2 },

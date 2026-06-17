@@ -139,6 +139,41 @@ def test_initialize_sessions_schema_tracks_primary_person_and_date_index(tmp_pat
     assert [row["name"] for row in index_columns] == ["date_key", "started_at"]
 
 
+def test_initialize_sessions_has_nullable_name_column(tmp_path) -> None:
+    # The 声纹/审核 UI surfaces a user-chosen session name; add a nullable `name` column.
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(sessions)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert "name" in column_by_name
+    assert column_by_name["name"]["type"].lower() == "text"
+    assert column_by_name["name"]["notnull"] == 0  # nullable
+    assert column_by_name["name"]["dflt_value"] is None
+
+
+def test_initialize_sessions_name_is_idempotent(tmp_path) -> None:
+    # Re-running migrations on a DB that ALREADY has the `name` column must not error or change it
+    # (initialize() caches per-process, so call _run_migrations directly as a fresh process would).
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+        before = fetch_all(conn, "pragma table_info(sessions)")
+
+        _run_migrations(conn)  # second pass over an already-migrated table
+
+        after = fetch_all(conn, "pragma table_info(sessions)")
+    finally:
+        conn.close()
+
+    assert before == after
+    assert "name" in {row["name"] for row in after}
+
+
 def test_initialize_speaker_mappings_schema_tracks_design_metadata(tmp_path) -> None:
     conn = connect(tmp_path / "data" / "db.sqlite")
     try:

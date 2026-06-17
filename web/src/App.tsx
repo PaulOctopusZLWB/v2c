@@ -99,6 +99,8 @@ export function App() {
   // bumps after a review action so the queue refetches and a finished session leaves the list.
   const [reviewMode, setReviewMode] = useState<"queue" | "days">("queue");
   const [queueVersion, setQueueVersion] = useState(0);
+  // Bumped after a session rename/delete so WorkspaceNav's local by-day session list refetches.
+  const [sessionsVersion, setSessionsVersion] = useState(0);
   const [persons, setPersons] = useState<Person[]>([]);
   // "People taught once": the enriched person roster (enrollment + attribution) for the 声纹 tab,
   // plus a key that, when bumped, remounts the voiceprint map so it refetches recoloured points.
@@ -298,6 +300,26 @@ export function App() {
 
   async function reloadSession() {
     if (selectedSessionId) setSession(await api.session(selectedSessionId));
+  }
+
+  // Name a session (empty clears it), then refetch the by-day session list so the new name shows.
+  async function handleRenameSession(sessionId: string, name: string) {
+    await api.renameSession(sessionId, name);
+    setSessionsVersion((v) => v + 1);
+  }
+
+  // Delete a session (cascades server-side), then refresh the day + session lists and the review
+  // queue; if the deleted session was open, clear the selection so the panel doesn't show stale data.
+  async function handleDeleteSession(sessionId: string) {
+    await api.deleteSession(sessionId);
+    if (sessionId === selectedSessionId) {
+      setSelectedSessionId(null);
+      setSession(null);
+      setHighlightedSegmentId(null);
+    }
+    setSessionsVersion((v) => v + 1);
+    setQueueVersion((v) => v + 1);
+    await refreshDays();
   }
 
   // Patch the given segments' review_status in local session state, leaving everything else
@@ -625,8 +647,11 @@ export function App() {
               dayStatus={dayStatus}
               selectedDay={selectedDay}
               selectedSessionId={selectedSessionId}
+              sessionsVersion={sessionsVersion}
               onSelectDay={(d) => void guard(selectDay)(d)}
               onSelectSession={(id) => void guard(selectSession)(id)}
+              onRenameSession={(id, name) => guard(handleRenameSession)(id, name)}
+              onDeleteSession={(id) => guard(handleDeleteSession)(id)}
             />
           )}
         </aside>

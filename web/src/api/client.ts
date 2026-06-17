@@ -34,7 +34,13 @@ export const api = {
   reviewQueue: (limit?: number) =>
     request<{ queue: ReviewQueueItem[] }>(`/api/transcripts/review-queue${query({ limit })}`),
   sessionsForDay: (day: string) =>
-    request<{ day: string; sessions: Array<{ session_id: string; started_at: string; segment_count: number; review_status: string }> }>(`/api/transcripts/days/${day}/sessions`),
+    request<{ day: string; sessions: Array<{ session_id: string; started_at: string; segment_count: number; review_status: string; name?: string | null }> }>(`/api/transcripts/days/${day}/sessions`),
+  // Name a session (empty string clears it) — surfaces in the 审核 list + 声纹 scope picker.
+  renameSession: (id: string, name: string) =>
+    request<{ session_id: string; name: string | null }>(`/api/transcripts/sessions/${id}/name`, { method: "PUT", body: JSON.stringify({ name }) }),
+  // Delete a session and cascade-remove all its segments' rows.
+  deleteSession: (id: string) =>
+    request<{ deleted: boolean; segments: number }>(`/api/transcripts/sessions/${id}`, { method: "DELETE" }),
   session: (id: string) => request<TranscriptSession>(`/api/transcripts/sessions/${id}`),
   // conversation dynamics for a session: talk-share, turn-taking, timeline
   sessionDynamics: (id: string) => request<SessionDynamics>(`/api/sessions/${id}/dynamics`),

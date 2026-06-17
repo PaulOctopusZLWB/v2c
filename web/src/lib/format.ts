@@ -59,8 +59,11 @@ export function reviewStatusZh(status: ReviewStatus | "blocked"): string {
   return REVIEW_STATUS_ZH[status] ?? status;
 }
 
-/** Session list label from the days/sessions endpoint row. */
-export function sessionListLabel(s: { started_at: string; segment_count: number }): string {
+/** Session list label from the days/sessions endpoint row: the user-chosen name when set,
+ *  else the time label. */
+export function sessionListLabel(s: { started_at: string; segment_count: number; name?: string | null }): string {
+  const name = s.name?.trim();
+  if (name) return `${name} · ${s.segment_count}段`;
   const t = timeOfDay(s.started_at);
   return `${t || "会话"} · ${s.segment_count}段`;
 }

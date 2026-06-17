@@ -222,6 +222,55 @@ def test_session_transcript_person_null_when_unattributed(tmp_path: Path) -> Non
     assert segment["person_label"] is None
 
 
+def test_rename_session_endpoint_sets_name(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.put("/api/transcripts/sessions/ses_test/name", json={"name": "  晨会  "})
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": "ses_test", "name": "晨会"}
+
+    # The name surfaces in the by-day session list.
+    sessions = client.get("/api/transcripts/days/2087-05-10/sessions").json()["sessions"]
+    assert sessions[0]["name"] == "晨会"
+
+
+def test_rename_session_endpoint_unknown_404(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.put("/api/transcripts/sessions/ses_missing/name", json={"name": "x"})
+
+    assert response.status_code == 404
+
+
+def test_delete_session_endpoint_cascades(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+    client.post("/api/transcripts/segments/seg_1/review", json={"status": "accepted", "note": ""})
+
+    response = client.delete("/api/transcripts/sessions/ses_test")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True, "segments": 1}
+    # The session is gone from the day's list.
+    assert client.get("/api/transcripts/days/2087-05-10/sessions").json()["sessions"] == []
+
+
+def test_delete_session_endpoint_unknown_404(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.delete("/api/transcripts/sessions/ses_missing")
+
+    assert response.status_code == 404
+
+
 def _insert_session(database_path: Path) -> None:
     conn = connect(database_path)
     try:

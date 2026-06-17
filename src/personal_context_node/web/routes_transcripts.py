@@ -9,7 +9,9 @@ from personal_context_node.transcript_review import (
     batch_review_segments,
     clear_review_segments,
     day_status_rows,
+    delete_session,
     list_days,
+    rename_session,
     review_queue,
     review_segment,
     reviewed_segments_for_session,
@@ -35,6 +37,10 @@ class BatchReviewRequest(BaseModel):
 
 class ClearReviewRequest(BaseModel):
     segment_ids: list[str]
+
+
+class RenameSessionRequest(BaseModel):
+    name: str
 
 
 @router.get("/day-status")
@@ -75,6 +81,23 @@ def session_transcript(request: Request, session_id: str) -> dict[str, object]:
         "review_status": session_review_status(config=config, session_id=session_id),
         "segments": reviewed_segments_for_session(config=config, session_id=session_id),
     }
+
+
+@router.put("/sessions/{session_id}/name")
+def rename_session_route(request: Request, session_id: str, payload: RenameSessionRequest) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    if not rename_session(config=config, session_id=session_id, name=payload.name):
+        raise HTTPException(status_code=404, detail=f"unknown session: {session_id}")
+    return {"session_id": session_id, "name": payload.name.strip() or None}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session_route(request: Request, session_id: str) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    result = delete_session(config=config, session_id=session_id)
+    if not result["deleted"]:
+        raise HTTPException(status_code=404, detail=f"unknown session: {session_id}")
+    return result
 
 
 @router.post("/segments/{segment_id}/review")
