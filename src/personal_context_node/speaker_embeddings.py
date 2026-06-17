@@ -273,6 +273,7 @@ def recluster_by_anchors(
     finally:
         conn.close()
 
+    clear_projection_cache()  # attributions changed -> any cached 2D projection is now stale
     return {
         "assigned": assigned,
         "unassigned": unassigned,
@@ -312,6 +313,7 @@ def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: 
         conn.commit()
     finally:
         conn.close()
+    clear_projection_cache()  # attributions changed -> any cached 2D projection is now stale
     return len(segment_ids)
 
 
@@ -503,6 +505,7 @@ def auto_attribute_enrolled(
     finally:
         conn.close()
 
+    clear_projection_cache()  # attributions changed -> any cached 2D projection is now stale
     return {
         "assigned": assigned,
         "unassigned": unassigned,
@@ -765,6 +768,8 @@ def extract_pending_embeddings(
     finally:
         # Flush whatever was buffered even if an unexpected error escaped the loop.
         flush()
+    if embedded:
+        clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
     return {"embedded": embedded, "skipped_missing_audio": skipped, "failed": failed, "total": total}
 
 

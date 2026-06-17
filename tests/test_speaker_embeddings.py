@@ -474,6 +474,23 @@ def test_projection_cache_hit(tmp_path: Path) -> None:
     assert third == first
 
 
+def test_projection_cache_invalidated_by_attribution_write(tmp_path: Path) -> None:
+    # The map refetches the projection right after a lasso-label / recluster; the cache MUST NOT
+    # return a stale projection that still shows the old attribution (the cache key doesn't change
+    # because the embedding set is unchanged — only the override write does).
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)
+
+    before = {p["segment_id"]: p for p in embedding_projection(config=config, method="pca")["points"]}
+    assert before["seg_2"]["person_label"] is None  # unattributed, and now cached
+
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_2"])
+
+    after = {p["segment_id"]: p for p in embedding_projection(config=config, method="pca")["points"]}
+    assert after["seg_2"]["person_id"] == "per_a"      # fresh, not the stale cached None
+    assert after["seg_2"]["person_label"] == "Alice"
+
+
 # ---------------------------------------------------------------------------
 # Slice 5a: enroll / suggest / auto-attribute + bulk label-segments
 # ---------------------------------------------------------------------------
