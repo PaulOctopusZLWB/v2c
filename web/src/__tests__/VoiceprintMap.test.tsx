@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VoiceprintMap } from "../features/viz/VoiceprintMap";
-import type { ProjectionPoint, ProjectionResult } from "../api/types";
+import type { PersonRow, ProjectionPoint, ProjectionResult } from "../api/types";
 
 /** Four points across two person/speaker keys (per_a x2, spk_1 x2). */
 const points: ProjectionPoint[] = [
@@ -140,5 +140,69 @@ describe("VoiceprintMap", () => {
       const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
       expect(calls.some((u) => u.includes("method=pca"))).toBe(true);
     });
+  });
+
+  // --- lasso-to-label (slice 5b) ---
+  const labelPeople: PersonRow[] = [
+    { person_id: "per_a", display_name: "李雷", is_self: 0, enrolled: true, attributed_count: 4 },
+    { person_id: "per_b", display_name: "韩文巧", is_self: 0, enrolled: false, attributed_count: 0 }
+  ];
+
+  it("does not show the select toolbar until 框选 is toggled on (and the map still works without people)", async () => {
+    render(<VoiceprintMap sessionId="ses_1" day="2026-06-15" />);
+    await screen.findByRole("list", { name: /图例/ });
+    // No people/onLabel wired → no 框选 affordance at all.
+    expect(screen.queryByRole("button", { name: /框选/ })).not.toBeInTheDocument();
+  });
+
+  it("entering select mode reveals the 标注 toolbar, disabled until a person + selection exist", async () => {
+    render(<VoiceprintMap sessionId="ses_1" day="2026-06-15" people={labelPeople} onLabel={vi.fn()} />);
+    await screen.findByRole("list", { name: /图例/ });
+
+    await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+    // The select toolbar appears with a person picker and a disabled 标注 button (no selection yet).
+    const label = screen.getByRole("button", { name: /^标注$/ });
+    expect(label).toBeDisabled();
+    expect(screen.getByText(/已选 0 点/)).toBeInTheDocument();
+  });
+
+  it("dragging a rectangle in select mode selects the enclosed points and 标注 calls onLabel with their ids", async () => {
+    const onLabel = vi.fn().mockResolvedValue({ labeled: 2 });
+    const onChanged = vi.fn();
+    const { container } = render(
+      <VoiceprintMap sessionId="ses_1" day="2026-06-15" people={labelPeople} onLabel={onLabel} onChanged={onChanged} />
+    );
+    await screen.findByRole("list", { name: /图例/ });
+    await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+
+    // jsdom canvas rect is all-zero, so sizeRef falls back to 640x420 and client coords map to
+    // data space as px = x*640, py = (1-y)*420. seg_3 (0.7,0.6)->px490,py168 and seg_4
+    // (0.9,0.8)->px574,py84 live in the upper-right; drag a box around them.
+    const canvas = container.querySelector(".vmap-canvas") as HTMLCanvasElement;
+    // jsdom has no PointerEvent constructor (and ignores clientX on the generic event fireEvent
+    // would build), so dispatch MouseEvent-backed pointer events — they carry clientX/clientY and
+    // still trigger React's onPointer* handlers (which key off the native event type).
+    const pointer = (type: string, clientX: number, clientY: number) =>
+      fireEvent(canvas, new MouseEvent(type, { clientX, clientY, bubbles: true }));
+    pointer("pointerdown", 430, 50);
+    pointer("pointermove", 600, 200);
+    pointer("pointerup", 600, 200);
+
+    // The two enclosed points are now selected.
+    expect(await screen.findByText(/已选 2 点/)).toBeInTheDocument();
+
+    // Pick a person and commit → onLabel(personId, selectedIds).
+    await userEvent.selectOptions(screen.getByLabelText(/标注为/), "per_b");
+    await userEvent.click(screen.getByRole("button", { name: /^标注$/ }));
+
+    await waitFor(() => {
+      expect(onLabel).toHaveBeenCalledTimes(1);
+      const [personId, ids] = onLabel.mock.calls[0];
+      expect(personId).toBe("per_b");
+      expect([...ids].sort()).toEqual(["seg_3", "seg_4"]);
+    });
+    // selection clears + onChanged fires after a successful label.
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(await screen.findByText(/已选 0 点/)).toBeInTheDocument();
   });
 });

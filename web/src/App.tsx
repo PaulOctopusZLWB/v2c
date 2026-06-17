@@ -12,6 +12,7 @@ import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
+import { PeoplePanel } from "./features/people/PeoplePanel";
 import { VoiceprintMap } from "./features/viz/VoiceprintMap";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { Tabs } from "./features/workspace/Tabs";
@@ -24,7 +25,7 @@ import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
 import { taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, ReviewStatus, TaskRow, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, PersonRow, ReviewStatus, TaskRow, TranscriptSession } from "./api/types";
 
 const DEVICE_POLL_MS = 5000;
 const ACTIVE_STATUSES = ["pending", "claimed", "running"];
@@ -62,6 +63,10 @@ export function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [session, setSession] = useState<TranscriptSession | null>(null);
   const [persons, setPersons] = useState<Person[]>([]);
+  // "People taught once": the enriched person roster (enrollment + attribution) for the 声纹 tab,
+  // plus a key that, when bumped, remounts the voiceprint map so it refetches recoloured points.
+  const [people, setPeople] = useState<PersonRow[]>([]);
+  const [mapKey, setMapKey] = useState(0);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -108,6 +113,24 @@ export function App() {
     setDayStatus(statusResult.days ?? []);
   }
 
+  // Reload the enriched person roster (enrollment + attribution counts) for the People panel.
+  async function refreshPeople() {
+    try {
+      setPeople((await api.people()).people ?? []);
+    } catch {
+      /* keep last-known people on transient errors */
+    }
+  }
+
+  // A teaching mutation (label/enroll/suggest/auto-attribute) landed: reload the People roster,
+  // refresh the base persons list (a new person may exist), and remount the map so it refetches
+  // the now-recoloured projection.
+  function onPeopleChanged() {
+    void refreshPeople();
+    void api.persons().then((r) => setPersons(r.persons ?? [])).catch(() => undefined);
+    setMapKey((k) => k + 1);
+  }
+
   // Lazily load the full task list — only when the TaskList panel is open. The SSE
   // summary feeds counts/progress; the heavy per-row detail is fetched on demand.
   async function refreshTasks() {
@@ -120,16 +143,18 @@ export function App() {
   async function refreshBootstrap() {
     setBootstrapError(null);
     try {
-      const [personsResult, healthResult, daysResult, devicesResult] = await Promise.all([
+      const [personsResult, healthResult, daysResult, devicesResult, peopleResult] = await Promise.all([
         api.persons(),
         api.health(),
         api.days(),
-        api.devices()
+        api.devices(),
+        api.people().catch(() => ({ people: [] as PersonRow[] }))
       ]);
       setPersons(personsResult.persons ?? []);
       setHealth(healthResult);
       setDays(daysResult.days ?? []);
       setSources(devicesResult.sources ?? []);
+      setPeople(peopleResult.people ?? []);
       setBootstrapped(true);
     } catch (err) {
       setBootstrapError(err instanceof Error ? err.message : "API bootstrap failed");
@@ -505,9 +530,23 @@ export function App() {
           </label>
         </section>
         <VoiceprintMap
+          key={mapKey}
           sessionId={selectedSessionId}
           day={clusterDay || selectedDay}
           onPlaybackError={(message) => push("音频播放失败", message)}
+          people={people ?? []}
+          onLabel={async (personId, segmentIds) => {
+            await api.labelSegments(personId, segmentIds);
+            push(`已标注 ${segmentIds.length} 段`);
+          }}
+          onChanged={onPeopleChanged}
+        />
+        <PeoplePanel
+          sessionId={selectedSessionId}
+          day={clusterDay || selectedDay}
+          onChanged={onPeopleChanged}
+          push={push}
+          pushAction={pushAction}
         />
         <VoiceprintPanel
           day={selectedDay}

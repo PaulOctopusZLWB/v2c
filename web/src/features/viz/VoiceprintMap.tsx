@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
-import type { ProjectionPoint } from "../../api/types";
+import type { PersonRow, ProjectionPoint } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
@@ -35,17 +35,40 @@ const IDENTITY: View = { scale: 1, tx: 0, ty: 0 };
 export function VoiceprintMap({
   sessionId,
   day,
-  onPlaybackError
+  onPlaybackError,
+  people,
+  onLabel,
+  onChanged
 }: {
   sessionId?: string | null;
   day?: string | null;
   onPlaybackError?: (message: string) => void;
+  /** When provided alongside onLabel, enables a 框选 (lasso) → 标注 teaching toolbar. */
+  people?: PersonRow[];
+  /** Commit the selected segments to a person; resolve to refetch colours. */
+  onLabel?: (personId: string, segmentIds: string[]) => Promise<unknown> | void;
+  /** Notify the parent after a successful label (e.g. to reload the People panel). */
+  onChanged?: () => void;
 }) {
   const audio = useSegmentAudio();
   const [method, setMethod] = useState<Method>("umap");
   const [points, setPoints] = useState<ProjectionPoint[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Lasso-to-label is only offered when the parent wires both people + onLabel.
+  const canLabel = !!people && !!onLabel;
+  const [selectMode, setSelectMode] = useState(false);
+  const selectModeRef = useRef(false);
+  useEffect(() => { selectModeRef.current = selectMode; }, [selectMode]);
+  // The committed selection (segment ids) drives the toolbar + a highlight in draw().
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedIdsRef = useRef<Set<string>>(selectedIds);
+  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+  const [labelPersonId, setLabelPersonId] = useState("");
+  // Live rubber-band rectangle in canvas pixels while dragging a selection.
+  const rectRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [rect, setRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 
   // Imperative interaction state lives in refs (mutated on every pointer/wheel event); React
   // state only carries what the DOM (legend/tooltip) renders, so we don't re-render per frame.
@@ -69,6 +92,9 @@ export function VoiceprintMap({
     setError(null);
     setHover(null);
     setFocusKey(null);
+    setSelectedIds(new Set());
+    rectRef.current = null;
+    setRect(null);
     viewRef.current = { ...IDENTITY };
     api
       .embeddingProjection({ session_id: sessionId ?? null, day: day ?? null, method })
@@ -146,17 +172,27 @@ export function VoiceprintMap({
       py: (1 - p.y) * h * view.scale + view.ty
     });
 
+    const selected = selectedIdsRef.current;
     const r = 3.4;
     for (const p of pts) {
       const { px, py } = project(p);
       const key = clusterKey(p);
       const dim = focus !== null && key !== focus;
       const color = speakerColor(key);
-      ctx.globalAlpha = dim ? 0.08 : 0.78;
+      const isSel = selected.has(p.segment_id);
+      ctx.globalAlpha = dim ? 0.08 : isSel ? 0.95 : 0.78;
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.arc(px, py, isSel ? r + 1.2 : r, 0, Math.PI * 2);
       ctx.fill();
+      if (isSel) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "rgba(230, 237, 246, 0.95)";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(px, py, r + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     ctx.globalAlpha = 1;
 
@@ -174,7 +210,23 @@ export function VoiceprintMap({
     };
     ring(playingId, "rgba(45, 212, 238, 0.9)", 2.2);
     ring(hover?.point.segment_id ?? null, "rgba(230, 237, 246, 0.85)", 1.6);
-  }, [points, hover, playingId]);
+
+    // live rubber-band selection rectangle.
+    const rb = rectRef.current;
+    if (rb) {
+      const x = Math.min(rb.x0, rb.x1);
+      const y = Math.min(rb.y0, rb.y1);
+      const rw = Math.abs(rb.x1 - rb.x0);
+      const rh = Math.abs(rb.y1 - rb.y0);
+      ctx.save();
+      ctx.fillStyle = "rgba(45, 212, 238, 0.10)";
+      ctx.strokeStyle = "rgba(45, 212, 238, 0.85)";
+      ctx.lineWidth = 1.2;
+      ctx.fillRect(x, y, rw, rh);
+      ctx.strokeRect(x, y, rw, rh);
+      ctx.restore();
+    }
+  }, [points, hover, playingId, selectedIds, rect]);
 
   // Resize the canvas backing store to its container (devicePixelRatio-scaled) and redraw.
   const resize = useCallback(() => {
@@ -223,11 +275,37 @@ export function VoiceprintMap({
     return best;
   }, [points]);
 
+  // All points whose projected pixel falls inside the (canvas-space) rectangle.
+  const pointsInRect = useCallback((box: { x0: number; y0: number; x1: number; y1: number }): string[] => {
+    const { w, h } = sizeRef.current;
+    const view = viewRef.current;
+    const focus = focusRef.current;
+    const minX = Math.min(box.x0, box.x1);
+    const maxX = Math.max(box.x0, box.x1);
+    const minY = Math.min(box.y0, box.y1);
+    const maxY = Math.max(box.y0, box.y1);
+    const ids: string[] = [];
+    for (const p of points ?? []) {
+      if (focus !== null && clusterKey(p) !== focus) continue; // respect an active focus
+      const px = p.x * w * view.scale + view.tx;
+      const py = (1 - p.y) * h * view.scale + view.ty;
+      if (px >= minX && px <= maxX && py >= minY && py <= maxY) ids.push(p.segment_id);
+    }
+    return ids;
+  }, [points]);
+
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
+    // Select mode: extend the rubber-band rectangle while dragging.
+    if (selectModeRef.current && rectRef.current) {
+      rectRef.current = { ...rectRef.current, x1: cx, y1: cy };
+      setRect(rectRef.current);
+      draw();
+      return;
+    }
     if (dragRef.current) {
       viewRef.current.tx += cx - dragRef.current.x;
       viewRef.current.ty += cy - dragRef.current.y;
@@ -245,6 +323,14 @@ export function VoiceprintMap({
     if (!rect) return;
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
+    // Select mode: begin a rubber-band rectangle (no play/pan).
+    if (selectModeRef.current) {
+      rectRef.current = { x0: cx, y0: cy, x1: cx, y1: cy };
+      setRect(rectRef.current);
+      setHover(null);
+      canvasRef.current?.setPointerCapture?.(e.pointerId);
+      return;
+    }
     // A click on a point plays it; otherwise begin a pan drag.
     const hit = hitTest(cx, cy);
     if (hit) {
@@ -262,9 +348,18 @@ export function VoiceprintMap({
   }, [audio, hitTest, onPlaybackError]);
 
   const endDrag = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Select mode: commit the rectangle to a selection, then clear the rubber-band.
+    if (selectModeRef.current && rectRef.current) {
+      const ids = pointsInRect(rectRef.current);
+      setSelectedIds(new Set(ids));
+      rectRef.current = null;
+      setRect(null);
+      canvasRef.current?.releasePointerCapture?.(e.pointerId);
+      return;
+    }
     dragRef.current = null;
     canvasRef.current?.releasePointerCapture?.(e.pointerId);
-  }, []);
+  }, [pointsInRect]);
 
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -290,6 +385,28 @@ export function VoiceprintMap({
   }, [draw]);
 
   const toggleFocus = (key: string) => setFocusKey((cur) => (cur === key ? null : key));
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    rectRef.current = null;
+    setRect(null);
+  }, []);
+
+  const [labeling, setLabeling] = useState(false);
+  const commitLabel = useCallback(async () => {
+    if (!onLabel || !labelPersonId || selectedIds.size === 0) return;
+    setLabeling(true);
+    try {
+      await onLabel(labelPersonId, Array.from(selectedIds));
+      clearSelection();
+      // Refetch the projection so the just-labelled points recolour to the person.
+      const res = await api.embeddingProjection({ session_id: sessionId ?? null, day: day ?? null, method });
+      setPoints(res.points ?? []);
+      onChanged?.();
+    } finally {
+      setLabeling(false);
+    }
+  }, [onLabel, labelPersonId, selectedIds, clearSelection, sessionId, day, method, onChanged]);
 
   const n = points?.length ?? 0;
 
@@ -319,11 +436,64 @@ export function VoiceprintMap({
               PCA
             </button>
           </div>
+          {canLabel ? (
+            <button
+              type="button"
+              className={`ghost${selectMode ? " active" : ""}`}
+              aria-pressed={selectMode}
+              onClick={() => {
+                setSelectMode((v) => {
+                  const next = !v;
+                  if (!next) clearSelection();
+                  return next;
+                });
+                setHover(null);
+              }}
+              title="框选地图上的点以标注为某人"
+            >
+              <Icon name="person" /> 框选
+            </button>
+          ) : null}
           <button type="button" className="ghost" onClick={resetView} title="重置视图">
             <Icon name="refresh" /> 重置视图
           </button>
         </div>
       </div>
+
+      {canLabel && selectMode ? (
+        <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
+          <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>
+          <select
+            aria-label="标注为"
+            value={labelPersonId}
+            disabled={labeling}
+            onChange={(e) => setLabelPersonId(e.target.value)}
+          >
+            <option value="" disabled>选择人物…</option>
+            {(people ?? []).map((p) => (
+              <option key={p.person_id} value={p.person_id}>{p.display_name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => void commitLabel()}
+            disabled={labeling || selectedIds.size === 0 || !labelPersonId}
+            aria-busy={labeling}
+          >
+            {labeling ? <span className="spinner" aria-hidden /> : <Icon name="accept" />}
+            标注
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={clearSelection}
+            disabled={labeling || selectedIds.size === 0}
+          >
+            清除选择
+          </button>
+        </div>
+      ) : null}
 
       <div className="vmap-stage" ref={boxRef}>
         <canvas
