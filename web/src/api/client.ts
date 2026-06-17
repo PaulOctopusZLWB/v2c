@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -69,6 +69,11 @@ export const api = {
     request<EmotionStatus>(`/api/emotions/status${query(scope)}`),
   extractEmotions: (scope: { session_id?: string | null; day?: string | null }) =>
     request<{ started: boolean }>("/api/emotions/extract", { method: "POST", body: JSON.stringify(scope) }),
+  // per-segment emotion aggregates: overall + per-speaker distribution, and the map's label map
+  emotionDistribution: (scope: { session_id?: string | null; day?: string | null }) =>
+    request<EmotionDistribution>(`/api/emotions/distribution${query(scope)}`),
+  emotionLabels: (scope: { session_id?: string | null; day?: string | null }) =>
+    request<EmotionLabels>(`/api/emotions/labels${query(scope)}`),
   recluster: (body: { anchors: Record<string, string>; threshold: number; session_id?: string | null; day?: string | null }) =>
     request<ReclusterResult>("/api/speakers/recluster", { method: "POST", body: JSON.stringify(body) }),
   speakerSegments: (params: { session_id?: string | null; speaker?: string | null; limit?: number | null }) =>

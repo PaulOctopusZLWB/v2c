@@ -32,12 +32,14 @@ function stubCanvas() {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
 }
 
-/** Resolve embedding-projection with the given body; everything else is `{}`. */
-function mockFetch(body: unknown = projection) {
+/** Resolve embedding-projection (+ emotion labels) with the given body; everything else is `{}`. */
+function mockFetch(body: unknown = projection, labels: Record<string, string> = {}) {
   return vi.fn(async (url: string) => {
     const path = String(url).split("?")[0];
     if (path === "/api/speakers/embedding-projection")
       return new Response(JSON.stringify(body), { status: 200 });
+    if (path === "/api/emotions/labels")
+      return new Response(JSON.stringify({ labels }), { status: 200 });
     return new Response("{}", { status: 200 });
   });
 }
@@ -204,5 +206,40 @@ describe("VoiceprintMap", () => {
     // selection clears + onChanged fires after a successful label.
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(await screen.findByText(/已选 0 点/)).toBeInTheDocument();
+  });
+
+  // --- color-by-emotion (slice 9b) ---
+  it("toggling to 情绪 colour mode fetches emotion labels and switches the legend to emotion classes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch(projection, { seg_1: "开心/happy", seg_2: "开心/happy", seg_3: "难过/sad", seg_4: "中立/neutral" })
+    );
+    render(<VoiceprintMap sessionId="ses_1" day="2026-06-15" />);
+    await screen.findByRole("list", { name: /图例/ });
+
+    // Person mode legend lists the person/speaker keys.
+    expect(screen.getByText("李雷")).toBeInTheDocument();
+
+    // Switch to 情绪 colour mode.
+    await userEvent.click(screen.getByRole("button", { name: /情绪/ }));
+
+    // It fetches the emotion labels for the scope.
+    await waitFor(() => {
+      const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+      const url = calls.find((u) => u.startsWith("/api/emotions/labels"));
+      expect(url).toBeTruthy();
+      expect(url).toContain("session_id=ses_1");
+    });
+
+    // The legend now shows emotion classes (zh short labels) with counts, not person keys.
+    await waitFor(() => {
+      const legend = screen.getByRole("list", { name: /图例/ });
+      expect(legend).toHaveTextContent("开心");
+      expect(legend).toHaveTextContent("难过");
+      expect(legend).toHaveTextContent("中立");
+    });
+    // happy = 2 points (seg_1, seg_2).
+    const legend = screen.getByRole("list", { name: /图例/ });
+    expect(legend).toHaveTextContent("🙂");
   });
 });

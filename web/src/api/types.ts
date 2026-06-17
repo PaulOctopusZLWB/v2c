@@ -146,6 +146,33 @@ export interface EmotionStatus {
   pending: number;
 }
 
+/** One speaker's acoustic-emotion breakdown within a scope. */
+export interface EmotionSpeaker {
+  /** Resolved attribution label (person_label override, else raw speaker). */
+  label: string;
+  /** Total in-scope segments with an emotion for this speaker. */
+  total: number;
+  /** {emotion_label: count} over this speaker's segments. */
+  emotions: Record<string, number>;
+  /** Most frequent emotion label for this speaker. */
+  dominant: string;
+}
+
+/** Per-segment acoustic-emotion distribution over a session/day scope. */
+export interface EmotionDistribution {
+  /** {emotion_label: count} across all in-scope segments by dominant label. */
+  overall: Record<string, number>;
+  /** Per-speaker emotion profiles, sorted by total desc. */
+  per_speaker: EmotionSpeaker[];
+  /** Total in-scope segments that have an emotion. */
+  n: number;
+}
+
+/** {segment_id: dominant_emotion_label} for the map's color-by-emotion mode. */
+export interface EmotionLabels {
+  labels: Record<string, string>;
+}
+
 /** Outcome of a CAM++ similarity re-cluster pass driven by labeled anchors. */
 export interface ReclusterResult {
   assigned: number;

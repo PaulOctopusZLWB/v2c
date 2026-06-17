@@ -2,10 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import type { PersonRow, ProjectionPoint } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
+import { emotionColor, emotionMeta } from "../../lib/emotionColors";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 
 type Method = "umap" | "pca";
+type ColorMode = "person" | "emotion";
+
+/** Default emotion for a point with no extracted emotion row (so it still draws a colour). */
+const DEFAULT_EMOTION = "中立/neutral";
 
 /** The stable cluster key for a point: prefer the labelled person, else the raw speaker. */
 function clusterKey(p: ProjectionPoint): string {
@@ -55,6 +60,16 @@ export function VoiceprintMap({
   const [points, setPoints] = useState<ProjectionPoint[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Colour mode: by person/speaker cluster (default) or by acoustic emotion. In 情绪 mode the
+  // per-segment dominant-emotion labels are fetched for the scope and drive both the point
+  // colours and the legend (emotion classes instead of person keys).
+  const [colorMode, setColorMode] = useState<ColorMode>("person");
+  const colorModeRef = useRef<ColorMode>("person");
+  useEffect(() => { colorModeRef.current = colorMode; }, [colorMode]);
+  const [emotionLabels, setEmotionLabels] = useState<Record<string, string>>({});
+  const emotionLabelsRef = useRef<Record<string, string>>({});
+  useEffect(() => { emotionLabelsRef.current = emotionLabels; }, [emotionLabels]);
 
   // Lasso-to-label is only offered when the parent wires both people + onLabel.
   const canLabel = !!people && !!onLabel;
@@ -112,17 +127,50 @@ export function VoiceprintMap({
     return () => { cancelled = true; };
   }, [sessionId, day, method]);
 
-  // --- legend: distinct cluster keys with color + count, ordered by descending count ---
+  // --- fetch per-segment emotion labels when in 情绪 mode (lazily, on scope/mode change) ---
+  useEffect(() => {
+    if (colorMode !== "emotion") return;
+    let cancelled = false;
+    api
+      .emotionLabels({ session_id: sessionId ?? null, day: day ?? null })
+      .then((res) => {
+        if (!cancelled) setEmotionLabels(res.labels ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setEmotionLabels({});
+      });
+    return () => { cancelled = true; };
+  }, [colorMode, sessionId, day]);
+
+  // The focus/colour key for a point: emotion class in 情绪 mode, else the person/speaker cluster.
+  const keyOf = useCallback(
+    (p: ProjectionPoint): string =>
+      colorMode === "emotion" ? (emotionLabels[p.segment_id] ?? DEFAULT_EMOTION) : clusterKey(p),
+    [colorMode, emotionLabels]
+  );
+
+  // --- legend: in 人物 mode, distinct cluster keys; in 情绪 mode, distinct emotion classes ---
   const legend = useMemo(() => {
-    const by = new Map<string, { key: string; label: string; count: number }>();
+    if (colorMode === "emotion") {
+      const by = new Map<string, { key: string; label: string; color: string; emoji: string; count: number }>();
+      for (const p of points ?? []) {
+        const label = emotionLabels[p.segment_id] ?? DEFAULT_EMOTION;
+        const meta = emotionMeta(label);
+        const entry = by.get(label) ?? { key: label, label: meta.zh, color: meta.color, emoji: meta.emoji, count: 0 };
+        entry.count += 1;
+        by.set(label, entry);
+      }
+      return Array.from(by.values()).sort((a, b) => b.count - a.count);
+    }
+    const by = new Map<string, { key: string; label: string; color: string; emoji: string; count: number }>();
     for (const p of points ?? []) {
       const key = clusterKey(p);
-      const entry = by.get(key) ?? { key, label: clusterLabel(p), count: 0 };
+      const entry = by.get(key) ?? { key, label: clusterLabel(p), color: speakerColor(key), emoji: "", count: 0 };
       entry.count += 1;
       by.set(key, entry);
     }
     return Array.from(by.values()).sort((a, b) => b.count - a.count);
-  }, [points]);
+  }, [points, colorMode, emotionLabels]);
 
   // --- canvas drawing ---
   const draw = useCallback(() => {
@@ -173,12 +221,15 @@ export function VoiceprintMap({
     });
 
     const selected = selectedIdsRef.current;
+    const byEmotion = colorModeRef.current === "emotion";
+    const emoLabels = emotionLabelsRef.current;
     const r = 3.4;
     for (const p of pts) {
       const { px, py } = project(p);
-      const key = clusterKey(p);
+      // The "key" governs both colour and focus; it's the emotion class in 情绪 mode.
+      const key = byEmotion ? (emoLabels[p.segment_id] ?? DEFAULT_EMOTION) : clusterKey(p);
       const dim = focus !== null && key !== focus;
-      const color = speakerColor(key);
+      const color = byEmotion ? emotionColor(key) : speakerColor(key);
       const isSel = selected.has(p.segment_id);
       ctx.globalAlpha = dim ? 0.08 : isSel ? 0.95 : 0.78;
       ctx.fillStyle = color;
@@ -226,7 +277,7 @@ export function VoiceprintMap({
       ctx.strokeRect(x, y, rw, rh);
       ctx.restore();
     }
-  }, [points, hover, playingId, selectedIds, rect]);
+  }, [points, hover, playingId, selectedIds, rect, colorMode, emotionLabels]);
 
   // Resize the canvas backing store to its container (devicePixelRatio-scaled) and redraw.
   const resize = useCallback(() => {
@@ -266,14 +317,14 @@ export function VoiceprintMap({
     let best: ProjectionPoint | null = null;
     let bestD = 10 * 10; // within ~10px
     for (const p of pts) {
-      if (focus !== null && clusterKey(p) !== focus) continue;
+      if (focus !== null && keyOf(p) !== focus) continue;
       const px = p.x * w * view.scale + view.tx;
       const py = (1 - p.y) * h * view.scale + view.ty;
       const d = (px - cx) * (px - cx) + (py - cy) * (py - cy);
       if (d < bestD) { bestD = d; best = p; }
     }
     return best;
-  }, [points]);
+  }, [points, keyOf]);
 
   // All points whose projected pixel falls inside the (canvas-space) rectangle.
   const pointsInRect = useCallback((box: { x0: number; y0: number; x1: number; y1: number }): string[] => {
@@ -286,13 +337,13 @@ export function VoiceprintMap({
     const maxY = Math.max(box.y0, box.y1);
     const ids: string[] = [];
     for (const p of points ?? []) {
-      if (focus !== null && clusterKey(p) !== focus) continue; // respect an active focus
+      if (focus !== null && keyOf(p) !== focus) continue; // respect an active focus
       const px = p.x * w * view.scale + view.tx;
       const py = (1 - p.y) * h * view.scale + view.ty;
       if (px >= minX && px <= maxX && py >= minY && py <= maxY) ids.push(p.segment_id);
     }
     return ids;
-  }, [points]);
+  }, [points, keyOf]);
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -386,6 +437,15 @@ export function VoiceprintMap({
 
   const toggleFocus = (key: string) => setFocusKey((cur) => (cur === key ? null : key));
 
+  // Switching colour mode changes what the legend keys mean, so any active focus is cleared.
+  const switchColorMode = (mode: ColorMode) => {
+    setColorMode((cur) => {
+      if (cur !== mode) setFocusKey(null);
+      return mode;
+    });
+    setHover(null);
+  };
+
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
     rectRef.current = null;
@@ -434,6 +494,26 @@ export function VoiceprintMap({
               onClick={() => setMethod("pca")}
             >
               PCA
+            </button>
+          </div>
+          <div className="vmap-colormode" role="group" aria-label="着色">
+            <span className="vmap-colormode-label">着色:</span>
+            <button
+              type="button"
+              className={colorMode === "person" ? "active" : ""}
+              aria-pressed={colorMode === "person"}
+              onClick={() => switchColorMode("person")}
+            >
+              人物
+            </button>
+            <button
+              type="button"
+              className={colorMode === "emotion" ? "active" : ""}
+              aria-pressed={colorMode === "emotion"}
+              title="按情绪着色"
+              onClick={() => switchColorMode("emotion")}
+            >
+              情绪
             </button>
           </div>
           {canLabel ? (
@@ -523,8 +603,13 @@ export function VoiceprintMap({
             role="tooltip"
           >
             <div className="vmap-tip-head">
-              <span className="vmap-swatch" style={{ background: speakerColor(clusterKey(hover.point)) }} />
-              {clusterLabel(hover.point)}
+              <span
+                className="vmap-swatch"
+                style={{ background: colorMode === "emotion" ? emotionColor(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION) : speakerColor(clusterKey(hover.point)) }}
+              />
+              {colorMode === "emotion"
+                ? `${emotionMeta(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION).emoji} ${clusterLabel(hover.point)}`
+                : clusterLabel(hover.point)}
             </div>
             {hover.point.text ? <div className="vmap-tip-text">{hover.point.text}</div> : null}
           </div>
@@ -545,7 +630,8 @@ export function VoiceprintMap({
                   onClick={() => toggleFocus(c.key)}
                   title={focused ? "取消聚焦" : "聚焦此聚类"}
                 >
-                  <span className="vmap-swatch" style={{ background: speakerColor(c.key) }} />
+                  <span className="vmap-swatch" style={{ background: c.color }} />
+                  {c.emoji ? <span className="vmap-legend-emoji" aria-hidden>{c.emoji}</span> : null}
                   <span className="vmap-legend-label">{c.label}</span>
                   <span className="vmap-legend-count num">{c.count}</span>
                 </button>

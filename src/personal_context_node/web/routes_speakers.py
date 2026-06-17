@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
+from personal_context_node.segment_emotions import emotion_distribution, emotion_labels_for_scope
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
     embedding_projection,
@@ -321,6 +322,24 @@ def emotion_status_route(request: Request, day: str | None = None, session_id: s
     total = int(rows[0]["total"] or 0)
     emoted = int(rows[0]["emoted"] or 0)
     return {"total": total, "emoted": emoted, "pending": total - emoted}
+
+
+@router.get("/emotions/distribution")
+def emotion_distribution_route(
+    request: Request, session_id: str | None = None, day: str | None = None
+) -> dict[str, object]:
+    """Per-segment dominant-emotion distribution (overall + per-speaker) over an active scope."""
+    config: AppConfig = request.app.state.config
+    return emotion_distribution(config=config, session_id=session_id, day=day)
+
+
+@router.get("/emotions/labels")
+def emotion_labels_route(
+    request: Request, session_id: str | None = None, day: str | None = None
+) -> dict[str, object]:
+    """``{labels: {segment_id: dominant_emotion}}`` for the map's color-by-emotion mode."""
+    config: AppConfig = request.app.state.config
+    return {"labels": emotion_labels_for_scope(config=config, session_id=session_id, day=day)}
 
 
 @router.post("/emotions/extract")

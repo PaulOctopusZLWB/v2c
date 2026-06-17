@@ -74,6 +74,107 @@ def get_emotions(*, config: AppConfig, segment_ids: list[str]) -> dict[str, dict
     return result
 
 
+def _scope_query(
+    *, session_id: str | None, day: str | None
+) -> tuple[str, str, list[object]]:
+    """Build the (join, where, params) fragments scoping active segments to a session/day."""
+    where = ["ts.is_active = 1"]
+    params: list[object] = []
+    join = ""
+    if session_id is not None:
+        where.append("ts.session_id = ?")
+        params.append(session_id)
+    if day is not None:
+        join = "join sessions s on s.session_id = ts.session_id"
+        where.append("s.date_key = ?")
+        params.append(day)
+    return join, " and ".join(where), params
+
+
+def emotion_distribution(
+    *, config: AppConfig, session_id: str | None = None, day: str | None = None
+) -> dict:
+    """Aggregate per-segment dominant emotions over an active scope that HAS emotion rows.
+
+    Joins transcript_segments to segment_emotions (inner — only segments with an emotion row
+    count) and resolves each segment's speaker label = segment_person_overrides.person_label
+    (if relabelled) else the raw speaker. Returns:
+      - ``overall``: ``{emotion_label: count}`` across the scope by dominant label;
+      - ``per_speaker``: ``[{label, total, emotions: {emotion: count}, dominant}]`` sorted by
+        total desc (ties by label) — ``dominant`` is the speaker's most frequent emotion;
+      - ``n``: total in-scope segments with an emotion.
+    """
+    join, where, params = _scope_query(session_id=session_id, day=day)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            f"""
+            select
+              coalesce(o.person_label, ts.speaker) as label,
+              se.label as emotion
+            from transcript_segments ts
+            join segment_emotions se on se.segment_id = ts.segment_id
+            left join segment_person_overrides o on o.segment_id = ts.segment_id
+            {join}
+            where {where}
+            """,
+            tuple(params),
+        )
+    finally:
+        conn.close()
+
+    overall: dict[str, int] = {}
+    by_speaker: dict[str, dict[str, int]] = {}
+    for row in rows:
+        speaker = str(row["label"])
+        emotion = str(row["emotion"])
+        overall[emotion] = overall.get(emotion, 0) + 1
+        emotions = by_speaker.setdefault(speaker, {})
+        emotions[emotion] = emotions.get(emotion, 0) + 1
+
+    per_speaker = []
+    for speaker, emotions in by_speaker.items():
+        total = sum(emotions.values())
+        # Dominant = most frequent emotion (ties broken by label for determinism).
+        dominant = max(emotions.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        per_speaker.append(
+            {"label": speaker, "total": total, "emotions": emotions, "dominant": dominant}
+        )
+    per_speaker.sort(key=lambda s: (-int(s["total"]), str(s["label"])))
+
+    return {"overall": overall, "per_speaker": per_speaker, "n": len(rows)}
+
+
+def emotion_labels_for_scope(
+    *, config: AppConfig, session_id: str | None = None, day: str | None = None
+) -> dict[str, str]:
+    """``{segment_id: dominant_emotion_label}`` for in-scope active segments with emotions.
+
+    Powers the voiceprint map's color-by-emotion mode — every point that has an emotion row
+    maps to its dominant class.
+    """
+    join, where, params = _scope_query(session_id=session_id, day=day)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            f"""
+            select ts.segment_id as segment_id, se.label as emotion
+            from transcript_segments ts
+            join segment_emotions se on se.segment_id = ts.segment_id
+            {join}
+            where {where}
+            """,
+            tuple(params),
+        )
+    finally:
+        conn.close()
+    return {str(row["segment_id"]): str(row["emotion"]) for row in rows}
+
+
 def pending_emotion_segment_ids(
     *, config: AppConfig, session_id: str | None = None, day: str | None = None
 ) -> list[str]:

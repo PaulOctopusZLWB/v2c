@@ -59,6 +59,56 @@ def test_emotion_status_counts(tmp_path: Path) -> None:
     assert empty.json() == {"total": 0, "emoted": 0, "pending": 0}
 
 
+def test_emotion_distribution_route(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    # spk_a: happy, happy ; spk_b: sad. (seg_inactive has no emotion + is inactive.)
+    put_emotions_bulk(
+        config=config,
+        items=[
+            ("seg_a", {"label": "开心/happy", "scores": {"开心/happy": 0.9}}),
+            ("seg_b", {"label": "开心/happy", "scores": {"开心/happy": 0.8}}),
+            ("seg_c", {"label": "难过/sad", "scores": {"难过/sad": 0.7}}),
+        ],
+    )
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/emotions/distribution")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["n"] == 3
+    assert body["overall"] == {"开心/happy": 2, "难过/sad": 1}
+    per = {row["label"]: row for row in body["per_speaker"]}
+    assert per["spk_a"]["total"] == 2
+    assert per["spk_a"]["dominant"] == "开心/happy"
+    assert per["spk_b"]["emotions"] == {"难过/sad": 1}
+
+    # Scoped to the session yields the same (all share ses_lab).
+    scoped = client.get("/api/emotions/distribution", params={"session_id": "ses_lab"}).json()
+    assert scoped["n"] == 3
+
+    # An empty scope returns zeros.
+    empty = client.get("/api/emotions/distribution", params={"session_id": "ses_missing"}).json()
+    assert empty == {"overall": {}, "per_speaker": [], "n": 0}
+
+
+def test_emotion_labels_route(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    put_emotions_bulk(
+        config=config,
+        items=[
+            ("seg_a", {"label": "开心/happy", "scores": {"开心/happy": 0.9}}),
+            ("seg_c", {"label": "难过/sad", "scores": {"难过/sad": 0.7}}),
+        ],
+    )
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/emotions/labels")
+    assert response.status_code == 200
+    assert response.json() == {"labels": {"seg_a": "开心/happy", "seg_c": "难过/sad"}}
+
+
 def test_extract_emotions_starts(tmp_path: Path, monkeypatch) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_labeling_day(config.database_path)

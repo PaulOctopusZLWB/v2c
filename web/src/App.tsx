@@ -16,6 +16,7 @@ import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { PeoplePanel } from "./features/people/PeoplePanel";
 import { VoiceprintMap } from "./features/viz/VoiceprintMap";
 import { DynamicsCharts } from "./features/viz/DynamicsCharts";
+import { EmotionCharts } from "./features/viz/EmotionCharts";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { Tabs } from "./features/workspace/Tabs";
 import { useTab } from "./features/workspace/useTab";
@@ -661,6 +662,7 @@ export function App() {
           pushAction={pushAction}
         />
         <DynamicsCharts sessionId={selectedSessionId} />
+        <EmotionCharts sessionId={selectedSessionId} />
         <VoiceprintPanel
           day={selectedDay}
           sessionId={selectedSessionId}

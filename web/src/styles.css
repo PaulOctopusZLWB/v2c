@@ -352,6 +352,19 @@
 .vmap-method button:hover:not(:disabled) { color: var(--text); background: var(--elev); }
 .vmap-method button.active { background: var(--accent-dim); color: var(--accent-2); }
 
+/* 着色: 人物/情绪 colour-mode toggle (mirrors the segmented method toggle) */
+.vmap-colormode { display: inline-flex; align-items: center; gap: var(--s2); }
+.vmap-colormode-label { font-size: 11px; color: var(--text-dim); }
+.vmap-colormode button {
+  border: 1px solid var(--border-strong); border-radius: var(--r1); background: var(--panel-2);
+  color: var(--text-2); padding: 5px 12px; font-size: 12px; box-shadow: none;
+}
+.vmap-colormode button + button { margin-left: -1px; border-radius: 0 var(--r1) var(--r1) 0; }
+.vmap-colormode button:first-of-type { border-radius: var(--r1) 0 0 var(--r1); }
+.vmap-colormode button:hover:not(:disabled) { color: var(--text); background: var(--elev); }
+.vmap-colormode button.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }
+.vmap-legend-emoji { font-size: 13px; line-height: 1; flex: none; }
+
 /* the canvas stage: a bordered dark well with an inner glow */
 .vmap-stage {
   position: relative;
@@ -549,6 +562,69 @@
 
 @media (max-width: 900px) {
   .dyn-grid { grid-template-columns: 1fr; }
+}
+
+/* ── 情绪 — emotion distribution + per-speaker profiles ── */
+.emotion { margin-top: var(--s6); }
+.emo-grid {
+  display: grid; gap: var(--s4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.emo-card {
+  background: var(--elev); border: 1px solid var(--border); border-radius: var(--r2);
+  padding: var(--s4); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: var(--s3); min-width: 0;
+}
+.emo-card-wide { grid-column: 1 / -1; }
+.emo-overlay {
+  grid-column: 1 / -1; text-align: center; color: var(--text-2);
+  padding: var(--s6); border-style: dashed;
+}
+.emo-overlay.error { color: var(--err); }
+.emo-empty { display: flex; flex-direction: column; align-items: center; gap: var(--s3); }
+.emo-empty p { margin: 0; }
+.emo-title {
+  margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.emo-chart-fallback { height: 140px; border-radius: var(--r1); background: var(--panel-2); }
+
+/* 情绪分布 donut + legend */
+.emo-donut-row { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.emo-donut { position: relative; width: 180px; height: 180px; flex: none; }
+.emo-donut-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; pointer-events: none; gap: 2px;
+}
+.emo-donut-center strong { font-size: 20px; color: var(--text); }
+.emo-donut-center span { font-size: 12px; color: var(--text-dim); }
+.emo-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); flex: 1; min-width: 120px; }
+.emo-legend-item { display: flex; align-items: center; gap: var(--s3); font-size: 13px; color: var(--text-2); }
+.emo-legend-emoji { font-size: 14px; line-height: 1; flex: none; }
+.emo-legend-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emo-legend-count { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.emo-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; box-shadow: 0 0 8px -2px currentColor; }
+
+/* 各发言人情绪 — stacked emotion bar + dominant chip per speaker */
+.emo-speakers { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s3); }
+.emo-speaker-row { display: flex; align-items: center; gap: var(--s3); font-size: 13px; }
+.emo-speaker-name {
+  width: 84px; flex: none; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.emo-bar {
+  flex: 1; min-width: 0; height: 16px; display: flex; overflow: hidden;
+  border-radius: var(--r1); border: 1px solid var(--border); background: var(--panel-2);
+}
+.emo-bar-seg { height: 100%; min-width: 2px; }
+.emo-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; font-size: 12px; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 999px; background: var(--panel-2);
+}
+
+@media (max-width: 900px) {
+  .emo-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 700px) {
