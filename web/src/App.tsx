@@ -15,6 +15,9 @@ import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { Tabs } from "./features/workspace/Tabs";
 import { useTab } from "./features/workspace/useTab";
+import type { TabId } from "./features/workspace/useTab";
+import { CommandPalette, type Command } from "./features/command/CommandPalette";
+import { useHotkeys } from "./features/command/useHotkeys";
 import { usePipelineStatus } from "./hooks/usePipelineStatus";
 import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
@@ -62,6 +65,9 @@ export function App() {
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
+  // ⌘K command palette (keyboard-driven launcher); closed by default.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useHotkeys({ "mod+k": (e) => { e.preventDefault(); setPaletteOpen((v) => !v); } });
   // Mirror bootstrap state into a ref so the mount-time poll interval reads the latest value
   // (its closure captures the initial state).
   const bootstrappedRef = useRef(false);
@@ -235,6 +241,37 @@ export function App() {
   // backend's "done" semantics); the task-list fallback over-counts retryable failures that
   // still have attempts left, but only applies when the summary hasn't arrived yet.
   const failedCount = summary?.failed_total ?? tasks.filter((tk) => tk.status.startsWith("failed")).length;
+
+  // ⌘K command set, rebuilt from current state each render: jump to any tab, open any
+  // loaded day (-> 审核), or run a global action. Keep to navigation/tab jumps for now —
+  // only actions trivially callable from App scope.
+  const TAB_LABELS: Record<TabId, string> = { ingest: "录入", review: "审核", speakers: "声纹", llm: "观点", settings: "设置" };
+  const commands: Command[] = [
+    ...(Object.keys(TAB_LABELS) as TabId[]).map((id) => ({
+      id: `tab-${id}`,
+      title: `前往「${TAB_LABELS[id]}」`,
+      group: "导航",
+      keywords: `${id} ${TAB_LABELS[id]} tab`,
+      run: () => setTab(id)
+    })),
+    ...days.map(({ day }) => ({
+      id: `day-${day}`,
+      title: `打开 ${day}`,
+      group: "日期",
+      keywords: `day ${day} 审核`,
+      run: () => {
+        void guard(selectDay)(day);
+        setTab("review");
+      }
+    })),
+    {
+      id: "action-refresh-days",
+      title: "刷新日期列表",
+      group: "操作",
+      keywords: "refresh days reload",
+      run: () => void refreshDays().catch(() => undefined)
+    }
+  ];
 
   // The bootstrap-error screen pre-empts every tab: 重试 (refreshBootstrap) is the sole
   // recovery path, so don't let a tab render an empty workspace behind it.
@@ -452,6 +489,7 @@ export function App() {
 
       {renderTab()}
 
+      <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
       <Toasts toasts={toasts} onDismiss={dismiss} />
     </main>
   );
