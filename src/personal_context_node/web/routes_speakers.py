@@ -14,6 +14,7 @@ from personal_context_node.speaker_embeddings import (
     embedding_projection,
     enroll_person,
     label_segments_as_person,
+    project_embeddings,
     recluster_by_anchors,
     suggest_people_for_session,
 )
@@ -76,6 +77,18 @@ class AutoAttributeRequest(BaseModel):
 class MergePeopleRequest(BaseModel):
     from_id: str
     into_id: str
+
+
+class ProjectionRequest(BaseModel):
+    session_ids: list[str] = []
+    days: list[str] = []
+    method: str = "umap"
+    n_neighbors: int = 15
+    min_dist: float = 0.1
+    pca_x: int = 0
+    pca_y: int = 1
+    perplexity: int = 30
+    max_points: int = 4000
 
 
 def _assign_speaker_to_person(conn, *, speaker: str, person_id: str, person_label: str, now: str) -> None:
@@ -353,6 +366,30 @@ def embedding_projection_route(
         raise HTTPException(status_code=400, detail="method must be one of: umap, pca")
     config: AppConfig = request.app.state.config
     return embedding_projection(config=config, session_id=session_id, day=day, method=method)
+
+
+@router.post("/speakers/projection")
+def projection_route(request: Request, payload: ProjectionRequest) -> dict[str, object]:
+    """Multi-scope, tunable 2D projection of in-scope CAM++ voiceprints (UMAP/PCA-components/t-SNE).
+
+    Projects the union of the given sessions + days together for cross-session comparison; over
+    ``max_points`` segments are evenly subsampled to stay responsive.
+    """
+    if payload.method not in {"umap", "pca", "tsne"}:
+        raise HTTPException(status_code=400, detail="method must be one of: umap, pca, tsne")
+    config: AppConfig = request.app.state.config
+    return project_embeddings(
+        config=config,
+        session_ids=payload.session_ids,
+        days=payload.days,
+        method=payload.method,
+        n_neighbors=payload.n_neighbors,
+        min_dist=payload.min_dist,
+        pca_x=payload.pca_x,
+        pca_y=payload.pca_y,
+        perplexity=payload.perplexity,
+        max_points=payload.max_points,
+    )
 
 
 @router.post("/speakers/extract-embeddings")

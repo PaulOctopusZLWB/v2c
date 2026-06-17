@@ -691,10 +691,16 @@ def _segment_speakers(*, config: AppConfig, segment_ids: list[str]) -> dict[str,
 # a UMAP fit is a multi-second warmup and the scatter map is hit repeatedly as the UI re-renders.
 _PROJECTION_CACHE: dict[tuple, dict] = {}
 
+# The multi-scope, tunable projection (project_embeddings) keyed by its full parameter tuple.
+# Kept separate from _PROJECTION_CACHE (different key shape) but cleared together so an attribution
+# / embedding write invalidates BOTH the single-scope map and any cross-session projection.
+_MULTI_PROJECTION_CACHE: dict[tuple, dict] = {}
+
 
 def clear_projection_cache() -> None:
     """Drop all memoized projection results (call between tests / after re-embedding a scope)."""
     _PROJECTION_CACHE.clear()
+    _MULTI_PROJECTION_CACHE.clear()
 
 
 def embedding_projection(
@@ -787,6 +793,182 @@ def embedding_projection(
     return result
 
 
+def project_embeddings(
+    *,
+    config: AppConfig,
+    session_ids: list[str] | None = None,
+    days: list[str] | None = None,
+    method: str = "umap",
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    pca_x: int = 0,
+    pca_y: int = 1,
+    perplexity: int = 30,
+    max_points: int = 4000,
+) -> dict:
+    """Project stored CAM++ voiceprints across MULTIPLE sessions/days to 2D, tunable + responsive.
+
+    The scope is the union (dedup, order-preserving) of active, embedded segments across every
+    ``session_ids`` entry PLUS every ``days`` entry. Over ``max_points`` segments are evenly
+    subsampled (deterministic stride) so UMAP/t-SNE stay responsive; ``capped``/``total_in_scope``
+    report this. ``method`` is ``"pca"`` (deterministic, selectable components ``pca_x``/``pca_y``),
+    ``"umap"`` (needs >=5 points; tunable ``n_neighbors``/``min_dist``) or ``"tsne"`` (needs >=10;
+    tunable ``perplexity``); umap/tsne fall back to PCA below their minimum or on any failure. Each
+    point carries its ``session_id`` so the UI can color/compare by session. Results are memoized.
+    """
+    session_ids = list(session_ids or [])
+    days = list(days or [])
+
+    # Union of active, embedded segment ids across all sessions + days, dedup (order-preserving).
+    scope_ids: list[str] = []
+    seen: set[str] = set()
+    for session_id in session_ids:
+        for sid in scoped_embedding_segment_ids(config=config, session_id=session_id):
+            if sid not in seen:
+                seen.add(sid)
+                scope_ids.append(sid)
+    for day in days:
+        for sid in scoped_embedding_segment_ids(config=config, day=day):
+            if sid not in seen:
+                seen.add(sid)
+                scope_ids.append(sid)
+
+    total_in_scope = len(scope_ids)
+
+    # Evenly subsample (deterministic stride) when the scope exceeds the cap, so heavy reducers
+    # stay responsive and the result is consistent across methods/calls.
+    capped = False
+    if max_points > 0 and total_in_scope > max_points:
+        stride = total_in_scope / float(max_points)
+        scope_ids = [scope_ids[int(i * stride)] for i in range(max_points)]
+        capped = True
+
+    cache_key = (
+        str(config.database_path),
+        tuple(sorted(session_ids)),
+        tuple(sorted(days)),
+        method,
+        n_neighbors,
+        min_dist,
+        pca_x,
+        pca_y,
+        perplexity,
+        max_points,
+        total_in_scope,
+    )
+    cached = _MULTI_PROJECTION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    if not scope_ids:
+        result = {"points": [], "method": method, "n": 0, "capped": False}
+        _MULTI_PROJECTION_CACHE[cache_key] = result
+        return result
+
+    embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+    ids = [sid for sid in scope_ids if sid in embeddings]
+    if not ids:
+        result = {"points": [], "method": method, "n": 0, "capped": False}
+        _MULTI_PROJECTION_CACHE[cache_key] = result
+        return result
+
+    matrix = np.vstack([embeddings[sid] for sid in ids]).astype(np.float64)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms == 0.0] = 1.0
+    X = matrix / norms
+
+    used_method = "pca"
+    coords: np.ndarray | None = None
+
+    if method == "umap" and len(X) >= 5:
+        try:
+            import umap  # type: ignore
+
+            reducer = umap.UMAP(
+                n_components=2,
+                n_neighbors=min(max(2, n_neighbors), len(X) - 1),
+                min_dist=float(min_dist),
+                metric="cosine",
+                random_state=42,
+            )
+            with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two at once
+                coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
+            used_method = "umap"
+        except Exception:
+            coords = None  # any import/runtime failure -> deterministic PCA fallback
+    elif method == "tsne" and len(X) >= 10:
+        try:
+            from sklearn.decomposition import PCA
+            from sklearn.manifold import TSNE
+
+            # PCA-reduce first (standard t-SNE preconditioning) then embed.
+            pre_dim = min(50, X.shape[1], len(X) - 1)
+            with _UMAP_LOCK:  # serialize all heavy embeddings ops (numba/BLAS thread safety)
+                reduced = PCA(n_components=pre_dim, random_state=42).fit_transform(X) if pre_dim >= 2 else X
+                perp = min(max(5, perplexity), (len(X) - 1) // 3 or 5)
+                tsne = TSNE(n_components=2, perplexity=perp, init="pca", random_state=42)
+                coords = np.asarray(tsne.fit_transform(reduced), dtype=np.float64)
+            used_method = "tsne"
+        except Exception:
+            coords = None  # any failure -> deterministic PCA fallback
+
+    if coords is None:
+        coords = _pca_components(X, pca_x=pca_x, pca_y=pca_y)
+        used_method = "pca"
+
+    # Normalize coords to [0, 1]^2 for a stable scatter viewport.
+    lo = coords.min(axis=0)
+    span = coords.max(axis=0) - lo
+    norm_coords = (coords - lo) / (span + 1e-9)
+
+    metadata = _projection_metadata(config=config, segment_ids=ids)
+    points = []
+    for sid, (x, y) in zip(ids, norm_coords):
+        meta = metadata.get(sid, {})
+        points.append(
+            {
+                "segment_id": sid,
+                "x": round(float(x), 4),
+                "y": round(float(y), 4),
+                "speaker": meta.get("speaker"),
+                "person_id": meta.get("person_id"),
+                "person_label": meta.get("person_label"),
+                "text": meta.get("text"),
+                "session_id": meta.get("session_id"),
+            }
+        )
+
+    result = {
+        "points": points,
+        "method": used_method,
+        "n": len(points),
+        "capped": capped,
+        "total_in_scope": total_in_scope,
+    }
+    _MULTI_PROJECTION_CACHE[cache_key] = result
+    return result
+
+
+def _pca_components(X: np.ndarray, *, pca_x: int, pca_y: int) -> np.ndarray:
+    """Two selectable principal-component coordinates (columns ``pca_x``, ``pca_y``) via SVD.
+
+    Indices are clamped into the available component range; if both resolve to the same axis,
+    ``pca_y`` is bumped to a distinct one so the two output axes never collapse onto each other.
+    """
+    centered = X - X.mean(axis=0, keepdims=True)
+    _u, _s, vt = np.linalg.svd(centered, full_matrices=False)
+    n_components = vt.shape[0]
+    ax = max(0, min(int(pca_x), n_components - 1))
+    ay = max(0, min(int(pca_y), n_components - 1))
+    if ay == ax and n_components >= 2:
+        ay = ax + 1 if ax + 1 < n_components else ax - 1
+    components = vt[[ax, ay]] if n_components >= 2 else vt[[ax]]
+    coords = centered @ components.T
+    if coords.shape[1] < 2:  # degenerate (single component): pad the missing axis.
+        coords = np.hstack([coords, np.zeros((coords.shape[0], 2 - coords.shape[1]))])
+    return coords
+
+
 def _pca_2d(X: np.ndarray) -> np.ndarray:
     """Deterministic top-2 principal-component coordinates via SVD on centered rows."""
     centered = X - X.mean(axis=0, keepdims=True)
@@ -800,7 +982,7 @@ def _pca_2d(X: np.ndarray) -> np.ndarray:
 
 
 def _projection_metadata(*, config: AppConfig, segment_ids: list[str]) -> dict[str, dict]:
-    """Per-segment {speaker, text(truncated), person_id, person_label} in one chunked query."""
+    """Per-segment {speaker, text(truncated), person_id, person_label, session_id} in one chunked query."""
     result: dict[str, dict] = {}
     conn = connect(config.database_path)
     try:
@@ -815,6 +997,7 @@ def _projection_metadata(*, config: AppConfig, segment_ids: list[str]) -> dict[s
                   ts.segment_id,
                   ts.speaker,
                   ts.text,
+                  ts.session_id,
                   override.person_id as person_id,
                   override.person_label as person_label
                 from transcript_segments ts
@@ -832,6 +1015,7 @@ def _projection_metadata(*, config: AppConfig, segment_ids: list[str]) -> dict[s
                     "text": text,
                     "person_id": row["person_id"],
                     "person_label": row["person_label"],
+                    "session_id": row["session_id"],
                 }
     finally:
         conn.close()

@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, LabelSegment, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -92,6 +92,10 @@ export const api = {
   // 2D voiceprint map: project stored CAM++ embeddings to a scatter (UMAP default, PCA fallback)
   embeddingProjection: (params: { session_id?: string | null; day?: string | null; method?: "umap" | "pca" | null }) =>
     request<ProjectionResult>(`/api/speakers/embedding-projection${query(params)}`),
+  // Multi-scope, tunable voiceprint projection: project a union of sessions + days together
+  // (UMAP / PCA-component selection / t-SNE) with a perf cap for cross-session comparison.
+  projection: (body: ProjectionRequest) =>
+    request<ProjectionResult>("/api/speakers/projection", { method: "POST", body: JSON.stringify(body) }),
   // "People taught once": enroll a voiceprint, then suggest/auto-attribute everywhere; plus the
   // lasso-to-label bulk primitive (label a set of segments as one person).
   people: () => request<{ people: PersonRow[] }>("/api/people"),

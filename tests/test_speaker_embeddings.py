@@ -17,6 +17,7 @@ from personal_context_node.speaker_embeddings import (
     get_person_centroids,
     label_segments_as_person,
     pending_embedding_segment_ids,
+    project_embeddings,
     put_embedding,
     put_embeddings_bulk,
     recluster_by_anchors,
@@ -947,6 +948,160 @@ def test_suggest_excludes_non_speaker(tmp_path: Path) -> None:
     by_speaker = {s["speaker"]: s for s in result["suggestions"]}
     assert by_speaker["spk_qa"]["person_id"] == "per_a"
     assert by_speaker["spk_qb"]["person_id"] == "per_b"
+
+
+# ---------------------------------------------------------------------------
+# Item 2: multi-scope, tunable projection (project_embeddings)
+# ---------------------------------------------------------------------------
+
+
+def _embed_axis_session(
+    config: AppConfig,
+    *,
+    session_id: str,
+    audio_file_id: str,
+    segment_ids: list[str],
+    axis: int,
+    date_key: str = "2087-05-10",
+) -> None:
+    """Insert a session + segments and embed each near a given axis (distinct cluster per session)."""
+    _insert_session_with_segments(
+        config.database_path, segment_ids, session_id=session_id, audio_file_id=audio_file_id, date_key=date_key
+    )
+    put_embeddings_bulk(
+        config=config,
+        items=[(sid, _unit_axis(axis, noise=0.05 + 0.05 * i)) for i, sid in enumerate(segment_ids)],
+    )
+
+
+def test_project_embeddings_multi_session_spans_both(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _embed_axis_session(config, session_id="ses_1", audio_file_id="aud_1", segment_ids=["s1a", "s1b", "s1c"], axis=0)
+    _embed_axis_session(config, session_id="ses_2", audio_file_id="aud_2", segment_ids=["s2a", "s2b", "s2c"], axis=1)
+
+    result = project_embeddings(config=config, session_ids=["ses_1", "ses_2"], method="pca")
+
+    assert result["method"] == "pca"
+    assert result["n"] == 6
+    assert result["capped"] is False
+    assert result["total_in_scope"] == 6
+    by_id = {p["segment_id"]: p for p in result["points"]}
+    assert set(by_id) == {"s1a", "s1b", "s1c", "s2a", "s2b", "s2c"}
+    # Each point carries its originating session_id so the UI can color/compare by session.
+    for sid in ("s1a", "s1b", "s1c"):
+        assert by_id[sid]["session_id"] == "ses_1"
+    for sid in ("s2a", "s2b", "s2c"):
+        assert by_id[sid]["session_id"] == "ses_2"
+    for point in result["points"]:
+        assert 0.0 <= point["x"] <= 1.0
+        assert 0.0 <= point["y"] <= 1.0
+
+
+def test_project_embeddings_days_scope(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _embed_axis_session(
+        config, session_id="ses_d1", audio_file_id="aud_d1", segment_ids=["d1a", "d1b"], axis=0, date_key="2087-05-10"
+    )
+    _embed_axis_session(
+        config, session_id="ses_d2", audio_file_id="aud_d2", segment_ids=["d2a", "d2b"], axis=1, date_key="2087-05-11"
+    )
+
+    result = project_embeddings(config=config, days=["2087-05-10"], method="pca")
+    assert {p["segment_id"] for p in result["points"]} == {"d1a", "d1b"}
+    assert result["n"] == 2
+
+
+def test_project_embeddings_pca_component_selection(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)  # seg_1..6, dim 192
+
+    xy01 = project_embeddings(config=config, session_ids=["ses_test"], method="pca", pca_x=0, pca_y=1)
+    xy02 = project_embeddings(config=config, session_ids=["ses_test"], method="pca", pca_x=0, pca_y=2)
+    a = {p["segment_id"]: (p["x"], p["y"]) for p in xy01["points"]}
+    b = {p["segment_id"]: (p["x"], p["y"]) for p in xy02["points"]}
+    # Different y-component selection -> the y coords differ (deterministic, not identical).
+    assert any(a[s][1] != b[s][1] for s in a)
+
+
+def test_project_embeddings_pca_out_of_range_y_clamped(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)
+    # pca_y far beyond available components must not crash; it's clamped to a valid axis.
+    result = project_embeddings(config=config, session_ids=["ses_test"], method="pca", pca_x=0, pca_y=9999)
+    assert result["n"] == 6
+    for point in result["points"]:
+        assert 0.0 <= point["x"] <= 1.0
+        assert 0.0 <= point["y"] <= 1.0
+
+
+def test_project_embeddings_caps_evenly(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)  # 6 segments
+
+    result = project_embeddings(config=config, session_ids=["ses_test"], method="pca", max_points=3)
+    assert result["capped"] is True
+    assert result["n"] == 3
+    assert result["total_in_scope"] == 6
+
+
+def test_project_embeddings_umap_and_tsne_shapes(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    # >=10 points so both umap (>=5) and tsne (>=10) run their real reducers.
+    ids = [f"seg_{i:02d}" for i in range(12)]
+    _insert_session_with_segments(config.database_path, ids)
+    put_embeddings_bulk(
+        config=config,
+        items=[(sid, _unit_axis(0 if i < 6 else 1, noise=0.05 + 0.02 * i)) for i, sid in enumerate(ids)],
+    )
+
+    for method in ("umap", "tsne"):
+        clear_projection_cache()
+        result = project_embeddings(config=config, session_ids=["ses_test"], method=method)
+        assert result["method"] == method
+        assert result["n"] == 12
+        for point in result["points"]:
+            assert 0.0 <= point["x"] <= 1.0
+            assert 0.0 <= point["y"] <= 1.0
+
+
+def test_project_embeddings_umap_tsne_fall_back_to_pca_when_small(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)  # 6 segments: enough for umap (>=5) but not tsne (>=10)
+
+    # tsne needs >=10 -> pca fallback.
+    tsne = project_embeddings(config=config, session_ids=["ses_test"], method="tsne")
+    assert tsne["method"] == "pca"
+    assert tsne["n"] == 6
+
+    # umap needs >=5 points; with only 3 it falls back to pca.
+    clear_projection_cache()
+    small = project_embeddings(config=config, session_ids=["ses_test"], method="umap", max_points=3)
+    assert small["method"] == "pca"
+    assert small["n"] == 3
+
+
+def test_project_embeddings_cache_and_clear(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)
+
+    first = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+    second = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+    assert second is first  # cached: same object
+
+    clear_projection_cache()
+    third = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+    assert third is not first
+    assert third == first
+
+
+def test_project_embeddings_empty_scope(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    result = project_embeddings(config=config, session_ids=["ses_missing"], method="umap")
+    assert result == {"points": [], "method": "umap", "n": 0, "capped": False}
 
 
 def _set_speaker(database_path: Path, segment_id: str, speaker: str) -> None:

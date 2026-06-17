@@ -186,6 +186,8 @@ export interface ReclusterResult {
   threshold: number;
 }
 
+export type ProjectionMethod = "umap" | "pca" | "tsne";
+
 /** One voiceprint projected to 2D (x/y in [0,1]) for the scatter "voiceprint map". */
 export interface ProjectionPoint {
   segment_id: string;
@@ -195,13 +197,38 @@ export interface ProjectionPoint {
   person_id: string | null;
   person_label: string | null;
   text: string | null;
+  /** Originating session — lets the multi-scope map color/compare by session. */
+  session_id: string | null;
 }
 
 /** Result of the embedding-projection endpoint: 2D points plus the method actually used. */
 export interface ProjectionResult {
   points: ProjectionPoint[];
-  method: "umap" | "pca";
+  /** The method actually used (umap/tsne fall back to pca below their min points or on failure). */
+  method: ProjectionMethod;
   n: number;
+  /** True when the in-scope set was evenly subsampled down to max_points to stay responsive. */
+  capped?: boolean;
+  /** Total in-scope segments before any subsampling. */
+  total_in_scope?: number;
+}
+
+/** Multi-scope, tunable projection request: project a union of sessions + days together. */
+export interface ProjectionRequest {
+  session_ids?: string[];
+  days?: string[];
+  method?: ProjectionMethod;
+  /** UMAP: neighborhood size. */
+  n_neighbors?: number;
+  /** UMAP: minimum embedded distance. */
+  min_dist?: number;
+  /** PCA: which principal components to plot on x / y. */
+  pca_x?: number;
+  pca_y?: number;
+  /** t-SNE: perplexity. */
+  perplexity?: number;
+  /** Evenly subsample the scope down to this many points before projecting. */
+  max_points?: number;
 }
 
 /** A person enriched with enrollment + attribution state (People panel). */

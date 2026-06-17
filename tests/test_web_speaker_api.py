@@ -264,6 +264,46 @@ def test_embedding_projection_route(tmp_path: Path) -> None:
     assert bad.status_code == 400
 
 
+def test_projection_route_multi_scope(tmp_path: Path) -> None:
+    from personal_context_node.speaker_embeddings import clear_projection_cache, put_embeddings_bulk
+
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    # 192-dim vectors near two distinct axes so PCA is non-degenerate.
+    import numpy as np
+
+    def axis(i: int) -> list[float]:
+        v = np.zeros(192, dtype=np.float64)
+        v[i] = 1.0
+        v[(i + 1) % 192] = 0.1
+        return v.tolist()
+
+    put_embeddings_bulk(
+        config=config,
+        items=[("seg_a", axis(0)), ("seg_b", axis(0)), ("seg_c", axis(1))],
+    )
+    client = TestClient(create_app(config=config))
+
+    response = client.post(
+        "/api/speakers/projection", json={"session_ids": ["ses_lab"], "method": "pca"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "pca"
+    assert body["n"] == 3
+    ids = {p["segment_id"] for p in body["points"]}
+    assert ids == {"seg_a", "seg_b", "seg_c"}
+    for point in body["points"]:
+        assert point["session_id"] == "ses_lab"
+        assert 0.0 <= point["x"] <= 1.0
+        assert 0.0 <= point["y"] <= 1.0
+
+    # Bad method -> 400.
+    bad = client.post("/api/speakers/projection", json={"session_ids": ["ses_lab"], "method": "bogus"})
+    assert bad.status_code == 400
+
+
 def test_recluster_route_returns_distribution(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_labeling_day(config.database_path)

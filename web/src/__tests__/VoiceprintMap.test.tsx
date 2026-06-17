@@ -6,10 +6,10 @@ import type { PersonRow, ProjectionPoint, ProjectionResult } from "../api/types"
 
 /** Four points across two person/speaker keys (per_a x2, spk_1 x2). */
 const points: ProjectionPoint[] = [
-  { segment_id: "seg_1", x: 0.1, y: 0.2, speaker: "spk_0", person_id: "per_a", person_label: "李雷", text: "第一段" },
-  { segment_id: "seg_2", x: 0.3, y: 0.4, speaker: "spk_0", person_id: "per_a", person_label: "李雷", text: "第二段" },
-  { segment_id: "seg_3", x: 0.7, y: 0.6, speaker: "spk_1", person_id: null, person_label: null, text: "第三段" },
-  { segment_id: "seg_4", x: 0.9, y: 0.8, speaker: "spk_1", person_id: null, person_label: null, text: "第四段" }
+  { segment_id: "seg_1", x: 0.1, y: 0.2, speaker: "spk_0", person_id: "per_a", person_label: "李雷", text: "第一段", session_id: "ses_1" },
+  { segment_id: "seg_2", x: 0.3, y: 0.4, speaker: "spk_0", person_id: "per_a", person_label: "李雷", text: "第二段", session_id: "ses_1" },
+  { segment_id: "seg_3", x: 0.7, y: 0.6, speaker: "spk_1", person_id: null, person_label: null, text: "第三段", session_id: "ses_1" },
+  { segment_id: "seg_4", x: 0.9, y: 0.8, speaker: "spk_1", person_id: null, person_label: null, text: "第四段", session_id: "ses_1" }
 ];
 
 const projection: ProjectionResult = { points, method: "umap", n: 4 };
