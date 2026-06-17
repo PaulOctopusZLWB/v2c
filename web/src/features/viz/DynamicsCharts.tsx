@@ -150,8 +150,11 @@ function DynamicsBody({ data }: { data: SessionDynamics }) {
                 {timeline
                   .filter((turn) => turn.label === label)
                   .map((turn, i) => {
-                    const left = total_ms > 0 ? (turn.start_ms_rel / total_ms) * 100 : 0;
-                    const width = total_ms > 0 ? ((turn.end_ms_rel - turn.start_ms_rel) / total_ms) * 100 : 0;
+                    const left = total_ms > 0 ? Math.min(100, (turn.start_ms_rel / total_ms) * 100) : 0;
+                    // Clamp so a block never extends past the track's right edge (a turn ending at
+                    // total_ms, or rounding, would otherwise overflow — compounded by min-width).
+                    const width =
+                      total_ms > 0 ? Math.max(0, Math.min(((turn.end_ms_rel - turn.start_ms_rel) / total_ms) * 100, 100 - left)) : 0;
                     return (
                       <span
                         key={`${label}-${i}`}

@@ -642,7 +642,7 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .dyn-lane-track {
-  position: relative; flex: 1; height: 16px; min-width: 0;
+  position: relative; flex: 1; height: 16px; min-width: 0; overflow: hidden;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r1);
 }
 .dyn-block {
