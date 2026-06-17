@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api/client";
-import { PipelineRail } from "./components/PipelineRail";
 import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -12,7 +11,10 @@ import { DevicePanel } from "./features/device/DevicePanel";
 import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
+import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
+import { Tabs } from "./features/workspace/Tabs";
+import { useTab } from "./features/workspace/useTab";
 import { usePipelineStatus } from "./hooks/usePipelineStatus";
 import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
@@ -39,6 +41,7 @@ function stageBreakdownFromSummary(
 
 export function App() {
   const { summary, worker_running, import_progress } = usePipelineStatus();
+  const { tab, setTab } = useTab();
   const { toasts, push, dismiss } = useToasts();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
@@ -57,7 +60,6 @@ export function App() {
   const [persons, setPersons] = useState<Person[]>([]);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
-  const [focusedStage, setFocusedStage] = useState<Stage | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
   // Mirror bootstrap state into a ref so the mount-time poll interval reads the latest value
@@ -231,170 +233,221 @@ export function App() {
   // still have attempts left, but only applies when the summary hasn't arrived yet.
   const failedCount = summary?.failed_total ?? tasks.filter((tk) => tk.status.startsWith("failed")).length;
 
-  // Map a pipeline stage to the DOM id of the panel that owns it, then scroll there.
-  const STAGE_PANEL_ID: Record<Stage, string> = {
-    device: "panel-device",
-    import: "panel-device",
-    asr: "panel-transcript",
-    review: "panel-transcript",
-    llm: "panel-llm",
-    publish: "panel-run"
-  };
-  function focusStage(stage: Stage) {
-    setFocusedStage(stage);
-    const el = document.getElementById(STAGE_PANEL_ID[stage]);
-    el?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  // The bootstrap-error screen pre-empts every tab: 重试 (refreshBootstrap) is the sole
+  // recovery path, so don't let a tab render an empty workspace behind it.
+  if (bootstrapError && !bootstrapped) {
+    return (
+      <main className="workbench">
+        <header className="workbench-header">
+          <h1>{t.app.title}</h1>
+        </header>
+        <section className="tab-page single">
+          <div className="empty error-state" role="alert">
+            <Icon name="run" className="empty-icon" />
+            <h3>后端或 API 不可用</h3>
+            <p>{bootstrapError}</p>
+            <button className="primary" onClick={() => void refreshBootstrap()}>
+              <Icon name="refresh" /> 重试
+            </button>
+          </div>
+        </section>
+        <Toasts toasts={toasts} onDismiss={dismiss} />
+      </main>
+    );
   }
 
-  function renderCenter() {
-    if (bootstrapError && !bootstrapped) {
-      return (
-        <div className="empty error-state" role="alert">
-          <Icon name="run" className="empty-icon" />
-          <h3>后端或 API 不可用</h3>
-          <p>{bootstrapError}</p>
-          <button className="primary" onClick={() => void refreshBootstrap()}>
-            <Icon name="refresh" /> 重试
-          </button>
-        </div>
-      );
-    }
-    if (session) {
-      return (
-        <>
-          <TranscriptReviewPanel
-            session={session}
-            persons={persons ?? []}
-            highlightedSegmentId={highlightedSegmentId}
-            onBatchReview={guard(async (ids, status) => { await api.batchReview(ids, status); await reloadSession(); })}
-            onAcceptSession={guard(async () => { await api.acceptRemaining(session.session_id); await reloadSession(); })}
-            onPlaybackError={(message) => push("音频播放失败", message)}
-          />
-          <SpeakerPanel
-            speakers={speakers}
-            persons={persons ?? []}
-            onAssign={guard(async (speaker, personId) => { await api.assignPerson(speaker, personId); await reloadSession(); })}
-            onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
-          />
-        </>
-      );
-    }
-    if (firstRun) {
-      return (
-        <div className="empty">
-          <Icon name="device" className="empty-icon" />
-          <h3>{t.empty.firstRun}</h3>
-          <p>{t.empty.firstRunHint}</p>
-        </div>
-      );
-    }
-    if (!selectedDay) {
-      return (
-        <div className="empty">
-          <Icon name="inbox" className="empty-icon" />
-          <h3>{t.empty.pickDay}</h3>
-          <p>{t.empty.pickDayHint}</p>
-        </div>
-      );
-    }
+  // 录入 (ingest): device detection + import + the run-control/task surface.
+  function renderIngest() {
     return (
-      <div className="empty">
-        <Icon name="clock" className="empty-icon" />
-        <h3>{t.empty.pickSession}</h3>
-        <p>{t.empty.pickSessionHint}</p>
+      <div className="tab-page two-col">
+        <div className="col-main">
+          <div id="panel-device">
+            <DevicePanel sources={sources ?? []} onImport={guard(handleImport)} onRefresh={() => void refreshDevices()} />
+          </div>
+        </div>
+        <div className="col-side">
+          <div id="panel-run">
+            <RunInspector
+              workerRunning={pipelineRunning}
+              taskCount={summaryTotal}
+              gateOn={gateOn}
+              onRun={guard(() => api.run())}
+              onStop={guard(() => api.stop())}
+            />
+          </div>
+          <TaskList
+            tasks={tasks}
+            taskCount={summaryTotal}
+            failedCount={failedCount}
+            onToggle={(open) => {
+              setTasksOpen(open);
+              if (open) void refreshTasks().catch(() => undefined);
+            }}
+            onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); await refreshTasks(); })}
+            onRetryAllFailed={guard(async () => { await api.retryFailed(); await api.run(); await refreshTasks(); })}
+          />
+        </div>
       </div>
     );
   }
 
+  // 审核 (review): the day/session picker on the left, the selected session's transcript +
+  // speaker mapping on the right. Empty states when no day/session is chosen.
+  function renderReview() {
+    return (
+      <div className="tab-page two-col">
+        <aside className="col-nav">
+          <WorkspaceNav
+            days={days}
+            dayStatus={dayStatus}
+            selectedDay={selectedDay}
+            selectedSessionId={selectedSessionId}
+            onSelectDay={(d) => void guard(selectDay)(d)}
+            onSelectSession={(id) => void guard(selectSession)(id)}
+          />
+        </aside>
+        <section className="col-content" id="panel-transcript">
+          {session ? (
+            <>
+              <TranscriptReviewPanel
+                session={session}
+                persons={persons ?? []}
+                highlightedSegmentId={highlightedSegmentId}
+                onBatchReview={guard(async (ids, status) => { await api.batchReview(ids, status); await reloadSession(); })}
+                onAcceptSession={guard(async () => { await api.acceptRemaining(session.session_id); await reloadSession(); })}
+                onPlaybackError={(message) => push("音频播放失败", message)}
+              />
+              <SpeakerPanel
+                speakers={speakers}
+                persons={persons ?? []}
+                onAssign={guard(async (speaker, personId) => { await api.assignPerson(speaker, personId); await reloadSession(); })}
+                onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
+              />
+            </>
+          ) : firstRun ? (
+            <div className="empty">
+              <Icon name="device" className="empty-icon" />
+              <h3>{t.empty.firstRun}</h3>
+              <p>{t.empty.firstRunHint}</p>
+            </div>
+          ) : !selectedDay ? (
+            <div className="empty">
+              <Icon name="inbox" className="empty-icon" />
+              <h3>{t.empty.pickDay}</h3>
+              <p>{t.empty.pickDayHint}</p>
+            </div>
+          ) : (
+            <div className="empty">
+              <Icon name="clock" className="empty-icon" />
+              <h3>{t.empty.pickSession}</h3>
+              <p>{t.empty.pickSessionHint}</p>
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  // 声纹 (speakers): voiceprint coverage/anchor/recluster for the selected session, plus the
+  // day-level diarization-cluster merge tool. Scoped to the day/session chosen in 审核.
+  function renderSpeakers() {
+    const day = selectedDay ?? clusterDay;
+    return (
+      <div className="tab-page single">
+        <section className="cluster-day card">
+          <div className="section-title">{t.cluster.title}</div>
+          <label className="settings-field">
+            <span>{t.cluster.day}</span>
+            <input
+              type="date"
+              aria-label={t.cluster.day}
+              value={selectedDay ?? clusterDay}
+              onChange={(e) => setClusterDay(e.target.value)}
+            />
+          </label>
+        </section>
+        <VoiceprintPanel
+          day={selectedDay}
+          sessionId={selectedSessionId}
+          persons={persons ?? []}
+          onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
+          onPlaybackError={(message) => push("音频播放失败", message)}
+        />
+        {day ? (
+          <ClusterPanel
+            key={day}
+            day={day}
+            persons={persons ?? []}
+            onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
+            onPlaybackError={(message) => push("音频播放失败", message)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  // 观点 (llm): the day's generated context + memory candidates.
+  function renderLlm() {
+    return (
+      <div className="tab-page single">
+        {llm ? (
+          <LlmResultPanel result={llm} onHighlightEvidence={highlightEvidence} />
+        ) : (
+          <div className="empty">
+            <Icon name="inbox" className="empty-icon" />
+            <h3>{t.empty.pickDay}</h3>
+            <p>{t.empty.pickDayHint}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 设置 (settings).
+  function renderSettings() {
+    return (
+      <div className="tab-page single">
+        <SettingsPanel />
+      </div>
+    );
+  }
+
+  function renderTab() {
+    switch (tab) {
+      case "ingest":
+        return renderIngest();
+      case "review":
+        return renderReview();
+      case "speakers":
+        return renderSpeakers();
+      case "llm":
+        return renderLlm();
+      case "settings":
+        return renderSettings();
+    }
+  }
+
   return (
-    <main className="workbench">
+    <main className="workbench tabbed">
       <header className="workbench-header">
-        <h1>{t.app.title}</h1>
-        <span className={pipelineRunning ? "live" : "dim"}>
-          {pipelineRunning ? <span className="live-dot" aria-hidden /> : null}
-          {pipelineRunning ? t.app.running : t.app.idle}
-        </span>
-        <PipelineRail activeStage={current} focusedStage={focusedStage ?? undefined} onSelect={focusStage} />
-        <Progress
-          done={done}
-          total={total}
-          label={progressLabel}
-          stages={importing ? undefined : stageBreakdown}
-          etaSeconds={importing ? null : etaSeconds}
-        />
-      </header>
-
-      <aside className="rail-left">
-        <div id="panel-device">
-          <DevicePanel sources={sources ?? []} onImport={guard(handleImport)} onRefresh={() => void refreshDevices()} />
-        </div>
-        <WorkspaceNav
-          days={days}
-          dayStatus={dayStatus}
-          selectedDay={selectedDay}
-          selectedSessionId={selectedSessionId}
-          onSelectDay={(d) => void guard(selectDay)(d)}
-          onSelectSession={(id) => void guard(selectSession)(id)}
-        />
-        <TaskList
-          tasks={tasks}
-          taskCount={summaryTotal}
-          failedCount={failedCount}
-          onToggle={(open) => {
-            setTasksOpen(open);
-            if (open) void refreshTasks().catch(() => undefined);
-          }}
-          onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); await refreshTasks(); })}
-          onRetryAllFailed={guard(async () => { await api.retryFailed(); await api.run(); await refreshTasks(); })}
-        />
-      </aside>
-
-      <section className="center-panel" id="panel-transcript">
-        {renderCenter()}
-      </section>
-
-      <aside className="rail-right">
-        <div id="panel-run">
-          <RunInspector
-            workerRunning={pipelineRunning}
-            taskCount={summaryTotal}
-            gateOn={gateOn}
-            onRun={guard(() => api.run())}
-            onStop={guard(() => api.stop())}
+        <div className="header-status">
+          <h1>{t.app.title}</h1>
+          <span className={pipelineRunning ? "live" : "dim"}>
+            {pipelineRunning ? <span className="live-dot" aria-hidden /> : null}
+            {pipelineRunning ? t.app.running : t.app.idle}
+          </span>
+          <Progress
+            done={done}
+            total={total}
+            label={progressLabel}
+            stages={importing ? undefined : stageBreakdown}
+            etaSeconds={importing ? null : etaSeconds}
           />
         </div>
-        <div id="panel-llm">
-          {llm ? <LlmResultPanel result={llm} onHighlightEvidence={highlightEvidence} /> : null}
-        </div>
-        <div id="panel-config">
-          {bootstrapped ? (
-          <>
-          <SettingsPanel />
-          <section className="cluster-day card">
-            <div className="section-title">{t.cluster.title}</div>
-            <label className="settings-field">
-              <span>{t.cluster.day}</span>
-              <input
-                type="date"
-                aria-label={t.cluster.day}
-                value={selectedDay ?? clusterDay}
-                onChange={(e) => setClusterDay(e.target.value)}
-              />
-            </label>
-          </section>
-          {(selectedDay ?? clusterDay) ? (
-            <ClusterPanel
-              key={selectedDay ?? clusterDay}
-              day={selectedDay ?? clusterDay}
-              persons={persons ?? []}
-              onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
-              onPlaybackError={(message) => push("音频播放失败", message)}
-            />
-          ) : null}
-          </>
-          ) : null}
-        </div>
-      </aside>
+        <Tabs active={tab} onSelect={setTab} />
+      </header>
+
+      {renderTab()}
 
       <Toasts toasts={toasts} onDismiss={dismiss} />
     </main>

@@ -4,8 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { api } from "../api/client";
 
+/** Click a workspace tab by its Chinese label, awaiting the role="tab" element. */
+async function gotoTab(label: string) {
+  await userEvent.click(await screen.findByRole("tab", { name: label }));
+}
+
 describe("App container", () => {
   beforeEach(() => {
+    // Each test starts on a known tab regardless of the previous hash (useTab is hash-backed).
+    window.location.hash = "";
     // EventSource is not in jsdom; stub it so usePipelineStatus mounts cleanly.
     vi.stubGlobal("EventSource", class {
       addEventListener() {}
@@ -36,6 +43,8 @@ describe("App container", () => {
     });
 
     render(<App />);
+    // The DevicePanel + 导入 button live on the 录入 tab now.
+    await gotoTab("录入");
     await userEvent.click(await screen.findByRole("button", { name: "导入" }));
 
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
@@ -100,10 +109,12 @@ describe("App container", () => {
     );
 
     // The TaskList panel is never opened, so the lazy task array stays empty — these must
-    // come from the compact summary.
+    // come from the compact summary. The stage breakdown + ETA live in the always-visible header.
     expect(await screen.findByText("1200/1500")).toBeInTheDocument(); // asr stage breakdown
     expect(screen.getByText(/剩余约/)).toBeInTheDocument(); // ETA
-    expect(screen.getByText("1700")).toBeInTheDocument(); // RunInspector count == summary total
+    // RunInspector (with the task count) lives on the 录入 tab.
+    await gotoTab("录入");
+    expect(await screen.findByText("1700")).toBeInTheDocument(); // RunInspector count == summary total
   });
 
   it("derives the progress done count and failed count from summary.done_total / failed_total", async () => {
@@ -137,11 +148,13 @@ describe("App container", () => {
       })
     );
 
+    // The progress bar lives in the always-visible header.
     const bar = await screen.findByRole("progressbar");
     expect(bar).toHaveAttribute("aria-valuenow", "1234"); // from done_total, not the 1500 fallback
     expect(bar).toHaveAttribute("aria-valuemax", "1700");
-    // failed_total flows to the TaskList "重试全部失败 (N)" control (panel rendered via summary count).
-    expect(screen.getByRole("button", { name: /重试全部失败/ })).toHaveTextContent("42");
+    // failed_total flows to the TaskList "重试全部失败 (N)" control on the 录入 tab.
+    await gotoTab("录入");
+    expect(await screen.findByRole("button", { name: /重试全部失败/ })).toHaveTextContent("42");
   });
 
   it("refreshes the task list after a retry (api.retry -> api.run -> refreshTasks)", async () => {
@@ -172,6 +185,8 @@ describe("App container", () => {
     // panel can be opened to lazily load the rows.
     act(() => summaryListener!({ data: JSON.stringify({ status_counts: { failed_retryable: 1 }, total: 1, active_stage: null, current_target: null, import_progress: null, worker_running: false }) }));
 
+    // The TaskList lives on the 录入 tab.
+    await gotoTab("录入");
     // Open the <details> panel -> onToggle(true) -> refreshTasks() loads the failed row.
     const details = container.querySelector("details.task-list") as HTMLDetailsElement;
     details.open = true;
@@ -321,5 +336,40 @@ describe("App container", () => {
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(calls).toContain("/api/transcripts/sessions/ses_1");
     expect(calls).toContain("/api/transcripts/segments/batch-review");
+  });
+
+  it("renders only the active tab and keeps the selected session across tab switches", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
+      if (url === "/api/llm/days/2087-05-10") return new Response(JSON.stringify({ day: "2087-05-10", context: null, memory_candidates: [] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") return new Response(JSON.stringify({ session_id: "ses_1", review_status: "pending_review", segments: [{ segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review", note: null }] }), { status: 200 });
+      if (url.includes("/embeddings/status")) return new Response(JSON.stringify({ embedded: 0, total: 0, pending: 0 }), { status: 200 });
+      if (url.includes("/segments")) return new Response(JSON.stringify({ segments: [] }), { status: 200 });
+      if (url.includes("/speaker-clusters")) return new Response(JSON.stringify({ clusters: [] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    const { container } = render(<App />);
+
+    // Default tab is 审核 — pick a day + session; the transcript panel mounts.
+    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    await screen.findByText("你好"); // transcript content rendered
+    expect(container.querySelector("#panel-transcript")).toBeInTheDocument();
+
+    // Switch to 声纹: the transcript panel unmounts (only the active tab renders), and the
+    // VoiceprintPanel shows. The session stays selected (it's App-level state).
+    await gotoTab("声纹");
+    expect(await screen.findByText("声纹覆盖")).toBeInTheDocument();
+    expect(container.querySelector("#panel-transcript")).not.toBeInTheDocument();
+
+    // Switch back to 审核: the transcript reappears with the same session still selected — no
+    // need to re-pick the day/session.
+    await gotoTab("审核");
+    expect(await screen.findByText("你好")).toBeInTheDocument();
+    expect(container.querySelector("#panel-transcript")).toBeInTheDocument();
   });
 });
