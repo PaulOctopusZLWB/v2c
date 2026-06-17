@@ -8,6 +8,7 @@ import { TaskList } from "./components/TaskList";
 import { Icon } from "./components/Icon";
 import { Toasts, useToasts } from "./components/Toasts";
 import { DevicePanel } from "./features/device/DevicePanel";
+import { HomePanel } from "./features/home/HomePanel";
 import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
 import { ReviewQueue } from "./features/transcript/ReviewQueue";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
@@ -437,7 +438,7 @@ export function App() {
   // ⌘K command set, rebuilt from current state each render: jump to any tab, open any
   // loaded day (-> 审核), or run a global action. Keep to navigation/tab jumps for now —
   // only actions trivially callable from App scope.
-  const TAB_LABELS: Record<TabId, string> = { ingest: "录入", review: "审核", speakers: "声纹", llm: "观点", settings: "设置" };
+  const TAB_LABELS: Record<TabId, string> = { home: "首页", ingest: "录入", review: "审核", speakers: "声纹", llm: "观点", settings: "设置" };
   const commands: Command[] = [
     ...(Object.keys(TAB_LABELS) as TabId[]).map((id) => ({
       id: `tab-${id}`,
@@ -496,6 +497,27 @@ export function App() {
         </section>
         <Toasts toasts={toasts} onDismiss={dismiss} />
       </main>
+    );
+  }
+
+  // 首页 (home): the default landing — actionable cards that deep-link into each tab.
+  function renderHome() {
+    return (
+      <HomePanel
+        onGoReview={() => setTab("review")}
+        onGoSpeakers={() => setTab("speakers")}
+        onGoLlm={(day) => {
+          void guard(selectDay)(day);
+          setTab("llm");
+        }}
+        onOpenSession={(sid, day) => {
+          void guard(async () => {
+            await selectDay(day);
+            await selectSession(sid);
+          })();
+          setTab("review");
+        }}
+      />
     );
   }
 
@@ -711,6 +733,8 @@ export function App() {
 
   function renderTab() {
     switch (tab) {
+      case "home":
+        return renderHome();
       case "ingest":
         return renderIngest();
       case "review":

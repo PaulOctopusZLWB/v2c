@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import { Tabs } from "../features/workspace/Tabs";
 
 describe("Tabs", () => {
-  it("renders the five tab buttons with Chinese labels", () => {
+  it("renders the six tab buttons with Chinese labels, 首页 first", () => {
     render(<Tabs active="review" onSelect={vi.fn()} />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(5);
-    expect(tabs.map((t) => t.textContent)).toEqual(["录入", "审核", "声纹", "观点", "设置"]);
+    expect(tabs).toHaveLength(6);
+    expect(tabs.map((t) => t.textContent)).toEqual(["首页", "录入", "审核", "声纹", "观点", "设置"]);
   });
 
   it("marks the active tab with aria-current", () => {

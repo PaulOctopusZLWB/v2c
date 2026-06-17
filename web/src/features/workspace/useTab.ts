@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-export type TabId = "ingest" | "review" | "speakers" | "llm" | "settings";
+export type TabId = "home" | "ingest" | "review" | "speakers" | "llm" | "settings";
 
-const TAB_IDS: readonly TabId[] = ["ingest", "review", "speakers", "llm", "settings"];
-const DEFAULT_TAB: TabId = "review";
+const TAB_IDS: readonly TabId[] = ["home", "ingest", "review", "speakers", "llm", "settings"];
+const DEFAULT_TAB: TabId = "home";
 
 /** Reads the current tab from the URL hash (`#tab=<id>`), falling back to the default. */
 function tabFromHash(): TabId {

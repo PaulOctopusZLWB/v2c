@@ -7,9 +7,9 @@ describe("useTab", () => {
     window.location.hash = "";
   });
 
-  it("defaults to review", () => {
+  it("defaults to home", () => {
     const { result } = renderHook(() => useTab());
-    expect(result.current.tab).toBe("review");
+    expect(result.current.tab).toBe("home");
   });
 
   it("initializes from an existing #tab=speakers hash", () => {
@@ -37,6 +37,6 @@ describe("useTab", () => {
   it("ignores an invalid tab id and keeps the default", () => {
     window.location.hash = "#tab=bogus";
     const { result } = renderHook(() => useTab());
-    expect(result.current.tab).toBe("review");
+    expect(result.current.tab).toBe("home");
   });
 });

@@ -1,6 +1,7 @@
 import type { TabId } from "./useTab";
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: "home", label: "首页" },
   { id: "ingest", label: "录入" },
   { id: "review", label: "审核" },
   { id: "speakers", label: "声纹" },

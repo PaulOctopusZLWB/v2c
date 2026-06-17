@@ -294,6 +294,30 @@ export interface SessionDynamics {
   timeline: DynamicsTurn[];
 }
 
+/** One row in the 首页 (home) "最近会话" list: enough to deep-link into 审核. */
+export interface HomeRecentSession {
+  session_id: string;
+  /** sessions.date_key — the day this session belongs to. */
+  day: string;
+  started_at: string;
+  segment_count: number;
+  review_status: ReviewStatus | "blocked";
+}
+
+/** The 首页 (home/landing) dashboard payload (`/api/home/overview`). */
+export interface HomeOverview {
+  /** Review backlog headline: sessions still needing review + total pending segments. */
+  review: { pending_sessions: number; pending_segments: number };
+  /** Person roster size + how many have an enrolled voiceprint. */
+  people: { total: number; enrolled: number };
+  /** Corpus coverage: distinct days, sessions, active segments, embedded + emoted counts. */
+  coverage: { days: number; sessions: number; segments: number; embedded: number; emoted: number };
+  /** The 5 most recent sessions, newest first. */
+  recent_sessions: HomeRecentSession[];
+  /** The most recent day string (for deep-linking 观点), or null when empty. */
+  latest_day: string | null;
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;

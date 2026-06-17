@@ -631,3 +631,102 @@
   .vmap-stage { height: 320px; }
   .dyn-donut-row { flex-direction: column; align-items: stretch; }
 }
+
+/* ---- 首页 (home / landing dashboard) ---- */
+/* The home tab opens on value: a responsive card grid. 待审 + 最近会话 span two columns so the
+ * actionable headline and the recent-session list dominate; the rest are compact tiles. */
+.home { max-width: 1100px; }
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s5);
+  align-items: start;
+}
+.home-card-review, .home-card-recent { grid-column: 1 / -1; }
+
+.home-card {
+  display: flex; flex-direction: column; gap: var(--s3);
+  text-align: left; width: 100%;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r3);
+  padding: var(--s5) var(--s5); color: var(--text-2);
+  box-shadow: var(--shadow);
+  transition: border-color .15s ease, background .15s ease, transform .1s ease;
+}
+button.home-card { cursor: pointer; font: inherit; }
+button.home-card:hover:not(:disabled) {
+  border-color: var(--accent); background: var(--panel-2);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--accent-glow);
+}
+button.home-card:active:not(:disabled) { transform: translateY(1px); }
+button.home-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.home-card:disabled { opacity: .55; cursor: default; }
+
+.home-card-head { display: flex; align-items: center; justify-content: space-between; }
+.home-card-label {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  font-size: 13px; font-weight: 600; color: var(--text);
+  text-transform: none; letter-spacing: .02em;
+}
+.home-card-label .icon { width: 15px; height: 15px; color: var(--accent); }
+.home-card-go { width: 16px; height: 16px; color: var(--text-dim); }
+button.home-card:hover .home-card-go { color: var(--accent); }
+.home-card-sub { font-size: 12.5px; color: var(--text-2); }
+
+/* The headline number (待审 sessions, 人物 count). */
+.home-bignum {
+  font-size: 40px; line-height: 1; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
+.home-card-review .home-bignum { color: var(--accent); }
+.home-bignum-unit { font-size: 17px; font-weight: 500; color: var(--text-2); }
+
+/* 待审 zero-state: a calm "all clear" tile. */
+.home-card-review.is-clear .home-clear {
+  display: flex; flex-direction: column; gap: var(--s2);
+}
+.home-clear strong { font-size: 18px; color: var(--ok); }
+.home-clear-emoji { font-size: 28px; line-height: 1; }
+
+/* 覆盖 stat strip + completion bars. */
+.home-stat-strip { display: flex; gap: var(--s5); flex-wrap: wrap; }
+.home-stat { display: flex; flex-direction: column; gap: 1px; }
+.home-stat b {
+  font-size: 22px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.home-stat span { font-size: 11px; color: var(--text-dim); }
+.home-cov-bars { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
+.home-cov-row { display: flex; align-items: center; gap: var(--s3); font-size: 12px; }
+.home-cov-name { width: 28px; color: var(--text-2); flex: none; }
+.home-cov-track {
+  flex: 1; height: 6px; border-radius: 999px; overflow: hidden;
+  background: var(--panel-2); border: 1px solid var(--border);
+}
+.home-cov-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.home-cov-fill.emote { background: var(--warn); }
+.home-cov-pct { width: 36px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; flex: none; }
+
+.home-insight-day { font-size: 18px; font-weight: 600; color: var(--text); }
+
+/* 最近会话 list. */
+.home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.home-recent-item {
+  display: flex; align-items: center; gap: var(--s3); width: 100%;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r2);
+  padding: var(--s3) var(--s4); color: var(--text); cursor: pointer; font: inherit; text-align: left;
+  transition: border-color .12s ease, background .12s ease;
+}
+.home-recent-item:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.home-recent-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home-recent-day { font-size: 13px; font-weight: 500; }
+.home-recent-meta { font-size: 12px; color: var(--text-dim); }
+.home-recent-status { margin-left: auto; font-size: 11.5px; color: var(--text-2); }
+.home-recent-status.status-accepted { color: var(--ok); }
+.home-recent-status.status-pending_review { color: var(--warn); }
+.home-recent-status.status-blocked { color: var(--text-dim); }
+.home-recent-go { width: 15px; height: 15px; color: var(--text-dim); flex: none; }
+.home-recent-item:hover .home-recent-go { color: var(--accent); }
+
+@media (max-width: 900px) {
+  .home-grid { grid-template-columns: 1fr; }
+}

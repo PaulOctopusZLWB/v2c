@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -25,6 +25,8 @@ export const api = {
   // status
   statusTasks: () => request<{ tasks: TaskRow[] }>("/api/status/tasks"),
   health: () => request<Health>("/api/health"),
+  // 首页 (home/landing) dashboard: review backlog, people, coverage, recent sessions
+  homeOverview: () => request<HomeOverview>("/api/home/overview"),
   // transcript navigation + review
   days: () => request<{ days: Array<{ day: string; session_count: number }> }>("/api/transcripts/days"),
   dayStatus: () => request<{ days: DayStatusRow[] }>("/api/transcripts/day-status"),

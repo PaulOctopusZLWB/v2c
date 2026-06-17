@@ -4,14 +4,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { api } from "../api/client";
 
+/** A valid (empty) 首页 overview so the now-default home tab renders without crashing. */
+const EMPTY_HOME = {
+  review: { pending_sessions: 0, pending_segments: 0 },
+  people: { total: 0, enrolled: 0 },
+  coverage: { days: 0, sessions: 0, segments: 0, embedded: 0, emoted: 0 },
+  recent_sessions: [],
+  latest_day: null
+};
+
 /** Click a workspace tab by its Chinese label, awaiting the role="tab" element. */
 async function gotoTab(label: string) {
   await userEvent.click(await screen.findByRole("tab", { name: label }));
 }
 
-/** The 审核 tab defaults to the global review queue; switch to the by-day browser (WorkspaceNav)
- *  so day/session buttons render. The toggle is a role="tab" within the nav rail. */
+/** The default tab is now 首页, so first jump to 审核, then switch its left rail from the global
+ *  review queue to the by-day browser (WorkspaceNav) so day/session buttons render. Both toggles
+ *  are role="tab" — the workspace tab strip and the nav rail. */
 async function useDayBrowser() {
+  await gotoTab("审核");
   await userEvent.click(await screen.findByRole("tab", { name: "按天浏览" }));
 }
 
@@ -25,6 +36,7 @@ describe("App container", () => {
       close() {}
     } as unknown as typeof EventSource);
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/pipeline/import") return new Response(JSON.stringify({ imported_files: 1, queued: true }), { status: 200 });
       if (url === "/api/pipeline/run") return new Response(JSON.stringify({ worker_running: true }), { status: 200 });
@@ -35,6 +47,7 @@ describe("App container", () => {
 
   it("imports a detected device then starts a run", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }), { status: 200 });
@@ -68,7 +81,10 @@ describe("App container", () => {
       }
       close() {}
     } as unknown as typeof EventSource);
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
 
     render(<App />);
     await waitFor(() => expect(summaryListener).not.toBeNull());
@@ -95,7 +111,10 @@ describe("App container", () => {
       }
       close() {}
     } as unknown as typeof EventSource);
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
 
     render(<App />);
     await waitFor(() => expect(summaryListener).not.toBeNull());
@@ -135,7 +154,10 @@ describe("App container", () => {
       }
       close() {}
     } as unknown as typeof EventSource);
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response("{}", { status: 200 }));
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
 
     render(<App />);
     await waitFor(() => expect(summaryListener).not.toBeNull());
@@ -179,6 +201,7 @@ describe("App container", () => {
       status: "failed_retryable", attempt_count: 2, last_error: "model busy", duration_ms: 1200
     };
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [failedTask] }), { status: 200 });
       return new Response("{}", { status: 200 });
     });
@@ -242,6 +265,7 @@ describe("App container", () => {
     try {
       const daysSpy = vi.spyOn(api, "days");
       (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
         if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
         if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
         if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
@@ -275,6 +299,7 @@ describe("App container", () => {
 
     let runFinished = false;
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
       if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
       if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
@@ -303,6 +328,7 @@ describe("App container", () => {
     try {
       const dayStatusSpy = vi.spyOn(api, "dayStatus");
       (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
         if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }));
         if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }));
         if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }));
@@ -326,6 +352,7 @@ describe("App container", () => {
 
   it("navigates day -> session and batch-accepts a turn", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
@@ -353,6 +380,7 @@ describe("App container", () => {
     let releaseBatch: (() => void) | null = null;
     const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
@@ -384,6 +412,7 @@ describe("App container", () => {
     let accepted = false; // the session refetch reflects the latest server truth
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
       calls.push(url);
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
@@ -418,6 +447,7 @@ describe("App container", () => {
       ]
     });
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }), { status: 200 });
@@ -451,6 +481,7 @@ describe("App container", () => {
 
   it("renders only the active tab and keeps the selected session across tab switches", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
       if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
       if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
