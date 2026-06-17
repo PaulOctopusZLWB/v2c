@@ -144,6 +144,28 @@ describe("VoiceprintMap", () => {
     });
   });
 
+  it("hovering does NOT reallocate the canvas backing store (no width/height churn per move)", async () => {
+    const { container } = render(<VoiceprintMap sessionId="ses_1" day="2026-06-15" />);
+    await screen.findByRole("list", { name: /图例/ });
+
+    const canvas = container.querySelector(".vmap-canvas") as HTMLCanvasElement;
+    // Snapshot the backing-store dimensions after the initial resize.
+    const w0 = canvas.width;
+    const h0 = canvas.height;
+
+    // Move the pointer across the map repeatedly (seg_1 at 0.1,0.2 → px64/py336 in the 640x420
+    // jsdom fallback). A redraw should happen, but the backing store must NOT be reassigned.
+    const move = (clientX: number, clientY: number) =>
+      fireEvent(canvas, new MouseEvent("pointermove", { clientX, clientY, bubbles: true }));
+    move(64, 336);
+    move(70, 330);
+    move(200, 100);
+
+    // width/height attributes (the backing store) are unchanged → no realloc/clear per move.
+    expect(canvas.width).toBe(w0);
+    expect(canvas.height).toBe(h0);
+  });
+
   // --- lasso-to-label (slice 5b) ---
   const labelPeople: PersonRow[] = [
     { person_id: "per_a", display_name: "李雷", is_self: 0, enrolled: true, attributed_count: 4 },

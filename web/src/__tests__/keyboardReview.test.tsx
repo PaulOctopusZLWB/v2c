@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptReviewPanel } from "../features/transcript/TranscriptReviewPanel";
+import type { ReviewStatus, TranscriptSession } from "../api/types";
 
 // A 3-turn session: spk_1 (seg_1+seg_2), spk_2 (seg_3), spk_1 again (seg_4).
 const session = {
@@ -25,6 +27,32 @@ function renderPanel(onBatchReview = vi.fn().mockResolvedValue(undefined)) {
     />
   );
   return { onBatchReview };
+}
+
+/**
+ * Render the panel with the SAME optimistic-patch behaviour App provides: onBatchReview
+ * flips the segments' review_status in local state so the panel re-derives `turns` with the
+ * reviewed turn removed when 仅未审 is active (mirrors handleBatchReview in App.tsx).
+ */
+function OptimisticHarness({ onReview }: { onReview: (ids: string[], status: ReviewStatus) => void }) {
+  const [s, setS] = useState<TranscriptSession>(session);
+  return (
+    <TranscriptReviewPanel
+      session={s}
+      persons={[]}
+      onBatchReview={(ids, status) => {
+        onReview(ids, status);
+        const set = new Set(ids);
+        setS((prev) => ({
+          ...prev,
+          segments: prev.segments.map((seg) =>
+            set.has(seg.segment_id) ? { ...seg, review_status: status } : seg
+          )
+        }));
+      }}
+      onAcceptSession={vi.fn()}
+    />
+  );
 }
 
 /** The currently focused turn <article> (the one carrying the `focused` class). */
@@ -53,6 +81,22 @@ describe("keyboard-driven turn review", () => {
     expect(onBatchReview).toHaveBeenCalledWith(["seg_3"], "accepted");
     // Focus auto-advances to the 3rd turn (spk_1 · 好的).
     expect(focusedTurn()).toHaveTextContent("好的");
+  });
+
+  it("with 仅未审 on, accepting the focused turn focuses the NEXT pending turn (no skip)", async () => {
+    const onReview = vi.fn();
+    render(<OptimisticHarness onReview={onReview} />);
+
+    // Turn on 仅未审 (only-pending) filter. All three turns are pending, so all stay visible.
+    await userEvent.click(screen.getByText("仅未审").closest("label")!.querySelector("input")!);
+    expect(focusedTurn()).toHaveTextContent("你好"); // first turn focused
+
+    // Accept the focused (first) turn. It leaves the filtered list (now reviewed).
+    fireEvent.keyDown(window, { key: "a" });
+    expect(onReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
+
+    // Focus must land on the NEXT pending turn (我们开始吧), NOT skip it to 好的.
+    expect(focusedTurn()).toHaveTextContent("我们开始吧");
   });
 
   it("? opens the shortcut sheet and Esc closes it", () => {

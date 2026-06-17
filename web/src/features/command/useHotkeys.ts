@@ -21,12 +21,26 @@ export function eventToCombo(e: KeyboardEvent): string {
 /** Combos that fire even while focus is in a text field (so the palette is always reachable). */
 const ALWAYS_ACTIVE = new Set(["mod+k", "escape"]);
 
-/** True when the event originated from a field the user is actively typing into. */
+/** Activatable-control roles that own a single-key activation (Space/Enter). */
+const ACTIVATABLE_ROLES = new Set(["button", "checkbox", "tab", "menuitem"]);
+
+/**
+ * True when the event originated from a control the keystroke should defer to: an
+ * editable field the user is typing into (INPUT/TEXTAREA/SELECT/contentEditable) OR
+ * a focused activatable control (BUTTON, a link with href, or an element with an
+ * activatable ARIA role). Deferring to the latter is an accessibility fix — Space on
+ * a focused <button> must activate the button, not fire a global hotkey.
+ */
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
   if (target.isContentEditable) return true;
+  // A focused activatable control owns single-key activation (Space/Enter).
+  if (tag === "BUTTON") return true;
+  if (tag === "A" && target.hasAttribute("href")) return true;
+  const role = target.getAttribute("role");
+  if (role && ACTIVATABLE_ROLES.has(role)) return true;
   return false;
 }
 

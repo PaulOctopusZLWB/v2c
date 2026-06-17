@@ -63,6 +63,52 @@ describe("useHotkeys", () => {
     expect(onJ).toHaveBeenCalledTimes(1);
   });
 
+  it("does NOT fire a single key when the target is a <button> (defer to its activation)", () => {
+    const onSpace = vi.fn();
+    const onA = vi.fn();
+    renderHook(() => useHotkeys({ space: onSpace, a: onA }));
+    const button = document.createElement("button");
+    press({ key: " ", target: button });
+    press({ key: "a", target: button });
+    expect(onSpace).not.toHaveBeenCalled();
+    expect(onA).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire a single key on a link with href or an activatable ARIA role", () => {
+    const onSpace = vi.fn();
+    renderHook(() => useHotkeys({ space: onSpace }));
+
+    const link = document.createElement("a");
+    link.setAttribute("href", "#");
+    press({ key: " ", target: link });
+    expect(onSpace).not.toHaveBeenCalled();
+
+    const roleButton = document.createElement("div");
+    roleButton.setAttribute("role", "button");
+    press({ key: " ", target: roleButton });
+    expect(onSpace).not.toHaveBeenCalled();
+
+    const tab = document.createElement("div");
+    tab.setAttribute("role", "tab");
+    press({ key: " ", target: tab });
+    expect(onSpace).not.toHaveBeenCalled();
+  });
+
+  it("still fires a single key on a plain link with NO href (not activatable)", () => {
+    const onSpace = vi.fn();
+    renderHook(() => useHotkeys({ space: onSpace }));
+    const anchor = document.createElement("a"); // no href → not a control
+    press({ key: " ", target: anchor });
+    expect(onSpace).toHaveBeenCalledTimes(1);
+  });
+
+  it("escape still fires even when the target is a <button> (ALWAYS_ACTIVE bypasses)", () => {
+    const onEsc = vi.fn();
+    renderHook(() => useHotkeys({ escape: onEsc }));
+    press({ key: "Escape", target: document.createElement("button") });
+    expect(onEsc).toHaveBeenCalledTimes(1);
+  });
+
   it("removes the listener on unmount", () => {
     const onModK = vi.fn();
     const { unmount } = renderHook(() => useHotkeys({ "mod+k": onModK }));

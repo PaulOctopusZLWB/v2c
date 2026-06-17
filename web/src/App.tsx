@@ -649,7 +649,10 @@ export function App() {
   // 声纹 (speakers): voiceprint coverage/anchor/recluster for the selected session, plus the
   // day-level diarization-cluster merge tool. Scoped to the day/session chosen in 审核.
   function renderSpeakers() {
-    const day = selectedDay ?? clusterDay;
+    // ONE inspected-day source of truth: the date input is fully controlled by
+    // clusterDay (seeded by a day selected in 审核 via selectedDay), and that SAME
+    // derived day drives all four panels so they never disagree.
+    const inspectDay = clusterDay || selectedDay;
     return (
       <div className="tab-page single">
         <section className="cluster-day card">
@@ -659,7 +662,7 @@ export function App() {
             <input
               type="date"
               aria-label={t.cluster.day}
-              value={selectedDay ?? clusterDay}
+              value={clusterDay || selectedDay || ""}
               onChange={(e) => setClusterDay(e.target.value)}
             />
           </label>
@@ -667,7 +670,7 @@ export function App() {
         <VoiceprintMap
           key={mapKey}
           sessionId={selectedSessionId}
-          day={clusterDay || selectedDay}
+          day={inspectDay}
           onPlaybackError={(message) => push("音频播放失败", message)}
           people={people ?? []}
           onLabel={async (personId, segmentIds) => {
@@ -678,7 +681,7 @@ export function App() {
         />
         <PeoplePanel
           sessionId={selectedSessionId}
-          day={clusterDay || selectedDay}
+          day={inspectDay}
           onChanged={onPeopleChanged}
           push={push}
           pushAction={pushAction}
@@ -686,16 +689,16 @@ export function App() {
         <DynamicsCharts sessionId={selectedSessionId} />
         <EmotionCharts sessionId={selectedSessionId} />
         <VoiceprintPanel
-          day={selectedDay}
+          day={inspectDay}
           sessionId={selectedSessionId}
           persons={persons ?? []}
           onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
           onPlaybackError={(message) => push("音频播放失败", message)}
         />
-        {day ? (
+        {inspectDay ? (
           <ClusterPanel
-            key={day}
-            day={day}
+            key={inspectDay}
+            day={inspectDay}
             persons={persons ?? []}
             onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
             onPlaybackError={(message) => push("音频播放失败", message)}

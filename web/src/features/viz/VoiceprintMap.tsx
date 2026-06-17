@@ -97,8 +97,15 @@ export function VoiceprintMap({
   const focusRef = useRef<string | null>(null);
   useEffect(() => { focusRef.current = focusKey; }, [focusKey]);
 
+  // hover + playingId drive a per-frame ring in draw(); mirror them into refs so draw() can
+  // read the latest value WITHOUT being in its dependency array (keeping draw referentially
+  // stable, so resize() and the ResizeObserver effect don't churn on every mouse move).
   const [hover, setHover] = useState<{ point: ProjectionPoint; x: number; y: number } | null>(null);
+  const hoverRef = useRef(hover);
+  useEffect(() => { hoverRef.current = hover; }, [hover]);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const playingIdRef = useRef(playingId);
+  useEffect(() => { playingIdRef.current = playingId; }, [playingId]);
 
   // --- fetch the projection on scope/method change ---
   useEffect(() => {
@@ -259,8 +266,8 @@ export function VoiceprintMap({
       ctx.arc(px, py, r + 4, 0, Math.PI * 2);
       ctx.stroke();
     };
-    ring(playingId, "rgba(45, 212, 238, 0.9)", 2.2);
-    ring(hover?.point.segment_id ?? null, "rgba(230, 237, 246, 0.85)", 1.6);
+    ring(playingIdRef.current, "rgba(45, 212, 238, 0.9)", 2.2);
+    ring(hoverRef.current?.point.segment_id ?? null, "rgba(230, 237, 246, 0.85)", 1.6);
 
     // live rubber-band selection rectangle.
     const rb = rectRef.current;
@@ -277,7 +284,11 @@ export function VoiceprintMap({
       ctx.strokeRect(x, y, rw, rh);
       ctx.restore();
     }
-  }, [points, hover, playingId, selectedIds, rect, colorMode, emotionLabels]);
+    // draw() reads all transient/per-frame state (hover, playingId, selectedIds, rect,
+    // colorMode, emotionLabels, view, focus) from refs, so only `points` belongs here. This
+    // keeps draw()/resize() referentially stable across pointer moves; redraws are triggered
+    // imperatively from the pointer/zoom/pan handlers and the state-mirroring effect below.
+  }, [points]);
 
   // Resize the canvas backing store to its container (devicePixelRatio-scaled) and redraw.
   const resize = useCallback(() => {
@@ -300,13 +311,28 @@ export function VoiceprintMap({
     resize();
     const box = boxRef.current;
     if (!box || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => resize());
+    // Subscribe ONCE (resize is stable) and only reassign the backing store on an ACTUAL
+    // size change — otherwise a stale observer fire would needlessly realloc + clear the canvas.
+    const ro = new ResizeObserver(() => {
+      const box2 = boxRef.current;
+      if (!box2) return;
+      const r = box2.getBoundingClientRect();
+      const w = r.width || 640;
+      const h = r.height || 420;
+      if (w === sizeRef.current.w && h === sizeRef.current.h) { draw(); return; }
+      resize();
+    });
     ro.observe(box);
     return () => ro.disconnect();
-  }, [resize]);
+  }, [resize, draw]);
 
-  // Redraw whenever the data / hover / focus / playing state changes.
-  useEffect(() => { draw(); }, [draw, focusKey]);
+  // Redraw whenever rendered state changes. draw() is referentially stable (reads transient
+  // state from refs), so we list the state values here to schedule a redraw without ever
+  // reallocating the canvas. Per-frame interactions (hover/pan/zoom/lasso) redraw imperatively
+  // from their handlers; this covers state-driven changes (focus, colour mode, selection, …).
+  useEffect(() => {
+    draw();
+  }, [draw, focusKey, colorMode, emotionLabels, selectedIds, rect, hover, playingId]);
 
   // --- hit-testing: nearest point within a few px of the cursor (linear scan) ---
   const hitTest = useCallback((cx: number, cy: number): ProjectionPoint | null => {
@@ -415,6 +441,8 @@ export function VoiceprintMap({
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
+    // Keep the wheel zooming the map instead of scrolling the page.
+    e.preventDefault();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
     const view = viewRef.current;

@@ -74,7 +74,15 @@ export function TranscriptReviewPanel({
     const turn = turns[focusedIdx];
     if (!turn) return;
     void onBatchReview(turn.segment_ids, status);
-    move(1); // auto-advance after a decision
+    // When a filter (仅未审 / 隐藏碎语) will drop the just-reviewed turn from the
+    // visible list, the optimistic patch shifts the list so the NEXT turn already
+    // slides under `focusedIdx` — advancing again would skip it. Only auto-advance
+    // when the reviewed turn stays in the list. The range clamp effect handles the
+    // tail (reviewing the last visible turn).
+    const willLeaveList =
+      (onlyPending && status !== "pending_review") ||
+      (hideFiller && turn.segments.every((s) => s.text.trim().length <= 2));
+    if (!willLeaveList) move(1); // auto-advance after a decision
   };
   const playFocused = () => {
     const turn = turns[focusedIdx];
