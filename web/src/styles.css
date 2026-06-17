@@ -271,6 +271,8 @@
   cursor: pointer;
 }
 .cmdk-item .cmdk-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Search snippets bold the matched substring so the hit reads at a glance. */
+.cmdk-item .cmdk-title strong { color: var(--accent-2); font-weight: 600; }
 .cmdk-item .cmdk-hint {
   flex: 0 0 auto;
   font-family: var(--mono);

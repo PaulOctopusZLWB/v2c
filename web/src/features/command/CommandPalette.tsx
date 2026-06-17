@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export interface Command {
   id: string;
@@ -6,6 +6,8 @@ export interface Command {
   hint?: string;
   group?: string;
   keywords?: string;
+  /** Optional rich title (e.g. a snippet with the matched substring bolded). Falls back to `title`. */
+  node?: ReactNode;
   run: () => void;
 }
 
@@ -27,15 +29,26 @@ function fuzzyMatch(query: string, haystack: string): boolean {
   return qi === q.length;
 }
 
-/** ⌘K launcher overlay. Renders only when `open`; filters + navigates `commands`. */
+/**
+ * ⌘K launcher overlay. Renders only when `open`; locally fuzzy-filters `commands`.
+ *
+ * Search mode: the parent observes the typed query via `onQueryChange` (to debounce an async
+ * search) and injects the results as `extraItems`. Those are already server-filtered, so they
+ * are appended UNFILTERED after the locally-matched commands and share the same flat index space
+ * for arrow navigation.
+ */
 export function CommandPalette({
   open,
   commands,
-  onClose
+  onClose,
+  extraItems = [],
+  onQueryChange
 }: {
   open: boolean;
   commands: Command[];
   onClose: () => void;
+  extraItems?: Command[];
+  onQueryChange?: (q: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -46,6 +59,7 @@ export function CommandPalette({
     if (open) {
       setQuery("");
       setActive(0);
+      onQueryChange?.("");
       // Focus after the panel mounts so autofocus lands reliably.
       const id = requestAnimationFrame(() => inputRef.current?.focus());
       return () => cancelAnimationFrame(id);
@@ -54,8 +68,15 @@ export function CommandPalette({
 
   const filtered = useMemo(() => {
     const q = query.trim();
-    return commands.filter((c) => fuzzyMatch(q, `${c.title} ${c.keywords ?? ""} ${c.group ?? ""}`));
-  }, [commands, query]);
+    const local = commands.filter((c) => fuzzyMatch(q, `${c.title} ${c.keywords ?? ""} ${c.group ?? ""}`));
+    // extraItems are server-filtered async search hits — never run the local fuzzy gate on them.
+    return [...local, ...extraItems];
+  }, [commands, extraItems, query]);
+
+  function changeQuery(next: string) {
+    setQuery(next);
+    onQueryChange?.(next);
+  }
 
   // Keep the highlight in range as the filtered list shrinks/grows.
   useEffect(() => {
@@ -124,7 +145,7 @@ export function CommandPalette({
           aria-label="搜索命令"
           placeholder="搜索标签页、日期、操作…"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => changeQuery(e.target.value)}
           onKeyDown={onKeyDown}
         />
         <div className="cmdk-list" role="listbox">
@@ -147,7 +168,7 @@ export function CommandPalette({
                       onMouseMove={() => setActive(index)}
                       onClick={() => runAt(index)}
                     >
-                      <span className="cmdk-title">{cmd.title}</span>
+                      <span className="cmdk-title">{cmd.node ?? cmd.title}</span>
                       {cmd.hint ? <span className="cmdk-hint">{cmd.hint}</span> : null}
                     </button>
                   );

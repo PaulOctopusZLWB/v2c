@@ -397,6 +397,47 @@ describe("App container", () => {
     expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
   });
 
+  it("⌘K transcript search debounces api.search, renders the hit, and jumps to the utterance", async () => {
+    // jsdom has no real audio; stub HTMLMediaElement.play so jumpToSegment's best-effort
+    // playback resolves harmlessly.
+    vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
+      results: [
+        { segment_id: "seg_1", session_id: "ses_1", day: "2087-05-10", speaker: "spk_1", text: "数据不出本机", absolute_start_at: "2026-06-13T09:33:00+08:00" }
+      ]
+    });
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") return new Response(JSON.stringify({ session_id: "ses_1", review_status: "pending_review", segments: [{ segment_id: "seg_1", text: "数据不出本机", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review", note: null }] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    render(<App />);
+    await screen.findByRole("heading", { level: 1 }); // bootstrap settled
+
+    // Open the palette (⌘K) and type a query >=2 chars.
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })); });
+    const input = await screen.findByRole("textbox");
+    await userEvent.type(input, "数据");
+
+    // The search is debounced (~200ms); waitFor polls until it fires and the hit renders.
+    await waitFor(() => expect(searchSpy).toHaveBeenCalledWith("数据", 30));
+    expect(await screen.findByText("转写搜索")).toBeInTheDocument();
+    // The snippet bolds the matched substring, so the text is split across nodes — match the
+    // <strong> on "数据" and assert the hint (day · speaker) renders alongside.
+    expect(screen.getByText("数据", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByText("2087-05-10 · spk_1")).toBeInTheDocument();
+
+    // Selecting the hit jumps: it loads the session (review tab) and the utterance shows.
+    await userEvent.click(screen.getByText("数据", { selector: "strong" }));
+    await waitFor(() => {
+      const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(calls).toContain("/api/transcripts/sessions/ses_1");
+    });
+  });
+
   it("renders only the active tab and keeps the selected session across tab switches", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });

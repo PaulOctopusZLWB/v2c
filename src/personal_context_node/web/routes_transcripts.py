@@ -12,6 +12,7 @@ from personal_context_node.transcript_review import (
     list_days,
     review_segment,
     reviewed_segments_for_session,
+    search_transcripts,
     session_review_status,
     sessions_for_day,
 )
@@ -45,6 +46,12 @@ def transcript_day_status(request: Request) -> dict[str, object]:
 def transcript_days(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     return {"days": list_days(config=config)}
+
+
+@router.get("/search")
+def search_transcript_segments(request: Request, q: str = "", limit: int = 30) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    return {"results": search_transcripts(config=config, query=q, limit=limit)}
 
 
 @router.get("/days/{day}/sessions")

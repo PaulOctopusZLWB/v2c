@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewStatus, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewStatus, SearchResult, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -31,6 +31,9 @@ export const api = {
   sessionsForDay: (day: string) =>
     request<{ day: string; sessions: Array<{ session_id: string; started_at: string; segment_count: number; review_status: string }> }>(`/api/transcripts/days/${day}/sessions`),
   session: (id: string) => request<TranscriptSession>(`/api/transcripts/sessions/${id}`),
+  // global transcript search: substring match across every day, newest utterance first
+  search: (q: string, limit?: number) =>
+    request<{ results: SearchResult[] }>(`/api/transcripts/search${query({ q, limit })}`),
   reviewSegment: (id: string, status: ReviewStatus, note = "") =>
     request(`/api/transcripts/segments/${id}/review`, { method: "POST", body: JSON.stringify({ status, note }) }),
   batchReview: (segment_ids: string[], status: ReviewStatus, note = "") =>

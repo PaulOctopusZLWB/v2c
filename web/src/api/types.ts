@@ -194,6 +194,16 @@ export interface LabelSegment {
   has_embedding: boolean;
 }
 
+/** One global transcript-search hit: enough to render a snippet and jump to the utterance. */
+export interface SearchResult {
+  segment_id: string;
+  session_id: string;
+  day: string;
+  speaker: string;
+  text: string;
+  absolute_start_at: string | null;
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;

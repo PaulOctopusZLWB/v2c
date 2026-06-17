@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
@@ -25,7 +25,7 @@ import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
 import { taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, PersonRow, ReviewStatus, TaskRow, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, PersonRow, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
 
 const DEVICE_POLL_MS = 5000;
 const ACTIVE_STATUSES = ["pending", "claimed", "running"];
@@ -42,6 +42,21 @@ function stageBreakdownFromSummary(
     .filter(([, c]) => c.done < c.total)
     .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
     .map(([type, c]) => ({ label: taskTypeZh(type), done: c.done, total: c.total }));
+}
+
+/** Bold the (case-insensitive) first occurrence of `q` within `text` for a search snippet.
+ *  Returns the plain string when q is empty or doesn't appear, so non-matches render unchanged. */
+function highlightMatch(text: string, q: string): ReactNode {
+  if (!q) return text;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <strong>{text.slice(idx, idx + q.length)}</strong>
+      {text.slice(idx + q.length)}
+    </>
+  );
 }
 
 export function App() {
@@ -74,6 +89,9 @@ export function App() {
   // ⌘K command palette (keyboard-driven launcher); closed by default.
   const [paletteOpen, setPaletteOpen] = useState(false);
   useHotkeys({ "mod+k": (e) => { e.preventDefault(); setPaletteOpen((v) => !v); } });
+  // Global transcript search, driven from the palette: the typed query + its async results.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   // Mirror bootstrap state into a ref so the mount-time poll interval reads the latest value
   // (its closure captures the initial state).
   const bootstrappedRef = useRef(false);
@@ -204,6 +222,44 @@ export function App() {
     setSelectedSessionId(id);
     setHighlightedSegmentId(null);
     setSession(await api.session(id));
+  }
+
+  // Debounced global transcript search: while the palette is open and the query is >=2 chars,
+  // hit /api/transcripts/search ~200ms after the last keystroke; shorter/blank queries clear the
+  // results. Each run is guarded by a stale flag so an out-of-order response can't overwrite a
+  // newer query's results.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!paletteOpen || q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    let stale = false;
+    const timer = setTimeout(() => {
+      void api
+        .search(q, 30)
+        .then((r) => { if (!stale) setSearchResults(r.results ?? []); })
+        .catch(() => { if (!stale) setSearchResults([]); });
+    }, 200);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, paletteOpen]);
+
+  // Jump from a search hit straight to its utterance: load+select its session (so the 审核 panel
+  // has data), switch to that tab, highlight the segment (the existing `.hl`/scroll path makes it
+  // visible), and best-effort play its audio. Audio playback failures are swallowed — the jump +
+  // highlight is the contract.
+  async function jumpToSegment(segment_id: string, session_id: string) {
+    await selectSession(session_id);
+    setTab("review");
+    setHighlightedSegmentId(segment_id);
+    try {
+      await new Audio(api.audioUrl(segment_id)).play();
+    } catch {
+      /* best-effort: highlight + scroll is enough */
+    }
   }
 
   async function reloadSession() {
@@ -395,6 +451,17 @@ export function App() {
       run: () => void refreshDays().catch(() => undefined)
     }
   ];
+
+  // Async transcript-search hits rendered as palette items: a snippet (matched substring bolded)
+  // titled with `{day} · {speaker}`, that jumps to the utterance when chosen.
+  const searchItems: Command[] = searchResults.map((r) => ({
+    id: `search-${r.segment_id}`,
+    title: r.text,
+    node: highlightMatch(r.text, searchQuery.trim()),
+    hint: `${r.day} · ${r.speaker}`,
+    group: "转写搜索",
+    run: () => void guard(jumpToSegment)(r.segment_id, r.session_id)
+  }));
 
   // The bootstrap-error screen pre-empts every tab: 重试 (refreshBootstrap) is the sole
   // recovery path, so don't let a tab render an empty workspace behind it.
@@ -631,7 +698,17 @@ export function App() {
 
       {renderTab()}
 
-      <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        commands={commands}
+        extraItems={searchItems}
+        onQueryChange={setSearchQuery}
+        onClose={() => {
+          setPaletteOpen(false);
+          setSearchQuery("");
+          setSearchResults([]);
+        }}
+      />
       <Toasts toasts={toasts} onDismiss={dismiss} />
     </main>
   );

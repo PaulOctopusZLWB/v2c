@@ -144,6 +144,40 @@ def accept_remaining_segments(*, config: AppConfig, session_id: str) -> dict[str
     return {"accepted": accepted}
 
 
+def search_transcripts(*, config: AppConfig, query: str, limit: int = 30) -> list[dict[str, object]]:
+    """Case-insensitive substring search over active segment text, across every day.
+
+    Returns the newest matches first (by absolute wall-clock start), each carrying the day
+    (sessions.date_key) and speaker so the UI can jump straight to the utterance. A blank /
+    whitespace-only query short-circuits to []. LIKE metacharacters in the user query
+    (% _ \\) are escaped so they match literally, not as wildcards.
+    """
+    needle = query.strip()
+    if not needle:
+        return []
+    # Escape \\ first so it doesn't double-escape the % / _ escapes we add next.
+    escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        return fetch_all(
+            conn,
+            """
+            select ts.segment_id, ts.session_id, s.date_key as day, ts.speaker, ts.text,
+                   ts.absolute_start_at
+            from transcript_segments ts
+            join sessions s on s.session_id = ts.session_id
+            where ts.is_active = 1 and ts.text like ? escape '\\'
+            order by ts.absolute_start_at desc
+            limit ?
+            """,
+            (pattern, limit),
+        )
+    finally:
+        conn.close()
+
+
 def list_days(*, config: AppConfig) -> list[dict[str, object]]:
     conn = connect(config.database_path)
     try:

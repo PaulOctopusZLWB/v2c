@@ -11,6 +11,7 @@ from personal_context_node.transcript_review import (
     clear_review_segments,
     review_segment,
     reviewed_segments_for_session,
+    search_transcripts,
     session_review_status,
 )
 
@@ -239,6 +240,105 @@ def test_batch_review_chunks_large_input(tmp_path: Path) -> None:
     assert batch_review_segments(config=config, segment_ids=ids, status="accepted") == 1200
     rows = reviewed_segments_for_session(config=config, session_id="ses_big")
     assert sum(1 for r in rows if r["review_status"] == "accepted") == 1200
+
+
+def test_search_transcripts_matches_substring(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_texts(
+        config.database_path,
+        [("seg_1", "数据不出本机"), ("seg_2", "继续完善系统"), ("seg_3", "天气不错")],
+    )
+
+    results = search_transcripts(config=config, query="数据")
+
+    assert len(results) == 1
+    hit = results[0]
+    assert hit["segment_id"] == "seg_1"
+    assert hit["session_id"] == "ses_text"
+    assert hit["day"] == "2087-05-10"
+    assert hit["speaker"] == "self"
+    assert hit["text"] == "数据不出本机"
+    assert hit["absolute_start_at"] == "2087-05-10T08:00:00.000000+08:00"
+
+
+def test_search_transcripts_orders_by_absolute_start_desc_and_limits(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_texts(
+        config.database_path,
+        [("seg_1", "完善 A"), ("seg_2", "完善 B"), ("seg_3", "完善 C")],
+    )
+
+    results = search_transcripts(config=config, query="完善")
+    # absolute_start_at is set 0,1,2 minutes apart by the helper -> newest first.
+    assert [r["segment_id"] for r in results] == ["seg_3", "seg_2", "seg_1"]
+
+    limited = search_transcripts(config=config, query="完善", limit=2)
+    assert [r["segment_id"] for r in limited] == ["seg_3", "seg_2"]
+
+
+def test_search_transcripts_treats_wildcards_literally(tmp_path: Path) -> None:
+    # A LIKE wildcard in the user query must be escaped, so "%" matches only a literal "%".
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_texts(
+        config.database_path,
+        [("seg_1", "数据不出本机"), ("seg_2", "命中率 95% 达标")],
+    )
+
+    assert [r["segment_id"] for r in search_transcripts(config=config, query="%")] == ["seg_2"]
+    # An underscore is likewise literal: matches nothing here, not "any single char".
+    assert search_transcripts(config=config, query="_") == []
+
+
+def test_search_transcripts_ignores_inactive_segments(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_texts(
+        config.database_path,
+        [("seg_1", "数据保留"), ("seg_2", "数据作废")],
+        inactive={"seg_2"},
+    )
+
+    assert [r["segment_id"] for r in search_transcripts(config=config, query="数据")] == ["seg_1"]
+
+
+def test_search_transcripts_empty_query_returns_empty(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_texts(config.database_path, [("seg_1", "数据不出本机")])
+
+    assert search_transcripts(config=config, query="") == []
+    assert search_transcripts(config=config, query="   ") == []
+
+
+def _insert_session_with_texts(
+    database_path: Path,
+    rows: list[tuple[str, str]],
+    *,
+    inactive: set[str] | None = None,
+) -> None:
+    """Insert one session ('ses_text', day 2087-05-10) with the given (segment_id, text) rows.
+
+    Each row's absolute_start_at is its index minutes after 08:00 so search ordering is stable.
+    """
+    inactive = inactive or set()
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aud_text", "DJI Mic 3", "/source/text.wav", 1, 1, "/raw/text.wav", "sha256:text", 600000, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00", "imported"),
+        )
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_text", "2087-05-10", "2087-05-10T08:00:00+08:00", "2087-05-10T08:10:00+08:00", "derived_from_segments", len(rows), 2000, rows[0][0], "2087-05-10T08:11:00+08:00", "2087-05-10T08:11:00+08:00"),
+        )
+        for index, (segment_id, text) in enumerate(rows):
+            abs_start = f"2087-05-10T08:0{index}:00.000000+08:00"
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, absolute_start_at, absolute_end_at, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (segment_id, "aud_text", f"chk_{segment_id}", "ses_text", index * 1000, (index + 1) * 1000, abs_start, abs_start, text, "zh", "self", "self", f"ev_{segment_id}", 1.0, "MockASRAdapter", "mock-asr", "test", 0 if segment_id in inactive else 1, "2087-05-10T08:11:00+08:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _insert_session_with_segments(database_path: Path) -> None:

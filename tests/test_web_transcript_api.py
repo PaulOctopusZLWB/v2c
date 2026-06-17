@@ -128,6 +128,37 @@ def test_days_and_sessions_for_day_navigation(tmp_path: Path) -> None:
     assert sessions[0]["review_status"] == "pending_review"
 
 
+def test_search_endpoint_returns_results(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/transcripts/search", params={"q": "你好"})
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["segment_id"] == "seg_1"
+    assert results[0]["session_id"] == "ses_test"
+    assert results[0]["day"] == "2087-05-10"
+
+
+def test_search_endpoint_empty_query_returns_empty(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/transcripts/search", params={"q": "   "})
+
+    assert response.status_code == 200
+    assert response.json() == {"results": []}
+
+    # A missing q param is also a 200 with no results (no validation error).
+    missing = client.get("/api/transcripts/search")
+    assert missing.status_code == 200
+    assert missing.json() == {"results": []}
+
+
 def _insert_session(database_path: Path) -> None:
     conn = connect(database_path)
     try:
