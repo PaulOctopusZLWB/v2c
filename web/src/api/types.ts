@@ -204,6 +204,45 @@ export interface SearchResult {
   absolute_start_at: string | null;
 }
 
+/** One speaker's share of a session's conversation dynamics. */
+export interface DynamicsSpeaker {
+  /** Resolved attribution label (person_label override, else raw speaker). */
+  label: string;
+  /** Total talk time in ms (sum of segment end-start). */
+  talk_ms: number;
+  /** talk_ms / total_ms, rounded 3dp. */
+  talk_share: number;
+  /** Number of turns (maximal same-label runs in time order). */
+  turns: number;
+  segment_count: number;
+  avg_segment_ms: number;
+}
+
+/** One turn-taking transition between consecutive turns. */
+export interface DynamicsTransition {
+  from: string;
+  to: string;
+  count: number;
+}
+
+/** One merged turn on the conversation timeline; offsets are ms relative to the
+ *  session's earliest absolute start (cross-file safe). */
+export interface DynamicsTurn {
+  label: string;
+  start_ms_rel: number;
+  end_ms_rel: number;
+  segment_ids: string[];
+}
+
+/** Per-session conversation dynamics: talk-share, turn-taking, timeline. */
+export interface SessionDynamics {
+  session_id: string;
+  total_ms: number;
+  speakers: DynamicsSpeaker[];
+  transitions: DynamicsTransition[];
+  timeline: DynamicsTurn[];
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;

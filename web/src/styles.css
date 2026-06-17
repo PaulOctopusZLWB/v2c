@@ -444,6 +444,83 @@
 .people-threshold { display: flex; align-items: center; gap: var(--s3); font-size: 12px; color: var(--text-2); }
 .people-threshold input[type="range"] { width: 120px; }
 
+/* 对话动态 — premium dark dashboard of talk-share / turns / timeline / turn-taking, consistent
+   with the voiceprint map cards. */
+.dynamics { margin-top: var(--s6); }
+.dyn-grid {
+  display: grid; gap: var(--s4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.dyn-card {
+  background: var(--elev); border: 1px solid var(--border); border-radius: var(--r2);
+  padding: var(--s4); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: var(--s3); min-width: 0;
+}
+.dyn-card-wide { grid-column: 1 / -1; }
+.dyn-overlay {
+  grid-column: 1 / -1; text-align: center; color: var(--text-2);
+  padding: var(--s6); border-style: dashed;
+}
+.dyn-overlay.error { color: var(--err); }
+.dyn-title {
+  margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.dyn-chart-fallback { height: 140px; border-radius: var(--r1); background: var(--panel-2); }
+
+/* 1. 发言占比 donut + legend */
+.dyn-donut-row { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.dyn-donut { position: relative; width: 180px; height: 180px; flex: none; }
+.dyn-donut-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; pointer-events: none; gap: 2px;
+}
+.dyn-donut-center strong { font-size: 20px; color: var(--text); }
+.dyn-donut-center span { font-size: 12px; color: var(--text-dim); }
+.dyn-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); flex: 1; min-width: 120px; }
+.dyn-legend-item { display: flex; align-items: center; gap: var(--s3); font-size: 13px; color: var(--text-2); }
+.dyn-legend-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dyn-legend-pct { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.dyn-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; box-shadow: 0 0 8px -2px currentColor; }
+
+/* 3. 对话时间线 — lanes of positioned blocks */
+.dyn-timeline { display: grid; gap: var(--s2); }
+.dyn-lane { display: flex; align-items: center; gap: var(--s3); }
+.dyn-lane-label {
+  width: 64px; flex: none; font-size: 12px; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dyn-lane-track {
+  position: relative; flex: 1; height: 16px; min-width: 0;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r1);
+}
+.dyn-block {
+  position: absolute; top: 1px; bottom: 1px; min-width: 2px;
+  border-radius: 3px; opacity: .85; box-shadow: 0 0 8px -3px currentColor;
+}
+.dyn-block:hover { opacity: 1; }
+
+/* 4. 话轮接力 — transition list */
+.dyn-transitions { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.dyn-transition {
+  display: flex; align-items: center; gap: var(--s3); font-size: 13px; color: var(--text-2);
+  padding: var(--s2) var(--s3); border: 1px solid var(--border); border-radius: var(--r1);
+  background: var(--panel-2);
+}
+.dyn-transition-text { flex: 1; min-width: 0; color: var(--text); }
+.dyn-arrow { color: var(--accent); margin: 0 2px; }
+.dyn-transition-count {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  color: var(--accent-2); background: var(--accent-dim);
+  padding: 1px 8px; border-radius: 999px; font-size: 11px;
+}
+.dyn-empty-note { font-size: 12px; margin: 0; }
+
+@media (max-width: 900px) {
+  .dyn-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 700px) {
   .vmap-stage { height: 320px; }
+  .dyn-donut-row { flex-direction: column; align-items: stretch; }
 }
