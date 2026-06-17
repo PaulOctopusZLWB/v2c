@@ -839,3 +839,8 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 /* Loudness-leveling toggle in the review hints bar */
 .level-toggle { margin-left: 10px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; font-size: 11px; }
 .level-toggle.on { color: var(--accent); border-color: var(--accent); }
+
+/* 观点 tab day picker — pick among dates that have data */
+.llm-daypick { display: flex; align-items: center; gap: 10px; }
+.llm-daypick label { color: var(--text-2); font-size: 13px; }
+.llm-daypick select { flex: 0 1 320px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface, transparent); color: inherit; }

@@ -27,7 +27,7 @@ import { useHotkeys } from "./features/command/useHotkeys";
 import { usePipelineStatus } from "./hooks/usePipelineStatus";
 import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
-import { taskTypeZh } from "./lib/format";
+import { dayLabel, taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
 import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, PersonRow, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
 
@@ -751,6 +751,26 @@ export function App() {
   function renderLlm() {
     return (
       <div className="tab-page single">
+        <div className="llm-daypick card">
+          <label htmlFor="llm-day">观点日期</label>
+          <select
+            id="llm-day"
+            value={selectedDay ?? ""}
+            disabled={days.length === 0}
+            onChange={(e) => {
+              if (e.target.value) void guard(selectDay)(e.target.value);
+            }}
+          >
+            <option value="" disabled>
+              {days.length === 0 ? "暂无有数据的日期" : "选择有数据的日期…"}
+            </option>
+            {days.map((d) => (
+              <option key={d.day} value={d.day}>
+                {dayLabel(d.day)} · {d.session_count} 场
+              </option>
+            ))}
+          </select>
+        </div>
         {llm ? (
           <LlmResultPanel result={llm} onHighlightEvidence={highlightEvidence} />
         ) : (
