@@ -653,6 +653,130 @@ def test_auto_attribute_no_enrolled_raises(tmp_path: Path) -> None:
         raise AssertionError("expected ValueError when no people enrolled")
 
 
+# ---------------------------------------------------------------------------
+# Supervised global identity: manual vs voiceprint source
+# ---------------------------------------------------------------------------
+
+
+def _override_sources(database_path: Path) -> dict[str, str]:
+    conn = connect(database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id, source from segment_person_overrides")
+    finally:
+        conn.close()
+    return {str(r["segment_id"]): str(r["source"]) for r in rows}
+
+
+def _voiceprint_exists(database_path: Path, person_id: str) -> bool:
+    conn = connect(database_path)
+    try:
+        rows = fetch_all(conn, "select 1 from person_voiceprints where person_id = ?", (person_id,))
+    finally:
+        conn.close()
+    return bool(rows)
+
+
+def test_label_segments_writes_manual_source_and_enrolls(tmp_path: Path) -> None:
+    # Labelling IS the ground-truth signal: each override gets source='manual', and the person's
+    # voiceprint is enrolled immediately so the centroid reflects the new labels right away.
+    config = _setup_two_clusters(tmp_path)
+
+    n = label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2"])
+    assert n == 2
+
+    sources = _override_sources(config.database_path)
+    assert sources["seg_1"] == "manual"
+    assert sources["seg_2"] == "manual"
+    # Enrolled immediately from the just-written manual labels.
+    assert _voiceprint_exists(config.database_path, "per_a")
+    centroid = get_person_centroids(config=config)["per_a"]
+    assert int(np.argmax(centroid)) == 0  # e0 cluster
+
+
+def test_enroll_person_no_ids_uses_only_manual_rows(tmp_path: Path) -> None:
+    # When segment_ids is None, enroll gathers ONLY source='manual' overrides (confirmed labels),
+    # never source='voiceprint' guesses — so an inferred attribution cannot drift the centroid.
+    config = _setup_two_clusters(tmp_path)
+    now = "2087-05-10T08:00:00+08:00"
+    conn = connect(config.database_path)
+    try:
+        # seg_4 is a confirmed manual label for per_b; seg_5 is an auto-inferred voiceprint guess.
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) "
+            "values (?, ?, ?, ?, ?)",
+            ("seg_4", "Bob", now, "per_b", "manual"),
+        )
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) "
+            "values (?, ?, ?, ?, ?)",
+            ("seg_5", "Bob", now, "per_b", "voiceprint"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = enroll_person(config=config, person_id="per_b")
+    assert result["n_segments"] == 1  # only the manual seg_4, NOT the voiceprint seg_5
+
+
+def test_identify_assigns_rest_by_voiceprint_respecting_manual(tmp_path: Path) -> None:
+    # Two persons each manually labelled with ONE segment; identify enrolls them from those labels,
+    # then assigns every other in-scope embedded segment by nearest centroid with source='voiceprint'.
+    config = _setup_two_clusters(tmp_path)
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_4"])
+
+    result = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+
+    sources = _override_sources(config.database_path)
+    overrides = _override_rows(config.database_path)
+    # Manual seeds keep source='manual' and their labelled person.
+    assert sources["seg_1"] == "manual"
+    assert sources["seg_4"] == "manual"
+    assert overrides["seg_1"]["person_id"] == "per_a"
+    assert overrides["seg_4"]["person_id"] == "per_b"
+    # The remaining segments are inferred by voiceprint.
+    for seg in ("seg_2", "seg_3"):
+        assert sources[seg] == "voiceprint"
+        assert overrides[seg]["person_id"] == "per_a"
+    for seg in ("seg_5", "seg_6"):
+        assert sources[seg] == "voiceprint"
+        assert overrides[seg]["person_id"] == "per_b"
+    # per_person counts only the voiceprint assignments (manual seeds are separate).
+    assert result["per_person"] == {"per_a": 2, "per_b": 2}
+    assert result["assigned"] == 4
+    assert result["threshold"] == 0.5
+
+
+def test_identify_idempotent_and_manual_always_wins(tmp_path: Path) -> None:
+    # Re-running identify clears prior voiceprint guesses (no accumulation) and never overwrites a
+    # manual label. Labelling a previously-inferred segment manually then re-identifying keeps it manual.
+    config = _setup_two_clusters(tmp_path)
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1"])
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_4"])
+
+    first = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+    # seg_2 was inferred as per_a by voiceprint; now the user confirms it as per_b manually.
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_2"])
+    assert _override_sources(config.database_path)["seg_2"] == "manual"
+
+    second = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+
+    sources = _override_sources(config.database_path)
+    overrides = _override_rows(config.database_path)
+    # seg_2 stays the manual per_b label; identify never reverted it to a voiceprint guess.
+    assert sources["seg_2"] == "manual"
+    assert overrides["seg_2"]["person_id"] == "per_b"
+    # No stale accumulation: every row is still exactly one of the 6 segments.
+    assert set(sources) == {"seg_1", "seg_2", "seg_3", "seg_4", "seg_5", "seg_6"}
+    # The original manual seeds are untouched.
+    assert sources["seg_1"] == "manual"
+    assert sources["seg_4"] == "manual"
+    # Idempotent counts: total stays 6 across re-runs.
+    assert first["total"] == 6
+    assert second["total"] == 6
+
+
 def _set_speaker(database_path: Path, segment_id: str, speaker: str) -> None:
     conn = connect(database_path)
     try:

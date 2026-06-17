@@ -606,6 +606,86 @@ def test_auto_attribute_no_enrolled_400(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
+def test_people_route_exposes_manual_count(tmp_path: Path) -> None:
+    # /api/people surfaces manual_count: the enroll-able ground-truth labels per person, distinct
+    # from attributed_count (which also includes auto-inferred voiceprint guesses).
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _enroll_two_clusters(config)
+    from personal_context_node.speaker_embeddings import label_segments_as_person
+    from personal_context_node.speaker_review import upsert_segment_person_override
+
+    # Two manual labels for Alice.
+    label_segments_as_person(config=config, person_id="per_alice", segment_ids=["seg_a", "seg_b"])
+    # One auto-inferred (voiceprint) attribution for Bob — counts toward attributed_count, NOT manual.
+    conn = connect(config.database_path)
+    try:
+        upsert_segment_person_override(
+            conn,
+            segment_id="seg_c",
+            person_id="per_bob",
+            person_label="Bob",
+            now="2087-05-10T08:00:00+08:00",
+            source="voiceprint",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    people = {p["person_id"]: p for p in client.get("/api/people").json()["people"]}
+    assert people["per_alice"]["manual_count"] == 2
+    assert people["per_alice"]["attributed_count"] == 2
+    assert people["per_bob"]["manual_count"] == 0
+    assert people["per_bob"]["attributed_count"] == 1
+
+
+def test_auto_attribute_route_runs_identify_preserving_manual(tmp_path: Path) -> None:
+    # POST /api/people/auto-attribute runs the manual-respecting global identify: a single manual
+    # label per person enrolls them, the rest are inferred by voiceprint, and manual labels persist.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_alice", "Alice", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_bob", "Bob", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    # seg_a/seg_b near +x (Alice), seg_c near +y (Bob).
+    put_embedding(config=config, segment_id="seg_a", vector=[1.0, 0.0, 0.0])
+    put_embedding(config=config, segment_id="seg_b", vector=[0.9, 0.1, 0.0])
+    put_embedding(config=config, segment_id="seg_c", vector=[0.0, 1.0, 0.0])
+    client = TestClient(create_app(config=config))
+
+    # One manual seed per person.
+    assert client.post("/api/people/per_alice/label-segments", json={"segment_ids": ["seg_a"]}).status_code == 200
+    assert client.post("/api/people/per_bob/label-segments", json={"segment_ids": ["seg_c"]}).status_code == 200
+
+    response = client.post("/api/people/auto-attribute", json={"session_id": "ses_lab", "threshold": 0.5})
+    assert response.status_code == 200
+    body = response.json()
+    # seg_b is inferred to Alice by voiceprint (manual seeds counted separately in per_person).
+    assert body["per_person"] == {"per_alice": 1, "per_bob": 0}
+    assert body["threshold"] == 0.5
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id, person_id, source from segment_person_overrides")
+    finally:
+        conn.close()
+    by_seg = {r["segment_id"]: r for r in rows}
+    assert by_seg["seg_a"]["source"] == "manual" and by_seg["seg_a"]["person_id"] == "per_alice"
+    assert by_seg["seg_c"]["source"] == "manual" and by_seg["seg_c"]["person_id"] == "per_bob"
+    assert by_seg["seg_b"]["source"] == "voiceprint" and by_seg["seg_b"]["person_id"] == "per_alice"
+
+
 def _insert_labeling_day(database_path: Path) -> None:
     """Seed one session with three active segments (spk_a x2, spk_b x1) plus an inactive one."""
     conn = connect(database_path)

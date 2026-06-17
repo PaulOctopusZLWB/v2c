@@ -461,7 +461,8 @@ def list_people_route(request: Request) -> dict[str, object]:
               p.display_name,
               p.is_self,
               exists (select 1 from person_voiceprints vp where vp.person_id = p.person_id) as enrolled,
-              (select count(*) from segment_person_overrides o where o.person_id = p.person_id) as attributed_count
+              (select count(*) from segment_person_overrides o where o.person_id = p.person_id) as attributed_count,
+              (select count(*) from segment_person_overrides o where o.person_id = p.person_id and o.source = 'manual') as manual_count
             from persons p
             order by p.is_self desc, p.display_name
             """,
@@ -475,6 +476,7 @@ def list_people_route(request: Request) -> dict[str, object]:
             "is_self": row["is_self"],
             "enrolled": bool(row["enrolled"]),
             "attributed_count": int(row["attributed_count"] or 0),
+            "manual_count": int(row["manual_count"] or 0),
         }
         for row in rows
     ]

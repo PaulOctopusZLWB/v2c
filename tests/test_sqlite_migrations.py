@@ -543,3 +543,67 @@ def test_initialize_memory_cards_schema_includes_temporal_bounds(tmp_path) -> No
     assert column_by_name["observed_at"]["type"].lower() == "text"
     assert column_by_name["valid_from"]["type"].lower() == "text"
     assert column_by_name["valid_until"]["type"].lower() == "text"
+
+
+def test_initialize_segment_person_overrides_has_source_defaulting_manual(tmp_path) -> None:
+    # The supervised-identity split needs a `source` column distinguishing user ground truth
+    # ('manual') from auto-inferred guesses ('voiceprint'). Existing rows must default to 'manual'.
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(segment_person_overrides)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert "source" in column_by_name
+    assert column_by_name["source"]["type"].lower() == "text"
+    assert column_by_name["source"]["notnull"] == 1
+    assert column_by_name["source"]["dflt_value"] == "'manual'"
+
+
+def test_initialize_segment_person_overrides_source_backfills_existing_rows(tmp_path) -> None:
+    # A row written by a legacy schema (no `source` column) is treated as ground truth: after the
+    # add-column migration it reads back as source='manual', so enrollment works immediately.
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        conn.execute(
+            "create table segment_person_overrides ("
+            "  segment_id text primary key,"
+            "  person_label text not null,"
+            "  updated_at text not null,"
+            "  person_id text"
+            ")"
+        )
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id) "
+            "values (?, ?, ?, ?)",
+            ("seg_legacy", "Alice", "2087-05-10T00:00:00Z", "per_a"),
+        )
+        initialize(conn)
+
+        rows = fetch_all(conn, "select segment_id, source from segment_person_overrides")
+    finally:
+        conn.close()
+
+    assert rows == [{"segment_id": "seg_legacy", "source": "manual"}]
+
+
+def test_initialize_segment_person_overrides_source_is_idempotent(tmp_path) -> None:
+    # Re-running migrations on a DB that ALREADY has the `source` column must not error or change it
+    # (initialize() caches per-process, so call _run_migrations directly as a fresh process would).
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+        before = fetch_all(conn, "pragma table_info(segment_person_overrides)")
+
+        _run_migrations(conn)  # second pass over an already-migrated table
+
+        after = fetch_all(conn, "pragma table_info(segment_person_overrides)")
+    finally:
+        conn.close()
+
+    assert before == after
+    column_by_name = {row["name"]: row for row in after}
+    assert "source" in column_by_name

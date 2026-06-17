@@ -209,17 +209,25 @@ def upsert_segment_person_override(
     person_id: str,
     person_label: str,
     now: str,
+    source: str = "manual",
 ) -> None:
+    """Upsert a segment's person attribution.
+
+    ``source`` distinguishes USER-LABELED ground truth (``'manual'``) from AUTO-INFERRED voiceprint
+    guesses (``'voiceprint'``). Defaults to ``'manual'`` so existing callers keep writing ground
+    truth; the global identify loop passes ``'voiceprint'`` for its nearest-centroid assignments.
+    """
     conn.execute(
         """
-        insert into segment_person_overrides (segment_id, person_label, updated_at, person_id)
-        values (?, ?, ?, ?)
+        insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source)
+        values (?, ?, ?, ?, ?)
         on conflict(segment_id) do update set
           person_label = excluded.person_label,
           updated_at = excluded.updated_at,
-          person_id = excluded.person_id
+          person_id = excluded.person_id,
+          source = excluded.source
         """,
-        (segment_id, person_label, now, person_id),
+        (segment_id, person_label, now, person_id, source),
     )
 
 

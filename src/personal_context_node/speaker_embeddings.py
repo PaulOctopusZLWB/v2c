@@ -288,7 +288,9 @@ def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: 
 
     Resolves the person's label from ``persons.display_name`` (raising ``ValueError`` if the
     person is unknown) and upserts a ``segment_person_overrides`` row for every segment in ONE
-    transaction. Empty input writes nothing and returns 0. Returns the count written.
+    transaction. These are GROUND TRUTH, so each row is written with ``source='manual'``. After the
+    labels commit, the person's voiceprint is re-enrolled so the centroid immediately reflects the
+    new labels. Empty input writes nothing and returns 0. Returns the count written.
     """
     if not segment_ids:
         return 0
@@ -309,21 +311,30 @@ def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: 
                 person_id=person_id,
                 person_label=person_label,
                 now=now,
+                source="manual",
             )
         conn.commit()
     finally:
         conn.close()
     clear_projection_cache()  # attributions changed -> any cached 2D projection is now stale
+    # Re-enroll from the just-written manual labels so the person's voiceprint is current.
+    try:
+        enroll_person(config=config, person_id=person_id)
+    except ValueError:
+        # No embeddings yet for any labelled segment -> nothing to enroll; the labels still stand.
+        pass
     return len(segment_ids)
 
 
 def enroll_person(*, config: AppConfig, person_id: str, segment_ids: list[str] | None = None) -> dict:
     """Compute and persist a person's voiceprint centroid from their segments.
 
-    If ``segment_ids`` is given those are used; otherwise ALL segments currently attributed to the
-    person via ``segment_person_overrides`` are gathered. The centroid is the re-normalized mean of
-    the L2-normalized embedding vectors, stored as a float32 blob in ``person_voiceprints``
-    (upserted with n_segments + updated_at). Raises ``ValueError`` if no embeddings are found.
+    If ``segment_ids`` is given those are used; otherwise the person's CONFIRMED labels are gathered
+    from ``segment_person_overrides`` where ``source='manual'`` (NOT auto-inferred 'voiceprint'
+    guesses — so an inferred attribution can never drift the centroid). The centroid is the
+    re-normalized mean of the L2-normalized embedding vectors, stored as a float32 blob in
+    ``person_voiceprints`` (upserted with n_segments + updated_at). Raises ``ValueError`` if no
+    embeddings are found.
 
     Returns ``{"person_id", "n_segments", "dim"}``.
     """
@@ -333,7 +344,7 @@ def enroll_person(*, config: AppConfig, person_id: str, segment_ids: list[str] |
             initialize(conn)
             rows = fetch_all(
                 conn,
-                "select segment_id from segment_person_overrides where person_id = ?",
+                "select segment_id from segment_person_overrides where person_id = ? and source = 'manual'",
                 (person_id,),
             )
         finally:
@@ -443,17 +454,47 @@ def auto_attribute_enrolled(
     day: str | None = None,
     threshold: float = 0.5,
 ) -> dict:
-    """Attribute every in-scope embedded segment to the nearest ENROLLED person centroid.
+    """Global, manual-respecting "identify": assign every in-scope embedded segment to a person.
 
-    Like ``recluster_by_anchors`` but the centroids come from ``get_person_centroids()`` (enrolled
-    voiceprints) rather than ad-hoc anchors. Each in-scope segment is assigned to the person whose
-    centroid it is most cosine-similar to, provided that cosine is >= ``threshold``; otherwise it is
-    left unassigned. Non-finite / dim-mismatched vectors are guarded (skipped) like recluster.
-    Writes only ``segment_person_overrides`` in one transaction. Raises ``ValueError`` if no people
-    are enrolled. Returns ``{"assigned", "unassigned", "total", "per_person", "threshold"}``.
+    The supervised loop is: a few segments are labelled manually (ground truth) -> each labelled
+    person's voiceprint enrolls from those manual labels only -> identify assigns every OTHER
+    embedded segment to the nearest person voiceprint (cosine >= ``threshold``), consistently across
+    all sessions. Manual labels always win and are never overwritten.
+
+    Steps:
+      a. Re-enroll EVERY person with >=1 manual label so centroids reflect the latest labels.
+      b. Load ``get_person_centroids()``; raise ``ValueError`` if none.
+      c. In scope, DELETE prior ``source='voiceprint'`` attributions (idempotent re-runs never
+         accumulate stale guesses); ``source='manual'`` rows are NEVER touched.
+      d. For each in-scope embedded segment that is NOT manually labelled, assign the nearest person
+         centroid by cosine if best >= threshold (else leave unassigned), writing ``source='voiceprint'``.
+         Non-finite / dim-mismatched vectors are guarded (skipped).
+      e. Returns ``{"assigned", "unassigned", "total", "per_person", "threshold"}`` where per_person
+         counts only the voiceprint assignments (manual labels are separate).
     """
     if not (0.0 <= threshold <= 1.0):
         raise ValueError("threshold must be in [0, 1]")
+
+    # (a) Re-enroll every person that has at least one manual label.
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        manual_person_rows = fetch_all(
+            conn, "select distinct person_id from segment_person_overrides where source = 'manual'"
+        )
+    finally:
+        conn.close()
+    for row in manual_person_rows:
+        person_id = row["person_id"]
+        if person_id is None:
+            continue
+        try:
+            enroll_person(config=config, person_id=str(person_id))
+        except ValueError:
+            # A manual label whose segment has no embedding yet -> nothing to enroll for them.
+            pass
+
+    # (b) Load enrolled centroids.
     centroids = get_person_centroids(config=config)
     if not centroids:
         raise ValueError("no enrolled people to attribute against")
@@ -467,11 +508,16 @@ def auto_attribute_enrolled(
     person_labels = _person_labels(config=config, person_ids=person_ids)
     now = _now()
 
+    # Manually-labelled in-scope segments: ground truth, never overwritten.
+    manual_segment_ids = _manual_override_segment_ids(config=config, segment_ids=scope_ids)
+
     assigned = 0
     per_person: dict[str, int] = {pid: 0 for pid in person_ids}
     writes: list[tuple[str, str]] = []  # (segment_id, person_id)
 
     for segment_id in scope_ids:
+        if segment_id in manual_segment_ids:
+            continue  # (d) skip manual labels — they always win
         vector = embeddings.get(segment_id)
         if vector is None or int(vector.shape[0]) != centroid_dim:
             continue
@@ -493,6 +539,18 @@ def auto_attribute_enrolled(
         initialize(conn)
         from personal_context_node.speaker_review import upsert_segment_person_override
 
+        # (c) Clear prior inferred attributions in scope so a re-run is idempotent and never
+        # accumulates stale guesses; NEVER delete source='manual'.
+        if scope_ids:
+            for start in range(0, len(scope_ids), _SQL_CHUNK):
+                chunk = scope_ids[start : start + _SQL_CHUNK]
+                placeholders = ", ".join("?" for _ in chunk)
+                conn.execute(
+                    f"delete from segment_person_overrides "
+                    f"where source = 'voiceprint' and segment_id in ({placeholders})",
+                    tuple(chunk),
+                )
+
         for segment_id, person_id in writes:
             upsert_segment_person_override(
                 conn,
@@ -500,6 +558,7 @@ def auto_attribute_enrolled(
                 person_id=person_id,
                 person_label=person_labels.get(person_id, person_id),
                 now=now,
+                source="voiceprint",
             )
         conn.commit()
     finally:
@@ -513,6 +572,30 @@ def auto_attribute_enrolled(
         "per_person": per_person,
         "threshold": threshold,
     }
+
+
+def _manual_override_segment_ids(*, config: AppConfig, segment_ids: list[str]) -> set[str]:
+    """Subset of ``segment_ids`` that carry a ``source='manual'`` override (chunked IN-clause)."""
+    if not segment_ids:
+        return set()
+    result: set[str] = set()
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(segment_ids), _SQL_CHUNK):
+            chunk = segment_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = fetch_all(
+                conn,
+                f"select segment_id from segment_person_overrides "
+                f"where source = 'manual' and segment_id in ({placeholders})",
+                tuple(chunk),
+            )
+            for row in rows:
+                result.add(str(row["segment_id"]))
+    finally:
+        conn.close()
+    return result
 
 
 def _segment_speakers(*, config: AppConfig, segment_ids: list[str]) -> dict[str, str]:

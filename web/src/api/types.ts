@@ -207,8 +207,10 @@ export interface PersonRow {
   is_self: number;
   /** Has a stored voiceprint centroid (person_voiceprints row). */
   enrolled: boolean;
-  /** Number of segment_person_overrides rows attributed to this person. */
+  /** Number of segment_person_overrides rows attributed to this person (manual + voiceprint). */
   attributed_count: number;
+  /** Confirmed ground-truth labels (source='manual') — the enroll-able segment count. */
+  manual_count: number;
 }
 
 /** Result of enrolling a person's voiceprint (centroid summary). */

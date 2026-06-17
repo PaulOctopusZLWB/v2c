@@ -277,7 +277,8 @@ create table if not exists segment_person_overrides (
   segment_id text primary key,
   person_label text not null,
   updated_at text not null,
-  person_id text
+  person_id text,
+  source text not null default 'manual'
 );
 
 create table if not exists segment_embeddings (
@@ -544,6 +545,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     )
     conn.execute("create index if not exists idx_speaker_mappings_cluster on speaker_mappings(speaker_cluster_id)")
     _ensure_column(conn, "segment_person_overrides", "person_id", "text")
+    # Distinguish USER-LABELED ground truth ('manual') from AUTO-INFERRED voiceprint guesses
+    # ('voiceprint'). Existing rows default to 'manual' so current attributions are treated as
+    # confirmed labels and enrollment works immediately.
+    _ensure_column(conn, "segment_person_overrides", "source", "text not null default 'manual'")
     _ensure_column(conn, "sessions", "primary_person_id", "text")
     conn.execute("create index if not exists idx_sessions_date on sessions(date_key, started_at)")
     _ensure_column(conn, "tasks", "priority", "integer not null default 100")
