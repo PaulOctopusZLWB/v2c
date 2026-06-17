@@ -7,6 +7,8 @@ import numpy as np
 from personal_context_node import transcription
 from personal_context_node.config import AppConfig
 from personal_context_node.speaker_embeddings import (
+    clear_projection_cache,
+    embedding_projection,
     extract_pending_embeddings,
     get_embeddings,
     pending_embedding_segment_ids,
@@ -398,6 +400,73 @@ def test_get_embeddings_chunks_large_input(tmp_path: Path) -> None:
 
     got = get_embeddings(config=config, segment_ids=ids)
     assert len(got) == 1200
+
+
+def test_projection_pca_separates_two_clusters(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)
+
+    result = embedding_projection(config=config, method="pca")
+
+    assert result["method"] == "pca"
+    assert result["n"] == 6
+    points = result["points"]
+    assert len(points) == 6
+    by_id = {p["segment_id"]: p for p in points}
+    for point in points:
+        assert 0.0 <= point["x"] <= 1.0
+        assert 0.0 <= point["y"] <= 1.0
+        assert point["speaker"] == "self"
+    # The two clusters (seg_1..3 near e0, seg_4..6 near e1) should be separated along x.
+    cluster_a_x = np.mean([by_id[s]["x"] for s in ("seg_1", "seg_2", "seg_3")])
+    cluster_b_x = np.mean([by_id[s]["x"] for s in ("seg_4", "seg_5", "seg_6")])
+    assert abs(cluster_a_x - cluster_b_x) > 0.3
+
+
+def test_projection_empty_scope(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    result = embedding_projection(config=config, method="pca")
+    assert result == {"points": [], "method": "pca", "n": 0}
+
+
+def test_projection_includes_person_attribution(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)
+    # Attribute seg_1 to a person via a segment_person_overrides row; leave the rest unattributed.
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id) values (?, ?, ?, ?)",
+            ("seg_1", "Alice", "2087-05-10T08:00:00+08:00", "per_a"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    points = {p["segment_id"]: p for p in embedding_projection(config=config, method="pca")["points"]}
+    assert points["seg_1"]["person_id"] == "per_a"
+    assert points["seg_1"]["person_label"] == "Alice"
+    assert points["seg_2"]["person_id"] is None
+    assert points["seg_2"]["person_label"] is None
+    # text is carried through (and truncated, but these are short).
+    assert points["seg_1"]["text"] == "text 1"
+
+
+def test_projection_cache_hit(tmp_path: Path) -> None:
+    clear_projection_cache()
+    config = _setup_two_clusters(tmp_path)
+
+    first = embedding_projection(config=config, method="pca")
+    second = embedding_projection(config=config, method="pca")
+    # Deterministic + cached: the second call returns the very same object.
+    assert second is first
+
+    clear_projection_cache()
+    third = embedding_projection(config=config, method="pca")
+    # After a cache clear it is recomputed (a fresh object) but identical in content.
+    assert third is not first
+    assert third == first
 
 
 def _insert_session_with_segments(

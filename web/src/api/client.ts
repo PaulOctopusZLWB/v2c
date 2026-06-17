@@ -1,4 +1,4 @@
-import type { DailyLlmResult, DayStatusRow, EmbeddingStatus, Health, LabelSegment, Person, ReclusterResult, ReviewStatus, Settings, SpeakerCluster, TaskRow, TranscriptSession } from "./types";
+import type { DailyLlmResult, DayStatusRow, EmbeddingStatus, Health, LabelSegment, Person, ProjectionResult, ReclusterResult, ReviewStatus, Settings, SpeakerCluster, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -60,6 +60,9 @@ export const api = {
     request<ReclusterResult>("/api/speakers/recluster", { method: "POST", body: JSON.stringify(body) }),
   speakerSegments: (params: { session_id?: string | null; speaker?: string | null; limit?: number | null }) =>
     request<{ segments: LabelSegment[] }>(`/api/speakers/segments${query(params)}`),
+  // 2D voiceprint map: project stored CAM++ embeddings to a scatter (UMAP default, PCA fallback)
+  embeddingProjection: (params: { session_id?: string | null; day?: string | null; method?: "umap" | "pca" | null }) =>
+    request<ProjectionResult>(`/api/speakers/embedding-projection${query(params)}`),
   // settings (model/runtime overrides; take effect on the next run)
   settings: () => request<Settings>("/api/settings"),
   updateSettings: (body: Partial<Settings>) =>

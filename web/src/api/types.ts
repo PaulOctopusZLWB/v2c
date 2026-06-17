@@ -131,6 +131,24 @@ export interface ReclusterResult {
   threshold: number;
 }
 
+/** One voiceprint projected to 2D (x/y in [0,1]) for the scatter "voiceprint map". */
+export interface ProjectionPoint {
+  segment_id: string;
+  x: number;
+  y: number;
+  speaker: string | null;
+  person_id: string | null;
+  person_label: string | null;
+  text: string | null;
+}
+
+/** Result of the embedding-projection endpoint: 2D points plus the method actually used. */
+export interface ProjectionResult {
+  points: ProjectionPoint[];
+  method: "umap" | "pca";
+  n: number;
+}
+
 /** A candidate segment to label as an anchor (voiceprint flow). */
 export interface LabelSegment {
   segment_id: string;

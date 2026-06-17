@@ -224,6 +224,46 @@ def test_embedding_status_counts(tmp_path: Path) -> None:
     assert empty.json() == {"total": 0, "embedded": 0, "pending": 0}
 
 
+def test_embedding_projection_route(tmp_path: Path) -> None:
+    from personal_context_node.speaker_embeddings import clear_projection_cache
+
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    # Embed all three active segments: two near +x, one near +y (separable for PCA).
+    put_embedding(config=config, segment_id="seg_a", vector=[1.0, 0.0, 0.0])
+    put_embedding(config=config, segment_id="seg_b", vector=[0.9, 0.1, 0.0])
+    put_embedding(config=config, segment_id="seg_c", vector=[0.0, 1.0, 0.0])
+    client = TestClient(create_app(config=config))
+
+    response = client.get(
+        "/api/speakers/embedding-projection", params={"session_id": "ses_lab", "method": "pca"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["method"] == "pca"
+    assert body["n"] == 3
+    ids = {p["segment_id"] for p in body["points"]}
+    assert ids == {"seg_a", "seg_b", "seg_c"}
+    for point in body["points"]:
+        assert 0.0 <= point["x"] <= 1.0
+        assert 0.0 <= point["y"] <= 1.0
+        assert "speaker" in point
+
+    # Empty scope still 200 with an empty points list.
+    empty = client.get(
+        "/api/speakers/embedding-projection", params={"session_id": "ses_missing", "method": "pca"}
+    )
+    assert empty.status_code == 200
+    assert empty.json() == {"points": [], "method": "pca", "n": 0}
+
+    # Unknown method -> 400.
+    bad = client.get(
+        "/api/speakers/embedding-projection", params={"session_id": "ses_lab", "method": "tsne"}
+    )
+    assert bad.status_code == 400
+
+
 def test_recluster_route_returns_distribution(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_labeling_day(config.database_path)

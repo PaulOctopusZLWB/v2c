@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
-from personal_context_node.speaker_embeddings import recluster_by_anchors
+from personal_context_node.speaker_embeddings import embedding_projection, recluster_by_anchors
 from personal_context_node.speaker_review import upsert_segment_person_override, upsert_speaker_mapping
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -233,6 +233,17 @@ def embedding_status_route(request: Request, day: str | None = None, session_id:
     total = int(rows[0]["total"] or 0)
     embedded = int(rows[0]["embedded"] or 0)
     return {"total": total, "embedded": embedded, "pending": total - embedded}
+
+
+@router.get("/speakers/embedding-projection")
+def embedding_projection_route(
+    request: Request, session_id: str | None = None, day: str | None = None, method: str = "umap"
+) -> dict[str, object]:
+    """2D projection of in-scope CAM++ voiceprints for a scatter "voiceprint map" (UMAP/PCA)."""
+    if method not in {"umap", "pca"}:
+        raise HTTPException(status_code=400, detail="method must be one of: umap, pca")
+    config: AppConfig = request.app.state.config
+    return embedding_projection(config=config, session_id=session_id, day=day, method=method)
 
 
 @router.post("/speakers/extract-embeddings")

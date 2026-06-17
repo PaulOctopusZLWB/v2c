@@ -282,6 +282,156 @@ def recluster_by_anchors(
     }
 
 
+# Projection results are deterministic for a given (database, scope, method, size), so cache them:
+# a UMAP fit is a multi-second warmup and the scatter map is hit repeatedly as the UI re-renders.
+_PROJECTION_CACHE: dict[tuple, dict] = {}
+
+
+def clear_projection_cache() -> None:
+    """Drop all memoized projection results (call between tests / after re-embedding a scope)."""
+    _PROJECTION_CACHE.clear()
+
+
+def embedding_projection(
+    *,
+    config: AppConfig,
+    session_id: str | None = None,
+    day: str | None = None,
+    method: str = "umap",
+) -> dict:
+    """Project stored CAM++ voiceprints in a scope down to 2D points for a scatter "voiceprint map".
+
+    Returns ``{"points": [...], "method": <"umap"|"pca">, "n": <count>}`` where each point carries
+    its ``segment_id``, normalized ``x``/``y`` in ``[0, 1]``, ``speaker``, person attribution
+    (``person_id``/``person_label``, null when unlabeled) and a truncated ``text`` preview.
+
+    UMAP (cosine metric, fixed seed) gives the best cluster separation but needs >=5 points and a
+    multi-second warmup; PCA (numpy SVD on centered, L2-normalized vectors) is the deterministic
+    fallback for small/instant cases and on any UMAP import/runtime failure. Results are memoized.
+    """
+    scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id, day=day)
+    cache_key = (str(config.database_path), session_id, day, method, len(scope_ids))
+    cached = _PROJECTION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    if not scope_ids:
+        result = {"points": [], "method": method, "n": 0}
+        _PROJECTION_CACHE[cache_key] = result
+        return result
+
+    embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+    # Keep only ids that actually have a vector, preserving the deterministic scope order.
+    ids = [sid for sid in scope_ids if sid in embeddings]
+    if not ids:
+        result = {"points": [], "method": method, "n": 0}
+        _PROJECTION_CACHE[cache_key] = result
+        return result
+
+    matrix = np.vstack([embeddings[sid] for sid in ids]).astype(np.float64)
+    # L2-normalize rows so PCA/UMAP both see unit voiceprints (cosine geometry).
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms == 0.0] = 1.0
+    X = matrix / norms
+
+    used_method = "pca"
+    coords: np.ndarray | None = None
+    if method == "umap" and len(X) >= 5:
+        try:
+            import umap  # type: ignore
+
+            reducer = umap.UMAP(
+                n_components=2,
+                n_neighbors=min(15, len(X) - 1),
+                min_dist=0.1,
+                metric="cosine",
+                random_state=42,
+            )
+            coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
+            used_method = "umap"
+        except Exception:
+            coords = None  # any import/runtime failure -> deterministic PCA fallback below
+    if coords is None:
+        coords = _pca_2d(X)
+        used_method = "pca"
+
+    # Normalize coords to [0, 1]^2 for a stable scatter viewport.
+    lo = coords.min(axis=0)
+    span = coords.max(axis=0) - lo
+    norm_coords = (coords - lo) / (span + 1e-9)
+
+    metadata = _projection_metadata(config=config, segment_ids=ids)
+    points = []
+    for sid, (x, y) in zip(ids, norm_coords):
+        meta = metadata.get(sid, {})
+        points.append(
+            {
+                "segment_id": sid,
+                "x": round(float(x), 4),
+                "y": round(float(y), 4),
+                "speaker": meta.get("speaker"),
+                "person_id": meta.get("person_id"),
+                "person_label": meta.get("person_label"),
+                "text": meta.get("text"),
+            }
+        )
+
+    result = {"points": points, "method": used_method, "n": len(points)}
+    _PROJECTION_CACHE[cache_key] = result
+    return result
+
+
+def _pca_2d(X: np.ndarray) -> np.ndarray:
+    """Deterministic top-2 principal-component coordinates via SVD on centered rows."""
+    centered = X - X.mean(axis=0, keepdims=True)
+    # full_matrices=False keeps this cheap for the wide (n x 192) voiceprint matrix.
+    _u, _s, vt = np.linalg.svd(centered, full_matrices=False)
+    components = vt[:2]  # may be (1, d) when n == 1
+    coords = centered @ components.T
+    if coords.shape[1] < 2:  # degenerate (single point / single component): pad the missing axis.
+        coords = np.hstack([coords, np.zeros((coords.shape[0], 2 - coords.shape[1]))])
+    return coords
+
+
+def _projection_metadata(*, config: AppConfig, segment_ids: list[str]) -> dict[str, dict]:
+    """Per-segment {speaker, text(truncated), person_id, person_label} in one chunked query."""
+    result: dict[str, dict] = {}
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(segment_ids), _SQL_CHUNK):
+            chunk = segment_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = fetch_all(
+                conn,
+                f"""
+                select
+                  ts.segment_id,
+                  ts.speaker,
+                  ts.text,
+                  override.person_id as person_id,
+                  override.person_label as person_label
+                from transcript_segments ts
+                left join segment_person_overrides override on override.segment_id = ts.segment_id
+                where ts.segment_id in ({placeholders})
+                """,
+                tuple(chunk),
+            )
+            for row in rows:
+                text = row["text"]
+                if text is not None and len(text) > 60:
+                    text = text[:60]
+                result[str(row["segment_id"])] = {
+                    "speaker": row["speaker"],
+                    "text": text,
+                    "person_id": row["person_id"],
+                    "person_label": row["person_label"],
+                }
+    finally:
+        conn.close()
+    return result
+
+
 def _normalize(vector: np.ndarray) -> np.ndarray:
     array = np.asarray(vector, dtype=np.float64)
     norm = float(np.linalg.norm(array))
