@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { SegmentRow } from "../features/transcript/SegmentRow";
 
-const seg = { segment_id: "seg_1", text: "数据不出本机", speaker: "self", start_ms: 9000, end_ms: 12000, absolute_start_at: "2026-06-13T09:33:09.530000+08:00", absolute_end_at: "2026-06-13T09:33:12.000000+08:00", review_status: "pending_review" as const, note: null };
+const seg = { segment_id: "seg_1", text: "数据不出本机", speaker: "self", start_ms: 9000, end_ms: 12000, absolute_start_at: "2026-06-13T09:33:09.530000+08:00", absolute_end_at: "2026-06-13T09:33:12.000000+08:00", review_status: "pending_review" as const, note: null, person_id: null, person_label: null };
 
 describe("SegmentRow", () => {
   it("renders Chinese status, a speaker chip, and fires review/override/play", async () => {

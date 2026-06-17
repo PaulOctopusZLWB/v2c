@@ -393,6 +393,39 @@ def test_review_queue_ignores_inactive_segments(tmp_path: Path) -> None:
     assert queue[0]["total"] == 1
 
 
+def test_reviewed_segments_surface_resolved_person(tmp_path: Path) -> None:
+    # A segment with a segment_person_overrides row surfaces person_id/person_label (the global
+    # voiceprint identity); an unattributed segment has them null.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    from personal_context_node.speaker_review import upsert_segment_person_override
+
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_paul", "Paul", "self", 1, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        upsert_segment_person_override(
+            conn, segment_id="seg_1", person_id="per_paul", person_label="Paul", now="2087-05-10T08:00:00+08:00"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = reviewed_segments_for_session(config=config, session_id="ses_test")
+    by_id = {r["segment_id"]: r for r in rows}
+    # The attributed segment carries the resolved person.
+    assert by_id["seg_1"]["person_id"] == "per_paul"
+    assert by_id["seg_1"]["person_label"] == "Paul"
+    # The unattributed segment has them null.
+    assert by_id["seg_2"]["person_id"] is None
+    assert by_id["seg_2"]["person_label"] is None
+    # Existing fields are still present and ordering is preserved.
+    assert [r["segment_id"] for r in rows] == ["seg_1", "seg_2"]
+    assert by_id["seg_1"]["review_status"] == "pending_review"
+
+
 def _insert_two_sessions(database_path: Path) -> None:
     """Two sessions on the same day: ses_a (started 08:00, 2 segs) then ses_b (09:00, 2 segs)."""
     conn = connect(database_path)

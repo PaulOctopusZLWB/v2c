@@ -10,10 +10,10 @@ const session = {
   session_id: "ses_1",
   review_status: "pending_review" as const,
   segments: [
-    { segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review" as const, note: null },
-    { segment_id: "seg_2", text: "在的", speaker: "spk_1", start_ms: 1000, end_ms: 2000, absolute_start_at: "2026-06-13T09:33:01+08:00", absolute_end_at: "2026-06-13T09:33:02+08:00", review_status: "pending_review" as const, note: null },
-    { segment_id: "seg_3", text: "我们开始吧", speaker: "spk_2", start_ms: 2000, end_ms: 3000, absolute_start_at: "2026-06-13T09:33:02+08:00", absolute_end_at: "2026-06-13T09:33:03+08:00", review_status: "pending_review" as const, note: null },
-    { segment_id: "seg_4", text: "好的", speaker: "spk_1", start_ms: 3000, end_ms: 4000, absolute_start_at: "2026-06-13T09:33:03+08:00", absolute_end_at: "2026-06-13T09:33:04+08:00", review_status: "pending_review" as const, note: null }
+    { segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review" as const, note: null, person_id: null, person_label: null },
+    { segment_id: "seg_2", text: "在的", speaker: "spk_1", start_ms: 1000, end_ms: 2000, absolute_start_at: "2026-06-13T09:33:01+08:00", absolute_end_at: "2026-06-13T09:33:02+08:00", review_status: "pending_review" as const, note: null, person_id: null, person_label: null },
+    { segment_id: "seg_3", text: "我们开始吧", speaker: "spk_2", start_ms: 2000, end_ms: 3000, absolute_start_at: "2026-06-13T09:33:02+08:00", absolute_end_at: "2026-06-13T09:33:03+08:00", review_status: "pending_review" as const, note: null, person_id: null, person_label: null },
+    { segment_id: "seg_4", text: "好的", speaker: "spk_1", start_ms: 3000, end_ms: 4000, absolute_start_at: "2026-06-13T09:33:03+08:00", absolute_end_at: "2026-06-13T09:33:04+08:00", review_status: "pending_review" as const, note: null, person_id: null, person_label: null }
   ]
 };
 

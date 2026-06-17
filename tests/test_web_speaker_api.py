@@ -757,6 +757,131 @@ def test_auto_attribute_route_runs_identify_preserving_manual(tmp_path: Path) ->
     assert by_seg["seg_b"]["source"] == "voiceprint" and by_seg["seg_b"]["person_id"] == "per_alice"
 
 
+# ---------------------------------------------------------------------------
+# Item 2: delete / merge a person
+# ---------------------------------------------------------------------------
+
+
+def _seed_person_with_attribution(config: AppConfig, person_id: str, display_name: str) -> None:
+    """Seed a person plus a segment override, a voiceprint, a speaker mapping, and a
+    session whose primary_person_id points at them — i.e. a row in every table that
+    references persons.person_id, so a delete must cascade across all of them."""
+    from personal_context_node.speaker_review import (
+        upsert_segment_person_override,
+        upsert_speaker_mapping,
+    )
+
+    now = "2087-05-10T08:00:00+08:00"
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            (person_id, display_name, "contact", 0, now, now),
+        )
+        upsert_segment_person_override(conn, segment_id="seg_a", person_id=person_id, person_label=display_name, now=now)
+        upsert_speaker_mapping(conn, speaker="spk_a", person_id=person_id, person_label=display_name, now=now)
+        conn.execute(
+            "insert into person_voiceprints (person_id, dim, vector, n_segments, updated_at) values (?, ?, ?, ?, ?)",
+            (person_id, 3, b"\x00\x00\x00", 1, now),
+        )
+        conn.execute("update sessions set primary_person_id = ? where session_id = 'ses_lab'", (person_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_delete_person_cascades(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _seed_person_with_attribution(config, "per_dup", "Dup")
+    client = TestClient(create_app(config=config))
+
+    # Sanity: the person shows up in the list before deletion.
+    assert any(p["person_id"] == "per_dup" for p in client.get("/api/persons").json()["persons"])
+
+    response = client.delete("/api/persons/per_dup")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+
+    # The person is gone, and every dependent row is deleted / nulled.
+    conn = connect(config.database_path)
+    try:
+        assert fetch_all(conn, "select person_id from persons where person_id = 'per_dup'") == []
+        assert fetch_all(conn, "select segment_id from segment_person_overrides where person_id = 'per_dup'") == []
+        assert fetch_all(conn, "select speaker from speaker_mappings where person_id = 'per_dup'") == []
+        assert fetch_all(conn, "select person_id from person_voiceprints where person_id = 'per_dup'") == []
+        rows = fetch_all(conn, "select primary_person_id from sessions where session_id = 'ses_lab'")
+        assert rows == [{"primary_person_id": None}]
+    finally:
+        conn.close()
+
+    # The person list no longer includes them.
+    assert all(p["person_id"] != "per_dup" for p in client.get("/api/persons").json()["persons"])
+
+
+def test_delete_person_unknown_returns_404(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    assert client.delete("/api/persons/ghost").status_code == 404
+
+
+def test_merge_people_reassigns_then_deletes_from(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _seed_person_with_attribution(config, "per_from", "Duplicate")
+    # The merge target.
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_into", "Canonical", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/merge", json={"from_id": "per_from", "into_id": "per_into"})
+    assert response.status_code == 200
+    # One override + one speaker mapping reassigned.
+    assert response.json() == {"moved": 2}
+
+    conn = connect(config.database_path)
+    try:
+        # from_id is gone; its labels were reassigned to into_id (keeping the attribution).
+        assert fetch_all(conn, "select person_id from persons where person_id = 'per_from'") == []
+        # The override now points at into_id and carries into_id's display name (the canonical label).
+        override = fetch_all(conn, "select person_id, person_label from segment_person_overrides where segment_id = 'seg_a'")
+        assert override == [{"person_id": "per_into", "person_label": "Canonical"}]
+        mapping = fetch_all(conn, "select person_id from speaker_mappings where speaker = 'spk_a'")
+        assert mapping == [{"person_id": "per_into"}]
+    finally:
+        conn.close()
+
+
+def test_merge_people_missing_returns_404(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _seed_person_with_attribution(config, "per_from", "Duplicate")
+    client = TestClient(create_app(config=config))
+
+    # into_id missing.
+    assert client.post("/api/people/merge", json={"from_id": "per_from", "into_id": "ghost"}).status_code == 404
+    # from_id missing.
+    assert client.post("/api/people/merge", json={"from_id": "ghost", "into_id": "per_from"}).status_code == 404
+
+
+def test_merge_people_same_id_returns_400(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _seed_person_with_attribution(config, "per_from", "Duplicate")
+    client = TestClient(create_app(config=config))
+
+    assert client.post("/api/people/merge", json={"from_id": "per_from", "into_id": "per_from"}).status_code == 400
+
+
 def _insert_labeling_day(database_path: Path) -> None:
     """Seed one session with three active segments (spk_a x2, spk_b x1) plus an inactive one."""
     conn = connect(database_path)

@@ -10,6 +10,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.segment_emotions import emotion_distribution, emotion_labels_for_scope
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
+    clear_projection_cache,
     embedding_projection,
     enroll_person,
     label_segments_as_person,
@@ -72,6 +73,11 @@ class AutoAttributeRequest(BaseModel):
     threshold: float = 0.5
 
 
+class MergePeopleRequest(BaseModel):
+    from_id: str
+    into_id: str
+
+
 def _assign_speaker_to_person(conn, *, speaker: str, person_id: str, person_label: str, now: str) -> None:
     """Map one speaker/cluster to a person (mirrors the single assign-person route).
 
@@ -90,6 +96,20 @@ def _person_label(conn, *, person_id: str) -> str:
     if not rows:
         raise ValueError(f"unknown person_id: {person_id}")
     return str(rows[0]["display_name"])
+
+
+def _delete_person(conn, *, person_id: str) -> None:
+    """Remove a person and every row that references them, in the caller's transaction.
+
+    Deletes the person's segment_person_overrides, person_voiceprints, and speaker_mappings;
+    nulls sessions.primary_person_id pointing at them; then deletes the persons row. The caller
+    has already verified the person exists and is responsible for the commit.
+    """
+    conn.execute("delete from segment_person_overrides where person_id = ?", (person_id,))
+    conn.execute("delete from person_voiceprints where person_id = ?", (person_id,))
+    conn.execute("delete from speaker_mappings where person_id = ?", (person_id,))
+    conn.execute("update sessions set primary_person_id = null where primary_person_id = ?", (person_id,))
+    conn.execute("delete from persons where person_id = ?", (person_id,))
 
 
 @router.get("/persons")
@@ -123,6 +143,64 @@ def create_person(request: Request, payload: CreatePersonRequest) -> dict[str, o
     finally:
         conn.close()
     return {"person_id": person_id, "display_name": payload.display_name, "person_type": payload.person_type, "is_self": 0}
+
+
+@router.delete("/persons/{person_id}")
+def delete_person_route(request: Request, person_id: str) -> dict[str, bool]:
+    """Delete a person (e.g. an accidental duplicate) and cascade across every referencing table.
+
+    All deletions/nulling happen in one transaction; 404 if the person does not exist. The 2D
+    voiceprint map colors segments by person, so clear its projection cache afterward.
+    """
+    config: AppConfig = request.app.state.config
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        if not fetch_all(conn, "select 1 from persons where person_id = ?", (person_id,)):
+            raise HTTPException(status_code=404, detail=f"unknown person_id: {person_id}")
+        _delete_person(conn, person_id=person_id)
+        conn.commit()
+    finally:
+        conn.close()
+    clear_projection_cache()  # a person's segments lose their color -> any cached projection is stale
+    return {"deleted": True}
+
+
+@router.post("/people/merge")
+def merge_people_route(request: Request, payload: MergePeopleRequest) -> dict[str, int]:
+    """Merge a duplicate person (from_id) into another (into_id) without losing labels.
+
+    Reassigns from_id's segment_person_overrides (person_id + person_label) and speaker_mappings to
+    into_id, then deletes from_id (cascading the rest). 404 if either is missing; 400 if from==into.
+    Returns the number of attribution rows moved (overrides + mappings).
+    """
+    if payload.from_id == payload.into_id:
+        raise HTTPException(status_code=400, detail="from_id and into_id must differ")
+    config: AppConfig = request.app.state.config
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        try:
+            into_label = _person_label(conn, person_id=payload.into_id)
+            _person_label(conn, person_id=payload.from_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # Reassign from_id's labels to into_id (keeping the attribution), then delete from_id.
+        overrides = conn.execute(
+            "update segment_person_overrides set person_id = ?, person_label = ? where person_id = ?",
+            (payload.into_id, into_label, payload.from_id),
+        )
+        mappings = conn.execute(
+            "update speaker_mappings set person_id = ? where person_id = ?",
+            (payload.into_id, payload.from_id),
+        )
+        moved = overrides.rowcount + mappings.rowcount
+        _delete_person(conn, person_id=payload.from_id)
+        conn.commit()
+    finally:
+        conn.close()
+    clear_projection_cache()  # the merged person's segments recolor -> any cached projection is stale
+    return {"moved": moved}
 
 
 @router.post("/speakers/{speaker}/assign-person")

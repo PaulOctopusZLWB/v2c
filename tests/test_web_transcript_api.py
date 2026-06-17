@@ -186,6 +186,42 @@ def test_review_queue_endpoint_honors_limit(tmp_path: Path) -> None:
     assert response.json()["queue"] == []
 
 
+def test_session_transcript_surfaces_resolved_person(tmp_path: Path) -> None:
+    # GET /api/transcripts/sessions/{id} exposes the resolved person on each segment so 审核
+    # reflects the global voiceprint identity; an unattributed segment has them null.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    from personal_context_node.speaker_review import upsert_segment_person_override
+
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_paul", "Paul", "self", 1, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        upsert_segment_person_override(
+            conn, segment_id="seg_1", person_id="per_paul", person_label="Paul", now="2087-05-10T08:00:00+08:00"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    segment = client.get("/api/transcripts/sessions/ses_test").json()["segments"][0]
+    assert segment["person_id"] == "per_paul"
+    assert segment["person_label"] == "Paul"
+
+
+def test_session_transcript_person_null_when_unattributed(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    segment = client.get("/api/transcripts/sessions/ses_test").json()["segments"][0]
+    assert segment["person_id"] is None
+    assert segment["person_label"] is None
+
+
 def _insert_session(database_path: Path) -> None:
     conn = connect(database_path)
     try:

@@ -112,9 +112,13 @@ def reviewed_segments_for_session(*, config: AppConfig, session_id: str) -> list
             """
             select ts.segment_id, ts.text, ts.speaker, ts.start_ms, ts.end_ms,
                    ts.absolute_start_at, ts.absolute_end_at,
-                   coalesce(r.status, 'pending_review') as review_status, r.note
+                   coalesce(r.status, 'pending_review') as review_status, r.note,
+                   -- Surface the RESOLVED global person (voiceprint identity) so 审核 reflects who
+                   -- actually said it and updates on re-identify; null when still unattributed.
+                   o.person_id as person_id, o.person_label as person_label
             from transcript_segments ts
             left join transcript_segment_reviews r on r.segment_id = ts.segment_id
+            left join segment_person_overrides o on o.segment_id = ts.segment_id
             where ts.session_id = ? and ts.is_active = 1
             -- A whole-day session fans in many audio files; start_ms is per-file, so it would
             -- interleave files and show 00:00 for each file's opening segments. Order by the

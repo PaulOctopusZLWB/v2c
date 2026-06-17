@@ -12,6 +12,10 @@ export interface TranscriptSegment {
   absolute_end_at: string | null;
   review_status: ReviewStatus;
   note: string | null;
+  // Resolved global person (voiceprint identity) for this segment; null when unattributed.
+  // Lets 审核 group/display by the re-identifiable person rather than the diarizer's spk_NN.
+  person_id: string | null;
+  person_label: string | null;
 }
 
 export interface TranscriptSession {

@@ -56,6 +56,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify(person_type ? { display_name, person_type } : { display_name }),
     }),
+  // Remove an accidental duplicate person (cascades across every referencing table).
+  deletePerson: (id: string) =>
+    request<{ deleted: boolean }>(`/api/persons/${id}`, { method: "DELETE" }),
+  // Merge a duplicate person into another without losing their labels.
+  mergePeople: (fromId: string, intoId: string) =>
+    request<{ moved: number }>("/api/people/merge", { method: "POST", body: JSON.stringify({ from_id: fromId, into_id: intoId }) }),
   assignPerson: (speaker: string, person_id: string) =>
     request(`/api/speakers/${speaker}/assign-person`, { method: "POST", body: JSON.stringify({ person_id }) }),
   overridePerson: (segmentId: string, person_id: string) =>

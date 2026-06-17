@@ -15,7 +15,9 @@ function seg(id: string, text: string, start: string, end: string): TranscriptSe
     absolute_start_at: start,
     absolute_end_at: end,
     review_status: "pending_review",
-    note: null
+    note: null,
+    person_id: null,
+    person_label: null
   };
 }
 
