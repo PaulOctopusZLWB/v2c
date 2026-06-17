@@ -181,6 +181,9 @@ export function App() {
   function highlightEvidence(candidateId: string) {
     const candidate = (llm?.memory_candidates ?? []).find((c) => c.candidate_id === candidateId);
     setHighlightedSegmentId(candidate?.evidence_segment_ids?.[0] ?? null);
+    // The cited segment lives in the 审核 (review) tab; jump there so the highlight is visible
+    // (panels are no longer co-mounted, so setting the id alone would leave the user on 观点).
+    setTab("review");
   }
 
   const speakers = session ? Array.from(new Set(session.segments.map((s) => s.speaker))) : [];
