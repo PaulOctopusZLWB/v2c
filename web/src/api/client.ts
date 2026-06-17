@@ -1,4 +1,4 @@
-import type { DailyLlmResult, DayStatusRow, EmbeddingStatus, Health, LabelSegment, Person, ProjectionResult, ReclusterResult, ReviewStatus, Settings, SpeakerCluster, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EnrollResult, Health, LabelSegment, Person, PersonRow, ProjectionResult, ReclusterResult, ReviewStatus, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -63,6 +63,17 @@ export const api = {
   // 2D voiceprint map: project stored CAM++ embeddings to a scatter (UMAP default, PCA fallback)
   embeddingProjection: (params: { session_id?: string | null; day?: string | null; method?: "umap" | "pca" | null }) =>
     request<ProjectionResult>(`/api/speakers/embedding-projection${query(params)}`),
+  // "People taught once": enroll a voiceprint, then suggest/auto-attribute everywhere; plus the
+  // lasso-to-label bulk primitive (label a set of segments as one person).
+  people: () => request<{ people: PersonRow[] }>("/api/people"),
+  labelSegments: (personId: string, segment_ids: string[]) =>
+    request<{ labeled: number }>(`/api/people/${personId}/label-segments`, { method: "POST", body: JSON.stringify({ segment_ids }) }),
+  enrollPerson: (personId: string, segment_ids?: string[]) =>
+    request<EnrollResult>(`/api/people/${personId}/enroll`, { method: "POST", body: JSON.stringify({ segment_ids }) }),
+  suggestPeople: (session_id: string) =>
+    request<{ suggestions: Suggestion[] }>("/api/speakers/suggest", { method: "POST", body: JSON.stringify({ session_id }) }),
+  autoAttribute: (params: { session_id?: string | null; day?: string | null; threshold?: number | null }) =>
+    request<AutoAttributeResult>("/api/people/auto-attribute", { method: "POST", body: JSON.stringify(params) }),
   // settings (model/runtime overrides; take effect on the next run)
   settings: () => request<Settings>("/api/settings"),
   updateSettings: (body: Partial<Settings>) =>

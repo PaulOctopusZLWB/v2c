@@ -7,7 +7,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
-from personal_context_node.speaker_embeddings import embedding_projection, recluster_by_anchors
+from personal_context_node.speaker_embeddings import (
+    auto_attribute_enrolled,
+    embedding_projection,
+    enroll_person,
+    label_segments_as_person,
+    recluster_by_anchors,
+    suggest_people_for_session,
+)
 from personal_context_node.speaker_review import upsert_segment_person_override, upsert_speaker_mapping
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -39,6 +46,24 @@ class ReclusterRequest(BaseModel):
 class ExtractEmbeddingsRequest(BaseModel):
     session_id: str | None = None
     day: str | None = None
+
+
+class LabelSegmentsRequest(BaseModel):
+    segment_ids: list[str]
+
+
+class EnrollPersonRequest(BaseModel):
+    segment_ids: list[str] | None = None
+
+
+class SuggestPeopleRequest(BaseModel):
+    session_id: str
+
+
+class AutoAttributeRequest(BaseModel):
+    session_id: str | None = None
+    day: str | None = None
+    threshold: float = 0.5
 
 
 def _assign_speaker_to_person(conn, *, speaker: str, person_id: str, person_label: str, now: str) -> None:
@@ -316,3 +341,90 @@ def segments_for_labeling_route(
         for row in rows
     ]
     return {"segments": segments}
+
+
+@router.post("/people/{person_id}/label-segments")
+def label_segments_route(request: Request, person_id: str, payload: LabelSegmentsRequest) -> dict[str, int]:
+    """Bulk-attribute segments to a person (the map's lasso-to-label commit)."""
+    if not payload.segment_ids:
+        raise HTTPException(status_code=400, detail="segment_ids must not be empty")
+    config: AppConfig = request.app.state.config
+    try:
+        labeled = label_segments_as_person(config=config, person_id=person_id, segment_ids=payload.segment_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"labeled": labeled}
+
+
+@router.post("/people/{person_id}/enroll")
+def enroll_person_route(request: Request, person_id: str, payload: EnrollPersonRequest) -> dict[str, object]:
+    """Enroll a person's voiceprint from explicit segments (or their attributed segments)."""
+    config: AppConfig = request.app.state.config
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        try:
+            _person_label(conn, person_id=person_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        conn.close()
+    try:
+        return enroll_person(config=config, person_id=person_id, segment_ids=payload.segment_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/people")
+def list_people_route(request: Request) -> dict[str, object]:
+    """Persons enriched with enrollment + attribution counts (powers the People panel)."""
+    config: AppConfig = request.app.state.config
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            """
+            select
+              p.person_id,
+              p.display_name,
+              p.is_self,
+              exists (select 1 from person_voiceprints vp where vp.person_id = p.person_id) as enrolled,
+              (select count(*) from segment_person_overrides o where o.person_id = p.person_id) as attributed_count
+            from persons p
+            order by p.is_self desc, p.display_name
+            """,
+        )
+    finally:
+        conn.close()
+    people = [
+        {
+            "person_id": row["person_id"],
+            "display_name": row["display_name"],
+            "is_self": row["is_self"],
+            "enrolled": bool(row["enrolled"]),
+            "attributed_count": int(row["attributed_count"] or 0),
+        }
+        for row in rows
+    ]
+    return {"people": people}
+
+
+@router.post("/speakers/suggest")
+def suggest_people_route(request: Request, payload: SuggestPeopleRequest) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    return suggest_people_for_session(config=config, session_id=payload.session_id)
+
+
+@router.post("/people/auto-attribute")
+def auto_attribute_route(request: Request, payload: AutoAttributeRequest) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    try:
+        return auto_attribute_enrolled(
+            config=config,
+            session_id=payload.session_id,
+            day=payload.day,
+            threshold=payload.threshold,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

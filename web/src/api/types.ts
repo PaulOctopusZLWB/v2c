@@ -149,6 +149,42 @@ export interface ProjectionResult {
   n: number;
 }
 
+/** A person enriched with enrollment + attribution state (People panel). */
+export interface PersonRow {
+  person_id: string;
+  display_name: string;
+  is_self: number;
+  /** Has a stored voiceprint centroid (person_voiceprints row). */
+  enrolled: boolean;
+  /** Number of segment_person_overrides rows attributed to this person. */
+  attributed_count: number;
+}
+
+/** Result of enrolling a person's voiceprint (centroid summary). */
+export interface EnrollResult {
+  person_id: string;
+  n_segments: number;
+  dim: number;
+}
+
+/** One nearest-enrolled-person suggestion for a speaker cluster in a session. */
+export interface Suggestion {
+  speaker: string;
+  person_id: string;
+  person_label: string;
+  /** Cosine similarity of the cluster mean to the person's centroid, rounded 3dp. */
+  score: number;
+}
+
+/** Outcome of auto-attributing in-scope segments to enrolled person centroids. */
+export interface AutoAttributeResult {
+  assigned: number;
+  unassigned: number;
+  total: number;
+  per_person: Record<string, number>;
+  threshold: number;
+}
+
 /** A candidate segment to label as an anchor (voiceprint flow). */
 export interface LabelSegment {
   segment_id: string;

@@ -7,14 +7,19 @@ import numpy as np
 from personal_context_node import transcription
 from personal_context_node.config import AppConfig
 from personal_context_node.speaker_embeddings import (
+    auto_attribute_enrolled,
     clear_projection_cache,
     embedding_projection,
+    enroll_person,
     extract_pending_embeddings,
     get_embeddings,
+    get_person_centroids,
+    label_segments_as_person,
     pending_embedding_segment_ids,
     put_embedding,
     put_embeddings_bulk,
     recluster_by_anchors,
+    suggest_people_for_session,
 )
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -467,6 +472,180 @@ def test_projection_cache_hit(tmp_path: Path) -> None:
     # After a cache clear it is recomputed (a fresh object) but identical in content.
     assert third is not first
     assert third == first
+
+
+# ---------------------------------------------------------------------------
+# Slice 5a: enroll / suggest / auto-attribute + bulk label-segments
+# ---------------------------------------------------------------------------
+
+
+def test_label_segments_as_person_writes_overrides(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+
+    n = label_segments_as_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    assert n == 3
+
+    overrides = _override_rows(config.database_path)
+    assert overrides["seg_1"] == {"person_id": "per_a", "person_label": "Alice"}
+    assert overrides["seg_2"] == {"person_id": "per_a", "person_label": "Alice"}
+    assert overrides["seg_3"] == {"person_id": "per_a", "person_label": "Alice"}
+    # The other cluster is untouched.
+    assert "seg_4" not in overrides
+
+
+def test_label_segments_empty_is_zero(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    assert label_segments_as_person(config=config, person_id="per_a", segment_ids=[]) == 0
+    assert _override_rows(config.database_path) == {}
+
+
+def test_label_segments_unknown_person_raises(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    try:
+        label_segments_as_person(config=config, person_id="ghost", segment_ids=["seg_1"])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for unknown person")
+
+
+def test_enroll_person_with_explicit_segments(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+
+    result = enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    assert result["person_id"] == "per_a"
+    assert result["n_segments"] == 3
+    assert result["dim"] == 192
+
+    centroids = get_person_centroids(config=config)
+    assert set(centroids) == {"per_a"}
+    centroid = centroids["per_a"]
+    assert centroid.shape == (192,)
+    np.testing.assert_allclose(np.linalg.norm(centroid), 1.0, atol=1e-6)
+    # The cluster sits near axis e0, so the centroid's dominant component is e0.
+    assert int(np.argmax(centroid)) == 0
+
+
+def test_enroll_person_uses_attributed_when_no_ids(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    # Attribute seg_4, seg_5 (the e1 cluster) to per_b via overrides.
+    label_segments_as_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5"])
+
+    result = enroll_person(config=config, person_id="per_b")
+    assert result["n_segments"] == 2
+    assert result["dim"] == 192
+
+    centroid = get_person_centroids(config=config)["per_b"]
+    assert int(np.argmax(centroid)) == 1  # e1 cluster
+
+
+def test_enroll_person_no_embeddings_raises(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    # per_a has no attributed segments and no explicit ids -> nothing to enroll.
+    try:
+        enroll_person(config=config, person_id="per_a")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError when no embeddings found")
+
+
+def test_get_person_centroids_roundtrips_unit_vectors(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    enroll_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5", "seg_6"])
+
+    centroids = get_person_centroids(config=config)
+    assert set(centroids) == {"per_a", "per_b"}
+    for vec in centroids.values():
+        np.testing.assert_allclose(np.linalg.norm(vec), 1.0, atol=1e-6)
+
+
+def test_suggest_people_for_session_maps_clusters(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    enroll_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5", "seg_6"])
+
+    # Build a separate session whose two speakers are A-like / B-like.
+    _insert_session_with_segments(
+        config.database_path, ["seg_qa", "seg_qb"], session_id="ses_query", audio_file_id="aud_query"
+    )
+    _set_speaker(config.database_path, "seg_qa", "spk_qa")
+    _set_speaker(config.database_path, "seg_qb", "spk_qb")
+    put_embeddings_bulk(
+        config=config,
+        items=[("seg_qa", _unit_axis(0, noise=0.1)), ("seg_qb", _unit_axis(1, noise=0.1))],
+    )
+
+    result = suggest_people_for_session(config=config, session_id="ses_query")
+    by_speaker = {s["speaker"]: s for s in result["suggestions"]}
+    assert by_speaker["spk_qa"]["person_id"] == "per_a"
+    assert by_speaker["spk_qa"]["person_label"] == "Alice"
+    assert by_speaker["spk_qa"]["score"] > 0
+    assert by_speaker["spk_qb"]["person_id"] == "per_b"
+    assert by_speaker["spk_qb"]["person_label"] == "Bob"
+    # Sorted by score desc.
+    scores = [s["score"] for s in result["suggestions"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_suggest_people_no_enrolled_is_empty(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    # No one enrolled.
+    result = suggest_people_for_session(config=config, session_id="ses_test")
+    assert result == {"suggestions": []}
+
+
+def test_auto_attribute_enrolled_assigns_all(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    enroll_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5", "seg_6"])
+
+    result = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+    assert result["total"] == 6
+    assert result["assigned"] == 6
+    assert result["unassigned"] == 0
+    assert result["per_person"] == {"per_a": 3, "per_b": 3}
+    assert result["threshold"] == 0.5
+
+    overrides = _override_rows(config.database_path)
+    assert overrides["seg_1"]["person_id"] == "per_a"
+    assert overrides["seg_6"]["person_id"] == "per_b"
+    assert overrides["seg_1"]["person_label"] == "Alice"
+    assert overrides["seg_6"]["person_label"] == "Bob"
+
+
+def test_auto_attribute_high_threshold_leaves_unassigned(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    enroll_person(config=config, person_id="per_a", segment_ids=["seg_1", "seg_2", "seg_3"])
+    enroll_person(config=config, person_id="per_b", segment_ids=["seg_4", "seg_5", "seg_6"])
+
+    result = auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.999)
+    assert result["total"] == 6
+    assert result["unassigned"] > 0
+    assert result["assigned"] + result["unassigned"] == result["total"]
+
+
+def test_auto_attribute_no_enrolled_raises(tmp_path: Path) -> None:
+    config = _setup_two_clusters(tmp_path)
+    try:
+        auto_attribute_enrolled(config=config, session_id="ses_test", threshold=0.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError when no people enrolled")
+
+
+def _set_speaker(database_path: Path, segment_id: str, speaker: str) -> None:
+    conn = connect(database_path)
+    try:
+        conn.execute(
+            "update transcript_segments set speaker = ?, speaker_cluster_id = ? where segment_id = ?",
+            (speaker, speaker, segment_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _insert_session_with_segments(

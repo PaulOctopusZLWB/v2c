@@ -282,6 +282,259 @@ def recluster_by_anchors(
     }
 
 
+def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: list[str]) -> int:
+    """Bulk-attribute a list of segments to one person (the map's lasso-to-label primitive).
+
+    Resolves the person's label from ``persons.display_name`` (raising ``ValueError`` if the
+    person is unknown) and upserts a ``segment_person_overrides`` row for every segment in ONE
+    transaction. Empty input writes nothing and returns 0. Returns the count written.
+    """
+    if not segment_ids:
+        return 0
+    from personal_context_node.speaker_review import upsert_segment_person_override
+
+    now = _now()
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(conn, "select display_name from persons where person_id = ?", (person_id,))
+        if not rows:
+            raise ValueError(f"unknown person_id: {person_id}")
+        person_label = str(rows[0]["display_name"])
+        for segment_id in segment_ids:
+            upsert_segment_person_override(
+                conn,
+                segment_id=segment_id,
+                person_id=person_id,
+                person_label=person_label,
+                now=now,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return len(segment_ids)
+
+
+def enroll_person(*, config: AppConfig, person_id: str, segment_ids: list[str] | None = None) -> dict:
+    """Compute and persist a person's voiceprint centroid from their segments.
+
+    If ``segment_ids`` is given those are used; otherwise ALL segments currently attributed to the
+    person via ``segment_person_overrides`` are gathered. The centroid is the re-normalized mean of
+    the L2-normalized embedding vectors, stored as a float32 blob in ``person_voiceprints``
+    (upserted with n_segments + updated_at). Raises ``ValueError`` if no embeddings are found.
+
+    Returns ``{"person_id", "n_segments", "dim"}``.
+    """
+    if segment_ids is None:
+        conn = connect(config.database_path)
+        try:
+            initialize(conn)
+            rows = fetch_all(
+                conn,
+                "select segment_id from segment_person_overrides where person_id = ?",
+                (person_id,),
+            )
+        finally:
+            conn.close()
+        segment_ids = [str(row["segment_id"]) for row in rows]
+
+    embeddings = get_embeddings(config=config, segment_ids=list(segment_ids))
+    if not embeddings:
+        raise ValueError(f"no embeddings found for person {person_id}")
+    dims = {int(v.shape[0]) for v in embeddings.values()}
+    if len(dims) > 1:
+        raise ValueError(f"inconsistent embedding dim for person {person_id}: {sorted(dims)}")
+
+    normalized = [_normalize(vector) for vector in embeddings.values()]
+    centroid = _normalize(np.mean(normalized, axis=0)).astype(np.float32)
+    dim = int(centroid.shape[0])
+    n_segments = len(embeddings)
+    now = _now()
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into person_voiceprints (person_id, dim, vector, n_segments, updated_at)
+            values (?, ?, ?, ?, ?)
+            on conflict(person_id) do update set
+              dim = excluded.dim, vector = excluded.vector,
+              n_segments = excluded.n_segments, updated_at = excluded.updated_at
+            """,
+            (person_id, dim, centroid.tobytes(), n_segments, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"person_id": person_id, "n_segments": n_segments, "dim": dim}
+
+
+def get_person_centroids(*, config: AppConfig) -> dict[str, np.ndarray]:
+    """Read all enrolled voiceprints as unit-normalized float64 ndarrays keyed by person_id."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(conn, "select person_id, dim, vector from person_voiceprints")
+    finally:
+        conn.close()
+    result: dict[str, np.ndarray] = {}
+    for row in rows:
+        array = np.frombuffer(row["vector"], dtype=np.float32).reshape(int(row["dim"]))
+        result[str(row["person_id"])] = _normalize(array.copy())
+    return result
+
+
+def suggest_people_for_session(*, config: AppConfig, session_id: str) -> dict:
+    """Suggest the nearest enrolled person for each speaker cluster in a session.
+
+    For each distinct ``speaker`` among the session's embedded segments, the cluster's mean
+    (L2-normalized) embedding is matched by cosine to the nearest enrolled person centroid.
+    Returns ``{"suggestions": [{"speaker", "person_id", "person_label", "score"}]}`` sorted by
+    score desc. Clusters with no usable embedding are omitted; if no people are enrolled the
+    suggestion list is empty.
+    """
+    centroids = get_person_centroids(config=config)
+    if not centroids:
+        return {"suggestions": []}
+    person_ids = list(centroids.keys())
+    centroid_matrix = np.vstack([centroids[pid] for pid in person_ids])
+    centroid_dim = int(centroid_matrix.shape[1])
+    person_labels = _person_labels(config=config, person_ids=person_ids)
+
+    scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id)
+    embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+    speakers = _segment_speakers(config=config, segment_ids=scope_ids)
+
+    per_speaker_vectors: dict[str, list[np.ndarray]] = {}
+    for segment_id in scope_ids:
+        vector = embeddings.get(segment_id)
+        speaker = speakers.get(segment_id)
+        if vector is None or speaker is None or int(vector.shape[0]) != centroid_dim:
+            continue
+        per_speaker_vectors.setdefault(speaker, []).append(_normalize(vector))
+
+    suggestions = []
+    for speaker, vectors in per_speaker_vectors.items():
+        cluster_mean = _normalize(np.mean(vectors, axis=0))
+        sims = centroid_matrix @ cluster_mean
+        best = int(np.argmax(sims))
+        best_sim = float(sims[best])
+        if not np.isfinite(best_sim):
+            continue
+        suggestions.append(
+            {
+                "speaker": speaker,
+                "person_id": person_ids[best],
+                "person_label": person_labels.get(person_ids[best], person_ids[best]),
+                "score": round(best_sim, 3),
+            }
+        )
+    suggestions.sort(key=lambda item: item["score"], reverse=True)
+    return {"suggestions": suggestions}
+
+
+def auto_attribute_enrolled(
+    *,
+    config: AppConfig,
+    session_id: str | None = None,
+    day: str | None = None,
+    threshold: float = 0.5,
+) -> dict:
+    """Attribute every in-scope embedded segment to the nearest ENROLLED person centroid.
+
+    Like ``recluster_by_anchors`` but the centroids come from ``get_person_centroids()`` (enrolled
+    voiceprints) rather than ad-hoc anchors. Each in-scope segment is assigned to the person whose
+    centroid it is most cosine-similar to, provided that cosine is >= ``threshold``; otherwise it is
+    left unassigned. Non-finite / dim-mismatched vectors are guarded (skipped) like recluster.
+    Writes only ``segment_person_overrides`` in one transaction. Raises ``ValueError`` if no people
+    are enrolled. Returns ``{"assigned", "unassigned", "total", "per_person", "threshold"}``.
+    """
+    if not (0.0 <= threshold <= 1.0):
+        raise ValueError("threshold must be in [0, 1]")
+    centroids = get_person_centroids(config=config)
+    if not centroids:
+        raise ValueError("no enrolled people to attribute against")
+
+    person_ids = list(centroids.keys())
+    centroid_matrix = np.vstack([centroids[pid] for pid in person_ids])
+    centroid_dim = int(centroid_matrix.shape[1])
+
+    scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id, day=day)
+    embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+    person_labels = _person_labels(config=config, person_ids=person_ids)
+    now = _now()
+
+    assigned = 0
+    per_person: dict[str, int] = {pid: 0 for pid in person_ids}
+    writes: list[tuple[str, str]] = []  # (segment_id, person_id)
+
+    for segment_id in scope_ids:
+        vector = embeddings.get(segment_id)
+        if vector is None or int(vector.shape[0]) != centroid_dim:
+            continue
+        sims = centroid_matrix @ _normalize(vector)
+        best = int(np.argmax(sims))
+        best_sim = float(sims[best])
+        if not np.isfinite(best_sim) or best_sim < threshold:
+            continue
+        assigned_person = person_ids[best]
+        writes.append((segment_id, assigned_person))
+        assigned += 1
+        per_person[assigned_person] = per_person.get(assigned_person, 0) + 1
+
+    total = len(scope_ids)
+    unassigned = total - assigned
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        from personal_context_node.speaker_review import upsert_segment_person_override
+
+        for segment_id, person_id in writes:
+            upsert_segment_person_override(
+                conn,
+                segment_id=segment_id,
+                person_id=person_id,
+                person_label=person_labels.get(person_id, person_id),
+                now=now,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "assigned": assigned,
+        "unassigned": unassigned,
+        "total": total,
+        "per_person": per_person,
+        "threshold": threshold,
+    }
+
+
+def _segment_speakers(*, config: AppConfig, segment_ids: list[str]) -> dict[str, str]:
+    """Per-segment ``speaker`` cluster id, chunked to stay under SQLite's bind-var limit."""
+    if not segment_ids:
+        return {}
+    result: dict[str, str] = {}
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(segment_ids), _SQL_CHUNK):
+            chunk = segment_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = fetch_all(
+                conn,
+                f"select segment_id, speaker from transcript_segments where segment_id in ({placeholders})",
+                tuple(chunk),
+            )
+            for row in rows:
+                result[str(row["segment_id"])] = str(row["speaker"])
+    finally:
+        conn.close()
+    return result
+
+
 # Projection results are deterministic for a given (database, scope, method, size), so cache them:
 # a UMAP fit is a multi-second warmup and the scatter map is hit repeatedly as the UI re-renders.
 _PROJECTION_CACHE: dict[tuple, dict] = {}

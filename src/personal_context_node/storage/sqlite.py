@@ -290,6 +290,14 @@ create table if not exists segment_embeddings (
 
 create index if not exists idx_segment_embeddings_model on segment_embeddings(model);
 
+create table if not exists person_voiceprints (
+  person_id text primary key references persons(person_id),
+  dim integer not null,
+  vector blob not null,
+  n_segments integer not null,
+  updated_at text not null
+);
+
 create table if not exists archive_records (
   archive_record_id text primary key,
   target_type text not null default '',

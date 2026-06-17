@@ -437,6 +437,175 @@ def test_extract_embeddings_returns_false_when_running(tmp_path: Path, monkeypat
     assert blocking.closed is True
 
 
+# ---------------------------------------------------------------------------
+# Slice 5a routes: label-segments / enroll / people / suggest / auto-attribute
+# ---------------------------------------------------------------------------
+
+
+def _enroll_two_clusters(config: AppConfig) -> None:
+    """Seed two persons + two enrolled voiceprints over the labeling day's segments.
+
+    seg_a/seg_b near +x -> Alice; seg_c near +y -> Bob. Uses the public enroll path.
+    """
+    from personal_context_node.speaker_embeddings import enroll_person
+
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_alice", "Alice", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_bob", "Bob", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    put_embedding(config=config, segment_id="seg_a", vector=[1.0, 0.0, 0.0])
+    put_embedding(config=config, segment_id="seg_b", vector=[0.9, 0.1, 0.0])
+    put_embedding(config=config, segment_id="seg_c", vector=[0.0, 1.0, 0.0])
+    enroll_person(config=config, person_id="per_alice", segment_ids=["seg_a", "seg_b"])
+    enroll_person(config=config, person_id="per_bob", segment_ids=["seg_c"])
+
+
+def test_label_segments_route(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_and_segment(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/per_paul/label-segments", json={"segment_ids": ["seg_1"]})
+    assert response.status_code == 200
+    assert response.json() == {"labeled": 1}
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id, person_id, person_label from segment_person_overrides")
+    finally:
+        conn.close()
+    assert rows == [{"segment_id": "seg_1", "person_id": "per_paul", "person_label": "Paul"}]
+
+
+def test_label_segments_unknown_person_404(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_and_segment(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/ghost/label-segments", json={"segment_ids": ["seg_1"]})
+    assert response.status_code == 404
+
+
+def test_label_segments_empty_400(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_and_segment(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/per_paul/label-segments", json={"segment_ids": []})
+    assert response.status_code == 400
+
+
+def test_enroll_person_route(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_alice", "Alice", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    put_embedding(config=config, segment_id="seg_a", vector=[1.0, 0.0, 0.0])
+    put_embedding(config=config, segment_id="seg_b", vector=[0.9, 0.1, 0.0])
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/per_alice/enroll", json={"segment_ids": ["seg_a", "seg_b"]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["person_id"] == "per_alice"
+    assert body["n_segments"] == 2
+    assert body["dim"] == 3
+
+
+def test_enroll_person_no_embeddings_400(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("per_alice", "Alice", "contact", 0, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    # No embeddings stored / no attributed segments -> ValueError -> 400.
+    response = client.post("/api/people/per_alice/enroll", json={})
+    assert response.status_code == 400
+
+
+def test_people_route_lists_enrichment(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _enroll_two_clusters(config)
+    # Attribute two segments to Alice via overrides (attributed_count).
+    from personal_context_node.speaker_embeddings import label_segments_as_person
+
+    label_segments_as_person(config=config, person_id="per_alice", segment_ids=["seg_a", "seg_b"])
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/people")
+    assert response.status_code == 200
+    people = {p["person_id"]: p for p in response.json()["people"]}
+    assert people["per_alice"]["display_name"] == "Alice"
+    assert people["per_alice"]["enrolled"] is True
+    assert people["per_alice"]["attributed_count"] == 2
+    assert people["per_bob"]["enrolled"] is True
+    assert people["per_bob"]["attributed_count"] == 0
+    assert "is_self" in people["per_alice"]
+
+
+def test_suggest_route(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _enroll_two_clusters(config)
+    client = TestClient(create_app(config=config))
+
+    # The labeling day session ses_lab has spk_a (near +x) and spk_b (near +y).
+    response = client.post("/api/speakers/suggest", json={"session_id": "ses_lab"})
+    assert response.status_code == 200
+    by_speaker = {s["speaker"]: s for s in response.json()["suggestions"]}
+    assert by_speaker["spk_a"]["person_id"] == "per_alice"
+    assert by_speaker["spk_b"]["person_id"] == "per_bob"
+
+
+def test_auto_attribute_route(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _enroll_two_clusters(config)
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/auto-attribute", json={"session_id": "ses_lab", "threshold": 0.5})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 3
+    assert body["assigned"] == 3
+    assert body["per_person"] == {"per_alice": 2, "per_bob": 1}
+    assert body["threshold"] == 0.5
+
+
+def test_auto_attribute_no_enrolled_400(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/auto-attribute", json={"session_id": "ses_lab"})
+    assert response.status_code == 400
+
+
 def _insert_labeling_day(database_path: Path) -> None:
     """Seed one session with three active segments (spk_a x2, spk_b x1) plus an inactive one."""
     conn = connect(database_path)
