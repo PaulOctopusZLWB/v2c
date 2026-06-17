@@ -17,8 +17,8 @@
 
 /* ---- per-tab page ---- */
 .tab-page { padding: 20px; overflow-y: auto; min-height: 0; }
-/* A single-column tab (声纹 · 观点 · 设置) caps width so cards don't sprawl. */
-.tab-page.single { display: grid; gap: 18px; max-width: 920px; }
+/* A single-column tab (声纹 · 观点 · 设置) fills the available width. */
+.tab-page.single { display: grid; gap: 18px; }
 /* A two-column tab (录入 · 审核): a nav/main lane plus a secondary lane. */
 .tab-page.two-col {
   display: grid;
@@ -538,7 +538,7 @@
 .badge.badge-noise { color: var(--text-dim); border-color: var(--border-strong); }
 
 /* ---- 声纹 tab layout (toolbar · map | people · collapsible analysis/advanced) ---- */
-.speakers-layout { max-width: 1280px; gap: var(--s5); }
+.speakers-layout { gap: var(--s5); }
 
 /* Toolbar row: title + inspect-day picker + the compact 提取声纹/情绪 control. */
 .speakers-toolbar {
