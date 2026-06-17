@@ -11,6 +11,45 @@ let ctx: AudioContext | null = null;
 let currentSource: AudioBufferSourceNode | null = null;
 let currentEl: HTMLAudioElement | null = null;
 let currentUrl: string | null = null;
+
+// Loudness leveling: recordings vary wildly (one speaker loud, another faint). When on, each clip
+// is peak-normalized to TARGET_PEAK so every utterance is audible without clipping the loud ones.
+// Boost is capped so near-silence isn't amplified into noise. Persisted, default on.
+const TARGET_PEAK = 0.92;
+const MAX_GAIN = 18;
+const LEVELING_KEY = "pcn.audio.leveling";
+let leveling = readLeveling();
+function readLeveling(): boolean {
+  try {
+    return localStorage.getItem(LEVELING_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+export function setLoudnessLeveling(on: boolean): void {
+  leveling = on;
+  try {
+    localStorage.setItem(LEVELING_KEY, on ? "on" : "off");
+  } catch {
+    /* ignore */
+  }
+  listeners.forEach((l) => l());
+}
+export function clipGain(buf: Pick<AudioBuffer, "numberOfChannels" | "getChannelData">): number {
+  if (!leveling) return 1;
+  let peak = 0;
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const data = buf.getChannelData(ch);
+    // Stride large buffers — sampling the peak is plenty and keeps this O(1)-ish per clip.
+    const step = Math.max(1, Math.floor(data.length / 8000));
+    for (let i = 0; i < data.length; i += step) {
+      const a = Math.abs(data[i]);
+      if (a > peak) peak = a;
+    }
+  }
+  if (peak < 1e-4) return 1; // essentially silent — don't amplify noise
+  return Math.min(MAX_GAIN, TARGET_PEAK / peak);
+}
 // Bumped on every play()/stop(); a stale clip's onended/onplay callback checks its token against
 // this and no-ops if it has been superseded (so stopping the old clip never clears the new one).
 let token = 0;
@@ -105,7 +144,10 @@ async function play(segmentId: string): Promise<number[]> {
   if (my !== token) return []; // superseded while decoding
   const src = ctx.createBufferSource();
   src.buffer = decoded;
-  src.connect(ctx.destination);
+  // Peak-normalize via a gain node so quiet speakers are audible (loudness leveling).
+  const gain = ctx.createGain();
+  gain.gain.value = clipGain(decoded);
+  src.connect(gain).connect(ctx.destination);
   currentSource = src;
   src.onended = () => {
     if (my === token) {
@@ -118,15 +160,13 @@ async function play(segmentId: string): Promise<number[]> {
 }
 
 export function useSegmentAudio() {
-  const playing = useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => playingId,
-    () => null,
-  );
-  return { play, stop: stopAudio, playing };
+  const subscribe = (cb: () => void) => {
+    listeners.add(cb);
+    return () => listeners.delete(cb);
+  };
+  const playing = useSyncExternalStore(subscribe, () => playingId, () => null);
+  const levelingOn = useSyncExternalStore(subscribe, () => leveling, () => true);
+  return { play, stop: stopAudio, playing, leveling: levelingOn, setLeveling: setLoudnessLeveling };
 }
 
 /** Reset the shared audio state — for tests, so module state doesn't leak between cases. */

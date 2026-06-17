@@ -163,6 +163,15 @@ export function TranscriptReviewPanel({
       <div className="review-hints num">
         <kbd>j</kbd>/<kbd>k</kbd> 移动 · <kbd>a</kbd> 接受 · <kbd>r</kbd> 拒绝 · <kbd>f</kbd> 存疑 ·{" "}
         <kbd>space</kbd> 播放 · <kbd>?</kbd> 帮助
+        <button
+          type="button"
+          className={`level-toggle${audio.leveling ? " on" : ""}`}
+          aria-pressed={audio.leveling}
+          title="音量均衡:把每段语音归一到可听音量(应对有人声音大、有人声音小)"
+          onClick={() => audio.setLeveling(!audio.leveling)}
+        >
+          🔊 音量均衡 {audio.leveling ? "开" : "关"}
+        </button>
       </div>
 
       {helpOpen ? <ShortcutSheet onClose={() => setHelpOpen(false)} /> : null}

@@ -1,6 +1,11 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useSegmentAudio } from "../hooks/useSegmentAudio";
+import { clipGain, setLoudnessLeveling, useSegmentAudio } from "../hooks/useSegmentAudio";
+
+function fakeBuf(peak: number) {
+  const data = new Float32Array([0, peak, -peak / 2, 0]);
+  return { numberOfChannels: 1, getChannelData: () => data } as unknown as AudioBuffer;
+}
 
 // jsdom has no AudioContext, so the hook uses the <audio> fallback. test-setup stubs
 // HTMLMediaElement.play/pause and URL.createObjectURL.
@@ -46,6 +51,17 @@ describe("useSegmentAudio (exclusive playback)", () => {
       await b.result.current.stop();
     });
     await waitFor(() => expect(a.result.current.playing).toBeNull());
+  });
+
+  it("loudness leveling peak-normalizes quiet clips and leaves silence/loud alone", () => {
+    setLoudnessLeveling(true);
+    expect(clipGain(fakeBuf(0.1))).toBeCloseTo(0.92 / 0.1, 2); // quiet -> boosted toward target peak
+    expect(clipGain(fakeBuf(0.92))).toBeCloseTo(1, 2); // already at target -> ~1x
+    expect(clipGain(fakeBuf(0.00001))).toBe(1); // essentially silent -> no amplification
+    expect(clipGain(fakeBuf(0.01))).toBeLessThanOrEqual(18); // boost capped
+    setLoudnessLeveling(false);
+    expect(clipGain(fakeBuf(0.1))).toBe(1); // disabled -> passthrough
+    setLoudnessLeveling(true);
   });
 
   it("a failed clip does not leave a stuck `playing` state", async () => {
