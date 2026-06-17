@@ -96,6 +96,10 @@ export function App() {
   const [bootstrapped, setBootstrapped] = useState(false);
   // ⌘K command palette (keyboard-driven launcher); closed by default.
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The 对话分析 charts use recharts ResponsiveContainer, which measures 0 width inside a
+  // collapsed <details> (display:none) and never re-measures on expand — so mount them only
+  // once the section is open, when the container has its real (full) width.
+  const [analysisOpen, setAnalysisOpen] = useState(false);
   useHotkeys({ "mod+k": (e) => { e.preventDefault(); setPaletteOpen((v) => !v); } });
   // Global transcript search, driven from the palette: the typed query + its async results.
   const [searchQuery, setSearchQuery] = useState("");
@@ -718,11 +722,18 @@ export function App() {
         </div>
 
         {/* 对话分析 — session analytics, secondary to identity; collapsed by default. */}
-        <details className="speakers-analysis card">
+        <details
+          className="speakers-analysis card"
+          onToggle={(e) => setAnalysisOpen((e.currentTarget as HTMLDetailsElement).open)}
+        >
           <summary>对话分析(发言占比 · 情绪)</summary>
           <div className="speakers-analysis-body">
-            <DynamicsCharts sessionId={selectedSessionId} nonSpeakerLabels={nonSpeakerLabels} />
-            <EmotionCharts sessionId={selectedSessionId} nonSpeakerLabels={nonSpeakerLabels} />
+            {analysisOpen ? (
+              <>
+                <DynamicsCharts sessionId={selectedSessionId} nonSpeakerLabels={nonSpeakerLabels} />
+                <EmotionCharts sessionId={selectedSessionId} nonSpeakerLabels={nonSpeakerLabels} />
+              </>
+            ) : null}
           </div>
         </details>
 
