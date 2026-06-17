@@ -12,13 +12,43 @@ function sortedEntries(counts: Record<string, number>): Array<[string, number]> 
   return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
+/** A label that is a 非发言人 (噪音/多人) bucket, not a real speaker — excluded from emotion stats
+ *  so noise can't masquerade as a speaker. Literal "噪音/多人" is a fallback when no set is wired. */
+function isNoiseLabel(label: string, nonSpeakerLabels?: Set<string>): boolean {
+  return label === "噪音/多人" || (nonSpeakerLabels?.has(label) ?? false);
+}
+
+/** Drop 非发言人 rows from per_speaker and recompute overall+n from the survivors, so the donut
+ *  reflects only real speakers. Returns the distribution unchanged when nothing is filtered. */
+function withoutNoise(data: EmotionDistribution, nonSpeakerLabels?: Set<string>): EmotionDistribution {
+  const perSpeaker = data.per_speaker ?? [];
+  const kept = perSpeaker.filter((sp) => !isNoiseLabel(sp.label, nonSpeakerLabels));
+  if (kept.length === perSpeaker.length) return data;
+  const overall: Record<string, number> = {};
+  let n = 0;
+  for (const sp of kept) {
+    for (const [emo, count] of Object.entries(sp.emotions)) {
+      overall[emo] = (overall[emo] ?? 0) + count;
+      n += count;
+    }
+  }
+  return { overall, per_speaker: kept, n };
+}
+
 /**
  * 情绪 — per-segment acoustic-emotion dashboard for a session: an overall emotion-distribution
  * donut + legend, and per-speaker emotion profiles (mix + dominant). Fetches
  * /api/emotions/distribution on session change. When nothing is extracted yet, surfaces an
  * "提取情绪" trigger that kicks off the background pass and polls status until it completes.
  */
-export function EmotionCharts({ sessionId }: { sessionId: string | null }) {
+export function EmotionCharts({
+  sessionId,
+  nonSpeakerLabels
+}: {
+  sessionId: string | null;
+  /** Labels that are 非发言人 (噪音/多人) buckets — excluded so noise isn't an emotion "speaker". */
+  nonSpeakerLabels?: Set<string>;
+}) {
   const [data, setData] = useState<EmotionDistribution | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +106,9 @@ export function EmotionCharts({ sessionId }: { sessionId: string | null }) {
 
   if (!sessionId) return null;
 
+  // Exclude 非发言人 (噪音/多人) from the donut + per-speaker rows so noise isn't a "speaker".
+  const cleaned = data ? withoutNoise(data, nonSpeakerLabels) : null;
+
   return (
     <section className="emotion">
       <div className="section-title">情绪</div>
@@ -85,7 +118,7 @@ export function EmotionCharts({ sessionId }: { sessionId: string | null }) {
         <div className="emo-card emo-overlay error" role="alert">
           情绪加载失败：{error}
         </div>
-      ) : !data || !data.n || !data.overall ? (
+      ) : !cleaned || !cleaned.n || !cleaned.overall ? (
         <div className="emo-card emo-overlay emo-empty">
           <p>未提取情绪 — 在上方点「提取情绪」</p>
           <button type="button" className="primary" onClick={() => void extract()} disabled={extracting} aria-busy={extracting}>
@@ -94,7 +127,7 @@ export function EmotionCharts({ sessionId }: { sessionId: string | null }) {
           </button>
         </div>
       ) : (
-        <EmotionBody data={data} />
+        <EmotionBody data={cleaned} />
       )}
     </section>
   );

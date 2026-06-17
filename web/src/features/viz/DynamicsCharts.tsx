@@ -17,12 +17,26 @@ function minutesLabel(ms: number): string {
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}分钟`;
 }
 
+/** A label that is a 非发言人 (噪音/多人) bucket, not a real speaker — drop it from analytics so
+ *  noise can't masquerade as a real speaker. Resolved by the parent-supplied set, with a literal
+ *  "噪音/多人" name as a pragmatic fallback when no set is wired. */
+function isNoiseLabel(label: string, nonSpeakerLabels?: Set<string>): boolean {
+  return label === "噪音/多人" || (nonSpeakerLabels?.has(label) ?? false);
+}
+
 /**
  * 对话动态 — per-session conversation-dynamics dashboard: a talk-time donut, a turns bar, a
  * who-spoke-when timeline, and a turn-taking (接力) list. Fetches /api/sessions/{id}/dynamics
  * on session change; recharts charts are lazy-loaded so they code-split.
  */
-export function DynamicsCharts({ sessionId }: { sessionId: string | null }) {
+export function DynamicsCharts({
+  sessionId,
+  nonSpeakerLabels
+}: {
+  sessionId: string | null;
+  /** Labels that are 非发言人 (噪音/多人) buckets — filtered out so noise isn't a "speaker". */
+  nonSpeakerLabels?: Set<string>;
+}) {
   const [data, setData] = useState<SessionDynamics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +68,18 @@ export function DynamicsCharts({ sessionId }: { sessionId: string | null }) {
 
   if (!sessionId) return null;
 
+  // Drop 非发言人 (噪音/多人) labels from every facet so noise never appears as a real speaker.
+  const cleaned = data
+    ? {
+        ...data,
+        speakers: (data.speakers ?? []).filter((s) => !isNoiseLabel(s.label, nonSpeakerLabels)),
+        transitions: (data.transitions ?? []).filter(
+          (t) => !isNoiseLabel(t.from, nonSpeakerLabels) && !isNoiseLabel(t.to, nonSpeakerLabels)
+        ),
+        timeline: (data.timeline ?? []).filter((t) => !isNoiseLabel(t.label, nonSpeakerLabels))
+      }
+    : null;
+
   return (
     <section className="dynamics">
       <div className="section-title">对话动态</div>
@@ -63,10 +89,10 @@ export function DynamicsCharts({ sessionId }: { sessionId: string | null }) {
         <div className="dyn-card dyn-overlay error" role="alert">
           对话动态加载失败：{error}
         </div>
-      ) : !data || !data.speakers || data.speakers.length === 0 ? (
+      ) : !cleaned || !cleaned.speakers || cleaned.speakers.length === 0 ? (
         <div className="dyn-card dyn-overlay">该会话还没有对话动态可分析。</div>
       ) : (
-        <DynamicsBody data={data} />
+        <DynamicsBody data={cleaned} />
       )}
     </section>
   );

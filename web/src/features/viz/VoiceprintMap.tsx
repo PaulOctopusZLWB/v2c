@@ -579,7 +579,9 @@ export function VoiceprintMap({
           >
             <option value="" disabled>选择人物…</option>
             {(people ?? []).map((p) => (
-              <option key={p.person_id} value={p.person_id}>{p.display_name}</option>
+              <option key={p.person_id} value={p.person_id}>
+                {p.person_type === "non_speaker" ? `🔇 ${p.display_name}` : p.display_name}
+              </option>
             ))}
           </select>
           <button

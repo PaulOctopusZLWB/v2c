@@ -646,19 +646,32 @@ export function App() {
     );
   }
 
-  // 声纹 (speakers): voiceprint coverage/anchor/recluster for the selected session, plus the
-  // day-level diarization-cluster merge tool. Scoped to the day/session chosen in 审核.
+  // 声纹 (speakers): the identity workflow is the hero — extract voiceprints, 框选+标注 on the
+  // map, then 全局识别. Layout: a toolbar (inspect-day + 提取声纹/情绪), a 2-column main row
+  // (map | people), then collapsible 对话分析 (Dynamics/Emotion) + 高级 (legacy cluster merge).
   function renderSpeakers() {
     // ONE inspected-day source of truth: the date input is fully controlled by
     // clusterDay (seeded by a day selected in 审核 via selectedDay), and that SAME
-    // derived day drives all four panels so they never disagree.
+    // derived day drives every panel so they never disagree.
     const inspectDay = clusterDay || selectedDay;
+    // 非发言人 (噪音/多人) labels — passed to the analytics charts so noise is filtered out and
+    // can't masquerade as a real speaker.
+    const nonSpeakerLabels = new Set(
+      (people ?? []).filter((p) => p.person_type === "non_speaker").map((p) => p.display_name)
+    );
     return (
-      <div className="tab-page single">
-        <section className="cluster-day card">
-          <div className="section-title">{t.cluster.title}</div>
-          <label className="settings-field">
-            <span>{t.cluster.day}</span>
+      <div className="tab-page single speakers-layout">
+        {/* Toolbar: a short title + the inspect-day picker + the 提取声纹/情绪 control. */}
+        <section className="speakers-toolbar card">
+          <div className="speakers-toolbar-title">
+            <Icon name="mic" />
+            <div>
+              <strong>声纹身份</strong>
+              <span className="muted"> — 在图上框选标注,再点全局识别</span>
+            </div>
+          </div>
+          <label className="speakers-day">
+            <span className="muted">{t.cluster.day}</span>
             <input
               type="date"
               aria-label={t.cluster.day}
@@ -666,44 +679,70 @@ export function App() {
               onChange={(e) => setClusterDay(e.target.value)}
             />
           </label>
+          <div className="speakers-extract">
+            <VoiceprintPanel
+              day={inspectDay}
+              sessionId={selectedSessionId}
+              persons={persons ?? []}
+              onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
+              onPlaybackError={(message) => push("音频播放失败", message)}
+            />
+          </div>
         </section>
-        <VoiceprintMap
-          key={mapKey}
-          sessionId={selectedSessionId}
-          day={inspectDay}
-          onPlaybackError={(message) => push("音频播放失败", message)}
-          people={people ?? []}
-          onLabel={async (personId, segmentIds) => {
-            await api.labelSegments(personId, segmentIds);
-            push(`已标注 ${segmentIds.length} 段`);
-          }}
-          onChanged={onPeopleChanged}
-        />
-        <PeoplePanel
-          sessionId={selectedSessionId}
-          day={inspectDay}
-          onChanged={onPeopleChanged}
-          push={push}
-          pushAction={pushAction}
-        />
-        <DynamicsCharts sessionId={selectedSessionId} />
-        <EmotionCharts sessionId={selectedSessionId} />
-        <VoiceprintPanel
-          day={inspectDay}
-          sessionId={selectedSessionId}
-          persons={persons ?? []}
-          onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
-          onPlaybackError={(message) => push("音频播放失败", message)}
-        />
-        {inspectDay ? (
-          <ClusterPanel
-            key={inspectDay}
-            day={inspectDay}
-            persons={persons ?? []}
-            onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
-            onPlaybackError={(message) => push("音频播放失败", message)}
-          />
-        ) : null}
+
+        {/* Main row: the map (hero) on the left, the labeling/identify controls on the right. */}
+        <div className="speakers-main">
+          <div className="speakers-map">
+            <VoiceprintMap
+              key={mapKey}
+              sessionId={selectedSessionId}
+              day={inspectDay}
+              onPlaybackError={(message) => push("音频播放失败", message)}
+              people={people ?? []}
+              onLabel={async (personId, segmentIds) => {
+                await api.labelSegments(personId, segmentIds);
+                push(`已标注 ${segmentIds.length} 段`);
+              }}
+              onChanged={onPeopleChanged}
+            />
+          </div>
+          <div className="speakers-people">
+            <PeoplePanel
+              sessionId={selectedSessionId}
+              day={inspectDay}
+              onChanged={onPeopleChanged}
+              push={push}
+              pushAction={pushAction}
+            />
+          </div>
+        </div>
+
+        {/* 对话分析 — session analytics, secondary to identity; collapsed by default. */}
+        <details className="speakers-analysis card">
+          <summary>对话分析(发言占比 · 情绪)</summary>
+          <div className="speakers-analysis-body">
+            <DynamicsCharts sessionId={selectedSessionId} nonSpeakerLabels={nonSpeakerLabels} />
+            <EmotionCharts sessionId={selectedSessionId} nonSpeakerLabels={nonSpeakerLabels} />
+          </div>
+        </details>
+
+        {/* 高级 — the legacy day-cluster merge tool; tucked away, collapsed by default. */}
+        <details className="speakers-advanced card">
+          <summary>高级 — 按天聚类合并(旧版)</summary>
+          <div className="speakers-advanced-body">
+            {inspectDay ? (
+              <ClusterPanel
+                key={inspectDay}
+                day={inspectDay}
+                persons={persons ?? []}
+                onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
+                onPlaybackError={(message) => push("音频播放失败", message)}
+              />
+            ) : (
+              <p className="muted">选择一个日期后可使用按天聚类合并。</p>
+            )}
+          </div>
+        </details>
       </div>
     );
   }

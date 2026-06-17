@@ -247,4 +247,63 @@ describe("PeoplePanel", () => {
       expect(JSON.parse(String(create!.init!.body)).display_name).toBe("王芳");
     });
   });
+
+  it("the 全局识别 control carries a one-line '标注后点此重新识别' helper", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    await screen.findByText("韩文巧");
+    expect(screen.getByText(/标注后点此重新识别/)).toBeInTheDocument();
+  });
+
+  // --- 非发言人 (non_speaker / 噪音·多人) class ---
+  it("renders non_speaker people in a separate 非发言人 group WITHOUT a 登记声纹 button", async () => {
+    const withNoise: PersonRow[] = [
+      ...people,
+      { person_id: "per_noise", display_name: "噪音/多人", person_type: "non_speaker", is_self: 0, enrolled: false, attributed_count: 7, manual_count: 2 }
+    ];
+    vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withNoise } }));
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    // The non_speaker person lives in the dedicated 非发言人 group, not the normal roster.
+    const noiseRow = (await screen.findByText("噪音/多人")).closest(".person-row") as HTMLElement;
+    expect(noiseRow.closest(".people-nonspeakers")).toBeTruthy();
+    // No 登记声纹 — they are not a voiceprint identity.
+    expect(within(noiseRow).queryByRole("button", { name: /登记声纹/ })).toBeNull();
+    // Normal people are NOT inside that group.
+    const hanRow = screen.getByText("韩文巧").closest(".person-row") as HTMLElement;
+    expect(hanRow.closest(".people-nonspeakers")).toBeNull();
+  });
+
+  it("'+ 噪音/多人 类别' button creates a non_speaker person when none exists yet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({ "/api/persons": { person_id: "per_noise", display_name: "噪音/多人", person_type: "non_speaker", is_self: 0 } })
+    );
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    await screen.findByText("韩文巧");
+    await userEvent.click(screen.getByRole("button", { name: /噪音\/多人 类别/ }));
+
+    await waitFor(() => {
+      const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
+      const create = calls.find((c) => c.url === "/api/persons" && c.init?.method === "POST");
+      expect(create).toBeTruthy();
+      const body = JSON.parse(String(create!.init!.body));
+      expect(body.display_name).toBe("噪音/多人");
+      expect(body.person_type).toBe("non_speaker");
+    });
+  });
+
+  it("hides the '+ 噪音/多人 类别' button when a non_speaker person already exists", async () => {
+    const withNoise: PersonRow[] = [
+      ...people,
+      { person_id: "per_noise", display_name: "噪音/多人", person_type: "non_speaker", is_self: 0, enrolled: false, attributed_count: 0, manual_count: 0 }
+    ];
+    vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withNoise } }));
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    await screen.findByText("噪音/多人");
+    expect(screen.queryByRole("button", { name: /\+ 噪音\/多人 类别/ })).toBeNull();
+  });
 });

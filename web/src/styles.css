@@ -523,6 +523,76 @@
 .ghost.ghost-sm { font-size: 12px; padding: 3px 9px; opacity: .85; }
 .ghost.ghost-sm:disabled { opacity: .45; }
 
+/* One-line helper next to 全局识别: "标注后点此重新识别(无需训练,即时生效)". */
+.people-auto-helper { font-size: 11.5px; line-height: 1.5; flex-basis: 100%; }
+
+/* 非发言人 (噪音/多人) group — a muted bucket below the real roster. */
+.people-nonspeakers { border-top: 1px solid var(--border); padding-top: var(--s4); display: grid; gap: var(--s3); }
+.people-nonspeakers-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.people-nonspeaker-hint { font-size: 12px; line-height: 1.5; margin: 0; }
+.person-nonspeaker .chip.chip-noise {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--panel-2); color: var(--text-2);
+  border: 1px dashed var(--border-strong);
+}
+.badge.badge-noise { color: var(--text-dim); border-color: var(--border-strong); }
+
+/* ---- 声纹 tab layout (toolbar · map | people · collapsible analysis/advanced) ---- */
+.speakers-layout { max-width: 1280px; gap: var(--s5); }
+
+/* Toolbar row: title + inspect-day picker + the compact 提取声纹/情绪 control. */
+.speakers-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s5);
+}
+.speakers-toolbar-title { display: flex; align-items: center; gap: var(--s3); font-size: 13px; }
+.speakers-toolbar-title .icon { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.speakers-toolbar-title strong { font-size: 14px; }
+.speakers-day { display: flex; align-items: center; gap: var(--s2); font-size: 12px; }
+.speakers-extract { margin-left: auto; min-width: 0; }
+/* The lifted VoiceprintPanel sits as a compact toolbar item, not a full card. */
+.speakers-extract .voiceprint-panel { background: transparent; border: 0; padding: 0; box-shadow: none; }
+.speakers-extract .voiceprint-panel .vp-section + .vp-section { display: none; } /* toolbar shows only coverage/extract */
+.speakers-extract .voiceprint-panel .vp-section { margin: 0; }
+.speakers-extract .voiceprint-panel .section-title { margin: 0 0 var(--s2); }
+
+/* Main row: the map (hero) beside the labeling/identify controls; stacks on narrow screens. */
+.speakers-main {
+  display: grid; gap: var(--s5);
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+  align-items: start;
+}
+.speakers-map, .speakers-people { min-width: 0; }
+/* Let the hero map breathe with a taller stage. */
+.speakers-map .vmap-stage { min-height: 460px; }
+@media (max-width: 1024px) {
+  .speakers-main { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Collapsible 对话分析 + 高级 sections — tucked away, default collapsed. */
+.speakers-analysis > summary,
+.speakers-advanced > summary {
+  cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text);
+  list-style: none; display: flex; align-items: center; gap: var(--s2);
+}
+.speakers-analysis > summary::before,
+.speakers-advanced > summary::before {
+  content: "▸"; color: var(--text-dim); transition: transform .12s;
+}
+.speakers-analysis[open] > summary::before,
+.speakers-advanced[open] > summary::before { transform: rotate(90deg); }
+.speakers-analysis > summary::-webkit-details-marker,
+.speakers-advanced > summary::-webkit-details-marker { display: none; }
+.speakers-advanced > summary { color: var(--text-2); font-weight: 500; }
+.speakers-analysis-body { display: grid; gap: var(--s6); margin-top: var(--s4); }
+.speakers-advanced-body { margin-top: var(--s4); }
+@media (min-width: 1100px) {
+  /* On wide screens, the two analytics dashboards sit side by side. */
+  .speakers-analysis-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+}
+/* Inside the analysis section the two dashboards already self-space; drop their stray margins. */
+.speakers-analysis-body .dynamics,
+.speakers-analysis-body .emotion { margin-top: 0; }
+
 /* 对话动态 — premium dark dashboard of talk-share / turns / timeline / turn-taking, consistent
    with the voiceprint map cards. */
 .dynamics { margin-top: var(--s6); }

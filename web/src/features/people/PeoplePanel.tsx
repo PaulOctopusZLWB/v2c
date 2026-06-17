@@ -64,6 +64,18 @@ export function PeoplePanel({
     await load();
   });
 
+  // One-tap 噪音/多人 bucket: create a ready-to-use non_speaker person so the user can box-select
+  // messy points on the map and mark them noise. Only offered when no non_speaker exists yet.
+  const createNonSpeaker = useAsyncAction(async () => {
+    try {
+      await api.createPerson("噪音/多人", "non_speaker");
+      push("已创建「噪音/多人」类别");
+      await refresh();
+    } catch (err) {
+      push("创建失败", err instanceof Error ? err.message : undefined);
+    }
+  });
+
   // Delete an accidental duplicate person: confirm, cascade-delete on the backend, then reload
   // the roster + recolor the map. Never offered for 本人 (is_self) — the button is hidden for them.
   const remove = useAsyncAction(async (p: PersonRow) => {
@@ -147,6 +159,27 @@ export function PeoplePanel({
     }
   });
 
+  // Split the roster: real voiceprint identities vs. the 非发言人 (噪音/多人/无效) buckets, which
+  // are labelable but NOT a voiceprint (no 登记声纹, rendered in a muted group at the bottom).
+  const speakers = people.filter((p) => p.person_type !== "non_speaker");
+  const nonSpeakers = people.filter((p) => p.person_type === "non_speaker");
+  const hasNonSpeaker = nonSpeakers.length > 0;
+
+  // The delete affordance for a person (shared by both groups) — never offered for 本人 (is_self).
+  const deleteButton = (p: PersonRow) =>
+    p.is_self ? null : (
+      <button
+        className="ghost ghost-sm person-delete"
+        onClick={() => void remove.run(p)}
+        disabled={remove.pending}
+        aria-busy={remove.pending}
+        title="删除该人物(其声纹与归属将被清除)"
+      >
+        {remove.pending ? <span className="spinner" aria-hidden /> : <Icon name="trash" />}
+        删除
+      </button>
+    );
+
   return (
     <section className="people-panel card">
       <div className="section-title">
@@ -159,7 +192,7 @@ export function PeoplePanel({
       {loadError ? <p className="muted" role="alert">{loadError}</p> : null}
 
       <ul className="people-list" role="list">
-        {people.map((p) => (
+        {speakers.map((p) => (
           <li className="person-row" key={p.person_id} role="listitem">
             <span className="chip" style={{ background: speakerColor(p.person_id) }}>
               <Icon name="person" /> {p.display_name}
@@ -188,23 +221,51 @@ export function PeoplePanel({
               {enroll.pending ? <span className="spinner" aria-hidden /> : <Icon name="mic" />}
               {p.enrolled ? "重新登记声纹" : "登记声纹"}
             </button>
-            {/* Delete a duplicate person — never offered for 本人 (is_self). */}
-            {p.is_self ? null : (
-              <button
-                className="ghost ghost-sm person-delete"
-                onClick={() => void remove.run(p)}
-                disabled={remove.pending}
-                aria-busy={remove.pending}
-                title="删除该人物(其声纹与归属将被清除)"
-              >
-                {remove.pending ? <span className="spinner" aria-hidden /> : <Icon name="trash" />}
-                删除
-              </button>
-            )}
+            {deleteButton(p)}
           </li>
         ))}
         {people.length === 0 && !loadError ? <li className="muted">暂无人物</li> : null}
       </ul>
+
+      {/* 非发言人 (噪音/多人/无效): labelable buckets, NOT voiceprint identities — no 登记声纹.
+          A one-tap "+ 噪音/多人 类别" seeds the first bucket when none exists yet. */}
+      <div className="people-nonspeakers">
+        <div className="people-nonspeakers-head">
+          <span className="section-subtitle">非发言人(噪音/多人)</span>
+          {hasNonSpeaker ? null : (
+            <button
+              className="ghost ghost-sm"
+              onClick={() => void createNonSpeaker.run()}
+              disabled={createNonSpeaker.pending}
+              aria-busy={createNonSpeaker.pending}
+              title="新建一个「噪音/多人」类别,用于在图上把杂乱的点标为噪音"
+            >
+              {createNonSpeaker.pending ? <span className="spinner" aria-hidden /> : <Icon name="person" />}
+              + 噪音/多人 类别
+            </button>
+          )}
+        </div>
+        {hasNonSpeaker ? (
+          <ul className="people-list people-nonspeaker-list" role="list">
+            {nonSpeakers.map((p) => (
+              <li className="person-row person-nonspeaker" key={p.person_id} role="listitem">
+                <span className="chip chip-noise" title="非发言人(噪音/多人)">
+                  <span aria-hidden>🔇</span> {p.display_name}
+                </span>
+                <span className="badge badge-noise">非发言人</span>
+                <span className="person-count muted" title="已归 = 标为噪音/多人的片段数">
+                  已归 <span className="num">{p.attributed_count}</span> 段
+                </span>
+                {deleteButton(p)}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted people-nonspeaker-hint">
+            把噪音、多人重叠或无效的片段框选后标到这里,它们就不会冒充真实发言人。
+          </p>
+        )}
+      </div>
 
       <div className="people-add">
         <input
@@ -271,6 +332,7 @@ export function PeoplePanel({
       <div className="people-auto">
         <div className="people-auto-head">
           <span className="section-subtitle">全局识别(按声纹)</span>
+          <span className="people-auto-helper muted">标注后点此重新识别(无需训练,即时生效)</span>
           <div className="people-scope" role="radiogroup" aria-label="识别范围">
             <span className="muted">范围:</span>
             <button
