@@ -6,12 +6,16 @@ import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { Icon } from "../../components/Icon";
 
 /**
- * 人物 — "People taught once". Lists every person with their voiceprint enrollment + how many
- * segments are attributed to them, and turns the voiceprint map into a teaching surface:
- *  - 登记声纹 (enroll): freeze a person's currently-attributed segments into a centroid.
+ * 人物 — the supervised-identity surface. The voiceprint (not the diarizer's unreliable spk_NN)
+ * is the global identity signal, so the loop is: label a few segments as a person (ground truth) →
+ * 全局识别 propagates that voiceprint to every segment in every session → each person stays
+ * consistent across sessions, and the more you label, the sharper the boundary.
  *  - 智能建议 (suggest): for the selected session, score each diarization cluster against the
  *    enrolled centroids; one tap (采用) labels that whole cluster's segments as the person.
- *  - 自动归人 (auto-attribute): label every in-scope segment whose voiceprint clears a threshold.
+ *  - 登记声纹 (enroll): mostly automatic now (labeling auto-enrolls). Re-freezes the centroid from
+ *    a person's manual labels — disabled until they have at least one manual label.
+ *  - 全局识别 (auto-attribute): re-enroll everyone from their manual labels, then assign every
+ *    non-manual segment to the nearest person voiceprint ≥ threshold, never overwriting manuals.
  * Every mutation calls onChanged() so the map (and its colours) refetch.
  */
 export function PeoplePanel({
@@ -32,6 +36,8 @@ export function PeoplePanel({
   const [newName, setNewName] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
   const [threshold, setThreshold] = useState(0.6);
+  // Identity scope: 全部 (global, cross-session — the default and the whole point) vs 本会话.
+  const [scope, setScope] = useState<"all" | "session">("all");
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -64,7 +70,10 @@ export function PeoplePanel({
       push(`已登记 ${res.n_segments} 段声纹`);
       await refresh();
     } catch (err) {
-      push("登记失败", err instanceof Error ? err.message : undefined);
+      // Defensive: enroll 400s when the person has 0 manual labels (the button is normally
+      // disabled in that case, but surface a clear hint if it slips through).
+      const msg = err instanceof Error ? err.message : undefined;
+      push("登记失败", msg?.includes("400") ? "该人物还没有手动标注的片段,先标注几段再登记" : msg);
     }
   });
 
@@ -98,20 +107,30 @@ export function PeoplePanel({
     }
   });
 
+  // 全局识别 — re-enroll everyone from their manual labels, then assign every non-manual segment
+  // to the nearest person voiceprint ≥ threshold (manual labels are never overwritten). Default
+  // scope 全部 runs over ALL sessions (the consistent cross-session identity); 本会话 scopes it.
   const autoAttribute = useAsyncAction(async () => {
+    const useSession = scope === "session" && !!sessionId;
     try {
-      const res = await api.autoAttribute({ session_id: sessionId ?? null, day: sessionId ? null : day ?? null, threshold });
+      const res = await api.autoAttribute({
+        session_id: useSession ? sessionId : null,
+        day: null,
+        threshold
+      });
       const dist = Object.entries(res.per_person)
         .map(([id, n]) => `${people.find((p) => p.person_id === id)?.display_name ?? id} ${n}`)
         .join(" · ");
       pushAction(
-        `已归人 ${res.assigned}/${res.total}(未定 ${res.unassigned})`,
+        `已识别 ${res.assigned}/${res.total} 段(未定 ${res.unassigned})`,
         "查看",
-        () => push("归人分布", dist || "无")
+        () => push("识别分布", dist || "无")
       );
       await refresh();
     } catch (err) {
-      push("自动归人失败", err instanceof Error ? err.message : undefined);
+      // The backend 400s with "no enrolled people" when nobody is enrolled — map to a friendly hint.
+      const msg = err instanceof Error ? err.message : undefined;
+      push("全局识别失败", msg?.includes("400") ? "请先标注并登记至少一个人物的声纹" : msg);
     }
   });
 
@@ -120,6 +139,9 @@ export function PeoplePanel({
       <div className="section-title">
         <Icon name="person" /> 人物 — 教一次,处处认得
       </div>
+      <p className="people-explainer muted">
+        标注几段是谁 → 全局识别 → 每个人在所有会话里一致;标得越多,边界越准。
+      </p>
 
       {loadError ? <p className="muted" role="alert">{loadError}</p> : null}
 
@@ -135,15 +157,20 @@ export function PeoplePanel({
                 <Icon name="check_circle" /> 已登记
               </span>
             ) : null}
-            <span className="person-count muted">
-              已归 <span className="num">{p.attributed_count}</span> 段
+            <span className="person-count muted" title="已标注 = 你确认的样本;已归 = 手动 + 声纹自动归段">
+              已标注 <span className="num">{p.manual_count}</span> · 已归{" "}
+              <span className="num">{p.attributed_count}</span> 段
             </span>
             <button
-              className="ghost"
+              className="ghost ghost-sm"
               onClick={() => void enroll.run(p.person_id)}
-              disabled={enroll.pending}
+              disabled={enroll.pending || p.manual_count === 0}
               aria-busy={enroll.pending}
-              title="将该人物当前已归段落冻结为声纹中心"
+              title={
+                p.manual_count === 0
+                  ? "先在声纹图上框选并标注 TA 的片段(或用智能建议)"
+                  : "从该人物的手动标注片段重新冻结声纹中心(标注时已自动登记)"
+              }
             >
               {enroll.pending ? <span className="spinner" aria-hidden /> : <Icon name="mic" />}
               {p.enrolled ? "重新登记声纹" : "登记声纹"}
@@ -214,31 +241,60 @@ export function PeoplePanel({
         )}
       </div>
 
-      {/* One-tap auto-attribution across the current scope. */}
+      {/* 全局识别 — assign every segment to the nearest enrolled voiceprint, manual labels kept. */}
       <div className="people-auto">
-        <div className="people-threshold">
-          <label htmlFor="people-threshold">归人阈值</label>
-          <input
-            id="people-threshold"
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={threshold}
-            onChange={(e) => setThreshold(Number(e.target.value))}
-          />
-          <span className="num">{threshold.toFixed(2)}</span>
+        <div className="people-auto-head">
+          <span className="section-subtitle">全局识别(按声纹)</span>
+          <div className="people-scope" role="radiogroup" aria-label="识别范围">
+            <span className="muted">范围:</span>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={scope === "all"}
+              className={`scope-btn${scope === "all" ? " active" : ""}`}
+              onClick={() => setScope("all")}
+              title="对所有会话统一识别(跨会话一致)"
+            >
+              全部
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={scope === "session"}
+              className={`scope-btn${scope === "session" ? " active" : ""}`}
+              onClick={() => setScope("session")}
+              disabled={!sessionId}
+              title={sessionId ? "仅对当前选中的会话识别" : "请先选择一个会话"}
+            >
+              本会话
+            </button>
+          </div>
         </div>
-        <button
-          className="primary"
-          onClick={() => void autoAttribute.run()}
-          disabled={autoAttribute.pending}
-          aria-busy={autoAttribute.pending}
-          title="将范围内每个相似度达标的声纹自动归到对应人物"
-        >
-          {autoAttribute.pending ? <span className="spinner" aria-hidden /> : <Icon name="refresh" />}
-          {autoAttribute.pending ? "正在归人…" : "自动归人(≥阈值)"}
-        </button>
+        <div className="people-auto-controls">
+          <div className="people-threshold">
+            <label htmlFor="people-threshold">归人阈值</label>
+            <input
+              id="people-threshold"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+            />
+            <span className="num">{threshold.toFixed(2)}</span>
+          </div>
+          <button
+            className="primary"
+            onClick={() => void autoAttribute.run()}
+            disabled={autoAttribute.pending}
+            aria-busy={autoAttribute.pending}
+            title="把每个片段归到声纹最相近的已登记人物(相似度需达阈值),你的手动标注始终保留"
+          >
+            {autoAttribute.pending ? <span className="spinner" aria-hidden /> : <Icon name="refresh" />}
+            {autoAttribute.pending ? "正在识别…" : "全局识别(按声纹)"}
+          </button>
+        </div>
       </div>
     </section>
   );

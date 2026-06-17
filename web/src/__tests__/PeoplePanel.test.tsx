@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PeoplePanel } from "../features/people/PeoplePanel";
 import type { PersonRow } from "../api/types";
 
@@ -33,31 +33,44 @@ describe("PeoplePanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders people with an enrolled badge and attributed count", async () => {
+  it("renders people with an enrolled badge plus manual + attributed counts", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
     expect(await screen.findByText("韩文巧")).toBeInTheDocument();
     expect(screen.getByText("李雷")).toBeInTheDocument();
-    // enrolled person shows the ✓ badge + its attributed count; the un-enrolled one does not.
+    // enrolled person shows the ✓ badge + both its manual (ground-truth) and attributed counts.
     const hanRow = screen.getByText("韩文巧").closest(".person-row") as HTMLElement;
     expect(hanRow.querySelector(".person-enrolled")).toBeTruthy();
-    expect(hanRow.textContent).toContain("12");
+    expect(hanRow.textContent).toContain("4"); // manual_count
+    expect(hanRow.textContent).toContain("12"); // attributed_count
     const leiRow = screen.getByText("李雷").closest(".person-row") as HTMLElement;
     expect(leiRow.querySelector(".person-enrolled")).toBeFalsy();
   });
 
-  it("clicking 登记声纹 calls enrollPerson for that person", async () => {
-    vi.stubGlobal("fetch", mockFetch({ "/api/people/per_b/enroll": { person_id: "per_b", n_segments: 8, dim: 192 } }));
+  it("disables 登记声纹 for a person with no manual labels, enables it when labelled", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    // 李雷 has manual_count 0 → can't enroll (the 400 the user hit). Button is disabled.
+    const leiRow = (await screen.findByText("李雷")).closest(".person-row") as HTMLElement;
+    expect(within(leiRow).getByRole("button", { name: /登记声纹/ })).toBeDisabled();
+    // 韩文巧 has manual_count 4 → enroll button is enabled.
+    const hanRow = screen.getByText("韩文巧").closest(".person-row") as HTMLElement;
+    expect(within(hanRow).getByRole("button", { name: /登记声纹/ })).not.toBeDisabled();
+  });
+
+  it("clicking 登记声纹 calls enrollPerson for a labelled person", async () => {
+    vi.stubGlobal("fetch", mockFetch({ "/api/people/per_a/enroll": { person_id: "per_a", n_segments: 8, dim: 192 } }));
     const onChanged = vi.fn();
     render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
 
-    const leiRow = (await screen.findByText("李雷")).closest(".person-row") as HTMLElement;
-    await userEvent.click(within(leiRow).getByRole("button", { name: /登记声纹/ }));
+    const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
+    await userEvent.click(within(hanRow).getByRole("button", { name: /登记声纹/ }));
 
     await waitFor(() => {
       const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
-      const enroll = calls.find((c) => String(c[0]) === "/api/people/per_b/enroll");
+      const enroll = calls.find((c) => String(c[0]) === "/api/people/per_a/enroll");
       expect(enroll).toBeTruthy();
       expect((enroll![1] as RequestInit).method).toBe("POST");
     });
@@ -124,7 +137,7 @@ describe("PeoplePanel", () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
-  it("自动归人 calls auto-attribute scoped to the session", async () => {
+  it("全局识别 defaults to scope 全部 → calls auto-attribute with session_id null (global)", async () => {
     vi.stubGlobal(
       "fetch",
       mockFetch({
@@ -132,10 +145,36 @@ describe("PeoplePanel", () => {
       })
     );
     const onChanged = vi.fn();
+    // even with a session selected, the default scope is 全部 (cross-session identity).
     render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
 
     await screen.findByText("韩文巧");
-    await userEvent.click(screen.getByRole("button", { name: /自动归人/ }));
+    await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
+
+    await waitFor(() => {
+      const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
+      const auto = calls.find((c) => c.url === "/api/people/auto-attribute");
+      expect(auto).toBeTruthy();
+      const sent = JSON.parse(String(auto!.init!.body));
+      expect(sent.session_id).toBeNull();
+      expect(sent.day).toBeNull();
+    });
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("switching 全局识别 scope to 本会话 passes the selected session_id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        "/api/people/auto-attribute": { assigned: 5, unassigned: 1, total: 6, per_person: { per_a: 5 }, threshold: 0.6 }
+      })
+    );
+    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    await screen.findByText("韩文巧");
+    // flip the scope to 本会话, then run.
+    await userEvent.click(screen.getByRole("radio", { name: /本会话/ }));
+    await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
 
     await waitFor(() => {
       const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
@@ -143,7 +182,6 @@ describe("PeoplePanel", () => {
       expect(auto).toBeTruthy();
       expect(JSON.parse(String(auto!.init!.body)).session_id).toBe("ses_1");
     });
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
   it("新建人物 creates a person then reloads the list", async () => {
