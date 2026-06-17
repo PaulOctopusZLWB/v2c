@@ -194,6 +194,7 @@
 .voiceprint-panel { display: grid; gap: 18px; }
 .vp-section { display: grid; gap: 8px; }
 .vp-coverage { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.vp-coverage-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vp-seg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .vp-seg {
   display: grid;

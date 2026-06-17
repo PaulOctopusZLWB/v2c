@@ -737,6 +737,8 @@ export function App() {
               persons={persons ?? []}
               onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
               onPlaybackError={(message) => push("音频播放失败", message)}
+              push={push}
+              onMatched={onPeopleChanged}
             />
           </div>
         </section>

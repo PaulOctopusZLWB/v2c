@@ -18,14 +18,23 @@ export function VoiceprintPanel({
   sessionId,
   persons,
   onCreatePerson,
-  onPlaybackError
+  onPlaybackError,
+  push,
+  onMatched
 }: {
   day?: string | null;
   sessionId?: string | null;
   persons: Person[];
   onCreatePerson?: (name: string) => Promise<unknown> | void;
   onPlaybackError?: (message: string) => void;
+  /** Toast sink (title + optional message) — used for the auto-match outcome / hints. */
+  push?: (title: string, message?: string) => void;
+  /** Called after a successful auto-match so the parent can refresh people + recolor the map. */
+  onMatched?: () => void;
 }) {
+  // Auto-match to existing people is scoped exactly like 全局识别: a session if one is selected,
+  // else the inspected day (never both). Keeps cross-session identity consistent.
+  const matchScope = { session_id: sessionId ?? null, day: sessionId ? null : (day ?? null), threshold: 0.5 };
   const scope = { session_id: sessionId ?? null, day: day ?? null };
   const audio = useSegmentAudio();
 
@@ -51,6 +60,26 @@ export function VoiceprintPanel({
   // Stop polling on unmount or scope change.
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, [sessionId, day]);
 
+  // --- auto-match new voiceprints to existing people ---
+  // After embeddings exist, attribute every in-scope (non-manual) segment to the nearest enrolled
+  // person voiceprint ≥ threshold. Shared by the post-extract automatic pass and the manual button.
+  // Resolved once per extraction (guarded by being awaited inside extract.run, not the poll tick).
+  async function runAutoMatch() {
+    try {
+      const res = await api.autoAttribute(matchScope);
+      push?.(`已自动匹配 ${res.assigned}/${res.total} 段到已有人物(未定 ${res.unassigned})`);
+      onMatched?.();
+    } catch (err) {
+      // The backend 400s when nobody is labeled/enrolled yet — that's not an error, just a nudge.
+      // (request() surfaces only the status code, so match on "400" like the People panel does.)
+      const msg = err instanceof Error ? err.message : undefined;
+      if (msg?.includes("400")) push?.("先标注一些人物,之后提取会自动匹配");
+      else push?.("自动匹配失败", msg);
+    }
+  }
+
+  const match = useAsyncAction(runAutoMatch);
+
   const extract = useAsyncAction(async () => {
     await api.extractEmbeddings(scope);
     // Poll coverage every ~2s until nothing is pending; resolve only when done so the
@@ -73,6 +102,8 @@ export function VoiceprintPanel({
         }
       }, 2000);
     });
+    // The extraction pass finished — run the auto-match ONCE (we're past the poll, not on a tick).
+    await runAutoMatch();
   });
 
   // --- 2. anchors ---
@@ -142,15 +173,29 @@ export function VoiceprintPanel({
             已提取 <span className="num">{status?.embedded ?? 0}</span>/<span className="num">{status?.total ?? 0}</span>
             {status && status.pending > 0 ? <span className="muted"> · 待提取 {status.pending}</span> : null}
           </span>
-          <button
-            className="primary"
-            onClick={() => void extract.run()}
-            disabled={extract.pending}
-            aria-busy={extract.pending}
-          >
-            {extract.pending ? <span className="spinner" aria-hidden /> : <Icon name="mic" />}
-            {extract.pending ? "正在提取…" : "提取声纹"}
-          </button>
+          <div className="vp-coverage-actions">
+            <button
+              className="primary"
+              onClick={() => void extract.run()}
+              disabled={extract.pending}
+              aria-busy={extract.pending}
+            >
+              {extract.pending ? <span className="spinner" aria-hidden /> : <Icon name="mic" />}
+              {extract.pending ? "正在提取…" : "提取声纹"}
+            </button>
+            {/* Manual re-match: attribute this scope's existing voiceprints to known people on demand
+                (提取声纹 already does this automatically when it finishes). */}
+            <button
+              className="ghost"
+              onClick={() => void match.run()}
+              disabled={extract.pending || match.pending}
+              aria-busy={match.pending}
+              title="把本范围已提取的声纹归到最相近的已有人物(你的手动标注始终保留)"
+            >
+              {match.pending ? <span className="spinner" aria-hidden /> : <Icon name="person" />}
+              {match.pending ? "正在匹配…" : "匹配到已有人物"}
+            </button>
+          </div>
         </div>
       </div>
 
