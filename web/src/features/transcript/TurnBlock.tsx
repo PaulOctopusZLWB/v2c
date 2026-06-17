@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { Person, ReviewStatus, TranscriptSegment } from "../../api/types";
 import type { Turn } from "../../lib/turns";
 import { clockOfDay } from "../../lib/format";
@@ -16,15 +17,23 @@ export function TurnBlock({
   turn,
   onBatchReview,
   onPlaybackError,
-  highlightedSegmentId
+  highlightedSegmentId,
+  focused
 }: {
   turn: Turn;
   persons: Person[];
   onBatchReview: (segment_ids: string[], status: ReviewStatus) => Promise<unknown> | void;
   onPlaybackError?: (message: string) => void;
   highlightedSegmentId?: string;
+  /** When true this turn carries the keyboard focus ring and is scrolled into view. */
+  focused?: boolean;
 }) {
   const audio = useSegmentAudio();
+  // Bring the turn into view whenever it gains the keyboard focus ring (j/k navigation).
+  const articleRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focused) articleRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [focused]);
   const review = useAsyncAction(async (status: ReviewStatus) => { await onBatchReview(turn.segment_ids, status); });
 
   const accepted = turn.segments.filter((s) => s.review_status === "accepted").length;
@@ -42,7 +51,11 @@ export function TurnBlock({
   );
 
   return (
-    <article className="turn" style={{ borderLeftColor: speakerColor(turn.speaker) }}>
+    <article
+      ref={articleRef}
+      className={`turn${focused ? " focused" : ""}`}
+      style={{ borderLeftColor: speakerColor(turn.speaker) }}
+    >
       <header className="turn-head">
         <span className="chip" style={{ background: speakerColor(turn.speaker) }}>
           <Icon name="person" /> {turn.speaker}

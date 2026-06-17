@@ -12,7 +12,8 @@ export function eventToCombo(e: KeyboardEvent): string {
   if (e.altKey) parts.push("alt");
   if (e.shiftKey) parts.push("shift");
   // Named keys (Escape, Enter, …) come through `key` as a word; letters/symbols as the char.
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase();
+  // Space arrives as " " — name it so callers can bind the readable token "space".
+  const key = e.key === " " ? "space" : e.key.toLowerCase();
   parts.push(key);
   return parts.join("+");
 }

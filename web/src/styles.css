@@ -71,6 +71,67 @@
 .turn-text .evi.hl { background: color-mix(in srgb, var(--warn) 25%, transparent); }
 .turn-actions { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
 
+/* Keyboard focus ring: a bright accent left-border + faint inset glow so the focused
+   turn reads at a glance during j/k triage. */
+.turn.focused {
+  border-left-color: var(--accent) !important;
+  border-left-width: 3px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
+  border-radius: var(--r1);
+}
+
+/* Slim persistent shortcut hint bar pinned at the bottom of the review panel. */
+.review-hints {
+  position: sticky;
+  bottom: 0;
+  margin-top: 16px;
+  padding: 8px 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.review-hints kbd, .shortcut-sheet kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r1);
+  padding: 1px 5px;
+}
+
+/* ---- shortcut help sheet (?) ---- */
+.shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 8, 14, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: cmdk-fade 0.12s ease-out;
+}
+.shortcut-sheet {
+  width: min(360px, calc(100vw - 32px));
+  background: var(--elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r3);
+  box-shadow: var(--shadow), 0 0 0 1px var(--accent-glow);
+  padding: 18px 20px;
+  animation: cmdk-pop 0.13s ease-out;
+}
+.shortcut-sheet h3 { margin: 0 0 12px; font-size: 14px; color: var(--text); }
+.shortcut-list { margin: 0; display: grid; gap: 8px; }
+.shortcut-row { display: flex; align-items: center; gap: 12px; }
+.shortcut-row dt { flex: 0 0 84px; margin: 0; }
+.shortcut-row dd { margin: 0; color: var(--text-2); font-size: 13px; }
+.shortcut-foot { margin: 14px 0 0; font-size: 11px; }
+
 .segment-list { display: grid; gap: 8px; }
 .segment-row {
   display: grid;
