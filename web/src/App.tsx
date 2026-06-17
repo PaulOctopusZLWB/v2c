@@ -23,7 +23,7 @@ import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
 import { taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, TaskRow, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, ReviewStatus, TaskRow, TranscriptSession } from "./api/types";
 
 const DEVICE_POLL_MS = 5000;
 const ACTIVE_STATUSES = ["pending", "claimed", "running"];
@@ -45,7 +45,7 @@ function stageBreakdownFromSummary(
 export function App() {
   const { summary, worker_running, import_progress } = usePipelineStatus();
   const { tab, setTab } = useTab();
-  const { toasts, push, dismiss } = useToasts();
+  const { toasts, push, pushAction, dismiss } = useToasts();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [days, setDays] = useState<Array<{ day: string; session_count: number }>>([]);
@@ -182,6 +182,103 @@ export function App() {
 
   async function reloadSession() {
     if (selectedSessionId) setSession(await api.session(selectedSessionId));
+  }
+
+  // Patch the given segments' review_status in local session state, leaving everything else
+  // untouched. Pure functional update so React sees a new object and TurnBlock re-renders.
+  function patchSegmentStatuses(updates: Map<string, ReviewStatus>) {
+    setSession((prev) =>
+      prev
+        ? {
+            ...prev,
+            segments: prev.segments.map((seg) =>
+              updates.has(seg.segment_id) ? { ...seg, review_status: updates.get(seg.segment_id)! } : seg
+            )
+          }
+        : prev
+    );
+  }
+
+  // Restore each segment to a remembered prior status: those that were 'pending_review' get
+  // their review row CLEARED (api.clearReview), the rest re-batched per their prior status.
+  // Used by the Undo affordance on accept/reject/needs_fix.
+  async function restorePriorStatuses(prior: Map<string, ReviewStatus>) {
+    const byStatus = new Map<ReviewStatus, string[]>();
+    for (const [id, status] of prior) {
+      const bucket = byStatus.get(status) ?? [];
+      bucket.push(id);
+      byStatus.set(status, bucket);
+    }
+    for (const [status, ids] of byStatus) {
+      if (status === "pending_review") await api.clearReview(ids);
+      else await api.batchReview(ids, status);
+    }
+  }
+
+  // OPTIMISTIC batch review: flip local state immediately (no refetch first), call the API,
+  // then offer an Undo toast. On API failure, roll the local state back.
+  async function handleBatchReview(segment_ids: string[], status: ReviewStatus) {
+    if (!session || segment_ids.length === 0) return;
+    // Snapshot each affected segment's PREVIOUS status so Undo / rollback can restore it.
+    const byId = new Map(session.segments.map((s) => [s.segment_id, s.review_status as ReviewStatus]));
+    const priorById = new Map<string, ReviewStatus>(
+      segment_ids.map((id) => [id, byId.get(id) ?? "pending_review"])
+    );
+
+    // Update the UI instantly.
+    patchSegmentStatuses(new Map(segment_ids.map((id) => [id, status])));
+
+    try {
+      await api.batchReview(segment_ids, status);
+    } catch (err) {
+      // Roll back to the captured previous statuses and surface the error.
+      patchSegmentStatuses(priorById);
+      push(t.error.title, err instanceof Error ? err.message : undefined);
+      return;
+    }
+
+    const verb = t.review[status as keyof typeof t.review] ?? status;
+    pushAction(`已${verb} ${segment_ids.length} 段`, "撤销", () => {
+      void guard(async () => {
+        await restorePriorStatuses(priorById);
+        patchSegmentStatuses(priorById);
+        await reloadSession();
+      })();
+    });
+
+    // Reconcile session-level review_status in the background (AFTER the optimistic update,
+    // so the UI never blocks on it).
+    void reloadSession().catch(() => undefined);
+  }
+
+  // OPTIMISTIC accept-整场: mark every still-pending segment accepted at once, call
+  // accept-remaining, offer Undo. Only the pending segments are affected (so Undo only
+  // reverts those back to pending — already-rejected/needs_fix segments are left alone).
+  async function handleAcceptSession() {
+    if (!session) return;
+    const pendingIds = session.segments.filter((s) => s.review_status === "pending_review").map((s) => s.segment_id);
+    if (pendingIds.length === 0) return;
+    const priorById = new Map<string, ReviewStatus>(pendingIds.map((id) => [id, "pending_review" as ReviewStatus]));
+
+    patchSegmentStatuses(new Map(pendingIds.map((id) => [id, "accepted" as ReviewStatus])));
+
+    try {
+      await api.acceptRemaining(session.session_id);
+    } catch (err) {
+      patchSegmentStatuses(priorById);
+      push(t.error.title, err instanceof Error ? err.message : undefined);
+      return;
+    }
+
+    pushAction(`已${t.review.accepted} ${pendingIds.length} 段`, "撤销", () => {
+      void guard(async () => {
+        await api.clearReview(pendingIds);
+        patchSegmentStatuses(priorById);
+        await reloadSession();
+      })();
+    });
+
+    void reloadSession().catch(() => undefined);
   }
 
   function highlightEvidence(candidateId: string) {
@@ -353,8 +450,8 @@ export function App() {
                 session={session}
                 persons={persons ?? []}
                 highlightedSegmentId={highlightedSegmentId}
-                onBatchReview={guard(async (ids, status) => { await api.batchReview(ids, status); await reloadSession(); })}
-                onAcceptSession={guard(async () => { await api.acceptRemaining(session.session_id); await reloadSession(); })}
+                onBatchReview={handleBatchReview}
+                onAcceptSession={handleAcceptSession}
                 onPlaybackError={(message) => push("音频播放失败", message)}
               />
               <SpeakerPanel

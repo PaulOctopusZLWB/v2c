@@ -7,6 +7,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.transcript_review import (
     accept_remaining_segments,
     batch_review_segments,
+    clear_review_segments,
     day_status_rows,
     list_days,
     review_segment,
@@ -28,6 +29,10 @@ class BatchReviewRequest(BaseModel):
     segment_ids: list[str]
     status: str
     note: str = ""
+
+
+class ClearReviewRequest(BaseModel):
+    segment_ids: list[str]
 
 
 @router.get("/day-status")
@@ -83,6 +88,15 @@ def batch_review_route(request: Request, payload: BatchReviewRequest) -> dict[st
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"updated": updated}
+
+
+@router.post("/segments/clear-review")
+def clear_review_route(request: Request, payload: ClearReviewRequest) -> dict[str, int]:
+    config: AppConfig = request.app.state.config
+    if not payload.segment_ids:
+        raise HTTPException(status_code=400, detail="segment_ids must not be empty")
+    cleared = clear_review_segments(config=config, segment_ids=payload.segment_ids)
+    return {"cleared": cleared}
 
 
 @router.post("/sessions/{session_id}/accept-remaining")

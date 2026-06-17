@@ -8,6 +8,7 @@ from personal_context_node.transcript_review import (
     accept_remaining_segments,
     accepted_segments_clause,
     batch_review_segments,
+    clear_review_segments,
     review_segment,
     reviewed_segments_for_session,
     session_review_status,
@@ -101,6 +102,76 @@ def test_accept_remaining_still_accepts_only_pending(tmp_path: Path) -> None:
 
     rows = reviewed_segments_for_session(config=config, session_id="ses_test")
     assert [(r["segment_id"], r["review_status"]) for r in rows] == [("seg_1", "rejected"), ("seg_2", "accepted")]
+
+
+def test_clear_review_reverts_to_pending(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    review_segment(config=config, segment_id="seg_1", status="accepted", note="")
+
+    assert clear_review_segments(config=config, segment_ids=["seg_1"]) == 1
+
+    rows = reviewed_segments_for_session(config=config, session_id="ses_test")
+    assert [(r["segment_id"], r["review_status"]) for r in rows] == [
+        ("seg_1", "pending_review"),
+        ("seg_2", "pending_review"),
+    ]
+    # The review row is gone (not just status-flipped — there is no 'pending_review' row).
+    conn = connect(config.database_path)
+    try:
+        remaining = fetch_all(conn, "select segment_id from transcript_segment_reviews")
+    finally:
+        conn.close()
+    assert remaining == []
+
+
+def test_clear_review_empty_is_noop(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    assert clear_review_segments(config=config, segment_ids=[]) == 0
+
+
+def test_clear_review_counts_only_deleted_rows(tmp_path: Path) -> None:
+    # Only seg_1 has a review row; clearing [seg_1, seg_2] deletes one row -> count 1.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)
+    review_segment(config=config, segment_id="seg_1", status="rejected", note="")
+    assert clear_review_segments(config=config, segment_ids=["seg_1", "seg_2"]) == 1
+
+
+def test_clear_review_chunks_large_input(tmp_path: Path) -> None:
+    # >999 ids in a single DELETE would trip SQLite's per-statement variable limit; chunk it.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    ids = [f"seg_{i:04d}" for i in range(1200)]
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aud_big", "DJI Mic 3", "/source/big.wav", 1, 1, "/raw/big.wav", "sha256:big", 2000, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00", "imported"),
+        )
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_big", "2087-05-10", "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:02+08:00", "derived_from_segments", len(ids), 2000, ids[0], "2087-05-10T08:00:03+08:00", "2087-05-10T08:00:03+08:00"),
+        )
+        for index, segment_id in enumerate(ids):
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (segment_id, "aud_big", f"chk_{segment_id}", "ses_big", index, index + 1, "t", "zh", "self", "self", f"ev_{segment_id}", 1.0, "MockASRAdapter", "mock-asr", "test", 1, "2087-05-10T08:00:04+08:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    batch_review_segments(config=config, segment_ids=ids, status="accepted")
+
+    assert clear_review_segments(config=config, segment_ids=ids) == 1200
+
+    conn = connect(config.database_path)
+    try:
+        remaining = fetch_all(conn, "select segment_id from transcript_segment_reviews")
+    finally:
+        conn.close()
+    assert remaining == []
 
 
 def test_segments_ordered_by_absolute_timeline_across_files(tmp_path: Path) -> None:

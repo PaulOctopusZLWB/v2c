@@ -35,6 +35,8 @@ export const api = {
     request(`/api/transcripts/segments/${id}/review`, { method: "POST", body: JSON.stringify({ status, note }) }),
   batchReview: (segment_ids: string[], status: ReviewStatus, note = "") =>
     request<{ updated: number }>("/api/transcripts/segments/batch-review", { method: "POST", body: JSON.stringify({ segment_ids, status, note }) }),
+  clearReview: (segment_ids: string[]) =>
+    request<{ cleared: number }>("/api/transcripts/segments/clear-review", { method: "POST", body: JSON.stringify({ segment_ids }) }),
   acceptRemaining: (sessionId: string) =>
     request<{ accepted: number }>(`/api/transcripts/sessions/${sessionId}/accept-remaining`, { method: "POST" }),
   // persons / speakers

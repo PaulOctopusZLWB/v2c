@@ -76,6 +76,33 @@ def batch_review_segments(*, config: AppConfig, segment_ids: list[str], status: 
     return len(segment_ids)
 
 
+def clear_review_segments(*, config: AppConfig, segment_ids: list[str]) -> int:
+    """Delete review rows for the given segments, reverting them to 'pending_review'.
+
+    Returns the number of rows actually deleted (segments without a review row don't
+    count). Chunked in batches of 500 so clearing a whole multi-thousand-segment session
+    never trips SQLite's per-statement variable limit; all chunks share one transaction.
+    """
+    if not segment_ids:
+        return 0
+    deleted = 0
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(segment_ids), 500):
+            chunk = segment_ids[start : start + 500]
+            placeholders = ", ".join("?" for _ in chunk)
+            cursor = conn.execute(
+                f"delete from transcript_segment_reviews where segment_id in ({placeholders})",
+                chunk,
+            )
+            deleted += cursor.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return deleted
+
+
 def reviewed_segments_for_session(*, config: AppConfig, session_id: str) -> list[dict[str, object]]:
     conn = connect(config.database_path)
     try:

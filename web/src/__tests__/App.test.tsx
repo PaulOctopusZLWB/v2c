@@ -338,6 +338,65 @@ describe("App container", () => {
     expect(calls).toContain("/api/transcripts/segments/batch-review");
   });
 
+  it("optimistically flips a turn's accepted count and shows an Undo toast", async () => {
+    // Hold the batch-review response open so we can prove the UI updates BEFORE the API
+    // resolves (the optimistic local-state patch), not after a refetch.
+    let releaseBatch: (() => void) | null = null;
+    const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
+      if (url === "/api/llm/days/2087-05-10") return new Response(JSON.stringify({ day: "2087-05-10", context: null, memory_candidates: [] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") return new Response(JSON.stringify({ session_id: "ses_1", review_status: "pending_review", segments: [{ segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review", note: null }] }), { status: 200 });
+      if (url === "/api/transcripts/segments/batch-review") { await batchGate; return new Response(JSON.stringify({ updated: 1 }), { status: 200 }); }
+      return new Response("{}", { status: 200 });
+    });
+
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
+
+    // The batch-review fetch is still pending, yet the turn's accepted count already updated.
+    expect(await screen.findByText("1/1 已接受")).toBeInTheDocument();
+
+    // Once the API resolves, the Undo toast appears.
+    releaseBatch!();
+    expect(await screen.findByRole("button", { name: "撤销" })).toBeInTheDocument();
+  });
+
+  it("undo restores a batch-accepted turn back to pending (clearReview) and refetches", async () => {
+    const calls: string[] = [];
+    let accepted = false; // the session refetch reflects the latest server truth
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
+      calls.push(url);
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
+      if (url === "/api/llm/days/2087-05-10") return new Response(JSON.stringify({ day: "2087-05-10", context: null, memory_candidates: [] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") return new Response(JSON.stringify({ session_id: "ses_1", review_status: accepted ? "accepted" : "pending_review", segments: [{ segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: accepted ? "accepted" : "pending_review", note: null }] }), { status: 200 });
+      if (url === "/api/transcripts/segments/batch-review") { accepted = JSON.parse(String(init?.body)).status === "accepted"; return new Response(JSON.stringify({ updated: 1 }), { status: 200 }); }
+      if (url === "/api/transcripts/segments/clear-review") { accepted = false; return new Response(JSON.stringify({ cleared: 1 }), { status: 200 }); }
+      return new Response("{}", { status: 200 });
+    });
+
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
+    expect(await screen.findByText("1/1 已接受")).toBeInTheDocument();
+
+    // Undo: the segment was pending before, so undo CLEARS the review (back to pending).
+    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(calls).toContain("/api/transcripts/segments/clear-review"));
+    expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
+  });
+
   it("renders only the active tab and keeps the selected session across tab switches", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
