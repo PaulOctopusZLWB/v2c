@@ -94,14 +94,14 @@ def test_extract_pending_embeds_all(tmp_path: Path, monkeypatch) -> None:
     embed_fn = lambda path: [0.1, 0.2, 0.3]
 
     result = extract_pending_embeddings(config=config, embed_fn=embed_fn)
-    assert result == {"embedded": 3, "skipped_missing_audio": 0, "total": 3}
+    assert result == {"embedded": 3, "skipped_missing_audio": 0, "failed": 0, "total": 3}
 
     stored = get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_3"])
     assert set(stored) == {"seg_1", "seg_2", "seg_3"}
 
     # A second pass has nothing left to embed.
     second = extract_pending_embeddings(config=config, embed_fn=embed_fn)
-    assert second == {"embedded": 0, "skipped_missing_audio": 0, "total": 0}
+    assert second == {"embedded": 0, "skipped_missing_audio": 0, "failed": 0, "total": 0}
 
 
 def test_extract_skips_missing_audio(tmp_path: Path, monkeypatch) -> None:
@@ -117,7 +117,7 @@ def test_extract_skips_missing_audio(tmp_path: Path, monkeypatch) -> None:
     embed_fn = lambda path: [0.1, 0.2, 0.3]
 
     result = extract_pending_embeddings(config=config, embed_fn=embed_fn)
-    assert result == {"embedded": 2, "skipped_missing_audio": 1, "total": 3}
+    assert result == {"embedded": 2, "skipped_missing_audio": 1, "failed": 0, "total": 3}
 
     # The skipped segment stays pending; the embedded ones do not.
     assert pending_embedding_segment_ids(config=config) == ["seg_2"]
@@ -158,7 +158,7 @@ def test_extract_scoped_by_session(tmp_path: Path, monkeypatch) -> None:
     embed_fn = lambda path: [0.1, 0.2, 0.3]
 
     result = extract_pending_embeddings(config=config, embed_fn=embed_fn, session_id="ses_other")
-    assert result == {"embedded": 2, "skipped_missing_audio": 0, "total": 2}
+    assert result == {"embedded": 2, "skipped_missing_audio": 0, "failed": 0, "total": 2}
 
     stored = get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_o1", "seg_o2"])
     assert set(stored) == {"seg_o1", "seg_o2"}
@@ -310,6 +310,94 @@ def test_recluster_does_not_touch_speaker_columns(tmp_path: Path) -> None:
         conn.close()
 
     assert before == after
+
+
+def _write_raw_embedding(database_path: Path, segment_id: str, values: list[float]) -> None:
+    """Overwrite a segment's stored embedding blob directly, bypassing the write-time guards
+    (so we can exercise the read/recluster path against a corrupt or wrong-dim vector)."""
+    array = np.asarray(values, dtype=np.float32)
+    conn = connect(database_path)
+    try:
+        conn.execute(
+            "update segment_embeddings set vector = ?, dim = ? where segment_id = ?",
+            (array.tobytes(), len(array), segment_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_put_embedding_rejects_non_finite(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1"])
+    bad = [float("nan")] + [0.0] * 191
+    for raises in (
+        lambda: put_embedding(config=config, segment_id="seg_1", vector=bad),
+        lambda: put_embeddings_bulk(config=config, items=[("seg_1", bad)]),
+    ):
+        try:
+            raises()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected ValueError for non-finite embedding")
+
+
+def test_recluster_nan_embedding_left_unassigned(tmp_path: Path) -> None:
+    # A corrupt (NaN) scope embedding must NOT be force-assigned to person 0 (nan < threshold is
+    # False); it should fall through as unassigned.
+    config = _setup_two_clusters(tmp_path)
+    _write_raw_embedding(config.database_path, "seg_3", [float("nan")] + [0.0] * 191)
+
+    result = recluster_by_anchors(config=config, anchors={"seg_1": "per_a", "seg_4": "per_b"}, threshold=0.5)
+
+    overrides = _override_rows(config.database_path)
+    assert "seg_3" not in overrides  # corrupt vector left unassigned, not mis-attributed
+    assert result["assigned"] == 5
+    assert result["unassigned"] == 1
+
+
+def test_recluster_skips_mismatched_dim(tmp_path: Path) -> None:
+    # A scope vector with a different dimensionality (e.g. a future re-embed) is skipped, not fed
+    # to the matmul (which would otherwise crash the whole pass).
+    config = _setup_two_clusters(tmp_path)
+    _write_raw_embedding(config.database_path, "seg_3", [0.1] * 64)  # wrong dim (anchors are 192)
+
+    result = recluster_by_anchors(config=config, anchors={"seg_1": "per_a", "seg_4": "per_b"}, threshold=0.5)
+
+    overrides = _override_rows(config.database_path)
+    assert "seg_3" not in overrides
+    assert result["assigned"] == 5  # the other 5 still attributed
+
+
+def test_extract_continues_past_failed_embed(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+    monkeypatch.setattr(
+        transcription, "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+
+    def embed_fn(path: str) -> list[float]:
+        if "seg_2" in path:
+            raise RuntimeError("CAM++ failed on this slice")
+        return [0.1, 0.2, 0.3]
+
+    result = extract_pending_embeddings(config=config, embed_fn=embed_fn)
+    assert result == {"embedded": 2, "skipped_missing_audio": 0, "failed": 1, "total": 3}
+    assert set(get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_3"])) == {"seg_1", "seg_3"}
+    assert pending_embedding_segment_ids(config=config) == ["seg_2"]  # the failed one stays pending
+
+
+def test_get_embeddings_chunks_large_input(tmp_path: Path) -> None:
+    # >999 ids must not trip SQLite's per-statement bind-variable limit.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    ids = [f"seg_{i:04d}" for i in range(1200)]
+    _insert_session_with_segments(config.database_path, ids)
+    put_embeddings_bulk(config=config, items=[(sid, [0.1, 0.2, 0.3]) for sid in ids])
+
+    got = get_embeddings(config=config, segment_ids=ids)
+    assert len(got) == 1200
 
 
 def _insert_session_with_segments(

@@ -49,23 +49,27 @@ def batch_review_segments(*, config: AppConfig, segment_ids: list[str], status: 
     if not segment_ids:
         return 0
     now = _now()
-    values_clause = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in segment_ids)
-    params: list[object] = []
-    for segment_id in segment_ids:
-        params.extend((segment_id, status, reviewer, note, now, now))
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        conn.execute(
-            f"""
-            insert into transcript_segment_reviews (segment_id, status, reviewer, note, reviewed_at, updated_at)
-            values {values_clause}
-            on conflict(segment_id) do update set
-              status = excluded.status, reviewer = excluded.reviewer, note = excluded.note,
-              reviewed_at = excluded.reviewed_at, updated_at = excluded.updated_at
-            """,
-            params,
-        )
+        # Chunk so accepting a whole multi-thousand-segment session (6 bind vars per id) never
+        # trips SQLite's per-statement variable limit. All chunks share one transaction.
+        for start in range(0, len(segment_ids), 500):
+            chunk = segment_ids[start : start + 500]
+            values_clause = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+            params: list[object] = []
+            for segment_id in chunk:
+                params.extend((segment_id, status, reviewer, note, now, now))
+            conn.execute(
+                f"""
+                insert into transcript_segment_reviews (segment_id, status, reviewer, note, reviewed_at, updated_at)
+                values {values_clause}
+                on conflict(segment_id) do update set
+                  status = excluded.status, reviewer = excluded.reviewer, note = excluded.note,
+                  reviewed_at = excluded.reviewed_at, updated_at = excluded.updated_at
+                """,
+                params,
+            )
         conn.commit()
     finally:
         conn.close()

@@ -12,6 +12,8 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 def put_embedding(*, config: AppConfig, segment_id: str, vector: Sequence[float], model: str = "cam++") -> None:
     """Store one voiceprint for a segment, upserting on segment_id."""
     array = np.asarray(vector, dtype=np.float32)
+    if not np.all(np.isfinite(array)):
+        raise ValueError("embedding vector must be finite (no NaN/inf)")
     now = _now()
     conn = connect(config.database_path)
     try:
@@ -39,6 +41,8 @@ def put_embeddings_bulk(*, config: AppConfig, items: list[tuple[str, Sequence[fl
     rows = []
     for segment_id, vector in items:
         array = np.asarray(vector, dtype=np.float32)
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"embedding vector for {segment_id} must be finite (no NaN/inf)")
         rows.append((segment_id, model, len(array), array.tobytes(), now))
     conn = connect(config.database_path)
     try:
@@ -59,26 +63,35 @@ def put_embeddings_bulk(*, config: AppConfig, items: list[tuple[str, Sequence[fl
     return len(rows)
 
 
+_SQL_CHUNK = 500  # keep IN/VALUES bind-var counts well under SQLite's per-statement limit
+
+
 def get_embeddings(*, config: AppConfig, segment_ids: list[str]) -> dict[str, np.ndarray]:
-    """Read back voiceprints as float32 ndarrays keyed by segment_id."""
+    """Read back voiceprints as float32 ndarrays keyed by segment_id.
+
+    The IN-clause is chunked so a large scope (a whole day/session — thousands of segments) never
+    trips SQLite's per-statement bind-variable limit.
+    """
     if not segment_ids:
         return {}
-    placeholders = ", ".join("?" for _ in segment_ids)
+    result: dict[str, np.ndarray] = {}
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        rows = fetch_all(
-            conn,
-            f"select segment_id, dim, vector from segment_embeddings where segment_id in ({placeholders})",
-            tuple(segment_ids),
-        )
+        for start in range(0, len(segment_ids), _SQL_CHUNK):
+            chunk = segment_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = fetch_all(
+                conn,
+                f"select segment_id, dim, vector from segment_embeddings where segment_id in ({placeholders})",
+                tuple(chunk),
+            )
+            for row in rows:
+                array = np.frombuffer(row["vector"], dtype=np.float32)
+                # frombuffer is read-only and shares the bytes buffer; copy to a standalone (dim,) array.
+                result[str(row["segment_id"])] = array.reshape(int(row["dim"])).copy()
     finally:
         conn.close()
-    result: dict[str, np.ndarray] = {}
-    for row in rows:
-        array = np.frombuffer(row["vector"], dtype=np.float32)
-        # frombuffer is read-only and shares the bytes buffer; copy to a standalone (dim,) array.
-        result[str(row["segment_id"])] = array.reshape(int(row["dim"])).copy()
     return result
 
 
@@ -185,6 +198,11 @@ def recluster_by_anchors(
     anchor_embeddings = get_embeddings(config=config, segment_ids=anchor_segment_ids)
     if not anchor_embeddings:
         raise ValueError("no embeddings found for any anchor segment")
+    # All anchors must share one dimensionality, else np.mean / the cosine matmul below would
+    # raise an opaque error mid-pass (e.g. after a future re-embed with a different model build).
+    anchor_dims = {int(v.shape[0]) for v in anchor_embeddings.values()}
+    if len(anchor_dims) > 1:
+        raise ValueError(f"inconsistent anchor embedding dim: {sorted(anchor_dims)}")
 
     # Build per-person centroids from L2-normalized anchor vectors.
     per_person_vectors: dict[str, list[np.ndarray]] = {}
@@ -198,6 +216,7 @@ def recluster_by_anchors(
 
     person_ids: list[str] = list(per_person_vectors.keys())
     centroids = np.vstack([_normalize(np.mean(per_person_vectors[pid], axis=0)) for pid in person_ids])
+    centroid_dim = int(centroids.shape[1])
 
     # All active in-scope segments that have an embedding.
     scope_ids = scoped_embedding_segment_ids(config=config, session_id=scope_session_id, day=scope_day)
@@ -218,11 +237,16 @@ def recluster_by_anchors(
             assigned_person = anchors[segment_id]
         else:
             vector = scope_embeddings.get(segment_id)
-            if vector is None:
+            # Skip a segment with no embedding, or one whose dim doesn't match the centroids
+            # (a stray vector from a different model build would otherwise break the matmul).
+            if vector is None or int(vector.shape[0]) != centroid_dim:
                 continue
             sims = centroids @ _normalize(vector)
             best = int(np.argmax(sims))
-            if float(sims[best]) < threshold:
+            best_sim = float(sims[best])
+            # Non-finite cosine (a corrupt NaN/inf embedding) is treated as below-threshold, NOT
+            # silently force-assigned to person 0 — `nan < threshold` is False, so guard explicitly.
+            if not np.isfinite(best_sim) or best_sim < threshold:
                 continue
             assigned_person = person_ids[best]
         writes.append((segment_id, assigned_person))
@@ -306,6 +330,7 @@ def extract_pending_embeddings(
     total = len(pending)
     embedded = 0
     skipped = 0
+    failed = 0
     done = 0
     batch: list[tuple[str, Sequence[float]]] = []
 
@@ -315,20 +340,29 @@ def extract_pending_embeddings(
             embedded += put_embeddings_bulk(config=config, items=batch, model=model)
             batch.clear()
 
-    for segment_id in pending:
-        path = segment_audio_path(config=config, segment_id=segment_id)
-        if path is None:
-            skipped += 1
-        else:
-            batch.append((segment_id, embed_fn(str(path))))
-            if len(batch) >= batch_size:
-                flush()
-        done += 1
-        if progress is not None:
-            progress(done, total)
-
-    flush()
-    return {"embedded": embedded, "skipped_missing_audio": skipped, "total": total}
+    try:
+        for segment_id in pending:
+            path = segment_audio_path(config=config, segment_id=segment_id)
+            if path is None:
+                skipped += 1
+            else:
+                # One bad segment (corrupt slice, daemon error payload, decode failure) must NOT
+                # abort the whole pass — the resident wrapper survives it, so count and continue.
+                try:
+                    vector = embed_fn(str(path))
+                except Exception:
+                    failed += 1
+                else:
+                    batch.append((segment_id, vector))
+                    if len(batch) >= batch_size:
+                        flush()
+            done += 1
+            if progress is not None:
+                progress(done, total)
+    finally:
+        # Flush whatever was buffered even if an unexpected error escaped the loop.
+        flush()
+    return {"embedded": embedded, "skipped_missing_audio": skipped, "failed": failed, "total": total}
 
 
 def _now() -> str:

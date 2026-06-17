@@ -141,6 +141,35 @@ def test_segments_ordered_by_absolute_timeline_across_files(tmp_path: Path) -> N
     assert rows[0]["absolute_end_at"] == "2026-06-13T09:00:06.000000+08:00"
 
 
+def test_batch_review_chunks_large_input(tmp_path: Path) -> None:
+    # >999 segment ids (6 bind vars each) must not trip SQLite's per-statement variable limit.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    ids = [f"seg_{i:04d}" for i in range(1200)]
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aud_big", "DJI Mic 3", "/source/big.wav", 1, 1, "/raw/big.wav", "sha256:big", 2000, "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:00+08:00", "imported"),
+        )
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_big", "2087-05-10", "2087-05-10T08:00:00+08:00", "2087-05-10T08:00:02+08:00", "derived_from_segments", len(ids), 2000, ids[0], "2087-05-10T08:00:03+08:00", "2087-05-10T08:00:03+08:00"),
+        )
+        for index, segment_id in enumerate(ids):
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (segment_id, "aud_big", f"chk_{segment_id}", "ses_big", index, index + 1, "t", "zh", "self", "self", f"ev_{segment_id}", 1.0, "MockASRAdapter", "mock-asr", "test", 1, "2087-05-10T08:00:04+08:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert batch_review_segments(config=config, segment_ids=ids, status="accepted") == 1200
+    rows = reviewed_segments_for_session(config=config, session_id="ses_big")
+    assert sum(1 for r in rows if r["review_status"] == "accepted") == 1200
+
+
 def _insert_session_with_segments(database_path: Path) -> None:
     conn = connect(database_path)
     try:
