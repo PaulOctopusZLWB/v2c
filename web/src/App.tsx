@@ -12,6 +12,7 @@ import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
+import { VoiceprintMap } from "./features/viz/VoiceprintMap";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { Tabs } from "./features/workspace/Tabs";
 import { useTab } from "./features/workspace/useTab";
@@ -503,6 +504,11 @@ export function App() {
             />
           </label>
         </section>
+        <VoiceprintMap
+          sessionId={selectedSessionId}
+          day={clusterDay || selectedDay}
+          onPlaybackError={(message) => push("音频播放失败", message)}
+        />
         <VoiceprintPanel
           day={selectedDay}
           sessionId={selectedSessionId}
