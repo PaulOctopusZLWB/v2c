@@ -230,11 +230,49 @@ def test_post_generate_enqueues_summarize_session_task(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0]["target_type"] == "session"
     assert rows[0]["status"] == "pending"
-    assert rows[0]["priority"] == 10
 
     # the GET viewpoint now reports generating=True (an active summarize_session task exists).
     vp = client.get("/api/sessions/ses_test/viewpoint").json()
     assert vp["generating"] is True
+
+
+def test_post_generate_rearms_a_succeeded_task(tmp_path: Path) -> None:
+    """重新生成 must re-run even when the session was already summarized: enqueue_task dedups on
+    (type, target) regardless of status, so the route uses rerun_task to re-arm the SUCCEEDED task
+    back to 'pending'. Otherwise regenerate would silently no-op for every existing session."""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into tasks (task_id, task_type, target_type, target_id, status, priority, "
+            "max_retries, available_at, created_at, updated_at) values "
+            "('task_old', 'summarize_session', 'session', 'ses_test', 'succeeded', 100, 3, "
+            "'2026-06-01T00:00:00+00:00', '2026-06-01T00:00:00+00:00', '2026-06-01T00:00:00+00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    app = create_app(config=config)
+    app.state.worker.start = lambda *a, **k: True  # type: ignore[method-assign]
+    client = TestClient(app)
+
+    assert client.post("/api/sessions/ses_test/viewpoint/generate").status_code == 200
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            "select task_id, status from tasks where task_type = 'summarize_session' and target_id = 'ses_test'",
+        )
+    finally:
+        conn.close()
+    # same task re-armed (not a duplicate), pending again
+    assert len(rows) == 1
+    assert rows[0]["task_id"] == "task_old"
+    assert rows[0]["status"] == "pending"
+    assert client.get("/api/sessions/ses_test/viewpoint").json()["generating"] is True
 
 
 def test_post_generate_unknown_session_404(tmp_path: Path) -> None:

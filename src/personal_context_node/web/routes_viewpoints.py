@@ -15,7 +15,7 @@ from personal_context_node.session_viewpoint import (
     set_viewpoint_edit,
     viewpoint_state,
 )
-from personal_context_node.tasks import enqueue_task
+from personal_context_node.tasks import rerun_task
 
 
 router = APIRouter(prefix="/api/sessions")
@@ -72,12 +72,15 @@ def generate_viewpoint_route(request: Request, session_id: str) -> dict[str, obj
     # 404 when the session has no segments — there's nothing to summarize.
     if not viewpoint_state(config=config, session_id=session_id)["segments"]:
         raise HTTPException(status_code=404, detail=f"session has no segments: {session_id}")
-    enqueue_task(
+    # rerun_task (not enqueue_task): enqueue_task dedups on (type, target) regardless of status, so
+    # for an already-summarized session it would no-op and 重新生成 would silently do nothing. rerun
+    # re-arms the existing succeeded task back to 'pending' (or creates one) so the worker re-runs it
+    # and the summary is re-generated (UPSERT) from the current transcript + prompt.
+    rerun_task(
         config=config,
         task_type="summarize_session",
         target_type="session",
         target_id=session_id,
-        priority=10,
     )
     request.app.state.worker.start()
     return {"enqueued": True, "session_id": session_id}
