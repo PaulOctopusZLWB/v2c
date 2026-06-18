@@ -87,5 +87,15 @@ class LLMPort(Protocol):
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
         """Generate text-only daily context from transcript segments."""
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
-        """Generate a session summary from text-only transcript segments."""
+    def generate_session_summary(
+        self,
+        *,
+        session_id: str,
+        transcript_segments: list[dict[str, object]],
+        prompt: str | None = None,
+    ) -> SessionSummary:
+        """Generate a session summary from text-only transcript segments.
+
+        ``prompt`` is an optional editable persona/instruction that replaces the adapter's built-in
+        session-summary system text; adapters that don't support a custom prompt accept-and-ignore it.
+        """

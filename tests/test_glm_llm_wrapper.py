@@ -477,6 +477,39 @@ def test_main_fails_retryable_without_api_key() -> None:
     assert "GLM_API_KEY" in proc.stderr
 
 
+def test_build_session_messages_uses_custom_prompt_as_system() -> None:
+    # When the payload carries a `prompt`, it REPLACES the built-in persona/instruction as the
+    # system message — but the closed-schema enforcement (speaker_cluster_id + evidence_id
+    # constraints) must remain so the per-speaker schema doesn't break.
+    segs = [{"segment_id": "s1", "evidence_id": "ev_1", "speaker": "spk_01", "text": "x"}]
+    custom = "你是定制的会话分析助手，请用更口语化的语气。"
+
+    msgs = glm.build_session_messages(
+        {"session_id": "x", "transcript_segments": segs, "prompt": custom}
+    )
+
+    system = msgs[0]["content"]
+    assert system.startswith(custom)
+    # default persona line is replaced (not appended).
+    assert "你是会话分析助手。只依据给定转写输出 JSON" not in system
+    # schema-enforcement constraints survive so the closed schema stays intact.
+    assert "speaker_cluster_id 必须是转写中出现过的说话人标签之一" in system
+    assert "ev_1" in system
+    # user/transcript message unchanged.
+    assert "[spk_01]" in msgs[1]["content"]
+
+
+def test_build_session_messages_default_system_when_no_prompt() -> None:
+    # Without a `prompt`, the built-in persona/instruction is used (back-compat).
+    segs = [{"segment_id": "s1", "evidence_id": "ev_1", "speaker": "spk_01", "text": "x"}]
+
+    msgs = glm.build_session_messages({"session_id": "x", "transcript_segments": segs})
+
+    system = msgs[0]["content"]
+    assert system.startswith("你是会话分析助手。只依据给定转写输出 JSON，禁止编造证据。")
+    assert "speaker_cluster_id 必须是转写中出现过的说话人标签之一" in system
+
+
 def test_normalize_daily_context_tolerates_non_numeric_confidence() -> None:
     segments = [{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}]
     raw = {

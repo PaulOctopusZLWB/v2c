@@ -15,7 +15,7 @@ class RecordingLLM:
         self.session_segments: list[dict[str, object]] = []
         self.daily_segments: list[dict[str, object]] = []
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments):
+    def generate_session_summary(self, *, session_id: str, transcript_segments, prompt=None):
         self.session_segments = transcript_segments
         return SessionSummary(session_id=session_id, headline="h", summary="s", topics=[], decisions=[], todos=[], open_questions=[])
 

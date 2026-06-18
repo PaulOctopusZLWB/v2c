@@ -39,7 +39,14 @@ class RuleBasedLLMAdapter:
             memory_candidates=candidates,
         )
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(
+        self,
+        *,
+        session_id: str,
+        transcript_segments: list[dict[str, object]],
+        prompt: str | None = None,
+    ) -> SessionSummary:
+        # prompt is accepted-and-ignored: the deterministic rule_based path takes no system prompt.
         texts = [str(segment["text"]) for segment in transcript_segments if str(segment["text"]).strip()]
         headline = texts[0] if texts else f"Session {session_id}"
         decisions: list[SessionDecision] = []

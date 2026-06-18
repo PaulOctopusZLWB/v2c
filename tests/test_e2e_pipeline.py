@@ -32,7 +32,7 @@ class RecordingMilestoneLLM:
             ],
         )
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         raise AssertionError("first milestone should use daily LLM context only")
 
 

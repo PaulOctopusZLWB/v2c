@@ -35,7 +35,7 @@ class RecordingLLM:
             ],
         )
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         raise AssertionError("daily_generate should not request a session summary")
 
 
@@ -43,7 +43,7 @@ class TerminalLLM:
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
         raise TerminalPortError("invalid LLM contract")
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         raise AssertionError("daily_generate should not request a session summary")
 
 
@@ -51,7 +51,7 @@ class UnexpectedDailyLLM:
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
         raise AssertionError("daily_generate should sync review exclusions before prompting LLM")
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         raise AssertionError("daily_generate should not request a session summary")
 
 

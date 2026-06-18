@@ -16,7 +16,7 @@ from personal_context_node.web.routes_settings import router as settings_router
 from personal_context_node.web.routes_speakers import router as speakers_router
 from personal_context_node.web.routes_status import router as status_router
 from personal_context_node.web.routes_transcripts import router as transcripts_router
-from personal_context_node.web.routes_viewpoints import router as viewpoints_router
+from personal_context_node.web.routes_viewpoints import prompts_router, router as viewpoints_router
 from personal_context_node.web.worker import PipelineWorker
 
 
@@ -41,6 +41,7 @@ def create_app(*, config: AppConfig) -> FastAPI:
     app.include_router(home_router)
     app.include_router(transcripts_router)
     app.include_router(viewpoints_router)
+    app.include_router(prompts_router)
     app.include_router(speakers_router)
     app.include_router(dynamics_router)
     app.include_router(audio_router)

@@ -10,6 +10,19 @@ from personal_context_node.storage.sqlite import connect, initialize
 from personal_context_node.transcript_review import reviewed_segments_for_session
 
 
+# The editable persona/instruction for the session-summary LLM prompt. This is the *instruction*
+# half of the GLM wrapper's session system message (scripts/glm_llm_wrapper.py
+# build_session_messages); the transcript formatting + closed JSON-schema enforcement stay
+# wrapper-owned. When this is sent as `prompt=`, the wrapper substitutes it for its built-in
+# persona line and keeps the schema constraints intact.
+DEFAULT_SESSION_PROMPT = "你是会话分析助手。只依据给定转写输出 JSON，禁止编造证据。"
+
+# Active task statuses for a summarize_session task that is still in flight (pending → claimed →
+# running). Mirrors the statuses used by tasks.py/process_runner.py; a task in any of these is
+# "generating" from the viewpoint workspace's perspective.
+_ACTIVE_TASK_STATUSES = ("pending", "claimed", "running")
+
+
 def session_fingerprint(segments: list[dict]) -> str:
     """A stable sha256 hex over the session's segments, in order.
 
@@ -76,7 +89,149 @@ def viewpoint_state(*, config: AppConfig, session_id: str) -> dict:
         "stale": stale,
         "published_at": published_at,
         "note_path": note_path,
+        "prompt": effective_session_prompt(config=config, session_id=session_id),
+        "generating": _is_generating(config=config, session_id=session_id),
     }
+
+
+def _is_generating(*, config: AppConfig, session_id: str) -> bool:
+    """True when a summarize_session task for this session is pending/claimed/running."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        placeholders = ", ".join("?" for _ in _ACTIVE_TASK_STATUSES)
+        row = conn.execute(
+            f"""
+            select 1 from tasks
+            where task_type = 'summarize_session'
+              and target_type = 'session'
+              and target_id = ?
+              and status in ({placeholders})
+            limit 1
+            """,
+            (session_id, *_ACTIVE_TASK_STATUSES),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row is not None
+
+
+def get_session_prompt_template(*, config: AppConfig) -> str:
+    """The global session-summary prompt template (app_prompts['session_viewpoint']), else default."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        row = conn.execute(
+            "select template from app_prompts where kind = 'session_viewpoint'",
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return DEFAULT_SESSION_PROMPT
+    template = str(row["template"])
+    return template if template.strip() else DEFAULT_SESSION_PROMPT
+
+
+def set_session_prompt_template(*, config: AppConfig, template: str | None) -> None:
+    """Upsert the global template; a None/empty/blank template deletes the row (reset to default)."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        if template is None or not template.strip():
+            conn.execute("delete from app_prompts where kind = 'session_viewpoint'")
+        else:
+            conn.execute(
+                """
+                insert into app_prompts (kind, template, updated_at)
+                values ('session_viewpoint', ?, ?)
+                on conflict(kind) do update set
+                  template = excluded.template,
+                  updated_at = excluded.updated_at
+                """,
+                (template, _now()),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def effective_session_prompt(*, config: AppConfig, session_id: str) -> dict[str, object]:
+    """Resolve the prompt for a session: per-session override ?? global template ?? DEFAULT.
+
+    ``default`` is the GLOBAL template (so the UI can offer "reset to global"); ``is_override`` is
+    True only when a per-session prompt_override is set.
+    """
+    global_template = get_session_prompt_template(config=config)
+    sidecar = _load_sidecar(config=config, session_id=session_id)
+    override = sidecar["prompt_override"] if sidecar is not None else None
+    has_override = override is not None and str(override).strip() != ""
+    effective = str(override) if has_override else global_template
+    return {
+        "effective": effective,
+        "default": global_template,
+        "is_override": has_override,
+    }
+
+
+def record_summary_regenerated(*, config: AppConfig, session_id: str) -> None:
+    """Stamp the sidecar after a fresh summarize_session: write the live segments' fingerprint, clear
+    any prior manual edit, reset status to 'draft'. The per-session prompt_override is left intact.
+
+    Regenerate discards prior manual edits by design (the frontend warns first). source_fingerprint
+    is the fingerprint of the *reviewed* segments, so the new summary reads as not-stale.
+    """
+    rows = reviewed_segments_for_session(config=config, session_id=session_id)
+    segments = [
+        {
+            "segment_id": row["segment_id"],
+            "text": row["text"],
+            "speaker": row["speaker"],
+            "person_label": row["person_label"],
+        }
+        for row in rows
+    ]
+    fingerprint = session_fingerprint(segments)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into session_viewpoint_state
+              (session_id, source_fingerprint, edited_content_json, status, updated_at)
+            values (?, ?, null, 'draft', ?)
+            on conflict(session_id) do update set
+              source_fingerprint = excluded.source_fingerprint,
+              edited_content_json = null,
+              status = 'draft',
+              updated_at = excluded.updated_at
+            """,
+            (session_id, fingerprint, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_session_prompt_override(*, config: AppConfig, session_id: str, template: str | None) -> dict[str, object]:
+    """Set (or clear, on None/blank) the per-session prompt_override; returns effective_session_prompt."""
+    normalized = template.strip() if isinstance(template, str) and template.strip() else None
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into session_viewpoint_state (session_id, prompt_override, updated_at)
+            values (?, ?, ?)
+            on conflict(session_id) do update set
+              prompt_override = excluded.prompt_override,
+              updated_at = excluded.updated_at
+            """,
+            (session_id, normalized, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return effective_session_prompt(config=config, session_id=session_id)
 
 
 def set_segment_text(*, config: AppConfig, segment_id: str, text: str) -> bool:

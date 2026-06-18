@@ -21,7 +21,7 @@ class RecordingSessionLLM:
     def generate_daily_context(self, *, day: str, transcript_segments: list[dict[str, object]]) -> DailyContext:
         raise AssertionError("summarize_session should not request daily context")
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         self.session_segments = transcript_segments
         return SessionSummary(
             session_id=session_id,

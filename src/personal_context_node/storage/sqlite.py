@@ -218,6 +218,12 @@ create table if not exists session_viewpoint_state (
   updated_at text not null
 );
 
+create table if not exists app_prompts (
+  kind text primary key,
+  template text not null,
+  updated_at text not null
+);
+
 create table if not exists daily_reports (
   date_key text primary key,
   status text not null,

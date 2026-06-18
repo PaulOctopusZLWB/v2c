@@ -253,6 +253,61 @@ print(json.dumps({{
     assert ".wav" not in serialized.lower()
 
 
+def test_command_llm_adapter_sends_prompt_in_session_payload(tmp_path: Path) -> None:
+    capture = tmp_path / "session_input.json"
+    script = tmp_path / "prompt_session_llm.py"
+    script.write_text(
+        f"""
+import json
+import sys
+payload = json.loads(sys.stdin.read())
+open({str(capture)!r}, "w").write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+print(json.dumps({{
+  "headline": "h", "summary": "s", "topics": [],
+  "decisions": [], "todos": [], "open_questions": []
+}}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    adapter.generate_session_summary(
+        session_id="ses_1",
+        transcript_segments=[{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}],
+        prompt="自定义会话提示词",
+    )
+
+    sent = json.loads(capture.read_text(encoding="utf-8"))
+    assert sent["prompt"] == "自定义会话提示词"
+
+
+def test_command_llm_adapter_omits_prompt_when_none(tmp_path: Path) -> None:
+    capture = tmp_path / "session_input.json"
+    script = tmp_path / "no_prompt_session_llm.py"
+    script.write_text(
+        f"""
+import json
+import sys
+payload = json.loads(sys.stdin.read())
+open({str(capture)!r}, "w").write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+print(json.dumps({{
+  "headline": "h", "summary": "s", "topics": [],
+  "decisions": [], "todos": [], "open_questions": []
+}}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    adapter.generate_session_summary(
+        session_id="ses_1",
+        transcript_segments=[{"segment_id": "seg_1", "evidence_id": "ev_1", "text": "x"}],
+    )
+
+    sent = json.loads(capture.read_text(encoding="utf-8"))
+    assert "prompt" not in sent
+
+
 def test_command_llm_adapter_rejects_incomplete_session_summary(tmp_path: Path) -> None:
     script = tmp_path / "bad_session_llm.py"
     script.write_text(

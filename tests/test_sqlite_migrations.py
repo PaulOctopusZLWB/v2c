@@ -686,3 +686,39 @@ def test_initialize_session_viewpoint_state_is_idempotent(tmp_path) -> None:
 
     assert before == after
     assert "session_id" in {row["name"] for row in after}
+
+
+def test_initialize_app_prompts_schema(tmp_path) -> None:
+    # Editable prompt templates (slice 2) live in app_prompts, keyed one-row-per-kind.
+    # kind is the primary key; template + updated_at are not-null text.
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(app_prompts)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["kind"]["type"].lower() == "text"
+    assert column_by_name["kind"]["pk"] == 1
+    assert column_by_name["template"]["type"].lower() == "text"
+    assert column_by_name["updated_at"]["type"].lower() == "text"
+    assert column_by_name["updated_at"]["notnull"] == 1
+
+
+def test_initialize_app_prompts_is_idempotent(tmp_path) -> None:
+    # Re-running migrations on a DB that ALREADY has the table must not error or change it.
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+        before = fetch_all(conn, "pragma table_info(app_prompts)")
+
+        _run_migrations(conn)  # second pass over an already-migrated table
+
+        after = fetch_all(conn, "pragma table_info(app_prompts)")
+    finally:
+        conn.close()
+
+    assert before == after
+    assert "kind" in {row["name"] for row in after}

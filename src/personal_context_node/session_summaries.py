@@ -9,6 +9,10 @@ from uuid import uuid4
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import LLMPort, SessionSummary
 from personal_context_node.evidence_refs import persist_segment_evidence_refs
+from personal_context_node.session_viewpoint import (
+    effective_session_prompt,
+    record_summary_regenerated,
+)
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.summary_schemas import validate_session_summary
 from personal_context_node.transcript_review import accepted_segments_clause
@@ -42,15 +46,21 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
             return SessionSummaryResult(summaries_created=0)
         persist_segment_evidence_refs(conn, segments=segments, owner_id=config.owner_did)
         llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in segments]
+        prompt = str(effective_session_prompt(config=config, session_id=session_id)["effective"])
         summary = _generate_session_summary_with_budget(
             llm=llm,
             session_id=session_id,
             transcript_segments=llm_segments,
             max_chunk_tokens=config.max_chunk_tokens,
+            prompt=prompt,
         )
         _validate_summary_evidence_refs(summary, segments)
         _persist_session_summary(conn, summary)
         conn.commit()
+        # Record the regenerate in the viewpoint sidecar: stamp the source fingerprint (so the new
+        # summary reads as fresh), discard any prior manual edit + reset status to draft, keep the
+        # per-session prompt_override. Done after commit on its own connection (separate DB conn).
+        record_summary_regenerated(config=config, session_id=session_id)
         return SessionSummaryResult(summaries_created=1)
     finally:
         conn.close()
@@ -112,15 +122,19 @@ def _generate_session_summary_with_budget(
     session_id: str,
     transcript_segments: list[dict[str, object]],
     max_chunk_tokens: int,
+    prompt: str | None = None,
 ) -> SessionSummary:
     if max_chunk_tokens <= 0 or _segment_tokens(transcript_segments) <= max_chunk_tokens:
-        return llm.generate_session_summary(session_id=session_id, transcript_segments=transcript_segments)
+        return llm.generate_session_summary(
+            session_id=session_id, transcript_segments=transcript_segments, prompt=prompt
+        )
     chunks = _segment_chunks(transcript_segments, max_chunk_tokens=max_chunk_tokens)
     chunk_summary_segments: list[dict[str, object]] = []
     for index, chunk in enumerate(chunks, start=1):
         chunk_summary = llm.generate_session_summary(
             session_id=f"{session_id}:chunk:{index}",
             transcript_segments=chunk,
+            prompt=prompt,
         )
         summary_segment = {
             "segment_id": f"{session_id}_chunk_{index}",
@@ -132,7 +146,9 @@ def _generate_session_summary_with_budget(
         if "speaker" in chunk[0]:
             summary_segment["speaker"] = "summary"
         chunk_summary_segments.append(summary_segment)
-    return llm.generate_session_summary(session_id=session_id, transcript_segments=chunk_summary_segments)
+    return llm.generate_session_summary(
+        session_id=session_id, transcript_segments=chunk_summary_segments, prompt=prompt
+    )
 
 
 def _segment_chunks(

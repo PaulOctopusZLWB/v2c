@@ -42,7 +42,14 @@ class MockLLMAdapter:
             ],
         )
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(
+        self,
+        *,
+        session_id: str,
+        transcript_segments: list[dict[str, object]],
+        prompt: str | None = None,
+    ) -> SessionSummary:
+        # prompt is accepted-and-ignored: the fixture-backed mock has no LLM to retarget.
         session = _object_dict(self.fixture["session_summary"], "session_summary")
         evidence_id = _first_evidence_id(transcript_segments)
         return SessionSummary(

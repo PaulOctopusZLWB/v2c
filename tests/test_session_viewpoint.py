@@ -3,10 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from personal_context_node.adapters.llm.rule_based import RuleBasedLLMAdapter
 from personal_context_node.config import AppConfig
+from personal_context_node.session_summaries import summarize_session
 from personal_context_node.session_viewpoint import (
+    DEFAULT_SESSION_PROMPT,
+    effective_session_prompt,
+    get_session_prompt_template,
     session_fingerprint,
     set_segment_text,
+    set_session_prompt_template,
     viewpoint_state,
 )
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -234,3 +240,206 @@ def test_set_segment_text_unknown_id_returns_false(tmp_path: Path) -> None:
     _insert_session(config.database_path)
 
     assert set_segment_text(config=config, segment_id="seg_missing", text="x") is False
+
+
+# --- prompt template store (global) --------------------------------------
+
+
+def test_get_session_prompt_template_defaults_to_constant(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+
+    assert get_session_prompt_template(config=config) == DEFAULT_SESSION_PROMPT
+
+
+def test_set_session_prompt_template_persists_global_override(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+
+    set_session_prompt_template(config=config, template="你是定制助手。")
+
+    assert get_session_prompt_template(config=config) == "你是定制助手。"
+
+
+def test_set_session_prompt_template_none_resets_to_default(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    set_session_prompt_template(config=config, template="你是定制助手。")
+
+    set_session_prompt_template(config=config, template=None)
+
+    assert get_session_prompt_template(config=config) == DEFAULT_SESSION_PROMPT
+
+
+def test_set_session_prompt_template_empty_resets_to_default(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    set_session_prompt_template(config=config, template="你是定制助手。")
+
+    set_session_prompt_template(config=config, template="   ")
+
+    assert get_session_prompt_template(config=config) == DEFAULT_SESSION_PROMPT
+
+
+# --- effective_session_prompt (per-session > global > default) -----------
+
+
+def test_effective_session_prompt_falls_back_to_default(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+
+    prompt = effective_session_prompt(config=config, session_id="ses_test")
+
+    assert prompt == {
+        "effective": DEFAULT_SESSION_PROMPT,
+        "default": DEFAULT_SESSION_PROMPT,
+        "is_override": False,
+    }
+
+
+def test_effective_session_prompt_uses_global_template(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    set_session_prompt_template(config=config, template="全局模板。")
+
+    prompt = effective_session_prompt(config=config, session_id="ses_test")
+
+    assert prompt["effective"] == "全局模板。"
+    assert prompt["default"] == "全局模板。"
+    assert prompt["is_override"] is False
+
+
+def test_effective_session_prompt_per_session_override_wins(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    set_session_prompt_template(config=config, template="全局模板。")
+    _insert_sidecar(config.database_path, prompt_override="本会话专属模板。")
+
+    prompt = effective_session_prompt(config=config, session_id="ses_test")
+
+    assert prompt["effective"] == "本会话专属模板。"
+    # default reports the GLOBAL template so the UI can offer "reset to global".
+    assert prompt["default"] == "全局模板。"
+    assert prompt["is_override"] is True
+
+
+# --- summarize_session records fingerprint + clears edits -----------------
+
+
+def test_summarize_session_writes_source_fingerprint(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+
+    summarize_session(config=config, session_id="ses_test", llm=RuleBasedLLMAdapter())
+
+    state = viewpoint_state(config=config, session_id="ses_test")
+    expected = session_fingerprint(state["segments"])
+    sidecar = _read_sidecar(config.database_path)
+    assert sidecar is not None
+    assert sidecar["source_fingerprint"] == expected
+    # a fresh fingerprint == the live segments -> not stale.
+    assert state["stale"] is False
+    assert state["has_generated"] is True
+
+
+def test_summarize_session_clears_prior_edits_and_keeps_prompt_override(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    edited = {**_generated_content(), "headline": "手动改过的标题"}
+    _insert_sidecar(
+        config.database_path,
+        edited_content_json=json.dumps(edited),
+        prompt_override="本会话专属模板。",
+        status="edited",
+    )
+
+    summarize_session(config=config, session_id="ses_test", llm=RuleBasedLLMAdapter())
+
+    sidecar = _read_sidecar(config.database_path)
+    assert sidecar is not None
+    # regenerate DISCARDS the prior manual edit + resets status to draft (by design).
+    assert sidecar["edited_content_json"] is None
+    assert sidecar["status"] == "draft"
+    # but the per-session prompt override survives.
+    assert sidecar["prompt_override"] == "本会话专属模板。"
+
+
+def test_summarize_session_passes_effective_prompt_to_llm(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    set_session_prompt_template(config=config, template="全局模板。")
+    _insert_sidecar(config.database_path, prompt_override="本会话专属模板。")
+
+    captured: dict[str, object] = {}
+
+    class RecordingLLM(RuleBasedLLMAdapter):
+        def generate_session_summary(self, *, session_id, transcript_segments, prompt=None):
+            captured["prompt"] = prompt
+            return super().generate_session_summary(
+                session_id=session_id, transcript_segments=transcript_segments
+            )
+
+    summarize_session(config=config, session_id="ses_test", llm=RecordingLLM())
+
+    assert captured["prompt"] == "本会话专属模板。"
+
+
+# --- viewpoint_state surfaces prompt block + generating -------------------
+
+
+def _enqueue_summarize_task(config: AppConfig) -> None:
+    from personal_context_node.tasks import enqueue_task
+
+    enqueue_task(
+        config=config,
+        task_type="summarize_session",
+        target_type="session",
+        target_id="ses_test",
+        priority=10,
+    )
+
+
+def test_viewpoint_state_includes_prompt_block(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+
+    state = viewpoint_state(config=config, session_id="ses_test")
+
+    assert state["prompt"] == {
+        "effective": DEFAULT_SESSION_PROMPT,
+        "default": DEFAULT_SESSION_PROMPT,
+        "is_override": False,
+    }
+
+
+def test_viewpoint_state_generating_false_without_task(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+
+    state = viewpoint_state(config=config, session_id="ses_test")
+
+    assert state["generating"] is False
+
+
+def test_viewpoint_state_generating_true_with_pending_task(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _enqueue_summarize_task(config)
+
+    state = viewpoint_state(config=config, session_id="ses_test")
+
+    assert state["generating"] is True
+
+
+def _read_sidecar(database_path: Path) -> dict[str, object] | None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            "select * from session_viewpoint_state where session_id = ?",
+            ("ses_test",),
+        )
+    finally:
+        conn.close()
+    return rows[0] if rows else None

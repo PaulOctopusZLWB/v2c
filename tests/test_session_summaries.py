@@ -20,7 +20,7 @@ class RecordingSessionLLM:
     def __init__(self) -> None:
         self.received_segments: list[dict[str, object]] = []
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]):
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None):
         self.received_segments = transcript_segments
         return RuleBasedLLMAdapter().generate_session_summary(
             session_id=session_id,
@@ -32,7 +32,7 @@ class ChunkRecordingSessionLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[dict[str, object]]]] = []
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         self.calls.append((session_id, transcript_segments))
         return SessionSummary(
             session_id=session_id,
@@ -46,7 +46,7 @@ class ChunkRecordingSessionLLM:
 
 
 class UnknownEvidenceSessionLLM:
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         return SessionSummary(
             session_id=session_id,
             headline="未知证据引用",
@@ -59,7 +59,7 @@ class UnknownEvidenceSessionLLM:
 
 
 class MissingEvidenceSessionLLM:
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         return SessionSummary(
             session_id=session_id,
             headline="缺少证据引用",
@@ -72,7 +72,7 @@ class MissingEvidenceSessionLLM:
 
 
 class PerSpeakerSessionLLM:
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None) -> SessionSummary:
         return SessionSummary(
             session_id=session_id,
             headline="带说话人分析",

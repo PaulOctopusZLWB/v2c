@@ -47,14 +47,21 @@ class CommandLLMAdapter:
             memory_candidates=[_memory_candidate(item) for item in payload["memory_candidates"]],
         )
 
-    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]]) -> SessionSummary:
-        payload = self._run_json(
-            {
-                "task": "session_summary",
-                "session_id": session_id,
-                "transcript_segments": _text_only_segments(transcript_segments),
-            }
-        )
+    def generate_session_summary(
+        self,
+        *,
+        session_id: str,
+        transcript_segments: list[dict[str, object]],
+        prompt: str | None = None,
+    ) -> SessionSummary:
+        request: dict[str, object] = {
+            "task": "session_summary",
+            "session_id": session_id,
+            "transcript_segments": _text_only_segments(transcript_segments),
+        }
+        if prompt is not None:
+            request["prompt"] = prompt
+        payload = self._run_json(request)
         _validate_session_summary_payload(payload)
         return SessionSummary(
             session_id=session_id,

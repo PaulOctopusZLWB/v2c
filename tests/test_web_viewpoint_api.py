@@ -6,7 +6,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from personal_context_node.config import AppConfig
-from personal_context_node.storage.sqlite import connect, initialize
+from personal_context_node.session_viewpoint import DEFAULT_SESSION_PROMPT
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.web.app import create_app
 
 
@@ -121,3 +122,127 @@ def test_get_viewpoint_no_summary(tmp_path: Path) -> None:
     assert payload["has_generated"] is False
     assert payload["effective"] is None
     assert payload["stale"] is False
+
+
+# --- prompt block + generating surfaced on GET viewpoint -----------------
+
+
+def test_get_viewpoint_surfaces_prompt_and_generating(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    payload = client.get("/api/sessions/ses_test/viewpoint").json()
+
+    assert payload["prompt"] == {
+        "effective": DEFAULT_SESSION_PROMPT,
+        "default": DEFAULT_SESSION_PROMPT,
+        "is_override": False,
+    }
+    assert payload["generating"] is False
+
+
+# --- global prompt template GET/PUT --------------------------------------
+
+
+def test_get_global_prompt_returns_default(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/prompts/session_viewpoint")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "template": DEFAULT_SESSION_PROMPT,
+        "default": DEFAULT_SESSION_PROMPT,
+    }
+
+
+def test_put_global_prompt_updates_then_resets(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    client = TestClient(create_app(config=config))
+
+    response = client.put("/api/prompts/session_viewpoint", json={"template": "全局自定义模板。"})
+    assert response.status_code == 200
+    assert response.json()["template"] == "全局自定义模板。"
+    assert client.get("/api/prompts/session_viewpoint").json()["template"] == "全局自定义模板。"
+
+    # empty template resets to default.
+    reset = client.put("/api/prompts/session_viewpoint", json={"template": ""})
+    assert reset.status_code == 200
+    assert reset.json()["template"] == DEFAULT_SESSION_PROMPT
+    assert client.get("/api/prompts/session_viewpoint").json()["template"] == DEFAULT_SESSION_PROMPT
+
+
+# --- per-session prompt override PUT -------------------------------------
+
+
+def test_put_session_prompt_override_sets_and_clears(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.put(
+        "/api/sessions/ses_test/viewpoint/prompt", json={"template": "本会话专属模板。"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["effective"] == "本会话专属模板。"
+    assert body["is_override"] is True
+
+    # GET viewpoint now reflects the per-session override.
+    vp = client.get("/api/sessions/ses_test/viewpoint").json()
+    assert vp["prompt"]["effective"] == "本会话专属模板。"
+    assert vp["prompt"]["is_override"] is True
+
+    # null clears the override -> back to the global/default.
+    cleared = client.put("/api/sessions/ses_test/viewpoint/prompt", json={"template": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["is_override"] is False
+    assert cleared.json()["effective"] == DEFAULT_SESSION_PROMPT
+
+
+# --- manual generate ------------------------------------------------------
+
+
+def test_post_generate_enqueues_summarize_session_task(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    app = create_app(config=config)
+    # Stub the worker so the test doesn't spawn a real drain thread.
+    app.state.worker.start = lambda *a, **k: True  # type: ignore[method-assign]
+    client = TestClient(app)
+
+    response = client.post("/api/sessions/ses_test/viewpoint/generate")
+
+    assert response.status_code == 200
+    assert response.json() == {"enqueued": True, "session_id": "ses_test"}
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            "select task_type, target_type, target_id, status, priority from tasks "
+            "where task_type = 'summarize_session' and target_id = 'ses_test'",
+        )
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert rows[0]["target_type"] == "session"
+    assert rows[0]["status"] == "pending"
+    assert rows[0]["priority"] == 10
+
+    # the GET viewpoint now reports generating=True (an active summarize_session task exists).
+    vp = client.get("/api/sessions/ses_test/viewpoint").json()
+    assert vp["generating"] is True
+
+
+def test_post_generate_unknown_session_404(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    app = create_app(config=config)
+    app.state.worker.start = lambda *a, **k: True  # type: ignore[method-assign]
+    client = TestClient(app)
+
+    response = client.post("/api/sessions/ses_missing/viewpoint/generate")
+
+    assert response.status_code == 404

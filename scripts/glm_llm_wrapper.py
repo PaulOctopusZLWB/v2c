@@ -251,7 +251,10 @@ def build_session_messages(payload: dict) -> list[dict]:
     segments = _cap_segments(payload.get("transcript_segments", []))
     ids = sorted(_evidence_ids(segments))
     labels = _speaker_labels(segments)
-    system = (
+    # The persona/instruction half is editable (payload['prompt']); the schema-enforcement
+    # constraints below are wrapper-owned and ALWAYS appended so the closed per-speaker schema
+    # (speaker_cluster_id ∈ labels, evidence_refs ⊆ ids, non-empty) can never be edited away.
+    persona = payload.get("prompt") or (
         "你是会话分析助手。只依据给定转写输出 JSON，禁止编造证据。\n"
         "本会话已做说话人聚类(diarization)：转写每行形如 [说话人] [evidence_id] 文本。请按说话人(说话人聚类标签)分别分析。\n"
         "语言要求：所有文本字段（headline、core_conclusions、per_speaker 内 viewpoints 的 text、sentiment、stance、"
@@ -259,12 +262,15 @@ def build_session_messages(payload: dict) -> list[dict]:
         "质量要求：headline 为一句中文要点；core_conclusions 是整场会话层面的结论，每条一句完整中文陈述句；\n"
         "每个 per_speaker 项对应一个说话人：viewpoints 中每条观点只表达一个不可再拆分的原子化观点，"
         "写成可独立审阅、无需回看转写即可理解的完整陈述句；sentiment(情绪)与 stance(立场/倾向)为简短中文短语；"
-        "latent_needs 为该说话人潜在需求的简体中文短句列表。\n"
+        "latent_needs 为该说话人潜在需求的简体中文短句列表。"
+    )
+    constraints = (
         "约束：speaker_cluster_id 必须是转写中出现过的说话人标签之一: "
         + ", ".join(labels) + "。\n"
         "每条 viewpoint 的 evidence_refs 只能引用下列 evidence_id 且必须非空: "
         + ", ".join(ids)
     )
+    system = f"{persona}\n{constraints}"
     user = (
         f"会话: {payload.get('session_id')}\n"
         f"说话人标签: {', '.join(labels)}\n"
