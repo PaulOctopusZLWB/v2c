@@ -76,6 +76,11 @@ class AppConfig(BaseModel):
     task_retry_backoff_seconds: int = 60
     session_gap_minutes: int = 20
     session_cross_midnight_policy: str = "start_date"
+    # When False (default), the pipeline stops after session_derive; summarize_session /
+    # daily_generate / obsidian_publish are manual (per-session 观点 generate + manual publish).
+    # True restores the old auto-chain (session_derive → summarize_session → daily_generate →
+    # obsidian_publish fires automatically as upstream tasks succeed).
+    pipeline_auto_viewpoints: bool = False
     log_dir_path: Path | None = None
     log_level: str = "INFO"
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
@@ -164,6 +169,10 @@ class AppConfig(BaseModel):
             "session_cross_midnight_policy": session.get(
                 "cross_midnight_policy",
                 cls.model_fields["session_cross_midnight_policy"].default,
+            ),
+            "pipeline_auto_viewpoints": raw.get("pipeline", {}).get(
+                "auto_viewpoints",
+                cls.model_fields["pipeline_auto_viewpoints"].default,
             ),
             "log_dir_path": _optional_resolve_path(base_dir, logging_cfg.get("log_dir")),
             "log_level": logging_cfg.get("level", cls.model_fields["log_level"].default),

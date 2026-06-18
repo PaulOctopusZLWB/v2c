@@ -37,7 +37,10 @@ class RecordingSessionLLM:
 def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    # auto-chain ON: this regression covers session_derive auto-enqueuing summarize_session.
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True
+    )
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
     process_once(
@@ -204,7 +207,10 @@ def test_process_once_session_derive_uses_configured_gap_minutes(tmp_path: Path)
 def test_summarize_session_success_fans_in_to_daily_generate(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    # auto-chain ON: this regression covers the full asr->...->daily_generate auto fan-in.
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True
+    )
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
     for run_id in ["run_vad", "run_asr", "run_session"]:
@@ -234,10 +240,75 @@ def test_summarize_session_success_fans_in_to_daily_generate(tmp_path: Path) -> 
     )
 
 
-def test_process_once_session_summary_uses_injected_llm_adapter(tmp_path: Path) -> None:
+def test_session_derive_does_not_enqueue_summarize_when_auto_off(tmp_path: Path) -> None:
+    # With pipeline_auto_viewpoints=False (the default), the pipeline STOPS after
+    # session_derive: a completed session_derive must NOT auto-enqueue summarize_session.
     source = tmp_path / "source"
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
+
+    for run_id in ["run_vad", "run_asr", "run_session"]:
+        process_once(
+            config=config,
+            run_id=run_id,
+            vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+            asr=MockASRAdapter(text="本地任务转写"),
+            max_chunk_ms=1000,
+        )
+
+    # session_derive ran, but NO summarize_session was enqueued (manual now).
+    assert any(row["task_type"] == "session_derive" and row["status"] == "succeeded" for row in process_status_rows(config=config))
+    assert not any(row["task_type"] == "summarize_session" for row in process_status_rows(config=config))
+
+
+def test_manual_summarize_does_not_enqueue_daily_when_auto_off(tmp_path: Path) -> None:
+    # A MANUALLY enqueued summarize_session (slice 2's generate) must still run, but with
+    # pipeline_auto_viewpoints=False it must NOT auto-enqueue daily_generate.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_with_active_segments(
+        config=config,
+        segments=[("seg_1", 0, 10_000)],
+    )
+    enqueue_task(config=config, task_type="session_derive", target_type="date_key", target_id="2087-05-10")
+    process_once(
+        config=config,
+        run_id="run_session",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="本地任务转写"),
+        max_chunk_ms=1000,
+    )
+    # Manually enqueue summarize_session (as slice 2's generate route does).
+    conn = connect(config.database_path)
+    try:
+        sessions = fetch_all(conn, "select session_id from sessions")
+    finally:
+        conn.close()
+    session_id = sessions[0]["session_id"]
+    enqueue_task(config=config, task_type="summarize_session", target_type="session", target_id=session_id, priority=10)
+
+    result = process_once(
+        config=config,
+        run_id="run_summary",
+        vad=EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150),
+        asr=MockASRAdapter(text="本地任务转写"),
+        max_chunk_ms=1000,
+    )
+
+    # the manual summarize_session ran to success ...
+    assert result.task_type == "summarize_session"
+    assert result.status == "succeeded"
+    # ... but it did NOT auto-enqueue daily_generate.
+    assert not any(row["task_type"] == "daily_generate" for row in process_status_rows(config=config))
+
+
+def test_process_once_session_summary_uses_injected_llm_adapter(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    # auto-chain ON so session_derive enqueues the summarize_session this test then runs.
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True
+    )
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
     for run_id in ["run_vad", "run_asr", "run_session"]:

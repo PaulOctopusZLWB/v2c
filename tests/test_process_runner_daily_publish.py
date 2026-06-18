@@ -56,7 +56,10 @@ class UnexpectedDailyLLM:
 
 
 def test_process_runner_generates_daily_and_publishes_obsidian(tmp_path: Path) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    # auto-chain ON: this regression covers daily_generate auto-enqueuing obsidian_publish.
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True
+    )
     _insert_session_and_transcript(config.database_path)
     enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id="2087-05-10")
 
@@ -144,7 +147,10 @@ def test_process_once_daily_generate_uses_injected_llm_adapter(tmp_path: Path) -
 
 
 def test_process_once_rolls_back_success_when_downstream_registration_fails(tmp_path: Path, monkeypatch) -> None:
-    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    # auto-chain ON: the failure-injection edge hangs off daily_generate's downstream enqueue.
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True
+    )
     _insert_session_and_transcript(config.database_path)
     task = enqueue_task(config=config, task_type="daily_generate", target_type="date_key", target_id="2087-05-10")
     llm = RecordingLLM()

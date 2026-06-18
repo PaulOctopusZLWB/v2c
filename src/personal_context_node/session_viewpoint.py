@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from personal_context_node import llm_results
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, initialize
+from personal_context_node.summary_schemas import validate_session_summary
 from personal_context_node.transcript_review import reviewed_segments_for_session
 
 
@@ -206,6 +207,82 @@ def record_summary_regenerated(*, config: AppConfig, session_id: str) -> None:
               updated_at = excluded.updated_at
             """,
             (session_id, fingerprint, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_viewpoint_edit(*, config: AppConfig, session_id: str, content: dict) -> None:
+    """Validate + store a manual edit of the session 观点 result (the single source of truth).
+
+    ``content`` is a full session_summary.v1 doc; it is validated with the closed schema FIRST so
+    an invalid doc raises (the route maps that to 400) and nothing is stored — keeping the result
+    publishable. On success the normalized doc is upserted as ``edited_content_json`` and
+    ``status`` flips to 'edited'. The generated baseline + source_fingerprint are left untouched.
+    """
+    normalized = validate_session_summary(content)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into session_viewpoint_state
+              (session_id, edited_content_json, status, updated_at)
+            values (?, ?, 'edited', ?)
+            on conflict(session_id) do update set
+              edited_content_json = excluded.edited_content_json,
+              status = 'edited',
+              updated_at = excluded.updated_at
+            """,
+            (session_id, json.dumps(normalized, ensure_ascii=False, sort_keys=True), _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_viewpoint_edit(*, config: AppConfig, session_id: str) -> None:
+    """Discard a manual edit and revert to the generated baseline: clears ``edited_content_json``
+    and resets ``status`` to 'draft'. The generated summary + prompt_override are left intact.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into session_viewpoint_state
+              (session_id, edited_content_json, status, updated_at)
+            values (?, null, 'draft', ?)
+            on conflict(session_id) do update set
+              edited_content_json = null,
+              status = 'draft',
+              updated_at = excluded.updated_at
+            """,
+            (session_id, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_viewpoint_published(*, config: AppConfig, session_id: str, note_path: str, published_at: str) -> None:
+    """Stamp the sidecar after a manual publish: record note_path + published_at, status='published'."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into session_viewpoint_state
+              (session_id, note_path, published_at, status, updated_at)
+            values (?, ?, ?, 'published', ?)
+            on conflict(session_id) do update set
+              note_path = excluded.note_path,
+              published_at = excluded.published_at,
+              status = 'published',
+              updated_at = excluded.updated_at
+            """,
+            (session_id, note_path, published_at, _now()),
         )
         conn.commit()
     finally:

@@ -4,12 +4,15 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
+from personal_context_node.obsidian_sessions import publish_session_viewpoint
 from personal_context_node.session_viewpoint import (
     DEFAULT_SESSION_PROMPT,
+    clear_viewpoint_edit,
     effective_session_prompt,
     get_session_prompt_template,
     set_session_prompt_override,
     set_session_prompt_template,
+    set_viewpoint_edit,
     viewpoint_state,
 )
 from personal_context_node.tasks import enqueue_task
@@ -24,10 +27,43 @@ class PromptRequest(BaseModel):
     template: str | None = None
 
 
+class ViewpointEditRequest(BaseModel):
+    # A full session_summary.v1 doc; validated server-side, 400 on failure.
+    content: dict
+
+
 @router.get("/{session_id}/viewpoint")
 def session_viewpoint_route(request: Request, session_id: str) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     return viewpoint_state(config=config, session_id=session_id)
+
+
+@router.put("/{session_id}/viewpoint")
+def put_viewpoint_route(request: Request, session_id: str, body: ViewpointEditRequest) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    try:
+        set_viewpoint_edit(config=config, session_id=session_id, content=body.content)
+    except Exception as exc:
+        # validation failure -> 400 (the frontend shows the message; the result stays publishable).
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return viewpoint_state(config=config, session_id=session_id)
+
+
+@router.delete("/{session_id}/viewpoint/edit")
+def delete_viewpoint_edit_route(request: Request, session_id: str) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    clear_viewpoint_edit(config=config, session_id=session_id)
+    return viewpoint_state(config=config, session_id=session_id)
+
+
+@router.post("/{session_id}/viewpoint/publish")
+def publish_viewpoint_route(request: Request, session_id: str) -> dict[str, str]:
+    config: AppConfig = request.app.state.config
+    try:
+        return publish_session_viewpoint(config=config, session_id=session_id)
+    except ValueError as exc:
+        # nothing generated/edited yet -> nothing to publish.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{session_id}/viewpoint/generate")

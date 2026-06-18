@@ -173,6 +173,9 @@ command = "python3 missing_asr.py"
 
 [llm]
 backend = "rule_based"
+
+[pipeline]
+auto_viewpoints = true
 """.strip(),
         encoding="utf-8",
     )
@@ -240,7 +243,9 @@ def test_process_run_group_cli_uses_command_llm_from_config_for_session_summary(
     _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
-    config = AppConfig(data_dir=data, obsidian_vault=vault)
+    # auto-chain ON: prep runs session_derive (which must enqueue summarize_session) and the
+    # later `process run` consumes that summarize_session task.
+    config = AppConfig(data_dir=data, obsidian_vault=vault, pipeline_auto_viewpoints=True)
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     for run_id in ["run_vad", "run_asr", "run_session"]:
         process_once(

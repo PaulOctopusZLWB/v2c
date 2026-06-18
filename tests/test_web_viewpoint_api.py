@@ -246,3 +246,105 @@ def test_post_generate_unknown_session_404(tmp_path: Path) -> None:
     response = client.post("/api/sessions/ses_missing/viewpoint/generate")
 
     assert response.status_code == 404
+
+
+# --- edit the result: PUT / DELETE viewpoint ------------------------------
+
+
+def _edited_content() -> dict[str, object]:
+    return {
+        "schema_version": "session_summary.v1",
+        "session_id": "ses_test",
+        "headline": "手动改过的标题",
+        "summary": "手动编辑后的摘要。",
+        "topics": [],
+        "decisions": [],
+        "todos": [],
+        "open_questions": [],
+        "core_conclusions": [],
+        "per_speaker": [],
+    }
+
+
+def test_put_viewpoint_valid_stores_edit_and_returns_state(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _insert_summary(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.put(
+        "/api/sessions/ses_test/viewpoint", json={"content": _edited_content()}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["edited"] == _edited_content()
+    assert body["effective"] == _edited_content()
+    assert body["status"] == "edited"
+
+
+def test_put_viewpoint_invalid_doc_returns_400(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _insert_summary(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    # missing required fields + a stray field -> schema validation fails.
+    response = client.put(
+        "/api/sessions/ses_test/viewpoint", json={"content": {"headline": "x", "bogus": 1}}
+    )
+
+    assert response.status_code == 400
+    # nothing stored: still draft on a fresh GET.
+    assert client.get("/api/sessions/ses_test/viewpoint").json()["status"] == "draft"
+
+
+def test_delete_viewpoint_edit_reverts_to_draft(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    content = _insert_summary(config.database_path)
+    client = TestClient(create_app(config=config))
+    client.put("/api/sessions/ses_test/viewpoint", json={"content": _edited_content()})
+
+    response = client.delete("/api/sessions/ses_test/viewpoint/edit")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["edited"] is None
+    assert body["effective"] == content
+    assert body["status"] == "draft"
+
+
+# --- manual one-way publish: POST viewpoint/publish -----------------------
+
+
+def test_post_publish_writes_note_and_flips_status(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _insert_summary(config.database_path)
+    client = TestClient(create_app(config=config))
+    # publish the EDITED content so we can assert the edit lands in the note.
+    client.put("/api/sessions/ses_test/viewpoint", json={"content": _edited_content()})
+
+    response = client.post("/api/sessions/ses_test/viewpoint/publish")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["published_at"] is not None
+    note_path = Path(body["note_path"])
+    assert note_path.exists()
+    assert "手动改过的标题" in note_path.read_text(encoding="utf-8")
+
+    vp = client.get("/api/sessions/ses_test/viewpoint").json()
+    assert vp["status"] == "published"
+    assert vp["note_path"] == str(note_path)
+
+
+def test_post_publish_errors_when_nothing_generated(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/sessions/ses_test/viewpoint/publish")
+
+    assert response.status_code in (400, 409)

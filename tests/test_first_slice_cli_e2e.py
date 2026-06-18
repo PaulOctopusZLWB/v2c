@@ -52,6 +52,9 @@ backend = "rule_based"
 
 [obsidian]
 edit_grace_seconds = 0
+
+[pipeline]
+auto_viewpoints = true
 """.strip(),
         encoding="utf-8",
     )

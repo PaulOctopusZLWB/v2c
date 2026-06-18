@@ -80,6 +80,8 @@ def test_diarize_pipeline_drains_end_to_end_with_real_speaker_clusters(tmp_path:
         data_dir=tmp_path / "data",
         obsidian_vault=tmp_path / "PersonalContext",
         asr_mode="diarize",
+        # end-to-end drain: keep the old auto-chain so the day reaches published notes.
+        pipeline_auto_viewpoints=True,
     )
 
     raw_a = config.data_dir / "raw" / "2026-06-14" / "fileA.wav"

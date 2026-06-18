@@ -8,11 +8,13 @@ from personal_context_node.config import AppConfig
 from personal_context_node.session_summaries import summarize_session
 from personal_context_node.session_viewpoint import (
     DEFAULT_SESSION_PROMPT,
+    clear_viewpoint_edit,
     effective_session_prompt,
     get_session_prompt_template,
     session_fingerprint,
     set_segment_text,
     set_session_prompt_template,
+    set_viewpoint_edit,
     viewpoint_state,
 )
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -429,6 +431,115 @@ def test_viewpoint_state_generating_true_with_pending_task(tmp_path: Path) -> No
     state = viewpoint_state(config=config, session_id="ses_test")
 
     assert state["generating"] is True
+
+
+# --- set_viewpoint_edit / clear_viewpoint_edit ---------------------------
+
+
+def test_set_viewpoint_edit_validates_stores_and_sets_status(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _insert_summary(config.database_path, _generated_content())
+    edited = {**_generated_content(), "headline": "手动改过的标题", "summary": "手动改过的摘要。"}
+
+    set_viewpoint_edit(config=config, session_id="ses_test", content=edited)
+
+    state = viewpoint_state(config=config, session_id="ses_test")
+    assert state["edited"] == edited
+    assert state["effective"] == edited
+    assert state["generated"] == _generated_content()
+    assert state["status"] == "edited"
+
+
+def test_set_viewpoint_edit_rejects_invalid_doc(tmp_path: Path) -> None:
+    import pytest
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    bad = {"headline": "缺少必填字段"}  # missing session_id/summary etc. -> validation raises
+
+    with pytest.raises(Exception):
+        set_viewpoint_edit(config=config, session_id="ses_test", content=bad)
+
+    # nothing was stored: status stays draft, no edited content.
+    state = viewpoint_state(config=config, session_id="ses_test")
+    assert state["status"] == "draft"
+    assert state["edited"] is None
+
+
+def test_clear_viewpoint_edit_reverts_to_generated_baseline(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _insert_summary(config.database_path, _generated_content())
+    edited = {**_generated_content(), "headline": "手动改过的标题"}
+    set_viewpoint_edit(config=config, session_id="ses_test", content=edited)
+
+    clear_viewpoint_edit(config=config, session_id="ses_test")
+
+    state = viewpoint_state(config=config, session_id="ses_test")
+    assert state["edited"] is None
+    assert state["effective"] == _generated_content()
+    assert state["status"] == "draft"
+
+
+# --- publish_session_viewpoint (one-way, from effective content) ----------
+
+
+def test_publish_session_viewpoint_writes_note_and_records_sidecar(tmp_path: Path) -> None:
+    from personal_context_node.obsidian_sessions import publish_session_viewpoint
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _insert_summary(config.database_path, _generated_content())
+
+    result = publish_session_viewpoint(config=config, session_id="ses_test")
+
+    note_path = Path(result["note_path"])
+    assert note_path.exists()
+    # the standard per-day session note path.
+    assert note_path == config.obsidian_vault / "20_Conversations" / "2087-05-10" / "ses_test.md"
+    text = note_path.read_text(encoding="utf-8")
+    assert "一个标题" in text  # generated headline rendered
+
+    state = viewpoint_state(config=config, session_id="ses_test")
+    assert state["status"] == "published"
+    assert state["note_path"] == str(note_path)
+    assert state["published_at"] is not None
+
+
+def test_publish_session_viewpoint_renders_edited_content(tmp_path: Path) -> None:
+    from personal_context_node.obsidian_sessions import publish_session_viewpoint
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    _insert_summary(config.database_path, _generated_content())
+    edited = {
+        **_generated_content(),
+        "headline": "手动改过的标题",
+        "summary": "这是手动编辑后的摘要内容。",
+    }
+    set_viewpoint_edit(config=config, session_id="ses_test", content=edited)
+
+    result = publish_session_viewpoint(config=config, session_id="ses_test")
+
+    text = Path(result["note_path"]).read_text(encoding="utf-8")
+    # the EDITED text is published, NOT the generated baseline.
+    assert "手动改过的标题" in text
+    assert "这是手动编辑后的摘要内容。" in text
+    assert "一个标题" not in text
+
+
+def test_publish_session_viewpoint_errors_without_effective(tmp_path: Path) -> None:
+    import pytest
+
+    from personal_context_node.obsidian_sessions import publish_session_viewpoint
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session(config.database_path)
+    # nothing generated, nothing edited -> no effective content to publish.
+
+    with pytest.raises(Exception):
+        publish_session_viewpoint(config=config, session_id="ses_test")
 
 
 def _read_sidecar(database_path: Path) -> dict[str, object] | None:

@@ -54,6 +54,12 @@ PIPELINE = (
     PipelineEdge("summarize_session", "daily_generate", "date_key", lambda conn, config, target_id: _ready_daily_generate_dates_in_conn(conn, session_id=target_id)),
     PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
 )
+# The pipeline's "viewpoint tail" — the three edges that auto-chain 观点 generation +
+# daily report + Obsidian publish. When config.pipeline_auto_viewpoints is False (the
+# default), these are NOT enqueued: the pipeline stops after session_derive and the tail
+# stages are driven manually (per-session generate + manual publish). The two
+# *→session_derive edges and vad→asr are always live.
+_VIEWPOINT_TAIL_UPSTREAMS = frozenset({"session_derive", "summarize_session", "daily_generate"})
 PROCESS_TASK_ORDER = (
     "vad",
     "transcribe_diarize",
@@ -330,8 +336,14 @@ def _enqueue_downstream_tasks_in_conn(
         (upstream_task_type, upstream_target_id),
     ).fetchone()
     upstream_priority: int = int(upstream_row["priority"]) if upstream_row is not None else 100
+    # Cut the auto-chain when manual mode is on: filter the viewpoint-tail edges by config
+    # at enqueue time (never mutate the module-level PIPELINE list). A manually enqueued
+    # summarize_session still runs, but won't fan out to daily_generate when the flag is off.
+    auto_viewpoints = config.pipeline_auto_viewpoints
     for edge in PIPELINE:
         if edge.upstream_task_type != upstream_task_type:
+            continue
+        if not auto_viewpoints and edge.upstream_task_type in _VIEWPOINT_TAIL_UPSTREAMS:
             continue
         for target_id in edge.target_ids(conn, config, upstream_target_id):
             result = enqueue_task_in_conn(

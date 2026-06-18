@@ -46,10 +46,13 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
     for session in sessions:
         note_path = output_dir / f"{session['session_id']}.md"
         existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
+        summary_json = session.get("summary_json")
+        summary = json.loads(str(summary_json)) if summary_json else None
         write_text_atomic(
             note_path,
             _session_note_text(
                 session,
+                summary=summary,
                 existing_text=existing_text,
                 source_run_id=source_run_id,
             ),
@@ -57,18 +60,70 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
     return PublishSessionNotesResult(notes_written=len(sessions))
 
 
+def publish_session_viewpoint(*, config: AppConfig, session_id: str) -> dict[str, str]:
+    """Manually render + write ONE session's 观点 note from its EFFECTIVE content (one-way).
+
+    The effective content is the edited doc if present, else the generated summary
+    (``session_viewpoint.viewpoint_state(...)['effective']``); if there is none (nothing
+    generated yet) this raises ValueError. The note is written to the SAME per-day path
+    ``publish_session_notes`` uses, reusing the same markdown renderer, then the sidecar is
+    stamped with note_path/published_at/status='published'. Never reads the note back.
+    """
+    from personal_context_node.session_viewpoint import (
+        record_viewpoint_published,
+        viewpoint_state,
+    )
+
+    assert_personal_context_vault(config)
+    effective = viewpoint_state(config=config, session_id=session_id)["effective"]
+    if effective is None:
+        raise ValueError(f"no effective 观点 content to publish for session: {session_id}")
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            """
+            select session_id, date_key, started_at, ended_at, segment_count, active_speech_ms
+            from sessions
+            where session_id = ?
+            """,
+            (session_id,),
+        )
+    finally:
+        conn.close()
+    if not rows:
+        raise ValueError(f"unknown session: {session_id}")
+    session = rows[0]
+
+    output_dir = config.obsidian_vault / "20_Conversations" / str(session["date_key"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    note_path = output_dir / f"{session_id}.md"
+    existing_text = note_path.read_text(encoding="utf-8") if note_path.exists() else None
+    write_text_atomic(
+        note_path,
+        _session_note_text(session, summary=effective, existing_text=existing_text),
+    )
+    published_at = datetime.now(timezone.utc).isoformat()
+    record_viewpoint_published(
+        config=config, session_id=session_id, note_path=str(note_path), published_at=published_at
+    )
+    return {"note_path": str(note_path), "published_at": published_at}
+
+
 def _session_note_text(
     session: dict[str, object],
     *,
+    summary: dict[str, object] | None,
     existing_text: str | None = None,
     source_run_id: str | None = None,
 ) -> str:
     # Per §29.7 the note carries only the session_summary managed block and a user
     # block. The full transcript is intentionally NOT embedded; it stays queryable on
-    # demand via `pcn session-transcript`.
+    # demand via `pcn session-transcript`. ``summary`` is the already-parsed EFFECTIVE
+    # session_summary.v1 doc (edited ?? generated), or None when nothing was generated.
     session_id = str(session["session_id"])
-    summary_json = session.get("summary_json")
-    summary = json.loads(str(summary_json)) if summary_json else None
     title = summary["headline"] if summary else f"Session {session_id}"
     managed_lines = _summary_lines(session, summary)
     user_notes = _existing_user_notes(existing_text)
