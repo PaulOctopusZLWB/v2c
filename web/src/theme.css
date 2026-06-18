@@ -375,6 +375,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .badge.s-rejected { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
 .badge.s-needs_fix { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .badge.s-pending_review, .badge.s-blocked { color: var(--pending); }
+.badge.s-info { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.badge.s-draft { color: var(--pending); }
+.badge.s-edited { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.badge.s-published { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 
 /* ---- transcript timeline ---- */
 /* CHIP — filled colored speaker pill; text uses --accent-fg so it stays legible
@@ -406,6 +410,56 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .empty .empty-icon { width: 44px; height: 44px; color: var(--border-strong); }
 .empty h3 { color: var(--text-2); font-weight: var(--fw-medium); font-size: var(--fs-lg); }
 .empty p { margin: 0; max-width: 360px; }
+
+/* ---- loading / inspector / workflow primitives ---- */
+.skeleton { display: grid; gap: var(--s3); width: 100%; }
+.skeleton-row {
+  display: block;
+  height: var(--control-h);
+  border-radius: var(--r1);
+  border: 1px solid var(--border);
+  background: linear-gradient(90deg, var(--panel-2), var(--surface), var(--panel-2));
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-row { animation: none; } }
+
+.inspector-panel { display: grid; gap: var(--s4); align-content: start; }
+.inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); }
+.inspector-subtitle { margin: var(--s2) 0 0; font-size: var(--fs-sm); line-height: var(--lh-snug); }
+.inspector-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end; }
+.inspector-body { display: grid; gap: var(--s4); min-width: 0; }
+
+.workflow-stepper { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s3); }
+.workflow-step {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r1);
+  background: var(--panel-2);
+}
+.workflow-step-icon { display: inline-flex; align-items: center; color: var(--text-dim); }
+.workflow-step-main { min-width: 0; display: grid; gap: var(--s1); }
+.workflow-step-label { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.workflow-step-detail { font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-step-action { display: inline-flex; justify-content: flex-end; }
+.workflow-step[data-state="current"], .workflow-step[data-state="running"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+.workflow-step[data-state="complete"] .workflow-step-icon,
+.workflow-step[data-state="complete"] .workflow-step-label { color: var(--ok); }
+.workflow-step[data-state="blocked"] .workflow-step-icon,
+.workflow-step[data-state="blocked"] .workflow-step-label { color: var(--pending); }
+.workflow-step[data-state="error"] .workflow-step-icon,
+.workflow-step[data-state="error"] .workflow-step-label { color: var(--err); }
+@media (min-width: 900px) {
+  .workflow-stepper { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .workflow-step { align-content: start; grid-template-columns: auto minmax(0, 1fr); }
+  .workflow-step-action { grid-column: 1 / -1; justify-content: flex-start; }
+}
 
 /* ---- toast (errors) ---- */
 .toasts { position: fixed; right: var(--s5); bottom: var(--s5); display: flex; flex-direction: column; gap: var(--s3); z-index: 50; }
