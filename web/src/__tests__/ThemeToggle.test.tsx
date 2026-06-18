@@ -117,3 +117,12 @@ describe("theme.css token foundation", () => {
     }
   });
 });
+
+describe("index.html pre-paint theme", () => {
+  const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
+
+  it("defaults unsaved users to dark before the app bundle runs", () => {
+    expect(html).toContain('saved === "light" || saved === "dark" ? saved : "dark"');
+    expect(html).not.toContain("prefers-color-scheme");
+  });
+});
