@@ -551,6 +551,21 @@
 /* ---- 声纹 tab layout (toolbar · map | people · collapsible analysis/advanced) ---- */
 .speakers-layout { gap: var(--s5); }
 
+.voiceprint-workflow {
+  display: grid;
+  gap: var(--s4);
+}
+.workflow-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  align-items: flex-start;
+}
+.workflow-subtitle {
+  margin: var(--s2) 0 0;
+  font-size: var(--fs-sm);
+}
+
 /* Toolbar row: title + inspect-day picker + the compact 提取声纹/情绪 control. */
 .speakers-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--s5);
