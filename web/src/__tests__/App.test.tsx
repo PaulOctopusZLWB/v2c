@@ -1,5 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { api } from "../api/client";
@@ -24,6 +26,15 @@ async function gotoTab(label: string) {
 async function useDayBrowser() {
   await gotoTab("审核");
   await userEvent.click(await screen.findByRole("tab", { name: "按天浏览" }));
+}
+
+function renderApp() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderWithQuery(<App />, client);
+}
+
+function renderWithQuery(ui: ReactNode, client: QueryClient) {
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
 describe("App container", () => {
@@ -61,7 +72,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     // The DevicePanel + 导入 button live on the 录入 tab now.
     await gotoTab("录入");
     await userEvent.click(await screen.findByRole("button", { name: "导入" }));
@@ -86,7 +97,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(summaryListener).not.toBeNull());
     act(() =>
       summaryListener!({
@@ -116,7 +127,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(summaryListener).not.toBeNull());
     act(() =>
       summaryListener!({
@@ -159,7 +170,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(summaryListener).not.toBeNull());
     act(() =>
       summaryListener!({
@@ -208,7 +219,7 @@ describe("App container", () => {
     const urls = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     const statusTasksCount = () => urls().filter((u) => u === "/api/status/tasks").length;
 
-    const { container } = render(<App />);
+    const { container } = renderApp();
     await waitFor(() => expect(summaryListener).not.toBeNull());
     // A summary with a non-zero total makes the TaskList render (count = summaryTotal), so its
     // panel can be opened to lazily load the rows.
@@ -235,7 +246,7 @@ describe("App container", () => {
   it("shows an actionable backend error when bootstrap API calls fail", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(new Response("broken", { status: 500 }));
 
-    render(<App />);
+    renderApp();
 
     expect(await screen.findByText(/后端或 API 不可用/)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toBeInTheDocument(); // announced to screen readers
@@ -248,7 +259,7 @@ describe("App container", () => {
       const daysSpy = vi.spyOn(api, "days");
       (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(new Response("broken", { status: 500 }));
 
-      render(<App />);
+      renderApp();
       await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // bootstrap fails
       const afterBootstrap = daysSpy.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); // poll tick
@@ -274,7 +285,7 @@ describe("App container", () => {
         return new Response(JSON.stringify({}));
       });
 
-      render(<App />);
+      renderApp();
       await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // flush bootstrap
       const afterBootstrap = daysSpy.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); // one poll interval
@@ -309,7 +320,7 @@ describe("App container", () => {
       return new Response(JSON.stringify({}));
     });
 
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(summaryListener).not.toBeNull());
     // The day button lives in the by-day browser (WorkspaceNav), not the default review queue.
     await useDayBrowser();
@@ -338,7 +349,7 @@ describe("App container", () => {
         return new Response(JSON.stringify({}));
       });
 
-      render(<App />);
+      renderApp();
       await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // flush bootstrap
       const afterBootstrap = dayStatusSpy.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); // one poll interval
@@ -363,7 +374,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await useDayBrowser();
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
@@ -391,7 +402,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await useDayBrowser();
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
@@ -424,7 +435,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await useDayBrowser();
     await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
@@ -455,7 +466,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await screen.findByRole("heading", { level: 1 }); // bootstrap settled
 
     // Open the palette (⌘K) and type a query >=2 chars.
@@ -479,6 +490,25 @@ describe("App container", () => {
     });
   });
 
+  it("offers theme toggle in the command palette", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/people") return new Response(JSON.stringify({ people: [] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await screen.findByRole("heading", { level: 1 });
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })); });
+
+    expect(await screen.findByText("切换明暗主题")).toBeInTheDocument();
+  });
+
   it("观点 tab defaults to the per-session workspace and can toggle to the 日报汇总 rollup", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
@@ -489,7 +519,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    render(<App />);
+    renderApp();
     await screen.findByRole("heading", { level: 1 }); // bootstrap settled
     await gotoTab("观点");
 
@@ -502,6 +532,28 @@ describe("App container", () => {
     expect(await screen.findByLabelText("观点日期")).not.toBe(null);
     // The workspace's session picker is gone in daily mode.
     expect(screen.queryByLabelText("观点会话")).not.toBeInTheDocument();
+  });
+
+  it("renders the voiceprint workflow path on the 声纹 tab", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/people") return new Response(JSON.stringify({ people: [] }), { status: 200 });
+      if (url.startsWith("/api/speakers/embedding-status")) return new Response(JSON.stringify({ total: 0, embedded: 0, pending: 0 }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await gotoTab("声纹");
+
+    expect(await screen.findByText("声纹主路径")).toBeInTheDocument();
+    expect(screen.getByText("选择范围")).toBeInTheDocument();
+    expect(screen.getByText("在图上框选样本")).toBeInTheDocument();
+    expect(screen.getByText("回审核验证")).toBeInTheDocument();
   });
 
   it("renders only the active tab and keeps the selected session across tab switches", async () => {
@@ -519,7 +571,7 @@ describe("App container", () => {
       return new Response("{}", { status: 200 });
     });
 
-    const { container } = render(<App />);
+    const { container } = renderApp();
 
     // Default tab is 审核 — switch to the by-day browser, then pick a day + session; the
     // transcript panel mounts.
@@ -546,5 +598,111 @@ describe("App container", () => {
     await gotoTab("审核");
     expect(await screen.findByText("你好")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).toBeInTheDocument();
+  });
+
+  it("matches the current review session against the voiceprint library and refreshes labels", async () => {
+    let matched = false;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") {
+        return new Response(JSON.stringify({
+          session_id: "ses_1",
+          review_status: "pending_review",
+          segments: [{
+            segment_id: "seg_1",
+            text: "你好",
+            speaker: "spk_01",
+            start_ms: 0,
+            end_ms: 1000,
+            absolute_start_at: "2026-06-13T09:33:00+08:00",
+            absolute_end_at: "2026-06-13T09:33:01+08:00",
+            review_status: "pending_review",
+            note: null,
+            person_id: matched ? "per_paul" : null,
+            person_label: matched ? "Paul" : null
+          }]
+        }), { status: 200 });
+      }
+      if (url === "/api/people/auto-attribute") {
+        matched = true;
+        return new Response(JSON.stringify({ assigned: 1, unassigned: 0, total: 1, per_person: { per_paul: 1 }, threshold: 0.6 }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await useDayBrowser();
+    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    expect(await screen.findByRole("button", { name: /接受此人全部 · spk_01/ })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /匹配当前会话/ }));
+
+    await waitFor(() => {
+      const call = calls.find((c) => c.url === "/api/people/auto-attribute");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call!.init?.body))).toMatchObject({ session_id: "ses_1" });
+    });
+    expect(await screen.findByRole("button", { name: /接受 Paul 全部/ })).toBeInTheDocument();
+  });
+
+  it("auto-matches a newly opened review session when an enrolled voiceprint library exists", async () => {
+    let matched = false;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
+      if (url === "/api/people") return new Response(JSON.stringify({ people: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1, enrolled: true, attributed_count: 0, manual_count: 4 }] }), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") {
+        return new Response(JSON.stringify({
+          session_id: "ses_1",
+          review_status: "pending_review",
+          segments: [{
+            segment_id: "seg_1",
+            text: "你好",
+            speaker: "spk_01",
+            start_ms: 0,
+            end_ms: 1000,
+            absolute_start_at: "2026-06-13T09:33:00+08:00",
+            absolute_end_at: "2026-06-13T09:33:01+08:00",
+            review_status: "pending_review",
+            note: null,
+            person_id: matched ? "per_paul" : null,
+            person_label: matched ? "Paul" : null
+          }]
+        }), { status: 200 });
+      }
+      if (url === "/api/people/auto-attribute") {
+        matched = true;
+        return new Response(JSON.stringify({ assigned: 1, unassigned: 0, total: 1, per_person: { per_paul: 1 }, threshold: 0.6 }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await useDayBrowser();
+    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+
+    await waitFor(() => {
+      const call = calls.find((c) => c.url === "/api/people/auto-attribute");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call!.init?.body))).toMatchObject({ session_id: "ses_1" });
+    });
+    expect(await screen.findByRole("button", { name: /接受 Paul 全部/ })).toBeInTheDocument();
   });
 });

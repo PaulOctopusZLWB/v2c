@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { useDaysQuery, useSessionsForDayQuery } from "../../api/hooks";
 import type { ViewpointState } from "../../api/types";
 import { dayLabel, sessionListLabel } from "../../lib/format";
-import { Icon } from "../../components/Icon";
+import { EmptyState, Skeleton } from "../../components/ui";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { PromptEditor } from "./PromptEditor";
 import { ResultEditor } from "./ResultEditor";
 
 const POLL_MS = 2000;
-
-type SessionRow = { session_id: string; started_at: string; segment_count: number; review_status: string; name?: string | null };
 
 /**
  * The per-session 观点 workspace: a day/session picker on top, then a 2-column grid — the
@@ -24,28 +23,16 @@ export function ViewpointWorkspace({
   initialDay?: string | null;
   onPlaybackError?: (message: string) => void;
 } = {}) {
-  const [days, setDays] = useState<Array<{ day: string; session_count: number }>>([]);
   const [day, setDay] = useState<string>(initialDay ?? "");
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sessionId, setSessionId] = useState<string>("");
   const [vp, setVp] = useState<ViewpointState | null>(null);
   const [loading, setLoading] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    api.days().then((r) => setDays(r.days ?? [])).catch(() => setDays([]));
-  }, []);
-
-  // Load a day's sessions whenever the day changes.
-  useEffect(() => {
-    if (!day) { setSessions([]); return; }
-    let cancelled = false;
-    api
-      .sessionsForDay(day)
-      .then((r) => { if (!cancelled) setSessions(r.sessions ?? []); })
-      .catch(() => { if (!cancelled) setSessions([]); });
-    return () => { cancelled = true; };
-  }, [day]);
+  const daysQuery = useDaysQuery();
+  const days = daysQuery.data?.days ?? [];
+  const sessionsQuery = useSessionsForDayQuery(day);
+  const sessions = sessionsQuery.data?.sessions ?? [];
+  const sessionsLoading = !!day && sessionsQuery.isLoading;
 
   // Clear any pending poll on unmount.
   useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
@@ -104,10 +91,10 @@ export function ViewpointWorkspace({
           <select
             aria-label="观点会话"
             value={sessionId}
-            disabled={!day || sessions.length === 0}
+            disabled={!day || sessionsLoading || sessions.length === 0}
             onChange={(e) => void pickSession(e.target.value)}
           >
-            <option value="" disabled>{!day ? "先选日期" : sessions.length === 0 ? "该日无会话" : "选择会话…"}</option>
+            <option value="" disabled>{!day ? "先选日期" : sessionsLoading ? "正在载入会话" : sessions.length === 0 ? "该日无会话" : "选择会话…"}</option>
             {sessions.map((s) => (
               <option key={s.session_id} value={s.session_id}>{sessionListLabel(s)}</option>
             ))}
@@ -131,15 +118,13 @@ export function ViewpointWorkspace({
           </div>
         </div>
       ) : loading ? (
-        <div className="vp-loading" role="status">
-          <span className="spinner" aria-hidden /> 正在载入会话…
-        </div>
+        <Skeleton label="正在载入会话" rows={3} className="vp-loading" />
       ) : (
-        <div className="empty">
-          <Icon name="inbox" className="empty-icon" />
-          <h3>选择一个会话开始</h3>
-          <p>选好日期与会话后,可逐段编辑转写、生成并保存观点。</p>
-        </div>
+        <EmptyState
+          icon="inbox"
+          title="选择一个会话开始"
+          description="选好日期与会话后,可逐段编辑转写、生成并保存观点。"
+        />
       )}
     </div>
   );

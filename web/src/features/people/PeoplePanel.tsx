@@ -4,6 +4,7 @@ import type { PersonRow, Suggestion } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { Icon } from "../../components/Icon";
+import { Button, InspectorPanel, StatusBadge } from "../../components/ui";
 
 /**
  * 人物 — the supervised-identity surface. The voiceprint (not the diarizer's unreliable spk_NN)
@@ -23,17 +24,20 @@ export function PeoplePanel({
   day,
   onChanged,
   push,
-  pushAction
+  pushAction,
+  onAutoAttributed
 }: {
   sessionId?: string | null;
   day?: string | null;
   onChanged: () => void;
   push: (title: string, message?: string) => void;
   pushAction: (message: string, actionLabel: string, onAction: () => void) => void;
+  onAutoAttributed?: (count: number) => void;
 }) {
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
+  const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
   const [threshold, setThreshold] = useState(0.6);
   // Identity scope: 全部 (global, cross-session — the default and the whole point) vs 本会话.
@@ -151,6 +155,7 @@ export function PeoplePanel({
         "查看",
         () => push("识别分布", dist || "无")
       );
+      onAutoAttributed?.(res.assigned);
       await refresh();
     } catch (err) {
       // The backend 400s with "no enrolled people" when nobody is enrolled — map to a friendly hint.
@@ -164,6 +169,10 @@ export function PeoplePanel({
   const speakers = people.filter((p) => p.person_type !== "non_speaker");
   const nonSpeakers = people.filter((p) => p.person_type === "non_speaker");
   const hasNonSpeaker = nonSpeakers.length > 0;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visiblePeople = speakers.filter((p) =>
+    normalizedQuery.length === 0 ? true : p.display_name.toLowerCase().includes(normalizedQuery)
+  );
 
   // The delete affordance for a person (shared by both groups) — never offered for 本人 (is_self).
   const deleteButton = (p: PersonRow) =>
@@ -181,20 +190,36 @@ export function PeoplePanel({
     );
 
   return (
-    <section className="people-panel card">
-      <div className="section-title">
-        <Icon name="person" /> 人物 — 教一次,处处认得
-      </div>
+    <InspectorPanel
+      title="人物证据"
+      subtitle="声纹登记、归属计数、智能建议与全局识别"
+      actions={
+        <StatusBadge status="info">
+          <span className="num">{speakers.length}</span> 人
+        </StatusBadge>
+      }
+      className="people-panel"
+    >
       <p className="people-explainer muted">
         标注几段是谁 → 全局识别 → 每个人在所有会话里一致;标得越多,边界越准。
       </p>
+
+      <label className="people-search">
+        <span className="sr-only">搜索人物</span>
+        <input
+          type="search"
+          placeholder="搜索人物"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </label>
 
       {loadError ? <p className="muted" role="alert">{loadError}</p> : null}
 
       <details className="people-roster" open>
         <summary>人物 · <span className="num">{speakers.length}</span> 人(点击折叠)</summary>
         <ul className="people-list" role="list">
-        {speakers.map((p) => (
+        {visiblePeople.map((p) => (
           <li className="person-row" key={p.person_id} role="listitem">
             <span className="chip" style={{ background: speakerColor(p.person_id) }}>
               <Icon name="person" /> {p.display_name}
@@ -227,6 +252,7 @@ export function PeoplePanel({
           </li>
         ))}
         {people.length === 0 && !loadError ? <li className="muted">暂无人物</li> : null}
+        {people.length > 0 && visiblePeople.length === 0 ? <li className="muted">没有匹配人物</li> : null}
         </ul>
       </details>
 
@@ -253,7 +279,7 @@ export function PeoplePanel({
             {nonSpeakers.map((p) => (
               <li className="person-row person-nonspeaker" key={p.person_id} role="listitem">
                 <span className="chip chip-noise" title="非发言人(噪音/多人)">
-                  <span aria-hidden>🔇</span> {p.display_name}
+                  <Icon name="noise" /> {p.display_name}
                 </span>
                 <span className="badge badge-noise">非发言人</span>
                 <span className="person-count muted" title="已归 = 标为噪音/多人的片段数">
@@ -293,16 +319,16 @@ export function PeoplePanel({
       <div className="people-suggest">
         <div className="people-suggest-head">
           <span className="section-subtitle">智能建议</span>
-          <button
-            className="primary"
+          <Button
+            variant="primary"
+            icon="viewpoint"
+            busy={suggest.pending}
             onClick={() => void suggest.run()}
-            disabled={suggest.pending || !sessionId}
-            aria-busy={suggest.pending}
+            disabled={!sessionId}
             title={sessionId ? "为此会话的每个聚类匹配最相近的已登记人物" : "请先选择一个会话"}
           >
-            {suggest.pending ? <span className="spinner" aria-hidden /> : <Icon name="viewpoint" />}
-            {suggest.pending ? "正在匹配…" : "智能建议"}
-          </button>
+            智能建议
+          </Button>
         </div>
         {!sessionId ? (
           <p className="muted">选择一个会话后,可为其聚类匹配已登记人物。</p>
@@ -375,18 +401,17 @@ export function PeoplePanel({
             />
             <span className="num">{threshold.toFixed(2)}</span>
           </div>
-          <button
-            className="primary"
+          <Button
+            variant="primary"
+            icon="refresh"
+            busy={autoAttribute.pending}
             onClick={() => void autoAttribute.run()}
-            disabled={autoAttribute.pending}
-            aria-busy={autoAttribute.pending}
             title="把每个片段归到声纹最相近的已登记人物(相似度需达阈值),你的手动标注始终保留"
           >
-            {autoAttribute.pending ? <span className="spinner" aria-hidden /> : <Icon name="refresh" />}
-            {autoAttribute.pending ? "正在识别…" : "全局识别(按声纹)"}
-          </button>
+            全局识别(按声纹)
+          </Button>
         </div>
       </div>
-    </section>
+    </InspectorPanel>
   );
 }

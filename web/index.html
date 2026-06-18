@@ -6,13 +6,12 @@
     <meta name="color-scheme" content="light dark" />
     <title>Personal Context Node</title>
     <!-- Pre-paint theme: set data-theme BEFORE the app bundle so there's no flash
-         of the wrong theme (FOUC). Saved choice wins; otherwise follow the OS. -->
+         of the wrong theme (FOUC). Saved choice wins; otherwise default dark. -->
     <script>
       (function () {
         try {
           var saved = localStorage.getItem("pcn-theme"); // 'light' | 'dark' | null
-          var sys = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-          document.documentElement.dataset.theme = saved || sys;
+          document.documentElement.dataset.theme = saved === "light" || saved === "dark" ? saved : "dark";
         } catch (e) {
           document.documentElement.dataset.theme = "dark";
         }

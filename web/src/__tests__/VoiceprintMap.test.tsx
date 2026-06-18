@@ -134,6 +134,36 @@ describe("VoiceprintMap", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
+  it("reports projection lifecycle through onState", async () => {
+    const states: string[] = [];
+    render(<VoiceprintMap request={REQ} onState={(state) => states.push(state.status)} />);
+
+    await screen.findByRole("list", { name: /图例/ });
+
+    expect(states).toContain("loading");
+    expect(states).toContain("ready");
+  });
+
+  it("reports empty projection state through onState", async () => {
+    vi.stubGlobal("fetch", mockFetch({ points: [], method: "umap", n: 0 }));
+    const states: string[] = [];
+    render(<VoiceprintMap request={REQ} onState={(state) => states.push(state.status)} />);
+
+    await screen.findByText(/该范围还没有声纹/);
+
+    expect(states).toContain("empty");
+  });
+
+  it("reports error projection state through onState", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad", { status: 500 })));
+    const states: string[] = [];
+    render(<VoiceprintMap request={REQ} onState={(state) => states.push(state.status)} />);
+
+    await screen.findByRole("alert");
+
+    expect(states).toContain("error");
+  });
+
   it("re-fetches when the request prop changes", async () => {
     const { rerender } = render(<VoiceprintMap request={REQ} />);
     await screen.findByRole("list", { name: /图例/ });
@@ -206,11 +236,27 @@ describe("VoiceprintMap", () => {
     expect(screen.getByText(/已选 0 点/)).toBeInTheDocument();
   });
 
+  it("reports selected segment count when selection changes", async () => {
+    const selectedCounts: number[] = [];
+    render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()} onSelectionChange={(count) => selectedCounts.push(count)} />);
+
+    await screen.findByRole("list", { name: /图例/ });
+
+    expect(selectedCounts).toContain(0);
+  });
+
   it("dragging a rectangle in select mode selects the enclosed points and 标注 calls onLabel with their ids", async () => {
     const onLabel = vi.fn().mockResolvedValue({ labeled: 2 });
     const onChanged = vi.fn();
+    const selectedCounts: number[] = [];
     const { container } = render(
-      <VoiceprintMap request={REQ} people={labelPeople} onLabel={onLabel} onChanged={onChanged} />
+      <VoiceprintMap
+        request={REQ}
+        people={labelPeople}
+        onLabel={onLabel}
+        onChanged={onChanged}
+        onSelectionChange={(count) => selectedCounts.push(count)}
+      />
     );
     await screen.findByRole("list", { name: /图例/ });
     await userEvent.click(screen.getByRole("button", { name: /框选/ }));
@@ -223,6 +269,7 @@ describe("VoiceprintMap", () => {
     pointer("pointerup", 600, 200);
 
     expect(await screen.findByText(/已选 2 点/)).toBeInTheDocument();
+    expect(selectedCounts).toContain(2);
 
     await userEvent.selectOptions(screen.getByLabelText(/标注为/), "per_b");
     await userEvent.click(screen.getByRole("button", { name: /^标注$/ }));
@@ -235,6 +282,7 @@ describe("VoiceprintMap", () => {
     });
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(await screen.findByText(/已选 0 点/)).toBeInTheDocument();
+    expect(selectedCounts[selectedCounts.length - 1]).toBe(0);
   });
 
   // --- color-by-emotion ---

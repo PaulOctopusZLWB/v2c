@@ -71,7 +71,7 @@ export function HomePanel({ onGoReview, onGoSpeakers, onGoLlm, onOpenSession }: 
           </div>
           {noBacklog ? (
             <div className="home-clear">
-              <span className="home-clear-emoji" aria-hidden>🎉</span>
+              <Icon name="check_circle" className="home-clear-icon" />
               <strong>全部审核完毕</strong>
               <span className="home-card-sub">没有待审会话</span>
             </div>

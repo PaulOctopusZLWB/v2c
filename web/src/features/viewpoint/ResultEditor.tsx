@@ -103,21 +103,23 @@ export function ResultEditor({
         </button>
       </div>
 
-      {vp.generating ? (
-        <div className="vp-generating" role="status">
-          <span className="spinner" aria-hidden /> 生成中…
-        </div>
-      ) : !vp.has_generated || !doc ? (
-        <div className="empty">
-          <Icon name="inbox" className="empty-icon" />
-          <h3>尚未生成</h3>
-          <p>点击「重新生成」生成本会话的观点。</p>
-        </div>
-      ) : (
-        <ResultFields doc={doc} setDoc={setDoc} busy={busy} onCommit={commit} />
-      )}
+      <div className="vp-result-body">
+        {vp.generating ? (
+          <div className="vp-generating" role="status">
+            <span className="spinner" aria-hidden /> 生成中…
+          </div>
+        ) : !vp.has_generated || !doc ? (
+          <div className="empty">
+            <Icon name="inbox" className="empty-icon" />
+            <h3>尚未生成</h3>
+            <p>点击「重新生成」生成本会话的观点。</p>
+          </div>
+        ) : (
+          <ResultFields doc={doc} setDoc={setDoc} busy={busy} onCommit={commit} />
+        )}
 
-      {error ? <p className="vp-error" role="alert">{error}</p> : null}
+        {error ? <p className="vp-error" role="alert">{error}</p> : null}
+      </div>
 
       <div className="vp-result-actions">
         {vp.edited ? (

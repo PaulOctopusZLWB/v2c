@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -134,5 +136,14 @@ describe("ResultEditor", () => {
     await userEvent.click(screen.getByRole("button", { name: /确认保存到 Obsidian/ }));
     await waitFor(() => expect(api.publishViewpoint).toHaveBeenCalledWith("ses_1"));
     expect(await screen.findByText(/Notes\/ses_1\.md/)).toBeInTheDocument();
+  });
+});
+
+describe("ResultEditor layout", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+
+  it("bounds the result card and scrolls the editable body instead of growing indefinitely", () => {
+    expect(css).toMatch(/\.vp-result\s*\{[^}]*max-height:\s*min\(640px,\s*calc\(100vh - 220px\)\)[^}]*overflow:\s*hidden/);
+    expect(css).toMatch(/\.vp-result-body\s*\{[^}]*overflow-y:\s*auto/);
   });
 });

@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../../api/client";
+import { useDaysQuery } from "../../api/hooks";
 import { dayLabel, timeOfDay } from "../../lib/format";
 import { Icon } from "../../components/Icon";
+import { Skeleton } from "../../components/ui";
 
 /** The 声纹 projection scope: a union of whole days and/or individual sessions. */
 export interface Scope {
@@ -31,30 +33,12 @@ function toggle(list: string[], v: string): string[] {
  * independent — both supported. Compact + scrollable.
  */
 export function ScopeSelector({ value, onChange }: { value: Scope; onChange: (v: Scope) => void }) {
-  const [days, setDays] = useState<Array<{ day: string; session_count: number }>>([]);
-  const [loading, setLoading] = useState(true);
+  const daysQuery = useDaysQuery();
+  const days = daysQuery.data?.days ?? [];
+  const loading = daysQuery.isLoading;
   // Which day rows are expanded, and their lazily-fetched sessions (cached after first open).
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sessionsByDay, setSessionsByDay] = useState<Record<string, SessionRow[]>>({});
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api
-      .days()
-      .then((r) => {
-        if (!cancelled) setDays(r.days ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setDays([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const toggleExpand = (day: string) => {
     setExpanded((prev) => {
@@ -96,9 +80,7 @@ export function ScopeSelector({ value, onChange }: { value: Scope; onChange: (v:
       <p className="scope-hint muted">勾选日期或会话(可跨多天/多会话对比),再点「投射」。</p>
 
       {loading ? (
-        <div className="scope-loading" role="status">
-          <span className="spinner" aria-hidden /> 正在载入日期…
-        </div>
+        <Skeleton label="正在载入日期" rows={4} />
       ) : days.length === 0 ? (
         <p className="muted">还没有任何日期。</p>
       ) : (

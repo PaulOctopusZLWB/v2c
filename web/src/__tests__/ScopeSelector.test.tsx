@@ -1,5 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ScopeSelector } from "../features/viz/ScopeSelector";
 
@@ -34,6 +36,11 @@ function mockFetch() {
 
 const EMPTY = { session_ids: [], days: [] };
 
+function renderWithQuery(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 describe("ScopeSelector", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", mockFetch());
@@ -43,15 +50,23 @@ describe("ScopeSelector", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses a skeleton while loading days", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+
+    renderWithQuery(<ScopeSelector value={EMPTY} onChange={() => undefined} />);
+
+    expect(screen.getByRole("status", { name: "正在载入日期" })).toBeInTheDocument();
+  });
+
   it("renders the days from api.days()", async () => {
-    render(<ScopeSelector value={EMPTY} onChange={vi.fn()} />);
+    renderWithQuery(<ScopeSelector value={EMPTY} onChange={vi.fn()} />);
     expect(await screen.findByText(/2026-06-15/)).toBeInTheDocument();
     expect(screen.getByText(/2026-06-14/)).toBeInTheDocument();
   });
 
   it("checking a day calls onChange with that day in `days`", async () => {
     const onChange = vi.fn();
-    render(<ScopeSelector value={EMPTY} onChange={onChange} />);
+    renderWithQuery(<ScopeSelector value={EMPTY} onChange={onChange} />);
     await screen.findByText(/2026-06-15/);
 
     await userEvent.click(screen.getByRole("checkbox", { name: /2026-06-15/ }));
@@ -61,7 +76,7 @@ describe("ScopeSelector", () => {
 
   it("expanding a day lists its sessions and checking one adds its id to `session_ids`", async () => {
     const onChange = vi.fn();
-    render(<ScopeSelector value={EMPTY} onChange={onChange} />);
+    renderWithQuery(<ScopeSelector value={EMPTY} onChange={onChange} />);
     await screen.findByText(/2026-06-15/);
 
     // Expand the day to load + reveal its sessions.
@@ -78,7 +93,7 @@ describe("ScopeSelector", () => {
 
   it("清空 resets the selection", async () => {
     const onChange = vi.fn();
-    render(<ScopeSelector value={{ session_ids: ["ses_a"], days: ["2026-06-15"] }} onChange={onChange} />);
+    renderWithQuery(<ScopeSelector value={{ session_ids: ["ses_a"], days: ["2026-06-15"] }} onChange={onChange} />);
     await screen.findByText(/2026-06-15/);
 
     await userEvent.click(screen.getByRole("button", { name: /清空/ }));
@@ -87,7 +102,7 @@ describe("ScopeSelector", () => {
 
   it("unchecking a selected day removes it from `days`", async () => {
     const onChange = vi.fn();
-    render(<ScopeSelector value={{ session_ids: [], days: ["2026-06-15"] }} onChange={onChange} />);
+    renderWithQuery(<ScopeSelector value={{ session_ids: [], days: ["2026-06-15"] }} onChange={onChange} />);
     await screen.findByText(/2026-06-15/);
 
     await userEvent.click(screen.getByRole("checkbox", { name: /2026-06-15/ }));

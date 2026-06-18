@@ -51,6 +51,52 @@ describe("TranscriptReviewPanel", () => {
     expect(onBatchReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
   });
 
+  it("uses resolved person labels for bulk identity controls", async () => {
+    const onBatchReview = vi.fn().mockResolvedValue(undefined);
+    const attributed = {
+      session_id: "ses_attr",
+      review_status: "pending_review" as const,
+      segments: [
+        { segment_id: "seg_1", text: "我是 Paul", speaker: "spk_01", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review" as const, note: null, person_id: "per_paul", person_label: "Paul" },
+        { segment_id: "seg_2", text: "继续说", speaker: "spk_02", start_ms: 1000, end_ms: 2000, absolute_start_at: "2026-06-13T09:33:01+08:00", absolute_end_at: "2026-06-13T09:33:02+08:00", review_status: "pending_review" as const, note: null, person_id: "per_paul", person_label: "Paul" },
+        { segment_id: "seg_3", text: "未识别", speaker: "spk_03", start_ms: 2000, end_ms: 3000, absolute_start_at: "2026-06-13T09:33:02+08:00", absolute_end_at: "2026-06-13T09:33:03+08:00", review_status: "pending_review" as const, note: null, person_id: null, person_label: null }
+      ]
+    };
+    render(
+      <TranscriptReviewPanel
+        session={attributed}
+        persons={[]}
+        onBatchReview={onBatchReview}
+        onAcceptSession={vi.fn()}
+      />
+    );
+
+    const paul = screen.getByRole("button", { name: /接受 Paul 全部/ });
+    expect(paul).toHaveTextContent("spk_01");
+    expect(paul).toHaveTextContent("spk_02");
+    expect(screen.queryByRole("button", { name: /接受此人全部 · spk_01/ })).not.toBeInTheDocument();
+
+    await userEvent.click(paul);
+    expect(onBatchReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
+  });
+
+  it("shows a current-session voiceprint match action when provided", async () => {
+    const onMatchCurrentSession = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TranscriptReviewPanel
+        session={session}
+        persons={[]}
+        onBatchReview={vi.fn()}
+        onAcceptSession={vi.fn()}
+        onMatchCurrentSession={onMatchCurrentSession}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /匹配当前会话/ }));
+
+    expect(onMatchCurrentSession).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts the whole session via accept-remaining", async () => {
     const onAcceptSession = vi.fn().mockResolvedValue(undefined);
     render(

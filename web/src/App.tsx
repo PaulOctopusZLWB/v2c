@@ -15,7 +15,8 @@ import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPan
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { PeoplePanel } from "./features/people/PeoplePanel";
-import { VoiceprintMap } from "./features/viz/VoiceprintMap";
+import { VoiceprintMap, type VoiceprintMapState } from "./features/viz/VoiceprintMap";
+import { VoiceprintWorkflowPanel } from "./features/speakers/VoiceprintWorkflowPanel";
 import { ScopeSelector, type Scope } from "./features/viz/ScopeSelector";
 import { ProjectionControls, PROJ_DEFAULTS, type ProjParams } from "./features/viz/ProjectionControls";
 import { DynamicsCharts } from "./features/viz/DynamicsCharts";
@@ -24,6 +25,7 @@ import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { ViewpointWorkspace } from "./features/viewpoint/ViewpointWorkspace";
 import { Tabs } from "./features/workspace/Tabs";
 import { ThemeToggle } from "./features/workspace/ThemeToggle";
+import { useTheme } from "./features/workspace/useTheme";
 import { useTab } from "./features/workspace/useTab";
 import type { TabId } from "./features/workspace/useTab";
 import { CommandPalette, type Command } from "./features/command/CommandPalette";
@@ -82,6 +84,7 @@ function highlightMatch(text: string, q: string): ReactNode {
 export function App() {
   const { summary, worker_running, import_progress } = usePipelineStatus();
   const { tab, setTab } = useTab();
+  const themeController = useTheme();
   const { toasts, push, pushAction, dismiss } = useToasts();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
@@ -114,6 +117,9 @@ export function App() {
   const [scope, setScope] = useState<Scope>({ session_ids: [], days: [] });
   const [projParams, setProjParams] = useState<ProjParams>({ ...PROJ_DEFAULTS });
   const [appliedRequest, setAppliedRequest] = useState<ProjectionRequest | null>(null);
+  const [voiceprintProjectionState, setVoiceprintProjectionState] = useState<VoiceprintMapState>({ status: "idle" });
+  const [voiceprintSelectedCount, setVoiceprintSelectedCount] = useState(0);
+  const [lastAutoAttributeCount, setLastAutoAttributeCount] = useState<number | null>(null);
   // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
   const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
@@ -139,6 +145,7 @@ export function App() {
   useEffect(() => {
     bootstrappedRef.current = bootstrapped;
   }, [bootstrapped]);
+  const autoMatchedSessionIds = useRef(new Set<string>());
   // Mirror tasksOpen into a ref so the mount-time poll closure re-reads the latest value.
   const tasksOpenRef = useRef(false);
   useEffect(() => {
@@ -430,6 +437,36 @@ export function App() {
     setQueueVersion((v) => v + 1);
   }
 
+  async function handleMatchCurrentSession() {
+    if (!session) return;
+    const res = await api.autoAttribute({ session_id: session.session_id });
+    setLastAutoAttributeCount(res.assigned);
+    push("已按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`);
+    onPeopleChanged();
+    await reloadSession();
+  }
+
+  // New review sessions should not require the user to jump back into the 声纹 tab just to apply
+  // an already-enrolled voiceprint library. Run once per opened session, only when there is an
+  // enrolled speaker and at least one segment has not been attributed yet.
+  useEffect(() => {
+    if (!session) return;
+    if (autoMatchedSessionIds.current.has(session.session_id)) return;
+    const hasVoiceprintLibrary = (people ?? []).some((p) => p.person_type !== "non_speaker" && p.enrolled);
+    const hasUnattributedSegments = session.segments.some((seg) => !seg.person_id);
+    if (!hasVoiceprintLibrary || !hasUnattributedSegments) return;
+    autoMatchedSessionIds.current.add(session.session_id);
+    void guard(async () => {
+      const res = await api.autoAttribute({ session_id: session.session_id });
+      setLastAutoAttributeCount(res.assigned);
+      if (res.assigned > 0) {
+        push("已自动按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`);
+        onPeopleChanged();
+        await reloadSession();
+      }
+    })();
+  }, [session?.session_id, people]);
+
   function highlightEvidence(candidateId: string) {
     const candidate = (llm?.memory_candidates ?? []).find((c) => c.candidate_id === candidateId);
     setHighlightedSegmentId(candidate?.evidence_segment_ids?.[0] ?? null);
@@ -500,6 +537,13 @@ export function App() {
       keywords: `${id} ${TAB_LABELS[id]} tab`,
       run: () => setTab(id)
     })),
+    {
+      id: "action-toggle-theme",
+      title: "切换明暗主题",
+      group: "操作",
+      keywords: "theme dark light 主题 明暗",
+      run: () => themeController.toggle()
+    },
     ...days.map(({ day }) => ({
       id: `day-${day}`,
       title: `打开 ${day}`,
@@ -669,6 +713,7 @@ export function App() {
                 highlightedSegmentId={highlightedSegmentId}
                 onBatchReview={handleBatchReview}
                 onAcceptSession={handleAcceptSession}
+                onMatchCurrentSession={guard(handleMatchCurrentSession)}
                 onPlaybackError={(message) => push("音频播放失败", message)}
               />
               <SpeakerPanel
@@ -748,6 +793,15 @@ export function App() {
           </div>
         </section>
 
+        <VoiceprintWorkflowPanel
+          selectedScopeCount={scope.days.length + scope.session_ids.length}
+          projection={voiceprintProjectionState}
+          selectedSegmentCount={voiceprintSelectedCount}
+          hasKnownPeople={(people ?? []).some((p) => p.person_type !== "non_speaker" && p.enrolled)}
+          lastAutoAttributeCount={lastAutoAttributeCount}
+          hasReviewTarget={!!selectedSessionId || days.length > 0}
+        />
+
         {/* Main row: the projection controls rail, the map (hero), the labeling/identify controls. */}
         <div className="speakers-main speakers-main-proj">
           <div className="speakers-proj-rail">
@@ -757,6 +811,9 @@ export function App() {
                 setScope(next);
                 // A scope change auto-applies (re-projects with the current params).
                 setAppliedRequest(buildRequest(next, projParams));
+                setVoiceprintProjectionState({ status: "idle" });
+                setVoiceprintSelectedCount(0);
+                setLastAutoAttributeCount(null);
               }}
             />
             <ProjectionControls
@@ -777,6 +834,8 @@ export function App() {
               key={mapKey}
               request={appliedRequest}
               onResult={(r) => setProjCapped(r)}
+              onState={setVoiceprintProjectionState}
+              onSelectionChange={setVoiceprintSelectedCount}
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
               onLabel={async (personId, segmentIds) => {
@@ -791,6 +850,7 @@ export function App() {
               sessionId={selectedSessionId}
               day={inspectDay}
               onChanged={onPeopleChanged}
+              onAutoAttributed={setLastAutoAttributeCount}
               push={push}
               pushAction={pushAction}
             />
@@ -953,7 +1013,7 @@ export function App() {
           />
         </div>
         <div className="header-actions">
-          <ThemeToggle />
+          <ThemeToggle theme={themeController.theme} onToggle={themeController.toggle} />
           <Tabs active={tab} onSelect={setTab} />
         </div>
       </header>

@@ -8,6 +8,13 @@ import { Icon } from "../../components/Icon";
 
 type ColorMode = "person" | "session" | "emotion";
 
+export type VoiceprintMapState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "empty" }
+  | { status: "error"; message: string }
+  | { status: "ready"; pointCount: number; capped: boolean; total?: number };
+
 /** Default emotion for a point with no extracted emotion row (so it still draws a colour). */
 const DEFAULT_EMOTION = "中立/neutral";
 
@@ -44,6 +51,8 @@ const IDENTITY: View = { scale: 1, tx: 0, ty: 0 };
 export function VoiceprintMap({
   request,
   onResult,
+  onState,
+  onSelectionChange,
   onPlaybackError,
   people,
   onLabel,
@@ -55,6 +64,8 @@ export function VoiceprintMap({
   request: ProjectionRequest | null;
   /** Report each result's subsample state up (lets the parent's controls show the capped note). */
   onResult?: (r: { capped: boolean; n: number; total: number } | null) => void;
+  onState?: (state: VoiceprintMapState) => void;
+  onSelectionChange?: (count: number) => void;
   onPlaybackError?: (message: string) => void;
   /** When provided alongside onLabel, enables a 框选 (lasso) → 标注 teaching toolbar. */
   people?: PersonRow[];
@@ -72,6 +83,11 @@ export function VoiceprintMap({
   // Keep onResult out of the fetch effect's deps (it may change identity each render).
   const onResultRef = useRef(onResult);
   useEffect(() => { onResultRef.current = onResult; }, [onResult]);
+  const onStateRef = useRef(onState);
+  useEffect(() => { onStateRef.current = onState; }, [onState]);
+  const reportState = useCallback((state: VoiceprintMapState) => {
+    onStateRef.current?.(state);
+  }, []);
 
   // Colour mode: by person/speaker cluster (default) or by acoustic emotion. In 情绪 mode the
   // per-segment dominant-emotion labels are fetched for the scope and drive both the point
@@ -92,6 +108,9 @@ export function VoiceprintMap({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectedIdsRef = useRef<Set<string>>(selectedIds);
   useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
+  useEffect(() => { onSelectionChangeRef.current?.(selectedIds.size); }, [selectedIds.size]);
   const [labelPersonId, setLabelPersonId] = useState("");
   // Live rubber-band rectangle in canvas pixels while dragging a selection.
   const rectRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -143,32 +162,40 @@ export function VoiceprintMap({
       setCapped(null);
       onResultRef.current?.(null);
       setLoading(false);
+      reportState({ status: "idle" });
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
+    reportState({ status: "loading" });
     api
       .projection(request)
       .then((res) => {
         if (cancelled) return;
-        const n = res.n ?? res.points?.length ?? 0;
+        const pts = res.points ?? [];
+        const n = res.n ?? pts.length;
         const total = res.total_in_scope ?? 0;
-        setPoints(res.points ?? []);
+        setSelectedIds(new Set());
+        setPoints(pts);
         setCapped(res.capped ? { n, total } : null);
         onResultRef.current?.({ capped: !!res.capped, n, total });
         setLoading(false);
+        if (pts.length === 0) reportState({ status: "empty" });
+        else reportState({ status: "ready", pointCount: pts.length, capped: !!res.capped, total });
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "投影失败");
+        const message = err instanceof Error ? err.message : "投影失败";
+        setError(message);
         setPoints([]);
         setCapped(null);
         onResultRef.current?.(null);
         setLoading(false);
+        reportState({ status: "error", message });
       });
     return () => { cancelled = true; };
-  }, [request]);
+  }, [request, reportState]);
 
   // --- fetch per-segment emotion labels when in 情绪 mode (lazily, on scope/mode change) ---
   // The labels endpoint is single-scope, so over a multi-scope request we fetch per session +
@@ -630,7 +657,7 @@ export function VoiceprintMap({
             <option value="" disabled>选择人物…</option>
             {(people ?? []).map((p) => (
               <option key={p.person_id} value={p.person_id}>
-                {p.person_type === "non_speaker" ? `🔇 ${p.display_name}` : p.display_name}
+                {p.person_type === "non_speaker" ? `非发言人 · ${p.display_name}` : p.display_name}
               </option>
             ))}
           </select>
