@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, LabelSegment, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession } from "./types";
+import type { AutoAttributeResult, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, LabelSegment, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -10,7 +10,20 @@ function query(params: Record<string, string | number | null | undefined>): stri
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
-  if (!response.ok) throw new Error(`${init?.method ?? "GET"} ${path} failed: ${response.status}`);
+  if (!response.ok) {
+    // Surface the backend's validation message (FastAPI's `detail`, or a plain message) so
+    // callers — e.g. the 观点 editor on a 400 — can show what's wrong instead of "failed: 400".
+    let detail = "";
+    try {
+      const body = (await response.clone().json()) as { detail?: unknown; message?: unknown };
+      const d = body?.detail ?? body?.message;
+      if (typeof d === "string") detail = d;
+      else if (Array.isArray(d)) detail = d.map((e) => (e as { msg?: string })?.msg ?? String(e)).join("; ");
+    } catch {
+      /* non-JSON error body — fall back to the status line */
+    }
+    throw new Error(detail || `${init?.method ?? "GET"} ${path} failed: ${response.status}`);
+  }
   return (await response.json()) as T;
 }
 
@@ -117,8 +130,33 @@ export const api = {
   settings: () => request<Settings>("/api/settings"),
   updateSettings: (body: Partial<Settings>) =>
     request<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
-  // read-only llm
+  // read-only llm (daily rollup)
   dailyLlm: (day: string) => request<DailyLlmResult>(`/api/llm/days/${day}`),
+  // 观点 (per-session viewpoint workspace): the editable transcript/prompt/result single source
+  // of truth. Every step is manual — edit segment text, (re)generate, edit the result, publish.
+  viewpoint: (id: string) => request<ViewpointState>(`/api/sessions/${id}/viewpoint`),
+  // Edit a transcript turn's text in place (makes the generated 观点 stale).
+  editSegmentText: (id: string, text: string) =>
+    request<{ segment_id: string; text: string }>(`/api/transcripts/segments/${id}`, { method: "PATCH", body: JSON.stringify({ text }) }),
+  // Enqueue (re)generation of the session's 观点; poll viewpoint() until generating flips false.
+  generateViewpoint: (id: string) =>
+    request<{ enqueued: boolean; session_id: string }>(`/api/sessions/${id}/viewpoint/generate`, { method: "POST" }),
+  // Save a hand-edited 观点 document; 400 (with a validation message) when refs/clusters are bad.
+  editViewpoint: (id: string, content: ViewpointContent) =>
+    request<ViewpointState>(`/api/sessions/${id}/viewpoint`, { method: "PUT", body: JSON.stringify({ content }) }),
+  // Discard the manual edits, reverting to the generated baseline.
+  clearViewpointEdit: (id: string) =>
+    request<ViewpointState>(`/api/sessions/${id}/viewpoint/edit`, { method: "DELETE" }),
+  // Confirm + write the effective 观点 to Obsidian; 409 when nothing has been generated yet.
+  publishViewpoint: (id: string) =>
+    request<{ note_path: string; published_at: string }>(`/api/sessions/${id}/viewpoint/publish`, { method: "POST" }),
+  // The global 观点 prompt template + its built-in default.
+  getSessionPrompt: () => request<{ template: string; default: string }>("/api/prompts/session_viewpoint"),
+  setSessionPrompt: (template: string) =>
+    request<{ template: string; default: string }>("/api/prompts/session_viewpoint", { method: "PUT", body: JSON.stringify({ template }) }),
+  // Per-session prompt override (null clears it, falling back to the global default).
+  setSessionPromptOverride: (id: string, template: string | null) =>
+    request<ViewpointPrompt>(`/api/sessions/${id}/viewpoint/prompt`, { method: "PUT", body: JSON.stringify({ template }) }),
   audioUrl: (segmentId: string) => `/api/audio/segments/${segmentId}`,
   devices: () => request<{ sources: import("./types").ImportSource[] }>("/api/devices"),
 };

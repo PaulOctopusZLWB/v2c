@@ -945,3 +945,88 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 .people-roster > summary::-webkit-details-marker { display: none; }
 .people-roster > summary::before { content: "▾ "; color: var(--text-dim); }
 .people-roster:not([open]) > summary::before { content: "▸ "; }
+
+/* ---- 观点 (per-session viewpoint workspace, slice 4) ---- */
+/* The 观点 tab view toggle (会话观点 / 日报汇总) reuses the .nav-mode pill. */
+.llm-mode { width: fit-content; }
+.vp-page { display: grid; gap: var(--s5); }
+
+/* Day/session picker row at the top of the workspace. */
+.vp-picker { display: flex; flex-wrap: wrap; gap: var(--s5); align-items: end; }
+.vp-pick { display: grid; gap: var(--s2); font-size: 12px; color: var(--text-2); }
+.vp-pick select { min-width: 200px; }
+
+/* The 2-column grid: editable transcript (left) | editable prompt+result (right). */
+.viewpoint-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--s5);
+  align-items: start;
+}
+.vp-left, .vp-right { min-width: 0; display: grid; gap: var(--s5); }
+/* Stack on narrow viewports. */
+@media (max-width: 980px) {
+  .viewpoint-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+
+.vp-loading { display: flex; align-items: center; gap: var(--s3); color: var(--text-2); padding: var(--s6) 0; }
+
+/* ---- transcript (left) ---- */
+.vp-transcript { display: grid; gap: var(--s3); }
+.vp-stale {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: var(--r1); font-size: 12px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+}
+.vp-turns { display: grid; gap: var(--s3); max-height: 60vh; overflow-y: auto; }
+.vp-turn { border-left: 3px solid var(--border); padding: var(--s3) 0 var(--s3) var(--s4); }
+.vp-turn-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.vp-turn .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; color: #06121a; }
+.vp-turn-speaker { font-size: 12px; padding: 2px 6px; }
+.vp-turn-text { margin: var(--s2) 0 0; cursor: pointer; line-height: 1.5; }
+.vp-turn-text:hover { color: var(--accent-2); }
+.vp-turn-edit { display: grid; gap: var(--s2); margin-top: var(--s2); }
+.vp-turn-edit textarea { width: 100%; resize: vertical; }
+.vp-turn-edit-actions { display: flex; gap: var(--s3); }
+.icon-btn.playing { color: var(--accent); }
+
+/* ---- prompt (right, collapsible) ---- */
+.vp-prompt > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); user-select: none; }
+.vp-prompt > summary::-webkit-details-marker { display: none; }
+.vp-badge {
+  margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+  color: var(--accent-2); background: var(--accent-dim); border: 1px solid var(--accent);
+}
+.vp-prompt-body { display: grid; gap: var(--s3); margin-top: var(--s3); }
+.vp-prompt-body textarea { width: 100%; resize: vertical; font: inherit; }
+.vp-prompt-actions { display: flex; gap: var(--s3); flex-wrap: wrap; }
+
+/* ---- result (right) ---- */
+.vp-result { display: grid; gap: var(--s4); }
+.vp-result-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
+.vp-result-head .status { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.status.s-draft { color: var(--text-dim); }
+.status.s-edited { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.status.s-published { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.vp-generating { display: flex; align-items: center; gap: var(--s3); color: var(--text-2); padding: var(--s5) 0; }
+
+.vp-fields { display: grid; gap: var(--s4); }
+.vp-field { display: grid; gap: var(--s2); }
+.vp-field-label { font-size: 11px; color: var(--text-dim); letter-spacing: .04em; }
+.vp-fields input, .vp-fields textarea { width: 100%; font: inherit; resize: vertical; }
+
+.vp-group { border: 1px solid var(--border); border-radius: var(--r1); padding: var(--s3); display: grid; gap: var(--s3); margin: 0; }
+.vp-group legend { font-size: 11px; color: var(--text-dim); padding: 0 6px; text-transform: uppercase; letter-spacing: .06em; }
+.vp-row { display: grid; gap: var(--s2); }
+.vp-row .vp-owner { max-width: 220px; }
+.vp-refs { font-size: 11px; }
+.vp-list-row { display: flex; gap: var(--s2); align-items: center; }
+.vp-list-row input { flex: 1; }
+.vp-speaker-meta { display: flex; gap: var(--s4); flex-wrap: wrap; }
+.vp-speaker-meta .vp-field { flex: 1; min-width: 120px; }
+
+.vp-result-actions { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
+.vp-published { font-size: 12px; color: var(--ok); margin: 0; }
+.vp-error { font-size: 12px; color: var(--err); margin: var(--s2) 0 0; }

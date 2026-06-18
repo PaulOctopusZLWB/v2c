@@ -355,6 +355,73 @@ export interface HomeOverview {
   latest_day: string | null;
 }
 
+/** One cited claim/viewpoint with the transcript segment ids that back it. Refs are preserved
+ *  verbatim through edits (the backend validates refs ⊆ the session's segment ids). */
+export interface ViewpointClaim {
+  text: string;
+  evidence_refs: string[];
+}
+
+/** One to-do extracted from the session: a claim plus an owner. */
+export interface ViewpointTodo {
+  text: string;
+  owner: string;
+  evidence_refs: string[];
+}
+
+/** One speaker cluster's distilled stance within the session. `speaker_cluster_id` is preserved
+ *  verbatim (the backend validates it ∈ the session's cluster labels). */
+export interface ViewpointSpeaker {
+  speaker_cluster_id: string;
+  viewpoints: ViewpointClaim[];
+  sentiment: string;
+  stance: string;
+  latent_needs: string[];
+}
+
+/** session_summary.v1 — the editable 观点 document for one session. */
+export interface ViewpointContent {
+  headline: string;
+  summary: string;
+  topics: string[];
+  decisions: ViewpointClaim[];
+  todos: ViewpointTodo[];
+  open_questions: string[];
+  core_conclusions: string[];
+  per_speaker: ViewpointSpeaker[];
+}
+
+/** One transcript turn as surfaced by the viewpoint workspace (editable text + resolved speaker). */
+export interface ViewpointSegment {
+  segment_id: string;
+  text: string;
+  speaker: string;
+  person_label: string | null;
+}
+
+/** The effective/default 观点 prompt for a session (per-session override over the global default). */
+export interface ViewpointPrompt {
+  effective: string;
+  default: string;
+  is_override: boolean;
+}
+
+/** The full per-session 观点 workspace state (`GET /api/sessions/{id}/viewpoint`). */
+export interface ViewpointState {
+  session_id: string;
+  segments: ViewpointSegment[];
+  prompt: ViewpointPrompt;
+  generated: ViewpointContent | null;
+  edited: ViewpointContent | null;
+  effective: ViewpointContent | null;
+  status: "draft" | "edited" | "published";
+  stale: boolean;
+  has_generated: boolean;
+  generating: boolean;
+  published_at: string | null;
+  note_path: string | null;
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;

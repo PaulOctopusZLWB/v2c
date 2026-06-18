@@ -479,6 +479,31 @@ describe("App container", () => {
     });
   });
 
+  it("观点 tab defaults to the per-session workspace and can toggle to the 日报汇总 rollup", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    render(<App />);
+    await screen.findByRole("heading", { level: 1 }); // bootstrap settled
+    await gotoTab("观点");
+
+    // Default view is the editable per-session workspace: its day picker is present.
+    expect(await screen.findByLabelText("观点日期")).toBeInTheDocument();
+    expect(screen.getByLabelText("观点会话")).toBeInTheDocument();
+
+    // Toggling to 日报汇总 swaps in the legacy read-only daily rollup (its own day <select>).
+    await userEvent.click(screen.getByRole("tab", { name: "日报汇总" }));
+    expect(await screen.findByLabelText("观点日期")).not.toBe(null);
+    // The workspace's session picker is gone in daily mode.
+    expect(screen.queryByLabelText("观点会话")).not.toBeInTheDocument();
+  });
+
   it("renders only the active tab and keeps the selected session across tab switches", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });

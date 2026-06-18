@@ -21,6 +21,7 @@ import { ProjectionControls, PROJ_DEFAULTS, type ProjParams } from "./features/v
 import { DynamicsCharts } from "./features/viz/DynamicsCharts";
 import { EmotionCharts } from "./features/viz/EmotionCharts";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
+import { ViewpointWorkspace } from "./features/viewpoint/ViewpointWorkspace";
 import { Tabs } from "./features/workspace/Tabs";
 import { useTab } from "./features/workspace/useTab";
 import type { TabId } from "./features/workspace/useTab";
@@ -115,6 +116,9 @@ export function App() {
   // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
   const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
+  // 观点 tab view: the per-session editable workspace (default) vs. the legacy read-only
+  // 日报汇总 (daily rollup) reusing LlmResultPanel.
+  const [llmMode, setLlmMode] = useState<"session" | "daily">("session");
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
@@ -829,10 +833,48 @@ export function App() {
     );
   }
 
-  // 观点 (llm): the day's generated context + memory candidates.
+  // 观点 (llm): the per-session editable workspace is the hero (edit transcript/prompt/result,
+  // manual generate + publish to Obsidian). A 日报汇总 toggle exposes the legacy read-only daily
+  // rollup (LlmResultPanel) behind a day picker.
   function renderLlm() {
+    const modeToggle = (
+      <div className="llm-mode card" role="tablist" aria-label="观点视图">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={llmMode === "session"}
+          className={`nav-mode-btn${llmMode === "session" ? " active" : ""}`}
+          onClick={() => setLlmMode("session")}
+        >
+          会话观点
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={llmMode === "daily"}
+          className={`nav-mode-btn${llmMode === "daily" ? " active" : ""}`}
+          onClick={() => setLlmMode("daily")}
+        >
+          日报汇总
+        </button>
+      </div>
+    );
+
+    if (llmMode === "session") {
+      return (
+        <div className="tab-page single">
+          {modeToggle}
+          <ViewpointWorkspace
+            initialDay={selectedDay}
+            onPlaybackError={(message) => push("音频播放失败", message)}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="tab-page single">
+        {modeToggle}
         <div className="llm-daypick card">
           <label htmlFor="llm-day">观点日期</label>
           <select
