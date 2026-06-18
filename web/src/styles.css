@@ -71,6 +71,8 @@
 .chip-btn { display: inline-flex; align-items: center; gap: var(--s2); border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--text-2); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x); font-size: var(--fs-sm); cursor: pointer; }
 .chip-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
 .chip-btn.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); font-weight: var(--fw-semibold); }
+.chip-btn.attributed { color: var(--text); }
+.speaker-source { color: var(--text-dim); font-size: var(--fs-xs); }
 
 /* ---- review inbox (审核 left rail) ---- */
 /* 待审队列 / 按天浏览 — .nav-mode/.nav-mode-btn inherit the consolidated .segmented recipe;
@@ -1049,12 +1051,13 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 .vp-prompt-actions { display: flex; gap: var(--s3); flex-wrap: wrap; }
 
 /* ---- result (right) ---- */
-.vp-result { display: grid; gap: var(--s4); }
+.vp-result { display: grid; gap: var(--s4); grid-template-rows: auto minmax(0, 1fr) auto auto; max-height: min(640px, calc(100vh - 220px)); overflow: hidden; }
 .vp-result-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
 .vp-result-head .status { font-size: var(--fs-xs); padding: 1px var(--s3); border-radius: var(--radius-pill); border: 1px solid var(--border); }
 .status.s-draft { color: var(--text-dim); }
 .status.s-edited { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .status.s-published { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.vp-result-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: var(--s1); }
 .vp-generating { display: flex; align-items: center; gap: var(--s3); color: var(--text-2); padding: var(--s5) 0; }
 
 .vp-fields { display: grid; gap: var(--s4); }

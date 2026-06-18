@@ -16,6 +16,7 @@ export function TranscriptReviewPanel({
   highlightedSegmentId,
   onBatchReview,
   onAcceptSession,
+  onMatchCurrentSession,
   onPlaybackError
 }: {
   session: TranscriptSession;
@@ -25,6 +26,8 @@ export function TranscriptReviewPanel({
   onBatchReview: (segment_ids: string[], status: ReviewStatus) => Promise<unknown> | void;
   /** Accept every remaining (un-reviewed) segment of the session in one shot. */
   onAcceptSession: () => Promise<unknown> | void;
+  /** Match this session's segments against the enrolled voiceprint library, then let App refetch. */
+  onMatchCurrentSession?: () => Promise<unknown> | void;
   onPlaybackError?: (message: string) => void;
 }) {
   const head = sessionHeader(session.segments);
@@ -42,17 +45,32 @@ export function TranscriptReviewPanel({
     return true;
   });
 
-  // Distinct speakers (in first-seen order) → all of that speaker's segment ids, for the
-  // per-speaker "接受此人全部" control.
-  const speakerSegmentIds = new Map<string, string[]>();
+  // Distinct resolved identities (in first-seen order) → all matching segment ids, for the
+  // per-identity "接受全部" controls. Voiceprint-attributed speakers collapse under the person.
+  const identityActions = new Map<
+    string,
+    { key: string; label: string; personId: string | null; speakerLabels: string[]; segmentIds: string[] }
+  >();
   for (const seg of session.segments) {
-    const ids = speakerSegmentIds.get(seg.speaker) ?? [];
-    ids.push(seg.segment_id);
-    speakerSegmentIds.set(seg.speaker, ids);
+    const key = seg.person_id ?? seg.speaker;
+    const existing = identityActions.get(key);
+    if (existing) {
+      existing.segmentIds.push(seg.segment_id);
+      if (!existing.speakerLabels.includes(seg.speaker)) existing.speakerLabels.push(seg.speaker);
+    } else {
+      identityActions.set(key, {
+        key,
+        label: seg.person_label ?? seg.speaker,
+        personId: seg.person_id,
+        speakerLabels: [seg.speaker],
+        segmentIds: [seg.segment_id]
+      });
+    }
   }
 
   const acceptSpeaker = useAsyncAction(async (ids: string[]) => { await onBatchReview(ids, "accepted"); });
   const acceptSession = useAsyncAction(async () => { await onAcceptSession(); });
+  const matchCurrentSession = useAsyncAction(async () => { await onMatchCurrentSession?.(); });
 
   // ── Keyboard-driven triage ───────────────────────────────────────────────
   // A focus ring moves between turns (j/k); a/r/f review the focused turn and advance;
@@ -119,17 +137,40 @@ export function TranscriptReviewPanel({
       <p className="dim num session-id">{session.session_id}</p>
 
       <div className="session-actions">
-        {Array.from(speakerSegmentIds.entries()).map(([speaker, ids]) => (
+        {onMatchCurrentSession ? (
           <button
-            key={speaker}
-            className="chip-btn"
-            style={{ borderColor: speakerColor(speaker) }}
-            disabled={acceptSpeaker.pending}
-            onClick={() => void acceptSpeaker.run(ids)}
+            type="button"
+            className="ghost"
+            disabled={matchCurrentSession.pending}
+            onClick={() => void matchCurrentSession.run()}
           >
-            <Icon name="accept" /> 接受此人全部 · {speaker}
+            {matchCurrentSession.pending ? <span className="spinner" aria-hidden /> : <Icon name="refresh" />}
+            匹配当前会话
           </button>
-        ))}
+        ) : null}
+        {Array.from(identityActions.values()).map((group) => {
+          const attributed = group.personId !== null;
+          const rawSpeakers = group.speakerLabels.join(", ");
+          return (
+            <button
+              key={group.key}
+              className={`chip-btn${attributed ? " attributed" : ""}`}
+              style={{ borderColor: speakerColor(group.key) }}
+              disabled={acceptSpeaker.pending}
+              title={attributed ? rawSpeakers : undefined}
+              onClick={() => void acceptSpeaker.run(group.segmentIds)}
+            >
+              <Icon name="accept" />
+              {attributed ? (
+                <>
+                  接受 <strong>{group.label}</strong> 全部 <span className="speaker-source num">{rawSpeakers}</span>
+                </>
+              ) : (
+                <>接受此人全部 · {group.label}</>
+              )}
+            </button>
+          );
+        })}
         <button className="primary" disabled={acceptSession.pending} onClick={() => void acceptSession.run()}>
           <Icon name="check_circle" /> 接受整场
         </button>

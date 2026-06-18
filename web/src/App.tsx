@@ -145,6 +145,7 @@ export function App() {
   useEffect(() => {
     bootstrappedRef.current = bootstrapped;
   }, [bootstrapped]);
+  const autoMatchedSessionIds = useRef(new Set<string>());
   // Mirror tasksOpen into a ref so the mount-time poll closure re-reads the latest value.
   const tasksOpenRef = useRef(false);
   useEffect(() => {
@@ -436,6 +437,36 @@ export function App() {
     setQueueVersion((v) => v + 1);
   }
 
+  async function handleMatchCurrentSession() {
+    if (!session) return;
+    const res = await api.autoAttribute({ session_id: session.session_id });
+    setLastAutoAttributeCount(res.assigned);
+    push("已按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`);
+    onPeopleChanged();
+    await reloadSession();
+  }
+
+  // New review sessions should not require the user to jump back into the 声纹 tab just to apply
+  // an already-enrolled voiceprint library. Run once per opened session, only when there is an
+  // enrolled speaker and at least one segment has not been attributed yet.
+  useEffect(() => {
+    if (!session) return;
+    if (autoMatchedSessionIds.current.has(session.session_id)) return;
+    const hasVoiceprintLibrary = (people ?? []).some((p) => p.person_type !== "non_speaker" && p.enrolled);
+    const hasUnattributedSegments = session.segments.some((seg) => !seg.person_id);
+    if (!hasVoiceprintLibrary || !hasUnattributedSegments) return;
+    autoMatchedSessionIds.current.add(session.session_id);
+    void guard(async () => {
+      const res = await api.autoAttribute({ session_id: session.session_id });
+      setLastAutoAttributeCount(res.assigned);
+      if (res.assigned > 0) {
+        push("已自动按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`);
+        onPeopleChanged();
+        await reloadSession();
+      }
+    })();
+  }, [session?.session_id, people]);
+
   function highlightEvidence(candidateId: string) {
     const candidate = (llm?.memory_candidates ?? []).find((c) => c.candidate_id === candidateId);
     setHighlightedSegmentId(candidate?.evidence_segment_ids?.[0] ?? null);
@@ -682,6 +713,7 @@ export function App() {
                 highlightedSegmentId={highlightedSegmentId}
                 onBatchReview={handleBatchReview}
                 onAcceptSession={handleAcceptSession}
+                onMatchCurrentSession={guard(handleMatchCurrentSession)}
                 onPlaybackError={(message) => push("音频播放失败", message)}
               />
               <SpeakerPanel

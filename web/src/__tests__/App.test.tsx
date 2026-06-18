@@ -599,4 +599,110 @@ describe("App container", () => {
     expect(await screen.findByText("你好")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).toBeInTheDocument();
   });
+
+  it("matches the current review session against the voiceprint library and refreshes labels", async () => {
+    let matched = false;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") {
+        return new Response(JSON.stringify({
+          session_id: "ses_1",
+          review_status: "pending_review",
+          segments: [{
+            segment_id: "seg_1",
+            text: "你好",
+            speaker: "spk_01",
+            start_ms: 0,
+            end_ms: 1000,
+            absolute_start_at: "2026-06-13T09:33:00+08:00",
+            absolute_end_at: "2026-06-13T09:33:01+08:00",
+            review_status: "pending_review",
+            note: null,
+            person_id: matched ? "per_paul" : null,
+            person_label: matched ? "Paul" : null
+          }]
+        }), { status: 200 });
+      }
+      if (url === "/api/people/auto-attribute") {
+        matched = true;
+        return new Response(JSON.stringify({ assigned: 1, unassigned: 0, total: 1, per_person: { per_paul: 1 }, threshold: 0.6 }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await useDayBrowser();
+    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    expect(await screen.findByRole("button", { name: /接受此人全部 · spk_01/ })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /匹配当前会话/ }));
+
+    await waitFor(() => {
+      const call = calls.find((c) => c.url === "/api/people/auto-attribute");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call!.init?.body))).toMatchObject({ session_id: "ses_1" });
+    });
+    expect(await screen.findByRole("button", { name: /接受 Paul 全部/ })).toBeInTheDocument();
+  });
+
+  it("auto-matches a newly opened review session when an enrolled voiceprint library exists", async () => {
+    let matched = false;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/status/tasks") return new Response(JSON.stringify({ tasks: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1 }] }), { status: 200 });
+      if (url === "/api/people") return new Response(JSON.stringify({ people: [{ person_id: "per_paul", display_name: "Paul", person_type: "self", is_self: 1, enrolled: true, attributed_count: 0, manual_count: 4 }] }), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
+      if (url === "/api/transcripts/sessions/ses_1") {
+        return new Response(JSON.stringify({
+          session_id: "ses_1",
+          review_status: "pending_review",
+          segments: [{
+            segment_id: "seg_1",
+            text: "你好",
+            speaker: "spk_01",
+            start_ms: 0,
+            end_ms: 1000,
+            absolute_start_at: "2026-06-13T09:33:00+08:00",
+            absolute_end_at: "2026-06-13T09:33:01+08:00",
+            review_status: "pending_review",
+            note: null,
+            person_id: matched ? "per_paul" : null,
+            person_label: matched ? "Paul" : null
+          }]
+        }), { status: 200 });
+      }
+      if (url === "/api/people/auto-attribute") {
+        matched = true;
+        return new Response(JSON.stringify({ assigned: 1, unassigned: 0, total: 1, per_person: { per_paul: 1 }, threshold: 0.6 }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await useDayBrowser();
+    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+
+    await waitFor(() => {
+      const call = calls.find((c) => c.url === "/api/people/auto-attribute");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call!.init?.body))).toMatchObject({ session_id: "ses_1" });
+    });
+    expect(await screen.findByRole("button", { name: /接受 Paul 全部/ })).toBeInTheDocument();
+  });
 });
