@@ -47,7 +47,7 @@ export function ReviewQueue({
         <div className="section-title">
           <Icon name="inbox" /> 待审队列
         </div>
-        <div className="rq-done">🎉 全部已审完</div>
+        <div className="rq-done"><Icon name="check_circle" /> 全部已审完</div>
       </nav>
     );
   }

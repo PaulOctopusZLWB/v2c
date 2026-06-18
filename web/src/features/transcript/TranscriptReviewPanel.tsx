@@ -170,7 +170,7 @@ export function TranscriptReviewPanel({
           title="音量均衡:把每段语音归一到可听音量(应对有人声音大、有人声音小)"
           onClick={() => audio.setLeveling(!audio.leveling)}
         >
-          🔊 音量均衡 {audio.leveling ? "开" : "关"}
+          <Icon name="volume" /> 音量均衡 {audio.leveling ? "开" : "关"}
         </button>
       </div>
 

@@ -922,7 +922,7 @@ button.home-card:hover .home-card-go { color: var(--accent); }
   display: flex; flex-direction: column; gap: var(--s2);
 }
 .home-clear strong { font-size: var(--fs-lg); color: var(--ok); }
-.home-clear-emoji { font-size: var(--fs-2xl); line-height: 1; }
+.home-clear-icon { width: 28px; height: 28px; color: var(--ok); }
 
 /* 覆盖 stat strip + completion bars. */
 .home-stat-strip { display: flex; gap: var(--s5); flex-wrap: wrap; }
