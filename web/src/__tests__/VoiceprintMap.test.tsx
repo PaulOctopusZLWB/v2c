@@ -134,6 +134,36 @@ describe("VoiceprintMap", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
+  it("reports projection lifecycle through onState", async () => {
+    const states: string[] = [];
+    render(<VoiceprintMap request={REQ} onState={(state) => states.push(state.status)} />);
+
+    await screen.findByRole("list", { name: /图例/ });
+
+    expect(states).toContain("loading");
+    expect(states).toContain("ready");
+  });
+
+  it("reports empty projection state through onState", async () => {
+    vi.stubGlobal("fetch", mockFetch({ points: [], method: "umap", n: 0 }));
+    const states: string[] = [];
+    render(<VoiceprintMap request={REQ} onState={(state) => states.push(state.status)} />);
+
+    await screen.findByText(/该范围还没有声纹/);
+
+    expect(states).toContain("empty");
+  });
+
+  it("reports error projection state through onState", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad", { status: 500 })));
+    const states: string[] = [];
+    render(<VoiceprintMap request={REQ} onState={(state) => states.push(state.status)} />);
+
+    await screen.findByRole("alert");
+
+    expect(states).toContain("error");
+  });
+
   it("re-fetches when the request prop changes", async () => {
     const { rerender } = render(<VoiceprintMap request={REQ} />);
     await screen.findByRole("list", { name: /图例/ });
