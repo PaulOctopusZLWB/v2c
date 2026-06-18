@@ -5,7 +5,7 @@ export type Theme = "light" | "dark";
 const KEY = "pcn-theme";
 
 /** Read the theme the pre-paint script already applied to <html>, falling back to
- *  the saved value / system preference if (e.g. in tests) the attribute is absent. */
+ *  the saved value and then the product default: dark command-room mode. */
 function readInitialTheme(): Theme {
   const attr = document.documentElement.dataset.theme;
   if (attr === "light" || attr === "dark") return attr;
@@ -13,13 +13,13 @@ function readInitialTheme(): Theme {
     const saved = localStorage.getItem(KEY);
     if (saved === "light" || saved === "dark") return saved;
   } catch {
-    /* localStorage unavailable (private mode / SSR) — fall through to system */
+    /* persistence is best-effort */
   }
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return "dark";
 }
 
 /** Light/dark theme controller: keeps <html data-theme> + localStorage('pcn-theme') in
- *  sync, and live-follows the OS only while the user hasn't made an explicit choice. */
+ *  sync. */
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(readInitialTheme);
 
@@ -40,23 +40,6 @@ export function useTheme() {
   const toggle = useCallback(() => {
     set(theme === "dark" ? "light" : "dark");
   }, [theme, set]);
-
-  // Follow OS changes ONLY when the user never made an explicit choice.
-  useEffect(() => {
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!mq) return;
-    const onChange = (e: MediaQueryListEvent) => {
-      let saved: string | null = null;
-      try {
-        saved = localStorage.getItem(KEY);
-      } catch {
-        /* ignore */
-      }
-      if (!saved) setThemeState(e.matches ? "dark" : "light");
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
 
   return { theme, set, toggle };
 }

@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeToggle } from "../features/workspace/ThemeToggle";
+import { useTheme } from "../features/workspace/useTheme";
 
 // jsdom in this project ships without localStorage or matchMedia; the app guards both,
 // but to assert persistence we install a minimal in-memory localStorage + a matchMedia
@@ -29,6 +30,11 @@ function installStubs() {
   return ls;
 }
 
+function ThemeHarness() {
+  const theme = useTheme();
+  return <ThemeToggle theme={theme.theme} onToggle={theme.toggle} />;
+}
+
 describe("ThemeToggle", () => {
   beforeEach(() => {
     installStubs();
@@ -39,14 +45,31 @@ describe("ThemeToggle", () => {
     delete document.documentElement.dataset.theme;
   });
 
+  it("defaults to dark when no saved theme exists", () => {
+    localStorage.removeItem("pcn-theme");
+    document.documentElement.removeAttribute("data-theme");
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn()
+      }))
+    );
+
+    render(<ThemeHarness />);
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
   it("renders a pressed sun toggle while in dark theme", () => {
-    render(<ThemeToggle />);
+    render(<ThemeHarness />);
     const btn = screen.getByRole("button", { name: "切换到亮色主题" });
     expect(btn).toHaveAttribute("aria-pressed", "true");
   });
 
   it("flips <html data-theme> dark→light and persists to localStorage('pcn-theme')", async () => {
-    render(<ThemeToggle />);
+    render(<ThemeHarness />);
     expect(document.documentElement.dataset.theme).toBe("dark");
 
     await userEvent.click(screen.getByRole("button", { name: "切换到亮色主题" }));
@@ -59,7 +82,7 @@ describe("ThemeToggle", () => {
 
   it("flips back light→dark on a second click", async () => {
     document.documentElement.dataset.theme = "light";
-    render(<ThemeToggle />);
+    render(<ThemeHarness />);
 
     await userEvent.click(screen.getByRole("button", { name: "切换到暗色主题" }));
 

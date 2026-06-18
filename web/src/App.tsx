@@ -25,6 +25,7 @@ import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { ViewpointWorkspace } from "./features/viewpoint/ViewpointWorkspace";
 import { Tabs } from "./features/workspace/Tabs";
 import { ThemeToggle } from "./features/workspace/ThemeToggle";
+import { useTheme } from "./features/workspace/useTheme";
 import { useTab } from "./features/workspace/useTab";
 import type { TabId } from "./features/workspace/useTab";
 import { CommandPalette, type Command } from "./features/command/CommandPalette";
@@ -83,6 +84,7 @@ function highlightMatch(text: string, q: string): ReactNode {
 export function App() {
   const { summary, worker_running, import_progress } = usePipelineStatus();
   const { tab, setTab } = useTab();
+  const themeController = useTheme();
   const { toasts, push, pushAction, dismiss } = useToasts();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
@@ -504,6 +506,13 @@ export function App() {
       keywords: `${id} ${TAB_LABELS[id]} tab`,
       run: () => setTab(id)
     })),
+    {
+      id: "action-toggle-theme",
+      title: "切换明暗主题",
+      group: "操作",
+      keywords: "theme dark light 主题 明暗",
+      run: () => themeController.toggle()
+    },
     ...days.map(({ day }) => ({
       id: `day-${day}`,
       title: `打开 ${day}`,
@@ -972,7 +981,7 @@ export function App() {
           />
         </div>
         <div className="header-actions">
-          <ThemeToggle />
+          <ThemeToggle theme={themeController.theme} onToggle={themeController.toggle} />
           <Tabs active={tab} onSelect={setTab} />
         </div>
       </header>
