@@ -15,7 +15,8 @@ import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPan
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { PeoplePanel } from "./features/people/PeoplePanel";
-import { VoiceprintMap } from "./features/viz/VoiceprintMap";
+import { VoiceprintMap, type VoiceprintMapState } from "./features/viz/VoiceprintMap";
+import { VoiceprintWorkflowPanel } from "./features/speakers/VoiceprintWorkflowPanel";
 import { ScopeSelector, type Scope } from "./features/viz/ScopeSelector";
 import { ProjectionControls, PROJ_DEFAULTS, type ProjParams } from "./features/viz/ProjectionControls";
 import { DynamicsCharts } from "./features/viz/DynamicsCharts";
@@ -114,6 +115,8 @@ export function App() {
   const [scope, setScope] = useState<Scope>({ session_ids: [], days: [] });
   const [projParams, setProjParams] = useState<ProjParams>({ ...PROJ_DEFAULTS });
   const [appliedRequest, setAppliedRequest] = useState<ProjectionRequest | null>(null);
+  const [voiceprintProjectionState, setVoiceprintProjectionState] = useState<VoiceprintMapState>({ status: "idle" });
+  const [lastAutoAttributeCount, setLastAutoAttributeCount] = useState<number | null>(null);
   // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
   const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
@@ -748,6 +751,15 @@ export function App() {
           </div>
         </section>
 
+        <VoiceprintWorkflowPanel
+          selectedScopeCount={scope.days.length + scope.session_ids.length}
+          projection={voiceprintProjectionState}
+          selectedSegmentCount={0}
+          hasKnownPeople={(people ?? []).some((p) => p.person_type !== "non_speaker" && p.enrolled)}
+          lastAutoAttributeCount={lastAutoAttributeCount}
+          hasReviewTarget={!!selectedSessionId || days.length > 0}
+        />
+
         {/* Main row: the projection controls rail, the map (hero), the labeling/identify controls. */}
         <div className="speakers-main speakers-main-proj">
           <div className="speakers-proj-rail">
@@ -757,6 +769,8 @@ export function App() {
                 setScope(next);
                 // A scope change auto-applies (re-projects with the current params).
                 setAppliedRequest(buildRequest(next, projParams));
+                setVoiceprintProjectionState({ status: "idle" });
+                setLastAutoAttributeCount(null);
               }}
             />
             <ProjectionControls
@@ -777,6 +791,7 @@ export function App() {
               key={mapKey}
               request={appliedRequest}
               onResult={(r) => setProjCapped(r)}
+              onState={setVoiceprintProjectionState}
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
               onLabel={async (personId, segmentIds) => {

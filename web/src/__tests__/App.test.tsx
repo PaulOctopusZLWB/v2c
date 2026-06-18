@@ -504,6 +504,27 @@ describe("App container", () => {
     expect(screen.queryByLabelText("观点会话")).not.toBeInTheDocument();
   });
 
+  it("renders the voiceprint workflow path on the 声纹 tab", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day: "2087-05-10", session_count: 1 }] }), { status: 200 });
+      if (url === "/api/transcripts/day-status") return new Response(JSON.stringify({ days: [] }), { status: 200 });
+      if (url === "/api/devices") return new Response(JSON.stringify({ sources: [] }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/people") return new Response(JSON.stringify({ people: [] }), { status: 200 });
+      if (url.startsWith("/api/speakers/embedding-status")) return new Response(JSON.stringify({ total: 0, embedded: 0, pending: 0 }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    render(<App />);
+    await gotoTab("声纹");
+
+    expect(await screen.findByText("声纹主路径")).toBeInTheDocument();
+    expect(screen.getByText("选择范围")).toBeInTheDocument();
+    expect(screen.getByText("回审核验证")).toBeInTheDocument();
+  });
+
   it("renders only the active tab and keeps the selected session across tab switches", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
