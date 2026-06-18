@@ -14,6 +14,8 @@
 .workbench-header h1 { font-size: 16px; margin: 0; }
 /* Status row (title · running badge · progress) stays above the tab strip, always visible. */
 .header-status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+/* Tab strip + theme toggle share a row; the toggle sits to the left of the tabs. */
+.header-actions { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
 
 /* ---- per-tab page ---- */
 .tab-page { padding: 20px; overflow-y: auto; min-height: 0; }

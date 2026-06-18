@@ -3,7 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Personal Context Node</title>
+    <!-- Pre-paint theme: set data-theme BEFORE the app bundle so there's no flash
+         of the wrong theme (FOUC). Saved choice wins; otherwise follow the OS. -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("pcn-theme"); // 'light' | 'dark' | null
+          var sys = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          document.documentElement.dataset.theme = saved || sys;
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

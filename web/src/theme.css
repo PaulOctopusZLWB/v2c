@@ -1,50 +1,159 @@
 /* ============================================================
    Control Room — design system (persona: 单一技术主用户, 私人记忆档案)
-   深空底 · 单一青色=活跃 · 语义状态色 · 等宽数字 · 8pt 节奏
+   冷峻 Dashboard (Cold Slate) · 单一强调色=活跃 · 语义状态色 · 等宽数字 · 8pt 节奏
+   ------------------------------------------------------------
+   TOKEN ARCHITECTURE
+     · SHARED block (geometry / type / spacing / radius) lives ONCE on :root
+       and inherits into both themes — identical proportions light & dark.
+     · COLOR blocks differ only in hex: :root(/[data-theme=light]) = LIGHT,
+       :root[data-theme="dark"] = the existing 深空底 dark palette.
+     · Back-compat aliases (--panel, --panel-2, --ok, --err, --shadow, --s1..s7,
+       --r1..r3) keep every existing styles.css reference resolving, zero churn.
    ============================================================ */
+
+/* ---- SHARED: palette-independent geometry / type / spacing ---- */
 :root {
-  /* elevation ladder (深 → 浅) */
-  --bg: #0a0e15;
-  --panel: #0f1622;
-  --panel-2: #131c2b;
-  --elev: #182233;          /* 浮起卡片 */
-  --border: #1f2c3e;
-  --border-strong: #2b3b52;
-
-  --text: #e6edf6;
-  --text-2: #aab8c9;
-  --text-dim: #6b7a8f;
-
-  --accent: #2dd4ee;        /* electric cyan — ONLY live/active/progress/focus */
-  --accent-2: #7af0ff;
-  --accent-dim: #123a44;
-  --accent-glow: rgba(45, 212, 238, 0.16);
-
-  --ok: #3ddc97;            /* 接受/成功 */
-  --warn: #f4bf4f;          /* 存疑/进行 */
-  --err: #f87171;          /* 拒绝/失败 */
-  --pending: #6b7a8f;      /* 待审 */
-
+  /* fonts */
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --sans: "PingFang SC", "Microsoft YaHei", -apple-system, ui-sans-serif, system-ui, sans-serif;
 
-  /* spacing scale (8pt) */
-  --s1: 2px; --s2: 4px; --s3: 8px; --s4: 12px; --s5: 16px; --s6: 24px; --s7: 32px;
-  --r1: 6px; --r2: 8px; --r3: 12px;
-  --shadow: 0 1px 0 rgba(255,255,255,.02) inset, 0 8px 24px -12px rgba(0,0,0,.6);
+  /* spacing scale (8pt + one sanctioned half-step) */
+  --space-1: 2px;  --s1: var(--space-1);
+  --space-2: 4px;  --s2: var(--space-2);
+  --space-2h: 6px; /* the one sanctioned half-step (absorbs stray 5/6/7px) */
+  --space-3: 8px;  --s3: var(--space-3);
+  --space-4: 12px; --s4: var(--space-4);
+  --space-5: 16px; --s5: var(--space-5);
+  --space-6: 24px; --s6: var(--space-6);
+  --space-7: 32px; --s7: var(--space-7);
+
+  /* radius */
+  --radius-sm: 6px;  --r1: var(--radius-sm);
+  --radius-md: 8px;  --r2: var(--radius-md);
+  --radius-lg: 12px; --r3: var(--radius-lg);
+  --radius-pill: 999px;
+
+  /* type scale (8 real steps, collapsing the audited ~16 sizes) */
+  --fs-xs:  11px;  /* meta / badges / hints */
+  --fs-sm:  12px;  /* secondary labels */
+  --fs-base:13px;  /* body default */
+  --fs-md:  14px;  /* emphasis / transcript reading text */
+  --fs-lg:  16px;  /* section + h1 headings */
+  --fs-xl:  20px;  /* donut-center / insight numbers */
+  --fs-2xl: 28px;  /* secondary big stats */
+  --fs-3xl: 40px;  /* home headline numeral */
+
+  /* line-heights (CJK-tuned) */
+  --lh-tight:   1.2;
+  --lh-snug:    1.5;
+  --lh-relaxed: 1.65;
+
+  /* weights */
+  --fw-normal: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+
+  /* control sizing (one height ladder for all interactive elements) */
+  --control-h:    30px;
+  --control-h-sm: 24px;
+  --control-pad-x: 12px;
+  --control-pad-x-sm: 8px;
+}
+
+/* ---- LIGHT colors (default / fallback) ---- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* elevation ladder (page → surface → surface-2 → elev) */
+  --bg:         #eef1f5;   /* page: cool light slate, NOT pure white */
+  --surface:    #f7f9fb;   /* primary panels/rails */
+  --surface-2:  #ffffff;   /* inset wells: inputs, textareas, list rows, canvas backdrop */
+  --elev:       #ffffff;   /* floated cards (separated from page by border+shadow) */
+  --panel:      var(--surface);   /* back-compat alias for existing markup */
+  --panel-2:    var(--surface-2); /* back-compat alias (inputs read this today) */
+
+  /* borders */
+  --border:        #d8dee7;  /* hairline divider */
+  --border-strong: #c2ccd8;  /* control outline / interactive edge */
+
+  /* text */
+  --text:       #16202c;   /* primary, ~14:1 on --surface */
+  --text-2:     #475160;   /* secondary labels, ~7:1 */
+  --text-dim:   #6a7585;   /* meta/hints — AA at 12px+ on light wells */
+  --text-muted: var(--text-2);
+
+  /* accent (indigo→teal); ONLY live/active/focus/progress */
+  --accent:     #1f6feb;
+  --accent-2:   #0e5fd8;   /* hover/pressed accent text */
+  --accent-fg:  #ffffff;   /* text ON a filled accent button */
+  --accent-dim: #dbe8fd;   /* active pill / selected-row fill */
+  --accent-glow: rgba(31, 111, 235, 0.22);
+
+  /* semantic status */
+  --success: #0e8a5f;  --ok: var(--success);
+  --warn:    #b5740a;
+  --danger:  #c43d3d;  --err: var(--danger);
+  --pending: #6a7585;
+
+  /* elevation shadows */
+  --shadow-1: 0 1px 2px rgba(20, 30, 45, 0.06), 0 1px 1px rgba(20, 30, 45, 0.04);
+  --shadow-2: 0 4px 16px -6px rgba(20, 30, 45, 0.18), 0 1px 2px rgba(20, 30, 45, 0.06);
+  --shadow: var(--shadow-1); /* back-compat alias */
+
+  /* scrollbar */
+  --scrollbar-thumb: #c2ccd8;
+  --scrollbar-thumb-hover: #a7b4c4;
+}
+
+/* ---- DARK colors (= today's 深空底 palette, refined) ---- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:         #0a0e15;
+  --surface:    #0f1622;
+  --surface-2:  #131c2b;   /* inset wells — THE token every textarea/input reads */
+  --elev:       #182233;   /* 浮起卡片 */
+  --panel:      var(--surface);
+  --panel-2:    var(--surface-2);
+
+  --border:        #1f2c3e;
+  --border-strong: #2b3b52;
+
+  --text:       #e6edf6;
+  --text-2:     #aab8c9;
+  --text-dim:   #7d8da0;   /* lifted #6b7a8f → AA on --surface-2 at small sizes */
+  --text-muted: var(--text-2);
+
+  --accent:     #2dd4ee;   /* electric cyan — live/active/focus only */
+  --accent-2:   #7af0ff;
+  --accent-fg:  #04121a;   /* dark text ON a filled accent button/chip */
+  --accent-dim: #123a44;
+  --accent-glow: rgba(45, 212, 238, 0.18);
+
+  --success: #3ddc97;  --ok: var(--success);
+  --warn:    #f4bf4f;
+  --danger:  #f87171;  --err: var(--danger);
+  --pending: #7d8da0;
+
+  --shadow-1: 0 1px 0 rgba(255,255,255,.02) inset, 0 4px 12px -8px rgba(0,0,0,.7);
+  --shadow-2: 0 1px 0 rgba(255,255,255,.025) inset, 0 8px 24px -12px rgba(0,0,0,.7);
+  --shadow: var(--shadow-1);
+
+  --scrollbar-thumb: #2b3b52;
+  --scrollbar-thumb-hover: #3a4d68;
 }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+html { scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
 body {
   margin: 0;
   background:
-    radial-gradient(1200px 600px at 80% -10%, #0e1828 0%, transparent 60%),
+    radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--surface) 70%, var(--accent) 6%) 0%, transparent 60%),
     var(--bg);
   color: var(--text);
   font-family: var(--sans);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--fs-base);
+  line-height: var(--lh-snug);
   -webkit-font-smoothing: antialiased;
 }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: .01em; }
@@ -53,7 +162,8 @@ body {
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: .01em; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: var(--radius-pill); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ---- motion: only meaningful state ---- */
@@ -72,7 +182,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: .01em; }
 
 /* ---- buttons (full state matrix) ---- */
 button {
-  font-family: inherit; font-size: 13px; color: var(--text);
+  font-family: inherit; font-size: var(--fs-base); color: var(--text);
   background: linear-gradient(180deg, var(--elev), var(--panel-2));
   border: 1px solid var(--border-strong); border-radius: var(--r1);
   padding: 6px 12px; cursor: pointer; transition: border-color .12s, background .12s, color .12s, box-shadow .12s;
@@ -83,17 +193,34 @@ button:active:not(:disabled) { transform: translateY(.5px); }
 button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-glow), 0 0 0 1px var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
 button[aria-busy="true"], .pending { opacity: .75; cursor: progress; }
-button.primary { background: linear-gradient(180deg, #1b6f7e, #145663); border-color: #2b8a9c; color: #eafdff; }
-button.primary:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 0 18px -6px var(--accent-glow); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button.primary:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 0 18px -6px var(--accent-glow); color: var(--accent-fg); filter: brightness(1.05); }
 button.ghost { background: transparent; border-color: var(--border); color: var(--text-2); padding: 4px 8px; }
 button.ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 button.icon-btn { padding: 5px; border-radius: var(--r1); }
 
-select { font-family: inherit; font-size: 12px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: var(--r1); padding: 4px 8px; cursor: pointer; }
-select:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-glow); }
-input { font-family: inherit; font-size: 13px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: var(--r1); padding: 6px 10px; }
-input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+/* ---- inputs / textareas / selects: ONE base rule (THE white-box fix) ----
+   Every input, textarea, and select reads --surface-2 / --text / --border-strong,
+   so none can fall through to the browser UA default white box in either theme. */
+input, textarea, select {
+  font: inherit; font-size: var(--fs-base);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r1);
+}
+input, select { padding: 6px 10px; }
+select { font-size: var(--fs-sm); cursor: pointer; padding: 4px 8px; }
+textarea { padding: var(--s3) 10px; line-height: var(--lh-snug); resize: vertical; }
+input::placeholder, textarea::placeholder { color: var(--text-dim); }
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow), 0 0 0 1px var(--accent);
+}
 .icon { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; flex: none; }
+
+/* ---- theme toggle (sun/moon) in the header ---- */
+.theme-toggle { padding: 5px; line-height: 0; }
 
 /* ---- pipeline spine ---- */
 .spine { display: flex; gap: 2px; align-items: center; }
@@ -157,7 +284,7 @@ input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 
 .badge.s-pending_review, .badge.s-blocked { color: var(--pending); }
 
 /* ---- transcript timeline ---- */
-.chip { font-size: 11px; color: #04121a; border-radius: 999px; padding: 2px 9px; font-weight: 600; white-space: nowrap; }
+.chip { font-size: 11px; color: var(--accent-fg); border-radius: 999px; padding: 2px 9px; font-weight: 600; white-space: nowrap; }
 .segment-row { background: var(--panel); border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--r2); padding: var(--s4); transition: background .12s, border-color .12s; }
 .segment-row:hover { border-color: var(--border-strong); }
 .segment-row.hl { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 22px -8px var(--accent-glow); background: var(--panel-2); }
@@ -188,4 +315,4 @@ input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 
 .toast { background: var(--elev); border: 1px solid var(--err); border-left-width: 3px; border-radius: var(--r2); padding: 10px 14px; box-shadow: var(--shadow); max-width: 360px; font-size: 12.5px; animation: slidein .18s ease-out; }
 .toast .t-title { color: var(--err); font-weight: 600; }
 .toast .toast-action { margin-top: 8px; padding: 4px 12px; font-size: 12px; font-weight: 600; color: var(--accent-2); border-color: var(--accent); background: var(--accent-dim); }
-.toast .toast-action:hover:not(:disabled) { color: #fff; box-shadow: 0 0 14px -6px var(--accent-glow); }
+.toast .toast-action:hover:not(:disabled) { color: var(--accent-fg); box-shadow: 0 0 14px -6px var(--accent-glow); }

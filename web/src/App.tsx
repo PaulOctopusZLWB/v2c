@@ -23,6 +23,7 @@ import { EmotionCharts } from "./features/viz/EmotionCharts";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { ViewpointWorkspace } from "./features/viewpoint/ViewpointWorkspace";
 import { Tabs } from "./features/workspace/Tabs";
+import { ThemeToggle } from "./features/workspace/ThemeToggle";
 import { useTab } from "./features/workspace/useTab";
 import type { TabId } from "./features/workspace/useTab";
 import { CommandPalette, type Command } from "./features/command/CommandPalette";
@@ -951,7 +952,10 @@ export function App() {
             etaSeconds={importing ? null : etaSeconds}
           />
         </div>
-        <Tabs active={tab} onSelect={setTab} />
+        <div className="header-actions">
+          <ThemeToggle />
+          <Tabs active={tab} onSelect={setTab} />
+        </div>
       </header>
 
       {renderTab()}
