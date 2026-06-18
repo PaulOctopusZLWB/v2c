@@ -809,6 +809,7 @@ export function App() {
               sessionId={selectedSessionId}
               day={inspectDay}
               onChanged={onPeopleChanged}
+              onAutoAttributed={setLastAutoAttributeCount}
               push={push}
               pushAction={pushAction}
             />

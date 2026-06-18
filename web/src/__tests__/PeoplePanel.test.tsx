@@ -48,6 +48,19 @@ describe("PeoplePanel", () => {
     expect(leiRow.querySelector(".person-enrolled")).toBeFalsy();
   });
 
+  it("renders as an inspector with searchable people", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PeoplePanel sessionId={null} day="2087-05-10" onChanged={noop} push={noop} pushAction={noop} />);
+
+    expect(await screen.findByRole("complementary", { name: "人物证据" })).toBeInTheDocument();
+    const search = screen.getByPlaceholderText("搜索人物");
+    expect(search).toBeInTheDocument();
+
+    await userEvent.type(search, "韩");
+    expect(screen.getByText("韩文巧")).toBeInTheDocument();
+    expect(screen.queryByText("李雷")).not.toBeInTheDocument();
+  });
+
   it("disables 登记声纹 for a person with no manual labels, enables it when labelled", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
@@ -160,6 +173,31 @@ describe("PeoplePanel", () => {
       expect(sent.day).toBeNull();
     });
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("calls onAutoAttributed after global identification", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        "/api/people/auto-attribute": { assigned: 5, unassigned: 1, total: 6, per_person: { per_a: 5 }, threshold: 0.6 }
+      })
+    );
+    const onAutoAttributed = vi.fn();
+    render(
+      <PeoplePanel
+        sessionId={null}
+        day="2087-05-10"
+        onChanged={noop}
+        push={noop}
+        pushAction={noop}
+        onAutoAttributed={onAutoAttributed}
+      />
+    );
+
+    await screen.findByText("韩文巧");
+    await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
+
+    await waitFor(() => expect(onAutoAttributed).toHaveBeenCalledWith(5));
   });
 
   it("switching 全局识别 scope to 本会话 passes the selected session_id", async () => {
