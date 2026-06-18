@@ -359,7 +359,7 @@
   gap: var(--s4);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
   background:
-    radial-gradient(700px 360px at 18% -20%, rgba(45, 212, 238, 0.06), transparent 60%),
+    radial-gradient(700px 360px at 18% -20%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
     var(--surface);
   border-color: var(--border-strong);
 }
@@ -390,9 +390,9 @@
   border: 1px solid var(--border);
   border-radius: var(--r2);
   background:
-    radial-gradient(900px 480px at 50% 120%, rgba(45, 212, 238, 0.05), transparent 65%),
+    radial-gradient(900px 480px at 50% 120%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 65%),
     var(--bg);
-  box-shadow: inset 0 0 60px -20px rgba(0, 0, 0, 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.015);
+  box-shadow: inset 0 0 60px -20px color-mix(in srgb, var(--bg) 50%, #000), inset 0 0 0 1px rgba(255, 255, 255, 0.015);
   overflow: hidden;
 }
 .vmap-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; display: block; }
