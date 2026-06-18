@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
+from personal_context_node.session_viewpoint import set_segment_text
 from personal_context_node.transcript_review import (
     accept_remaining_segments,
     batch_review_segments,
@@ -41,6 +42,10 @@ class ClearReviewRequest(BaseModel):
 
 class RenameSessionRequest(BaseModel):
     name: str
+
+
+class SegmentTextRequest(BaseModel):
+    text: str
 
 
 @router.get("/day-status")
@@ -98,6 +103,14 @@ def delete_session_route(request: Request, session_id: str) -> dict[str, object]
     if not result["deleted"]:
         raise HTTPException(status_code=404, detail=f"unknown session: {session_id}")
     return result
+
+
+@router.patch("/segments/{segment_id}")
+def patch_segment_text_route(request: Request, segment_id: str, payload: SegmentTextRequest) -> dict[str, str]:
+    config: AppConfig = request.app.state.config
+    if not set_segment_text(config=config, segment_id=segment_id, text=payload.text):
+        raise HTTPException(status_code=404, detail=f"unknown segment: {segment_id}")
+    return {"segment_id": segment_id, "text": payload.text.strip()}
 
 
 @router.post("/segments/{segment_id}/review")

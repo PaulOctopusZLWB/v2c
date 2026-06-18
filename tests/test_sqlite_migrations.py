@@ -642,3 +642,47 @@ def test_initialize_segment_person_overrides_source_is_idempotent(tmp_path) -> N
     assert before == after
     column_by_name = {row["name"]: row for row in after}
     assert "source" in column_by_name
+
+
+def test_initialize_session_viewpoint_state_schema(tmp_path) -> None:
+    # The per-session 观点 workspace stores its edit/publish sidecar in session_viewpoint_state,
+    # keyed one-row-per-session. session_id is the primary key; status defaults to 'draft'.
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+
+        columns = fetch_all(conn, "pragma table_info(session_viewpoint_state)")
+    finally:
+        conn.close()
+
+    column_by_name = {row["name"]: row for row in columns}
+    assert column_by_name["session_id"]["type"].lower() == "text"
+    assert column_by_name["session_id"]["pk"] == 1
+    assert column_by_name["edited_content_json"]["type"].lower() == "text"
+    assert column_by_name["prompt_override"]["type"].lower() == "text"
+    assert column_by_name["status"]["type"].lower() == "text"
+    assert column_by_name["status"]["notnull"] == 1
+    assert column_by_name["status"]["dflt_value"] == "'draft'"
+    assert column_by_name["source_fingerprint"]["type"].lower() == "text"
+    assert column_by_name["note_path"]["type"].lower() == "text"
+    assert column_by_name["published_at"]["type"].lower() == "text"
+    assert column_by_name["updated_at"]["type"].lower() == "text"
+    assert column_by_name["updated_at"]["notnull"] == 1
+
+
+def test_initialize_session_viewpoint_state_is_idempotent(tmp_path) -> None:
+    # Re-running migrations on a DB that ALREADY has the table must not error or change it
+    # (initialize() caches per-process, so call _run_migrations directly as a fresh process would).
+    conn = connect(tmp_path / "data" / "db.sqlite")
+    try:
+        initialize(conn)
+        before = fetch_all(conn, "pragma table_info(session_viewpoint_state)")
+
+        _run_migrations(conn)  # second pass over an already-migrated table
+
+        after = fetch_all(conn, "pragma table_info(session_viewpoint_state)")
+    finally:
+        conn.close()
+
+    assert before == after
+    assert "session_id" in {row["name"] for row in after}

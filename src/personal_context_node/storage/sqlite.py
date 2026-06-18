@@ -207,6 +207,17 @@ create table if not exists summaries (
   unique(summary_type, target_type, target_id, prompt_version)
 );
 
+create table if not exists session_viewpoint_state (
+  session_id text primary key,
+  edited_content_json text,
+  prompt_override text,
+  status text not null default 'draft',
+  source_fingerprint text,
+  note_path text,
+  published_at text,
+  updated_at text not null
+);
+
 create table if not exists daily_reports (
   date_key text primary key,
   status text not null,
