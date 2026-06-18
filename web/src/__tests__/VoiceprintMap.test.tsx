@@ -236,11 +236,27 @@ describe("VoiceprintMap", () => {
     expect(screen.getByText(/已选 0 点/)).toBeInTheDocument();
   });
 
+  it("reports selected segment count when selection changes", async () => {
+    const selectedCounts: number[] = [];
+    render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()} onSelectionChange={(count) => selectedCounts.push(count)} />);
+
+    await screen.findByRole("list", { name: /图例/ });
+
+    expect(selectedCounts).toContain(0);
+  });
+
   it("dragging a rectangle in select mode selects the enclosed points and 标注 calls onLabel with their ids", async () => {
     const onLabel = vi.fn().mockResolvedValue({ labeled: 2 });
     const onChanged = vi.fn();
+    const selectedCounts: number[] = [];
     const { container } = render(
-      <VoiceprintMap request={REQ} people={labelPeople} onLabel={onLabel} onChanged={onChanged} />
+      <VoiceprintMap
+        request={REQ}
+        people={labelPeople}
+        onLabel={onLabel}
+        onChanged={onChanged}
+        onSelectionChange={(count) => selectedCounts.push(count)}
+      />
     );
     await screen.findByRole("list", { name: /图例/ });
     await userEvent.click(screen.getByRole("button", { name: /框选/ }));
@@ -253,6 +269,7 @@ describe("VoiceprintMap", () => {
     pointer("pointerup", 600, 200);
 
     expect(await screen.findByText(/已选 2 点/)).toBeInTheDocument();
+    expect(selectedCounts).toContain(2);
 
     await userEvent.selectOptions(screen.getByLabelText(/标注为/), "per_b");
     await userEvent.click(screen.getByRole("button", { name: /^标注$/ }));
@@ -265,6 +282,7 @@ describe("VoiceprintMap", () => {
     });
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(await screen.findByText(/已选 0 点/)).toBeInTheDocument();
+    expect(selectedCounts[selectedCounts.length - 1]).toBe(0);
   });
 
   // --- color-by-emotion ---

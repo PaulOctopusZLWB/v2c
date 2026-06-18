@@ -522,6 +522,7 @@ describe("App container", () => {
 
     expect(await screen.findByText("声纹主路径")).toBeInTheDocument();
     expect(screen.getByText("选择范围")).toBeInTheDocument();
+    expect(screen.getByText("在图上框选样本")).toBeInTheDocument();
     expect(screen.getByText("回审核验证")).toBeInTheDocument();
   });
 

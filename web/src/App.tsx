@@ -116,6 +116,7 @@ export function App() {
   const [projParams, setProjParams] = useState<ProjParams>({ ...PROJ_DEFAULTS });
   const [appliedRequest, setAppliedRequest] = useState<ProjectionRequest | null>(null);
   const [voiceprintProjectionState, setVoiceprintProjectionState] = useState<VoiceprintMapState>({ status: "idle" });
+  const [voiceprintSelectedCount, setVoiceprintSelectedCount] = useState(0);
   const [lastAutoAttributeCount, setLastAutoAttributeCount] = useState<number | null>(null);
   // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
   const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
@@ -754,7 +755,7 @@ export function App() {
         <VoiceprintWorkflowPanel
           selectedScopeCount={scope.days.length + scope.session_ids.length}
           projection={voiceprintProjectionState}
-          selectedSegmentCount={0}
+          selectedSegmentCount={voiceprintSelectedCount}
           hasKnownPeople={(people ?? []).some((p) => p.person_type !== "non_speaker" && p.enrolled)}
           lastAutoAttributeCount={lastAutoAttributeCount}
           hasReviewTarget={!!selectedSessionId || days.length > 0}
@@ -770,6 +771,7 @@ export function App() {
                 // A scope change auto-applies (re-projects with the current params).
                 setAppliedRequest(buildRequest(next, projParams));
                 setVoiceprintProjectionState({ status: "idle" });
+                setVoiceprintSelectedCount(0);
                 setLastAutoAttributeCount(null);
               }}
             />
@@ -792,6 +794,7 @@ export function App() {
               request={appliedRequest}
               onResult={(r) => setProjCapped(r)}
               onState={setVoiceprintProjectionState}
+              onSelectionChange={setVoiceprintSelectedCount}
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
               onLabel={async (personId, segmentIds) => {

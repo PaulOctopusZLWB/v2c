@@ -52,6 +52,7 @@ export function VoiceprintMap({
   request,
   onResult,
   onState,
+  onSelectionChange,
   onPlaybackError,
   people,
   onLabel,
@@ -64,6 +65,7 @@ export function VoiceprintMap({
   /** Report each result's subsample state up (lets the parent's controls show the capped note). */
   onResult?: (r: { capped: boolean; n: number; total: number } | null) => void;
   onState?: (state: VoiceprintMapState) => void;
+  onSelectionChange?: (count: number) => void;
   onPlaybackError?: (message: string) => void;
   /** When provided alongside onLabel, enables a 框选 (lasso) → 标注 teaching toolbar. */
   people?: PersonRow[];
@@ -106,6 +108,9 @@ export function VoiceprintMap({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectedIdsRef = useRef<Set<string>>(selectedIds);
   useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
+  useEffect(() => { onSelectionChangeRef.current?.(selectedIds.size); }, [selectedIds.size]);
   const [labelPersonId, setLabelPersonId] = useState("");
   // Live rubber-band rectangle in canvas pixels while dragging a selection.
   const rectRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -171,6 +176,7 @@ export function VoiceprintMap({
         const pts = res.points ?? [];
         const n = res.n ?? pts.length;
         const total = res.total_in_scope ?? 0;
+        setSelectedIds(new Set());
         setPoints(pts);
         setCapped(res.capped ? { n, total } : null);
         onResultRef.current?.({ capped: !!res.capped, n, total });
