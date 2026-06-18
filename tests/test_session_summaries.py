@@ -119,6 +119,52 @@ def test_summarize_session_persists_per_speaker_and_core_conclusions(tmp_path: P
     ]
 
 
+def test_summarize_session_does_not_hold_write_lock_during_llm_call(tmp_path: Path) -> None:
+    """Regression: the WAL write lock must be released BEFORE the (slow) LLM call, so concurrent
+    writers — manual viewpoint edit/publish, the segment-text PATCH — don't 500 with
+    'database is locked'. We prove it by writing from a second connection (short busy_timeout)
+    while the LLM is being called; if the lock were held across the call, this would fail."""
+    import sqlite3
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+
+    probe: dict[str, object] = {}
+
+    class ConcurrentWriterLLM:
+        def generate_session_summary(self, *, session_id: str, transcript_segments, prompt=None) -> SessionSummary:
+            other = sqlite3.connect(config.database_path)
+            other.execute("pragma busy_timeout = 500")
+            try:
+                other.execute(
+                    "insert into session_viewpoint_state (session_id, status, updated_at) "
+                    "values ('probe', 'draft', '2026-06-18T00:00:00+00:00')"
+                )
+                other.commit()
+                probe["ok"] = True
+            except sqlite3.OperationalError as exc:  # lock held across the LLM call → bug
+                probe["ok"] = False
+                probe["err"] = str(exc)
+            finally:
+                other.close()
+            return SessionSummary(
+                session_id=session_id,
+                headline="h",
+                summary="s",
+                topics=[],
+                decisions=[],
+                todos=[],
+                open_questions=[],
+                core_conclusions=[],
+                per_speaker=[],
+            )
+
+    result = summarize_session(config=config, session_id="ses_test", llm=ConcurrentWriterLLM())
+
+    assert result.summaries_created == 1
+    assert probe.get("ok") is True, probe.get("err")
+
+
 def test_summarize_session_persists_schema_and_renders_note(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session_and_segments(config.database_path)

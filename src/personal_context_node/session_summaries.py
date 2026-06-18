@@ -44,9 +44,15 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
         )
         if not segments:
             return SessionSummaryResult(summaries_created=0)
-        persist_segment_evidence_refs(conn, segments=segments, owner_id=config.owner_did)
         llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in segments]
         prompt = str(effective_session_prompt(config=config, session_id=session_id)["effective"])
+        # Do NO DB write before the (slow, possibly multi-minute) LLM call. Holding the WAL write
+        # lock across generate_session_summary would block every other writer — manual viewpoint
+        # edit/publish, the segment-text PATCH, even concurrent pipeline steps — until busy_timeout
+        # (30s) expires and they 500 with "database is locked". We only read segments above (read
+        # lock, released), call the LLM with no write lock held, then persist the evidence refs +
+        # summary together in one short transaction. Persisting AFTER validation also keeps a
+        # rejected summary side-effect-free (no evidence_refs / summary rows linger on a ValueError).
         summary = _generate_session_summary_with_budget(
             llm=llm,
             session_id=session_id,
@@ -55,6 +61,7 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
             prompt=prompt,
         )
         _validate_summary_evidence_refs(summary, segments)
+        persist_segment_evidence_refs(conn, segments=segments, owner_id=config.owner_did)
         _persist_session_summary(conn, summary)
         conn.commit()
         # Record the regenerate in the viewpoint sidecar: stamp the source fingerprint (so the new
