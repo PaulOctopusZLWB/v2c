@@ -1,5 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ViewpointWorkspace } from "../features/viewpoint/ViewpointWorkspace";
 import type { ViewpointState } from "../api/types";
@@ -46,13 +48,27 @@ function vpState(over: Partial<ViewpointState> = {}): ViewpointState {
 
 afterEach(() => vi.clearAllMocks());
 
+function renderWithQuery(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 describe("ViewpointWorkspace", () => {
+  it("uses the shared empty state before a session is selected", async () => {
+    renderWithQuery(<ViewpointWorkspace />);
+
+    expect(await screen.findByRole("heading", { name: "选择一个会话开始" })).toBeInTheDocument();
+    expect(screen.getByText("选好日期与会话后,可逐段编辑转写、生成并保存观点。")).toBeInTheDocument();
+  });
+
   it("picks a session and loads its viewpoint into the 2-pane workspace", async () => {
     (api.viewpoint as ReturnType<typeof vi.fn>).mockResolvedValue(vpState());
-    render(<ViewpointWorkspace />);
+    renderWithQuery(<ViewpointWorkspace />);
 
     // Pick the day, then the session.
+    await screen.findByRole("option", { name: /2087-05-10/ });
     await userEvent.selectOptions(await screen.findByLabelText(/日期/), "2087-05-10");
+    await screen.findByRole("option", { name: /晨会/ });
     await userEvent.selectOptions(await screen.findByLabelText(/会话/), "ses_1");
 
     await waitFor(() => expect(api.viewpoint).toHaveBeenCalledWith("ses_1"));
@@ -72,13 +88,14 @@ describe("ViewpointWorkspace", () => {
           headline: "好", summary: "", topics: [], decisions: [], todos: [], open_questions: [], core_conclusions: [], per_speaker: []
         } }));
 
-      render(<ViewpointWorkspace />);
+      renderWithQuery(<ViewpointWorkspace />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); }); // days load
 
       // Under fake timers, findBy*'s internal polling can't advance — query synchronously after
       // flushing microtasks (the day select exists once api.days resolved).
       const daySel = screen.getByLabelText("观点日期");
       await act(async () => { fireSelect(daySel, "2087-05-10"); await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       const sessSel = screen.getByLabelText("观点会话");
       await act(async () => { fireSelect(sessSel, "ses_1"); await vi.advanceTimersByTimeAsync(0); });
 

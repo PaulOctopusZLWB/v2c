@@ -621,7 +621,6 @@
 .scope-selector { display: grid; gap: var(--s3); }
 .scope-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
 .scope-hint { font-size: var(--fs-xs); line-height: var(--lh-snug); margin: 0; }
-.scope-loading { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-dim); }
 .scope-list {
   list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1);
   max-height: 42vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
@@ -1010,7 +1009,7 @@ button.home-card:hover .home-card-go { color: var(--accent); }
   .viewpoint-workspace { grid-template-columns: minmax(0, 1fr); }
 }
 
-.vp-loading { display: flex; align-items: center; gap: var(--s3); color: var(--text-2); padding: var(--s6) 0; }
+.vp-loading { padding: var(--s6) 0; }
 
 /* ---- transcript (left) ---- */
 .vp-transcript { display: grid; gap: var(--s3); }
