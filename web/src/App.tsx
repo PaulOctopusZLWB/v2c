@@ -863,7 +863,7 @@ export function App() {
 
     if (llmMode === "session") {
       return (
-        <div className="tab-page single">
+        <div className="tab-page single is-reading">
           {modeToggle}
           <ViewpointWorkspace
             initialDay={selectedDay}
@@ -874,7 +874,7 @@ export function App() {
     }
 
     return (
-      <div className="tab-page single">
+      <div className="tab-page single is-reading">
         {modeToggle}
         <div className="llm-daypick card">
           <label htmlFor="llm-day">观点日期</label>
@@ -912,7 +912,7 @@ export function App() {
   // 设置 (settings).
   function renderSettings() {
     return (
-      <div className="tab-page single">
+      <div className="tab-page single is-reading">
         <SettingsPanel />
       </div>
     );

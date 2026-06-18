@@ -1,97 +1,108 @@
+/* ---- APP SHELL — sticky header (row 1) over a single-scroll tab page (row 2) ----
+   The shell never scrolls; .tab-page is the single scroll owner per tab. */
 .workbench {
   display: grid;
   grid-template-rows: auto 1fr;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .workbench-header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 20px;
+  gap: var(--s3);
+  padding: var(--s4) var(--s6);
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
-.workbench-header h1 { font-size: 16px; margin: 0; }
+.workbench-header h1 { font-size: var(--fs-lg); margin: 0; }
 /* Status row (title · running badge · progress) stays above the tab strip, always visible. */
-.header-status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.header-status { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
 /* Tab strip + theme toggle share a row; the toggle sits to the left of the tabs. */
 .header-actions { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
 
-/* ---- per-tab page ---- */
-.tab-page { padding: 20px; overflow-y: auto; min-height: 0; }
-/* A single-column tab (声纹 · 观点 · 设置) fills the available width. */
-.tab-page.single { display: grid; gap: 18px; }
-/* A two-column tab (录入 · 审核): a nav/main lane plus a secondary lane. */
+/* ---- per-tab page — THE single scroll owner; centered by tab type ----
+   Three deliberate centered widths: wide (default, 录入·审核), reading
+   (.is-reading — 首页·观点·设置), canvas (.speakers-layout — 声纹). */
+.tab-page {
+  width: 100%; max-width: var(--page-w-wide); margin-inline: auto;
+  padding: var(--s6); overflow-y: auto; overflow-x: hidden; min-height: 0;
+}
+.tab-page.single.is-reading { max-width: var(--page-w-reading); }
+.tab-page.speakers-layout { max-width: var(--page-w-canvas); }
+/* A single-column tab: stacked cards with one section rhythm. */
+.tab-page.single { display: grid; gap: var(--s5); align-content: start; }
+/* A two-column tab (录入 · 审核): a nav/main lane plus a secondary lane.
+   ONE rail width both ways; nav-led vs content-led only flips column order. */
 .tab-page.two-col {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) var(--rail-w);
+  gap: var(--s6);
   align-items: start;
 }
-.tab-page .col-nav { width: 260px; }
+.tab-page .col-nav { width: var(--rail-w); }
 .tab-page .col-content,
-.tab-page .col-main { min-width: 0; display: grid; gap: 16px; }
-.tab-page .col-side { display: grid; gap: 16px; }
+.tab-page .col-main { min-width: 0; display: grid; gap: var(--s5); }
+.tab-page .col-side { display: grid; gap: var(--s5); }
 /* 审核 leads with the nav rail, so flip the lanes there. */
-.tab-page.two-col:has(.col-nav) { grid-template-columns: 260px minmax(0, 1fr); }
+.tab-page.two-col:has(.col-nav) { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
 
-.device-panel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.device-panel h3 { margin: 0; font-size: 13px; }
+.device-panel header { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.device-panel h3 { margin: 0; font-size: var(--fs-base); }
 
-.empty { padding: 24px 0; }
+.empty { padding: var(--s6) 0; }
 
-.stage { padding: 6px 8px; border-radius: 6px; }
-.stage.active { font-weight: 600; }
-
-/* ---- workspace tabs ---- */
-.tabs { display: flex; align-items: center; gap: 4px; }
+/* ---- workspace tabs (top-level strip — intentionally a bottom-border, NOT a pill) ---- */
+.tabs { display: flex; align-items: center; gap: var(--s2); }
 .tab {
   background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
-  color: var(--text-2); padding: 6px 12px; cursor: pointer; font: inherit; font-size: 13px;
+  color: var(--text-2); min-height: var(--control-h); padding: 0 var(--control-pad-x);
+  cursor: pointer; font: inherit; font-size: var(--fs-base); font-weight: var(--fw-medium);
   transition: color .12s, border-color .12s;
 }
 .tab:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: var(--fw-semibold); }
+.tab:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-glow); border-radius: var(--r1); }
 
 /* ---- merged-turn review ---- */
-.session-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 14px; }
-.chip-btn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); padding: 3px 10px; font-size: 12px; cursor: pointer; }
-.chip-btn:hover:not(:disabled) { background: var(--surface-2, rgba(255,255,255,.04)); }
+/* .session-actions inherits the .toolbar primitive (gap --s3); only its margin is unique. */
+.session-actions { margin: var(--s3) 0 var(--s5); }
+/* .chip-btn opts into the segmented pill recipe (it's a single toggle-style chip button). */
+.chip-btn { display: inline-flex; align-items: center; gap: var(--s2); border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--text-2); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x); font-size: var(--fs-sm); cursor: pointer; }
+.chip-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.chip-btn.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); font-weight: var(--fw-semibold); }
 
 /* ---- review inbox (审核 left rail) ---- */
-/* 待审队列 / 按天浏览 segmented toggle at the top of the nav rail. */
-.nav-mode { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--panel-2); margin-bottom: var(--s4); }
-.nav-mode-btn { flex: 1; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); padding: 5px 12px; font-size: 12px; cursor: pointer; box-shadow: none; }
-.nav-mode-btn:hover:not(:disabled) { color: var(--text); background: transparent; border-color: transparent; }
-.nav-mode-btn.active { background: var(--accent-dim); color: var(--accent-2); font-weight: 600; }
+/* 待审队列 / 按天浏览 — .nav-mode/.nav-mode-btn inherit the consolidated .segmented recipe;
+   only the bottom margin is unique here. */
+.nav-mode { display: flex; margin-bottom: var(--s4); }
 
-.review-queue { display: grid; gap: 4px; }
+.review-queue { display: grid; gap: var(--s2); max-height: calc(100vh - 220px); overflow-y: auto; overscroll-behavior: contain; }
+/* .rq-item is a .list-row in card form: keeps a visible border + stacked content. */
 .rq-item {
-  display: grid; gap: 6px; width: 100%; text-align: left;
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r2);
-  padding: 10px 12px; color: var(--text-2); cursor: pointer;
-  transition: border-color .12s, background .12s;
+  display: grid; gap: var(--s2h);
+  background: var(--panel); border-color: var(--border);
+  padding: var(--s4); align-items: stretch;
 }
-.rq-item:hover:not(:disabled) { border-color: var(--accent); color: var(--text); background: var(--panel-2); }
-.rq-item.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--accent-glow); }
-.rq-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.rq-when { font-size: 12.5px; color: var(--text); }
+.rq-item.active { box-shadow: inset 0 0 0 1px var(--accent-glow); }
+.rq-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.rq-when { font-size: var(--fs-sm); color: var(--text); }
 .rq-item.active .rq-when { color: var(--accent-2); }
-.rq-flag { color: var(--warn); font-size: 13px; line-height: 1; }
-.rq-meta { display: flex; align-items: baseline; gap: 10px; }
-.rq-count { font-size: 13px; font-weight: 600; color: var(--accent); }
+.rq-flag { color: var(--warn); font-size: var(--fs-base); line-height: 1; }
+.rq-meta { display: flex; align-items: baseline; gap: var(--s4); }
+.rq-count { font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--accent); }
 .rq-item.active .rq-count { color: var(--accent-2); }
-.rq-speakers { font-size: 11px; color: var(--text-dim); }
-.rq-done { padding: var(--s6) var(--s4); text-align: center; color: var(--text-dim); font-size: 13px; }
+.rq-speakers { font-size: var(--fs-xs); color: var(--text-dim); }
+.rq-done { padding: var(--s6) var(--s4); text-align: center; color: var(--text-dim); font-size: var(--fs-base); }
 
 /* Noise filters above the turn list: hide ≤2-char fillers / show only un-reviewed turns. */
-.review-filters { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 14px; }
-.rf-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); cursor: pointer; }
-.rf-toggle input { width: auto; }
+.review-filters { display: flex; flex-wrap: wrap; gap: var(--s5); margin: 0 0 var(--s4); }
+.rf-toggle { display: inline-flex; align-items: center; gap: var(--s2h); font-size: var(--fs-sm); color: var(--text-2); cursor: pointer; }
+.rf-toggle input { width: auto; height: auto; }
 
-.turn-list { display: grid; gap: 14px; }
-.turn { border-left: 3px solid var(--border); padding: 8px 0 10px 12px; }
-.turn-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.turn-list { display: grid; gap: var(--s4); }
+.turn { border-left: 3px solid var(--border); padding: var(--s3) 0 var(--s3) var(--s4); }
+.turn-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); }
 /* Unattributed turn: the diarizer's raw spk_NN with no resolved person. Dim the chip and tack on
    a quiet 未识别 hint so it reads as "not yet a person" vs an attributed name chip. */
 .turn-head .chip.unattributed {
@@ -100,20 +111,21 @@
   color: var(--text-2);
 }
 .turn-head .chip.unattributed .unattributed-hint {
-  font-size: 10px; opacity: .75; margin-left: 4px;
-  padding-left: 5px; border-left: 1px solid var(--border);
+  font-size: var(--fs-xs); opacity: .75; margin-left: var(--s2);
+  padding-left: var(--s2h); border-left: 1px solid var(--border);
 }
-.turn-summary { font-size: 11px; margin-left: auto; }
-.turn-text { margin: 0; line-height: 1.7; }
+.turn-summary { font-size: var(--fs-xs); margin-left: auto; }
+/* .turn-text inherits font-size/line-height from the shared transcript rule (theme.css). */
+.turn-text { margin: 0; }
 .turn-text .evi {
-  cursor: pointer; border-radius: 3px; padding: 0 1px;
+  cursor: pointer; border-radius: var(--r1); padding: 0 1px;
   transition: background .12s, color .12s;
 }
 .turn-text .evi:hover { background: var(--accent-dim); }
-.turn-text .evi:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .turn-text .evi.playing { background: var(--accent-dim); color: var(--accent); }
 .turn-text .evi.hl { background: color-mix(in srgb, var(--warn) 25%, transparent); }
-.turn-actions { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+/* .turn-actions inherits the .toolbar primitive; only its margin is unique. */
+.turn-actions { margin-top: var(--s3); }
 
 /* Keyboard focus ring: a bright accent left-border + faint inset glow so the focused
    turn reads at a glance during j/k triage. */
@@ -129,21 +141,21 @@
 .review-hints {
   position: sticky;
   bottom: 0;
-  margin-top: 16px;
-  padding: 8px 4px;
-  font-size: 12px;
+  margin-top: var(--s5);
+  padding: var(--s3) var(--s2);
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   border-top: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--surface);
 }
 .review-hints kbd, .shortcut-sheet kbd {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-2);
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--r1);
-  padding: 1px 5px;
+  padding: 1px var(--s2h);
 }
 
 /* ---- shortcut help sheet (?) ---- */
@@ -154,7 +166,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--s6);
   background: rgba(4, 8, 14, 0.55);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
@@ -166,75 +178,73 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--r3);
   box-shadow: var(--shadow), 0 0 0 1px var(--accent-glow);
-  padding: 18px 20px;
+  padding: var(--s5);
   animation: cmdk-pop 0.13s ease-out;
 }
-.shortcut-sheet h3 { margin: 0 0 12px; font-size: 14px; color: var(--text); }
-.shortcut-list { margin: 0; display: grid; gap: 8px; }
-.shortcut-row { display: flex; align-items: center; gap: 12px; }
+.shortcut-sheet h3 { margin: 0 0 var(--s4); font-size: var(--fs-md); color: var(--text); }
+.shortcut-list { margin: 0; display: grid; gap: var(--s3); }
+.shortcut-row { display: flex; align-items: center; gap: var(--s4); }
 .shortcut-row dt { flex: 0 0 84px; margin: 0; }
-.shortcut-row dd { margin: 0; color: var(--text-2); font-size: 13px; }
-.shortcut-foot { margin: 14px 0 0; font-size: 11px; }
+.shortcut-row dd { margin: 0; color: var(--text-2); font-size: var(--fs-base); }
+.shortcut-foot { margin: var(--s4) 0 0; font-size: var(--fs-xs); }
 
-.segment-list { display: grid; gap: 8px; }
-.segment-row {
-  display: grid;
-  grid-template-columns: auto auto auto 1fr auto;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.segment-row .actions { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; }
-.segment-row .seg-text { margin: 0; }
+/* ---- transcript segment (ONE card form — inherits .segment-row card from theme.css) ---- */
+.segment-list { display: grid; gap: var(--s3); }
+/* The segment's head row: speaker chip · time · play · waveform · status. */
+.segment-row .seg-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.segment-row .seg-head-end { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s2h); }
+/* .actions inherits the .toolbar primitive; only its top spacing is unique. */
+.segment-row .actions { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; margin-top: var(--s3); }
+.segment-row .seg-text { margin: var(--s3) 0 0; }
 
-.speaker-panel { margin-top: 16px; }
-.speaker-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
-.speaker-add { display: flex; gap: 8px; margin-top: 8px; }
+.speaker-panel { margin-top: var(--s5); }
+.speaker-row { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; }
+.speaker-add { display: flex; gap: var(--s3); margin-top: var(--s3); }
 
 /* ---- voiceprint (声纹) re-clustering panel ---- */
-.voiceprint-panel { display: grid; gap: 18px; }
-.vp-section { display: grid; gap: 8px; }
-.vp-coverage { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.vp-coverage-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.vp-seg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.voiceprint-panel { display: grid; gap: var(--s5); }
+.vp-section { display: grid; gap: var(--s3); }
+.vp-coverage { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
+.vp-coverage-actions { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.vp-seg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2h); }
+/* .vp-seg — a dense inline-table segment row (a modifier on the segment concept). */
 .vp-seg {
   display: grid;
   grid-template-columns: auto auto auto 1fr auto;
   align-items: center;
-  gap: 8px;
-  padding: 6px 4px;
+  gap: var(--s3);
+  padding: var(--s2h) var(--s2);
   border-bottom: 1px solid var(--border);
 }
 .vp-seg-text { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vp-time { font-variant-numeric: tabular-nums; font-size: 11px; }
-.vp-add { display: flex; gap: 8px; margin-top: 4px; }
-.vp-threshold { display: flex; align-items: center; gap: 10px; }
+.vp-time { font-variant-numeric: tabular-nums; font-size: var(--fs-xs); }
+.vp-add { display: flex; gap: var(--s3); margin-top: var(--s2); }
+.vp-threshold { display: flex; align-items: center; gap: var(--s4); }
 .vp-threshold input[type="range"] { flex: 1; }
-.vp-hint { margin: 0; font-size: 11px; }
-.vp-result { margin-top: 8px; }
-.vp-result p { margin: 0 0 6px; }
-.vp-breakdown { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.vp-breakdown li { display: inline-flex; align-items: center; gap: 6px; }
+.vp-hint { margin: 0; font-size: var(--fs-xs); }
+.vp-result { margin-top: var(--s3); }
+.vp-result p { margin: 0 0 var(--s2h); }
+.vp-breakdown { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s3); }
+.vp-breakdown li { display: inline-flex; align-items: center; gap: var(--s2h); }
 
 @media (max-width: 700px) {
   .vp-seg { grid-template-columns: auto auto 1fr; }
   .vp-seg .vp-time { display: none; }
 }
 
-.task-list { font-size: 13px; margin-top: 16px; }
-.task-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; padding: 4px 0; }
+.task-list { font-size: var(--fs-base); margin-top: var(--s5); }
+.task-row { display: flex; gap: var(--s3); justify-content: space-between; align-items: center; padding: var(--s2) 0; }
 .status-failed { color: var(--err); }
 
 /* Failed-task diagnostics: target id, attempt count, and last error wrap below the row.
    The row is fixed-height for the virtualized list, so clip overflow (never overlap the next
    row) and clamp the error to 2 lines (full text on hover via the title attribute). */
 .task-row { flex-wrap: wrap; align-items: flex-start; overflow: hidden; }
-.task-meta, .task-error { width: 100%; font-size: 11px; }
+.task-meta, .task-error { width: 100%; font-size: var(--fs-xs); }
 .task-error { color: var(--err); word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* Responsive layout: collapse a two-column tab into a single stacked column. */
-@media (max-width: 900px) {
+/* Responsive: primary collapse point — a two-column tab stacks to one column. */
+@media (max-width: 1024px) {
   .tab-page.two-col,
   .tab-page.two-col:has(.col-nav) {
     grid-template-columns: 1fr;
@@ -243,10 +253,7 @@
 }
 
 @media (max-width: 700px) {
-  .tab-page { padding: 12px; }
-  .segment-row {
-    grid-template-columns: 1fr;
-  }
+  .tab-page { padding: var(--s4); }
   button {
     white-space: normal;
   }
@@ -285,17 +292,18 @@
   border-bottom: 1px solid var(--border);
   color: var(--text);
   font: inherit;
-  font-size: 15px;
-  padding: 14px 18px;
+  font-size: var(--fs-md);
+  height: auto;
+  padding: var(--s4) var(--s5);
   outline: none;
 }
 .cmdk-input::placeholder { color: var(--text-dim); }
-.cmdk-list { overflow-y: auto; padding: 6px; min-height: 0; }
-.cmdk-group { padding: 4px 0; }
+.cmdk-list { overflow-y: auto; overscroll-behavior: contain; padding: var(--s2h); min-height: 0; }
+.cmdk-group { padding: var(--s2) 0; }
 .cmdk-group-head {
-  padding: 6px 12px 4px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: var(--s2h) var(--s4) var(--s2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -303,7 +311,7 @@
 .cmdk-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s4);
   width: 100%;
   text-align: left;
   background: transparent;
@@ -311,29 +319,29 @@
   border-radius: var(--r1);
   color: var(--text-2);
   font: inherit;
-  font-size: 13.5px;
-  padding: 9px 12px;
+  font-size: var(--fs-base);
+  padding: var(--s2h) var(--s4);
   cursor: pointer;
 }
 .cmdk-item .cmdk-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Search snippets bold the matched substring so the hit reads at a glance. */
-.cmdk-item .cmdk-title strong { color: var(--accent-2); font-weight: 600; }
+.cmdk-item .cmdk-title strong { color: var(--accent-2); font-weight: var(--fw-semibold); }
 .cmdk-item .cmdk-hint {
   flex: 0 0 auto;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--r1);
-  padding: 1px 6px;
+  padding: 1px var(--s2h);
 }
 .cmdk-item.active {
   background: var(--accent-dim);
   color: var(--text);
 }
 .cmdk-item.active .cmdk-hint { color: var(--accent-2); }
-.cmdk-empty { padding: 20px 12px; color: var(--text-dim); font-size: 13px; text-align: center; }
+.cmdk-empty { padding: var(--s5) var(--s4); color: var(--text-dim); font-size: var(--fs-base); text-align: center; }
 
 @keyframes cmdk-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes cmdk-pop {
@@ -344,40 +352,35 @@
 /* ============================================================
    声纹云图 — interactive canvas voiceprint cluster map (slice 4b)
    ============================================================ */
+/* The map is a .card--hero: it adds only the showpiece radial gradient + grid gap
+   on top of the shared .card base (kills the full re-declaration). */
 .voiceprint-map {
   display: grid;
   gap: var(--s4);
-  /* a deeper, glowing card so the scatter reads as a "showpiece" */
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
   background:
     radial-gradient(700px 360px at 18% -20%, rgba(45, 212, 238, 0.06), transparent 60%),
-    var(--panel);
+    var(--surface);
   border-color: var(--border-strong);
 }
 .vmap-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
-.vmap-actions { display: flex; align-items: center; gap: var(--s3); }
 
-/* segmented UMAP/PCA toggle */
-.vmap-method { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r1); overflow: hidden; }
-.vmap-method button {
-  border: none; border-radius: 0; background: var(--panel-2); color: var(--text-2);
-  padding: 5px 12px; font-size: 12px; box-shadow: none;
+/* The three map toggles (method / colormode / proj-method) all share the segmented
+   pill recipe: pill container, control-h-sm buttons, accent-dim active state. */
+.vmap-method, .vmap-colormode {
+  display: inline-flex; align-items: center; gap: var(--s1); padding: var(--s1);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-2);
 }
-.vmap-method button + button { border-left: 1px solid var(--border-strong); }
-.vmap-method button:hover:not(:disabled) { color: var(--text); background: var(--elev); }
-.vmap-method button.active { background: var(--accent-dim); color: var(--accent-2); }
-
-/* 着色: 人物/情绪 colour-mode toggle (mirrors the segmented method toggle) */
-.vmap-colormode { display: inline-flex; align-items: center; gap: var(--s2); }
-.vmap-colormode-label { font-size: 11px; color: var(--text-dim); }
-.vmap-colormode button {
-  border: 1px solid var(--border-strong); border-radius: var(--r1); background: var(--panel-2);
-  color: var(--text-2); padding: 5px 12px; font-size: 12px; box-shadow: none;
+.vmap-method button, .vmap-colormode button {
+  border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-2);
+  min-height: var(--control-h-sm); padding: 0 var(--control-pad-x); font-size: var(--fs-sm); box-shadow: none;
 }
-.vmap-colormode button + button { margin-left: -1px; border-radius: 0 var(--r1) var(--r1) 0; }
-.vmap-colormode button:first-of-type { border-radius: var(--r1) 0 0 var(--r1); }
-.vmap-colormode button:hover:not(:disabled) { color: var(--text); background: var(--elev); }
-.vmap-colormode button.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }
-.vmap-legend-emoji { font-size: 13px; line-height: 1; flex: none; }
+.vmap-method button:hover:not(:disabled),
+.vmap-colormode button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.vmap-method button.active,
+.vmap-colormode button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
+.vmap-colormode-label { font-size: var(--fs-xs); color: var(--text-dim); padding-left: var(--s2); }
+.vmap-legend-emoji { font-size: var(--fs-base); line-height: 1; flex: none; }
 
 /* the canvas stage: a bordered dark well with an inner glow */
 .vmap-stage {
@@ -398,8 +401,8 @@
 /* loading / empty / error overlay, centered over the canvas */
 .vmap-overlay {
   position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  color: var(--text-dim); font-size: 13px; text-align: center; padding: var(--s5);
+  display: flex; align-items: center; justify-content: center; gap: var(--s3);
+  color: var(--text-dim); font-size: var(--fs-base); text-align: center; padding: var(--s5);
   pointer-events: none;
 }
 .vmap-overlay.error { color: var(--err); }
@@ -413,29 +416,29 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--r2);
   box-shadow: var(--shadow), 0 0 0 1px var(--accent-glow);
-  padding: 8px 10px;
+  padding: var(--s3) var(--s4);
   pointer-events: none;
   z-index: 5;
 }
-.vmap-tip-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--text); }
-.vmap-tip-text { margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+.vmap-tip-head { display: flex; align-items: center; gap: var(--s2h); font-weight: var(--fw-semibold); font-size: var(--fs-sm); color: var(--text); }
+.vmap-tip-text { margin-top: var(--s2); font-size: var(--fs-sm); line-height: var(--lh-snug); color: var(--text-2); }
 
-.vmap-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; box-shadow: 0 0 8px -2px currentColor; }
+.vmap-swatch { width: 10px; height: 10px; border-radius: var(--r1); flex: none; box-shadow: 0 0 8px -2px currentColor; }
 
 /* legend: clickable cluster chips that focus/dim the scatter */
-.vmap-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.vmap-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s2h); }
 .vmap-legend-li { display: contents; }
 .vmap-legend-item {
-  display: inline-flex; align-items: center; gap: 7px;
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
-  color: var(--text-2); padding: 4px 10px; font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--s2h);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-pill);
+  color: var(--text-2); padding: var(--s2) var(--s4); font-size: var(--fs-sm); cursor: pointer;
   transition: border-color .12s, color .12s, opacity .12s, background .12s;
 }
 .vmap-legend-item:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
 .vmap-legend-item.focused { border-color: var(--accent); color: var(--accent-2); background: var(--accent-dim); box-shadow: 0 0 14px -6px var(--accent-glow); }
 .vmap-legend-item.dimmed { opacity: 0.4; }
 .vmap-legend-label { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vmap-legend-count { color: var(--text-dim); font-size: 11px; }
+.vmap-legend-count { color: var(--text-dim); font-size: var(--fs-xs); }
 .vmap-legend-item.focused .vmap-legend-count { color: var(--accent); }
 
 /* 框选 toggle uses the shared .ghost button; mark its on-state like the method toggle */
@@ -449,34 +452,34 @@
   background: var(--accent-dim);
   box-shadow: inset 0 0 0 1px var(--accent-glow);
 }
-.vmap-select-count { font-size: 12px; color: var(--accent-2); margin-right: auto; }
-.vmap-select-toolbar select { font-size: 12px; }
+.vmap-select-count { font-size: var(--fs-sm); color: var(--accent-2); margin-right: auto; }
+.vmap-select-toolbar select { font-size: var(--fs-sm); }
 
 /* the dashed rubber-band rect overlay (canvas-drawn; class kept for any future DOM overlay) */
 .vmap-select-rect {
   position: absolute; pointer-events: none;
   border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border-radius: 2px; z-index: 4;
+  border-radius: var(--r1); z-index: 4;
 }
 
 /* ---- People panel ("教一次,处处认得") ---- */
 .people-panel { display: grid; gap: var(--s4); }
-.people-explainer { font-size: 12px; line-height: 1.5; margin: calc(var(--s2) * -1) 0 0; }
+.people-explainer { font-size: var(--fs-sm); line-height: var(--lh-snug); margin: calc(var(--s2) * -1) 0 0; }
 /* Many people: cap the roster height and scroll inside it so the panel stays compact. */
-.people-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); max-height: 40vh; overflow-y: auto; scrollbar-gutter: stable; }
+.people-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .people-nonspeaker-list { max-height: 22vh; }
 .person-row {
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--s3);
   padding: var(--s3) 0; border-bottom: 1px solid var(--border);
 }
 .person-row:last-child { border-bottom: 0; }
-.person-row .chip { display: inline-flex; align-items: center; gap: 4px; }
+.person-row .chip { display: inline-flex; align-items: center; gap: var(--s2); }
 .person-enrolled {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--ok);
+  display: inline-flex; align-items: center; gap: var(--s2);
+  font-size: var(--fs-xs); color: var(--ok);
 }
 .person-enrolled .icon { width: 13px; height: 13px; }
-.person-count { font-size: 12px; margin-left: auto; }
+.person-count { font-size: var(--fs-sm); margin-left: auto; }
 .person-row > button { margin-left: var(--s2); }
 /* Delete a duplicate person: a quiet ghost button that warms to a danger tint on hover. */
 .person-delete { color: var(--text-2); }
@@ -485,58 +488,61 @@
   border-color: color-mix(in srgb, var(--danger, #f87171) 60%, transparent);
 }
 
-.people-add { display: flex; gap: var(--s3); }
+/* .people-add inherits the .toolbar primitive (gap --s3). */
 .people-add input { flex: 1; min-width: 0; }
 
 .people-suggest { display: grid; gap: var(--s3); border-top: 1px solid var(--border); padding-top: var(--s4); }
 .people-suggest-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
-.section-subtitle { font-size: 12px; font-weight: 600; color: var(--text); }
+.section-subtitle { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
 .suggestion-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+/* .suggestion-row is a static inset list-row (a li with an action button inside). */
 .suggestion-row {
-  display: flex; align-items: center; gap: var(--s3);
-  padding: var(--s2) var(--s3);
-  border: 1px solid var(--border); border-radius: var(--r1); background: var(--panel-2);
+  background: var(--panel-2); border-color: var(--border); cursor: default;
 }
+.suggestion-row:hover { background: var(--panel-2); color: var(--text-2); border-color: var(--border); }
 .suggestion-row .icon { width: 14px; height: 14px; color: var(--text-dim); flex: none; }
-.suggestion-person { font-size: 13px; color: var(--text); }
+.suggestion-person { font-size: var(--fs-base); color: var(--text); }
+/* .confidence-chip is a .tag with an accent tint (keeps its accent variant). */
 .confidence-chip {
-  font-size: 11px; font-family: var(--mono); font-variant-numeric: tabular-nums;
-  padding: 1px 8px; border-radius: 999px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
   color: var(--accent-2); background: var(--accent-dim);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .suggestion-row > button { margin-left: auto; }
 
 .people-auto { display: grid; gap: var(--s3); border-top: 1px solid var(--border); padding-top: var(--s4); }
 .people-auto-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--s3); }
 .people-auto-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s4); }
-.people-threshold { display: flex; align-items: center; gap: var(--s3); font-size: 12px; color: var(--text-2); }
+.people-threshold { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-sm); color: var(--text-2); }
 .people-threshold input[type="range"] { width: 120px; }
 
-/* Scope toggle (全部 / 本会话) — a small segmented control mirroring .vmap-method. */
-.people-scope { display: inline-flex; align-items: center; gap: var(--s2); font-size: 12px; }
+/* Scope toggle (全部 / 本会话) — adopts the segmented pill recipe. */
+.people-scope {
+  display: inline-flex; align-items: center; gap: var(--s1); padding: var(--s1);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-2);
+}
 .people-scope .scope-btn {
-  font-size: 12px; padding: 2px 10px; border-radius: var(--r1);
-  border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2);
+  font-size: var(--fs-sm); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x);
+  border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-2);
   cursor: pointer;
 }
-.people-scope .scope-btn + .scope-btn { margin-left: -1px; }
-.people-scope .scope-btn.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }
-.people-scope .scope-btn:disabled { opacity: .5; cursor: default; }
+.people-scope .scope-btn:hover:not(:disabled) { color: var(--text); }
+.people-scope .scope-btn.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
+.people-scope .scope-btn:disabled { opacity: .45; cursor: default; }
 
 /* De-emphasised small ghost button (per-person 登记声纹 is mostly automatic now). */
-.ghost.ghost-sm { font-size: 12px; padding: 3px 9px; opacity: .85; }
+.ghost.ghost-sm { font-size: var(--fs-sm); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm); opacity: .85; }
 .ghost.ghost-sm:disabled { opacity: .45; }
 
 /* One-line helper next to 全局识别: "标注后点此重新识别(无需训练,即时生效)". */
-.people-auto-helper { font-size: 11.5px; line-height: 1.5; flex-basis: 100%; }
+.people-auto-helper { font-size: var(--fs-xs); line-height: var(--lh-snug); flex-basis: 100%; }
 
 /* 非发言人 (噪音/多人) group — a muted bucket below the real roster. */
 .people-nonspeakers { border-top: 1px solid var(--border); padding-top: var(--s4); display: grid; gap: var(--s3); }
 .people-nonspeakers-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
-.people-nonspeaker-hint { font-size: 12px; line-height: 1.5; margin: 0; }
+.people-nonspeaker-hint { font-size: var(--fs-sm); line-height: var(--lh-snug); margin: 0; }
 .person-nonspeaker .chip.chip-noise {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: var(--s2);
   background: var(--panel-2); color: var(--text-2);
   border: 1px dashed var(--border-strong);
 }
@@ -549,10 +555,10 @@
 .speakers-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--s5);
 }
-.speakers-toolbar-title { display: flex; align-items: center; gap: var(--s3); font-size: 13px; }
+.speakers-toolbar-title { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-base); }
 .speakers-toolbar-title .icon { width: 18px; height: 18px; color: var(--accent); flex: none; }
-.speakers-toolbar-title strong { font-size: 14px; }
-.speakers-day { display: flex; align-items: center; gap: var(--s2); font-size: 12px; }
+.speakers-toolbar-title strong { font-size: var(--fs-md); }
+.speakers-day { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
 .speakers-extract { margin-left: auto; min-width: 0; }
 /* The lifted VoiceprintPanel sits as a compact toolbar item, not a full card. */
 .speakers-extract .voiceprint-panel { background: transparent; border: 0; padding: 0; box-shadow: none; }
@@ -566,109 +572,112 @@
   grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
   align-items: start;
 }
-/* The decoupled 声纹 view adds a projection-controls rail: [rail | map | people]. */
+/* The decoupled 声纹 view: a proportioned 3-zone grid — rail | map-hero | people.
+   Only the map column flexes, so the hero always claims surplus width. */
 .speakers-main-proj {
-  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.8fr) minmax(300px, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
 }
 .speakers-map, .speakers-people, .speakers-proj-rail { min-width: 0; }
 .speakers-proj-rail { display: grid; gap: var(--s4); align-content: start; }
 /* Let the hero map breathe with a taller stage. */
 .speakers-map .vmap-stage { min-height: 460px; }
-@media (max-width: 1280px) {
-  .speakers-main-proj { grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.6fr); }
-  .speakers-main-proj .speakers-people { grid-column: 1 / -1; }
+/* Below ~1200 the 3-col collapses to one stacked column (single scroll owner). */
+@media (max-width: 1200px) {
+  .speakers-main-proj { grid-template-columns: minmax(0, 1fr); }
+  .speakers-main-proj .speakers-people { grid-column: auto; }
 }
 @media (max-width: 1024px) {
   .speakers-main { grid-template-columns: minmax(0, 1fr); }
-  .speakers-main-proj { grid-template-columns: minmax(0, 1fr); }
-  .speakers-main-proj .speakers-people { grid-column: auto; }
 }
 
 /* ---- 投射范围 (ScopeSelector): multi-day/session picker, compact + scrollable ---- */
 .scope-selector { display: grid; gap: var(--s3); }
 .scope-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
-.scope-hint { font-size: 11.5px; line-height: 1.5; margin: 0; }
-.scope-loading { display: flex; align-items: center; gap: var(--s2); font-size: 12px; color: var(--text-dim); }
+.scope-hint { font-size: var(--fs-xs); line-height: var(--lh-snug); margin: 0; }
+.scope-loading { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-dim); }
 .scope-list {
-  list-style: none; margin: 0; padding: 0; display: grid; gap: 2px;
-  max-height: 42vh; overflow-y: auto; scrollbar-gutter: stable;
+  list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1);
+  max-height: 42vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
 }
-.scope-day { display: grid; gap: 2px; }
+.scope-day { display: grid; gap: var(--s1); }
+/* .scope-day-row is a dense .list-row variant: keep it compact, share the hover. */
 .scope-day-row {
-  display: flex; align-items: center; gap: var(--s2);
-  border-radius: var(--r1); padding: 2px 4px;
+  gap: var(--s2); padding: var(--s1) var(--s2);
 }
-.scope-day-row:hover { background: var(--elev); }
+.scope-day-row:hover { background: var(--panel-2); }
 .scope-check {
   display: flex; align-items: center; gap: var(--s2); flex: 1; min-width: 0;
-  font-size: 12.5px; color: var(--text-2); cursor: pointer;
+  font-size: var(--fs-sm); color: var(--text-2); cursor: pointer;
 }
 .scope-check input { accent-color: var(--accent); flex: none; }
 .scope-day-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scope-day-count { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+.scope-day-count { margin-left: auto; font-size: var(--fs-xs); color: var(--text-dim); }
 .scope-expander {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; flex: none; border: 0; background: transparent;
-  color: var(--text-dim); cursor: pointer; border-radius: var(--r1);
+  width: 22px; height: 22px; min-height: 0; flex: none; border: 0; background: transparent;
+  color: var(--text-dim); cursor: pointer; border-radius: var(--r1); padding: 0;
 }
-.scope-expander:hover { color: var(--text); background: var(--elev); }
+.scope-expander:hover { color: var(--text); background: var(--panel-2); }
 .scope-expander .icon { width: 14px; height: 14px; transition: transform .15s ease; }
 .scope-expander.open .icon { transform: rotate(90deg); }
 .scope-sessions {
-  list-style: none; margin: 0 0 2px; padding: 0 0 0 22px; display: grid; gap: 1px;
+  list-style: none; margin: 0 0 var(--s1); padding: 0 0 0 22px; display: grid; gap: 1px;
   border-left: 1px solid var(--border); margin-left: 10px;
 }
-.scope-session-loading, .scope-session-empty { font-size: 11.5px; padding: 2px 4px; display: flex; align-items: center; gap: var(--s2); }
-.scope-session .scope-check { padding: 2px 4px; border-radius: var(--r1); }
-.scope-session .scope-check:hover { background: var(--elev); }
+.scope-session-loading, .scope-session-empty { font-size: var(--fs-xs); padding: var(--s1) var(--s2); display: flex; align-items: center; gap: var(--s2); }
+.scope-session .scope-check { padding: var(--s1) var(--s2); border-radius: var(--r1); }
+.scope-session .scope-check:hover { background: var(--panel-2); }
 .scope-session-time { color: var(--text); font-variant-numeric: tabular-nums; }
 .scope-session-name { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scope-session-count { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+.scope-session-count { margin-left: auto; font-size: var(--fs-xs); color: var(--text-dim); }
 
 /* ---- 投射方式 (ProjectionControls): segmented method toggle + per-method params ---- */
 .projection-controls { display: grid; gap: var(--s4); }
-.proj-method { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r1); overflow: hidden; }
-.proj-method button {
-  flex: 1; font-size: 12px; padding: 5px 0; border: 0; background: var(--panel-2);
-  color: var(--text-dim); cursor: pointer;
+/* .proj-method adopts the segmented pill recipe. */
+.proj-method {
+  display: inline-flex; gap: var(--s1); padding: var(--s1);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-2);
 }
-.proj-method button + button { border-left: 1px solid var(--border-strong); }
-.proj-method button:hover:not(:disabled) { color: var(--text); background: var(--elev); }
-.proj-method button.active { background: var(--accent-dim); color: var(--accent-2); }
+.proj-method button {
+  flex: 1; font-size: var(--fs-sm); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x);
+  border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-2); cursor: pointer;
+}
+.proj-method button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.proj-method button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
 .proj-params { display: grid; gap: var(--s4); }
-.proj-slider { display: grid; gap: var(--s2); font-size: 12px; color: var(--text-2); }
+.proj-slider { display: grid; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-2); }
 .proj-slider-head { display: flex; align-items: center; justify-content: space-between; }
 .proj-slider-head .num { color: var(--accent-2); font-variant-numeric: tabular-nums; }
 .proj-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
 .proj-pca { grid-template-columns: 1fr 1fr; }
-.proj-dropdown { display: grid; gap: var(--s2); font-size: 12px; color: var(--text-2); }
-.proj-dropdown select { width: 100%; font-size: 12px; }
-.proj-hint { font-size: 11px; margin: 0; }
+.proj-dropdown { display: grid; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-2); }
+.proj-dropdown select { width: 100%; font-size: var(--fs-sm); }
+.proj-hint { font-size: var(--fs-xs); margin: 0; }
 .proj-apply {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  width: 100%; font-size: 13px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2h);
+  width: 100%; font-size: var(--fs-base); font-weight: var(--fw-semibold);
 }
 .proj-apply .icon { width: 15px; height: 15px; }
 .proj-capped {
-  font-size: 11px; margin: 0; text-align: center;
+  font-size: var(--fs-xs); margin: 0; text-align: center;
   color: var(--text-dim);
 }
 .proj-capped .num { color: var(--accent-2); font-variant-numeric: tabular-nums; }
 
 /* Subsample overlay note inside the map (top-right). */
 .vmap-capped-note {
-  position: absolute; top: 8px; right: 8px; z-index: 3;
-  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  position: absolute; top: var(--s3); right: var(--s3); z-index: 3;
+  font-size: var(--fs-xs); padding: 2px var(--s3); border-radius: var(--radius-pill);
   color: var(--accent-2); background: color-mix(in srgb, var(--panel) 80%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   font-variant-numeric: tabular-nums; pointer-events: none;
 }
-.vmap-tip-meta { font-size: 11px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.vmap-tip-meta { font-size: var(--fs-xs); margin-top: var(--s1); font-variant-numeric: tabular-nums; }
 
 /* Collapsible 对话分析 + 高级 sections — tucked away, default collapsed. */
 .speakers-analysis > summary,
 .speakers-advanced > summary {
-  cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text);
+  cursor: pointer; font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--text);
   list-style: none; display: flex; align-items: center; gap: var(--s2);
 }
 .speakers-analysis > summary::before,
@@ -679,7 +688,7 @@
 .speakers-advanced[open] > summary::before { transform: rotate(90deg); }
 .speakers-analysis > summary::-webkit-details-marker,
 .speakers-advanced > summary::-webkit-details-marker { display: none; }
-.speakers-advanced > summary { color: var(--text-2); font-weight: 500; }
+.speakers-advanced > summary { color: var(--text-2); font-weight: var(--fw-medium); }
 .speakers-analysis-body { display: grid; gap: var(--s6); margin-top: var(--s4); }
 .speakers-advanced-body { margin-top: var(--s4); }
 @media (min-width: 1100px) {
@@ -690,8 +699,8 @@
 .speakers-analysis-body .dynamics,
 .speakers-analysis-body .emotion { margin-top: 0; }
 
-/* 对话动态 — premium dark dashboard of talk-share / turns / timeline / turn-taking, consistent
-   with the voiceprint map cards. */
+/* 对话动态 — dashboard of talk-share / turns / timeline / turn-taking. The .dyn-card
+   surface reads the SAME card recipe tokens as .card (elev / border / r2 / shadow). */
 .dynamics { margin-top: var(--s6); }
 .dyn-grid {
   display: grid; gap: var(--s4);
@@ -709,7 +718,7 @@
 }
 .dyn-overlay.error { color: var(--err); }
 .dyn-title {
-  margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  margin: 0; font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .08em;
   text-transform: uppercase; color: var(--text-dim);
 }
 .dyn-chart-fallback { height: 140px; border-radius: var(--r1); background: var(--panel-2); }
@@ -719,21 +728,21 @@
 .dyn-donut { position: relative; width: 180px; height: 180px; flex: none; }
 .dyn-donut-center {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; pointer-events: none; gap: 2px;
+  align-items: center; justify-content: center; pointer-events: none; gap: var(--s1);
 }
-.dyn-donut-center strong { font-size: 20px; color: var(--text); }
-.dyn-donut-center span { font-size: 12px; color: var(--text-dim); }
+.dyn-donut-center strong { font-size: var(--fs-xl); color: var(--text); }
+.dyn-donut-center span { font-size: var(--fs-sm); color: var(--text-dim); }
 .dyn-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); flex: 1; min-width: 120px; }
-.dyn-legend-item { display: flex; align-items: center; gap: var(--s3); font-size: 13px; color: var(--text-2); }
+.dyn-legend-item { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-base); color: var(--text-2); }
 .dyn-legend-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dyn-legend-pct { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
-.dyn-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; box-shadow: 0 0 8px -2px currentColor; }
+.dyn-swatch { width: 10px; height: 10px; border-radius: var(--r1); flex: none; box-shadow: 0 0 8px -2px currentColor; }
 
 /* 3. 对话时间线 — lanes of positioned blocks */
 .dyn-timeline { display: grid; gap: var(--s2); }
 .dyn-lane { display: flex; align-items: center; gap: var(--s3); }
 .dyn-lane-label {
-  width: 64px; flex: none; font-size: 12px; color: var(--text-2);
+  width: 64px; flex: none; font-size: var(--fs-sm); color: var(--text-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .dyn-lane-track {
@@ -742,31 +751,32 @@
 }
 .dyn-block {
   position: absolute; top: 1px; bottom: 1px; min-width: 2px;
-  border-radius: 3px; opacity: .85; box-shadow: 0 0 8px -3px currentColor;
+  border-radius: var(--r1); opacity: .85; box-shadow: 0 0 8px -3px currentColor;
 }
 .dyn-block:hover { opacity: 1; }
 
-/* 4. 话轮接力 — transition list */
+/* 4. 话轮接力 — transition list (a static .list-row in inset-card form) */
 .dyn-transitions { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
 .dyn-transition {
-  display: flex; align-items: center; gap: var(--s3); font-size: 13px; color: var(--text-2);
-  padding: var(--s2) var(--s3); border: 1px solid var(--border); border-radius: var(--r1);
-  background: var(--panel-2);
+  font-size: var(--fs-base);
+  padding: var(--s2) var(--s3); border-color: var(--border); background: var(--panel-2); cursor: default;
 }
+.dyn-transition:hover { background: var(--panel-2); color: var(--text-2); border-color: var(--border); }
 .dyn-transition-text { flex: 1; min-width: 0; color: var(--text); }
 .dyn-arrow { color: var(--accent); margin: 0 2px; }
 .dyn-transition-count {
   font-family: var(--mono); font-variant-numeric: tabular-nums;
   color: var(--accent-2); background: var(--accent-dim);
-  padding: 1px 8px; border-radius: 999px; font-size: 11px;
+  padding: 1px var(--s3); border-radius: var(--radius-pill); font-size: var(--fs-xs);
 }
-.dyn-empty-note { font-size: 12px; margin: 0; }
+.dyn-empty-note { font-size: var(--fs-sm); margin: 0; }
 
 @media (max-width: 900px) {
   .dyn-grid { grid-template-columns: 1fr; }
 }
 
-/* ── 情绪 — emotion distribution + per-speaker profiles ── */
+/* ── 情绪 — emotion distribution + per-speaker profiles ──
+   .emo-card reads the SAME card recipe tokens as .card / .dyn-card. */
 .emotion { margin-top: var(--s6); }
 .emo-grid {
   display: grid; gap: var(--s4);
@@ -786,7 +796,7 @@
 .emo-empty { display: flex; flex-direction: column; align-items: center; gap: var(--s3); }
 .emo-empty p { margin: 0; }
 .emo-title {
-  margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  margin: 0; font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .08em;
   text-transform: uppercase; color: var(--text-dim);
 }
 .emo-chart-fallback { height: 140px; border-radius: var(--r1); background: var(--panel-2); }
@@ -796,20 +806,20 @@
 .emo-donut { position: relative; width: 180px; height: 180px; flex: none; }
 .emo-donut-center {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; pointer-events: none; gap: 2px;
+  align-items: center; justify-content: center; pointer-events: none; gap: var(--s1);
 }
-.emo-donut-center strong { font-size: 20px; color: var(--text); }
-.emo-donut-center span { font-size: 12px; color: var(--text-dim); }
+.emo-donut-center strong { font-size: var(--fs-xl); color: var(--text); }
+.emo-donut-center span { font-size: var(--fs-sm); color: var(--text-dim); }
 .emo-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); flex: 1; min-width: 120px; }
-.emo-legend-item { display: flex; align-items: center; gap: var(--s3); font-size: 13px; color: var(--text-2); }
-.emo-legend-emoji { font-size: 14px; line-height: 1; flex: none; }
+.emo-legend-item { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-base); color: var(--text-2); }
+.emo-legend-emoji { font-size: var(--fs-md); line-height: 1; flex: none; }
 .emo-legend-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .emo-legend-count { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
-.emo-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; box-shadow: 0 0 8px -2px currentColor; }
+.emo-swatch { width: 10px; height: 10px; border-radius: var(--r1); flex: none; box-shadow: 0 0 8px -2px currentColor; }
 
 /* 各发言人情绪 — stacked emotion bar + dominant chip per speaker */
 .emo-speakers { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s3); }
-.emo-speaker-row { display: flex; align-items: center; gap: var(--s3); font-size: 13px; }
+.emo-speaker-row { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-base); }
 .emo-speaker-name {
   width: 84px; flex: none; color: var(--text-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -819,11 +829,8 @@
   border-radius: var(--r1); border: 1px solid var(--border); background: var(--panel-2);
 }
 .emo-bar-seg { height: 100%; min-width: 2px; }
-.emo-chip {
-  flex: none; display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; font-size: 12px; color: var(--text);
-  border: 1px solid var(--border-strong); border-radius: 999px; background: var(--panel-2);
-}
+/* .emo-chip is a .tag (neutral mini-pill); only its border weight is unique. */
+.emo-chip { color: var(--text); border-color: var(--border-strong); }
 
 @media (max-width: 900px) {
   .emo-grid { grid-template-columns: 1fr; }
@@ -836,8 +843,8 @@
 
 /* ---- 首页 (home / landing dashboard) ---- */
 /* The home tab opens on value: a responsive card grid. 待审 + 最近会话 span two columns so the
- * actionable headline and the recent-session list dominate; the rest are compact tiles. */
-.home { max-width: 1100px; }
+ * actionable headline and the recent-session list dominate; the rest are compact tiles.
+ * Home page width is governed by .tab-page.single.is-reading; no .home width rule needed. */
 .home-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -846,83 +853,81 @@
 }
 .home-card-review, .home-card-recent { grid-column: 1 / -1; }
 
+/* .home-card is a .card--hero tile (lg radius + lifted shadow) rendered as a button. */
 .home-card {
   display: flex; flex-direction: column; gap: var(--s3);
   text-align: left; width: 100%;
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r3);
-  padding: var(--s5) var(--s5); color: var(--text-2);
-  box-shadow: var(--shadow);
+  background: var(--elev); border: 1px solid var(--border); border-radius: var(--r3);
+  padding: var(--s5); color: var(--text-2);
+  box-shadow: var(--shadow-2);
   transition: border-color .15s ease, background .15s ease, transform .1s ease;
 }
-button.home-card { cursor: pointer; font: inherit; }
+button.home-card { cursor: pointer; font: inherit; min-height: 0; }
 button.home-card:hover:not(:disabled) {
   border-color: var(--accent); background: var(--panel-2);
-  box-shadow: var(--shadow), inset 0 0 0 1px var(--accent-glow);
+  box-shadow: var(--shadow-2), inset 0 0 0 1px var(--accent-glow);
 }
 button.home-card:active:not(:disabled) { transform: translateY(1px); }
-button.home-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-button.home-card:disabled { opacity: .55; cursor: default; }
+button.home-card:focus-visible { outline: none; box-shadow: var(--shadow-2), 0 0 0 2px var(--accent-glow), 0 0 0 1px var(--accent); }
+button.home-card:disabled { opacity: .45; cursor: default; }
 
 .home-card-head { display: flex; align-items: center; justify-content: space-between; }
 .home-card-label {
   display: inline-flex; align-items: center; gap: var(--s2);
-  font-size: 13px; font-weight: 600; color: var(--text);
+  font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--text);
   text-transform: none; letter-spacing: .02em;
 }
 .home-card-label .icon { width: 15px; height: 15px; color: var(--accent); }
 .home-card-go { width: 16px; height: 16px; color: var(--text-dim); }
 button.home-card:hover .home-card-go { color: var(--accent); }
-.home-card-sub { font-size: 12.5px; color: var(--text-2); }
+.home-card-sub { font-size: var(--fs-sm); color: var(--text-2); }
 
 /* The headline number (待审 sessions, 人物 count). */
 .home-bignum {
-  font-size: 40px; line-height: 1; font-weight: 700; color: var(--text);
+  font-size: var(--fs-3xl); line-height: var(--lh-tight); font-weight: var(--fw-bold); color: var(--text);
   font-variant-numeric: tabular-nums; letter-spacing: -.02em;
 }
 .home-card-review .home-bignum { color: var(--accent); }
-.home-bignum-unit { font-size: 17px; font-weight: 500; color: var(--text-2); }
+.home-bignum-unit { font-size: var(--fs-lg); font-weight: var(--fw-medium); color: var(--text-2); }
 
 /* 待审 zero-state: a calm "all clear" tile. */
 .home-card-review.is-clear .home-clear {
   display: flex; flex-direction: column; gap: var(--s2);
 }
-.home-clear strong { font-size: 18px; color: var(--ok); }
-.home-clear-emoji { font-size: 28px; line-height: 1; }
+.home-clear strong { font-size: var(--fs-lg); color: var(--ok); }
+.home-clear-emoji { font-size: var(--fs-2xl); line-height: 1; }
 
 /* 覆盖 stat strip + completion bars. */
 .home-stat-strip { display: flex; gap: var(--s5); flex-wrap: wrap; }
-.home-stat { display: flex; flex-direction: column; gap: 1px; }
+.home-stat { display: flex; flex-direction: column; gap: var(--s1); }
 .home-stat b {
-  font-size: 22px; font-weight: 700; color: var(--text);
-  font-variant-numeric: tabular-nums; line-height: 1.1;
+  font-size: var(--fs-2xl); font-weight: var(--fw-bold); color: var(--text);
+  font-variant-numeric: tabular-nums; line-height: var(--lh-tight);
 }
-.home-stat span { font-size: 11px; color: var(--text-dim); }
+.home-stat span { font-size: var(--fs-xs); color: var(--text-dim); }
 .home-cov-bars { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
-.home-cov-row { display: flex; align-items: center; gap: var(--s3); font-size: 12px; }
+.home-cov-row { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-sm); }
 .home-cov-name { width: 28px; color: var(--text-2); flex: none; }
 .home-cov-track {
-  flex: 1; height: 6px; border-radius: 999px; overflow: hidden;
+  flex: 1; height: 6px; border-radius: var(--radius-pill); overflow: hidden;
   background: var(--panel-2); border: 1px solid var(--border);
 }
-.home-cov-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.home-cov-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
 .home-cov-fill.emote { background: var(--warn); }
 .home-cov-pct { width: 36px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; flex: none; }
 
-.home-insight-day { font-size: 18px; font-weight: 600; color: var(--text); }
+.home-insight-day { font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text); }
 
-/* 最近会话 list. */
+/* 最近会话 list — .home-recent-item is a .list-row in inset-card form. */
 .home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
 .home-recent-item {
-  display: flex; align-items: center; gap: var(--s3); width: 100%;
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r2);
-  padding: var(--s3) var(--s4); color: var(--text); cursor: pointer; font: inherit; text-align: left;
-  transition: border-color .12s ease, background .12s ease;
+  background: var(--panel-2); border-color: var(--border);
+  padding: var(--s3) var(--s4); color: var(--text);
 }
-.home-recent-item:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.home-recent-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.home-recent-day { font-size: 13px; font-weight: 500; }
-.home-recent-meta { font-size: 12px; color: var(--text-dim); }
-.home-recent-status { margin-left: auto; font-size: 11.5px; color: var(--text-2); }
+.home-recent-item:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--text); }
+.home-recent-day { font-size: var(--fs-base); font-weight: var(--fw-medium); }
+.home-recent-meta { font-size: var(--fs-sm); color: var(--text-dim); }
+.home-recent-status { margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); }
 .home-recent-status.status-accepted { color: var(--ok); }
 .home-recent-status.status-pending_review { color: var(--warn); }
 .home-recent-status.status-blocked { color: var(--text-dim); }
@@ -933,29 +938,36 @@ button.home-card:hover .home-card-go { color: var(--accent); }
   .home-grid { grid-template-columns: 1fr; }
 }
 
-/* Loudness-leveling toggle in the review hints bar */
-.level-toggle { margin-left: 10px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; font-size: 11px; }
+/* Loudness-leveling toggle in the review hints bar — a single pill-shaped toggle button. */
+.level-toggle { margin-left: var(--s4); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm); border-radius: var(--radius-pill); border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; font-size: var(--fs-xs); }
 .level-toggle.on { color: var(--accent); border-color: var(--accent); }
 
 /* 观点 tab day picker — pick among dates that have data */
-.llm-daypick { display: flex; align-items: center; gap: 10px; }
-.llm-daypick label { color: var(--text-2); font-size: 13px; }
-.llm-daypick select { flex: 0 1 320px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface, transparent); color: inherit; }
+.llm-daypick { display: flex; align-items: center; gap: var(--s4); }
+.llm-daypick label { color: var(--text-2); font-size: var(--fs-base); }
+.llm-daypick select { flex: 0 1 320px; }
 
 /* Foldable people roster (collapse when there are many people) */
-.people-roster > summary { cursor: pointer; list-style: none; font-size: 12px; color: var(--text-2); padding: 2px 0; user-select: none; }
+.people-roster > summary { cursor: pointer; list-style: none; font-size: var(--fs-sm); color: var(--text-2); padding: var(--s1) 0; user-select: none; }
 .people-roster > summary::-webkit-details-marker { display: none; }
 .people-roster > summary::before { content: "▾ "; color: var(--text-dim); }
 .people-roster:not([open]) > summary::before { content: "▸ "; }
 
 /* ---- 观点 (per-session viewpoint workspace, slice 4) ---- */
-/* The 观点 tab view toggle (会话观点 / 日报汇总) reuses the .nav-mode pill. */
-.llm-mode { width: fit-content; }
+/* The 观点 tab view toggle (会话观点 / 日报汇总) is a segmented pill (it holds
+   .nav-mode-btn children directly). It carries `card` for back-compat but renders
+   as the pill, not a padded card. */
+.llm-mode {
+  display: inline-flex; width: fit-content; gap: var(--s1); padding: var(--s1);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+  background: var(--panel-2); box-shadow: none;
+}
+.llm-mode .nav-mode-btn { flex: 0 1 auto; }
 .vp-page { display: grid; gap: var(--s5); }
 
 /* Day/session picker row at the top of the workspace. */
 .vp-picker { display: flex; flex-wrap: wrap; gap: var(--s5); align-items: end; }
-.vp-pick { display: grid; gap: var(--s2); font-size: 12px; color: var(--text-2); }
+.vp-pick { display: grid; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-2); }
 .vp-pick select { min-width: 200px; }
 
 /* The 2-column grid: editable transcript (left) | editable prompt+result (right). */
@@ -966,8 +978,8 @@ button.home-card:hover .home-card-go { color: var(--accent); }
   align-items: start;
 }
 .vp-left, .vp-right { min-width: 0; display: grid; gap: var(--s5); }
-/* Stack on narrow viewports. */
-@media (max-width: 980px) {
+/* Stack on narrow viewports (primary collapse point). */
+@media (max-width: 1024px) {
   .viewpoint-workspace { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -976,39 +988,44 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 /* ---- transcript (left) ---- */
 .vp-transcript { display: grid; gap: var(--s3); }
 .vp-stale {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 10px; border-radius: var(--r1); font-size: 12px;
+  display: flex; align-items: center; gap: var(--s2h);
+  padding: var(--s2h) var(--s4); border-radius: var(--r1); font-size: var(--fs-sm);
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
 }
-.vp-turns { display: grid; gap: var(--s3); max-height: 60vh; overflow-y: auto; }
+/* .vp-turns is a sanctioned bounded inner scroller. */
+.vp-turns { display: grid; gap: var(--s3); max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; }
 .vp-turn { border-left: 3px solid var(--border); padding: var(--s3) 0 var(--s3) var(--s4); }
 .vp-turn-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
-.vp-turn .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; color: #06121a; }
-.vp-turn-speaker { font-size: 12px; padding: 2px 6px; }
-.vp-turn-text { margin: var(--s2) 0 0; cursor: pointer; line-height: 1.5; }
+/* .vp-turn .chip is the speaker chip — inherits .chip (accent-fg text, legible in both themes). */
+.vp-turn .chip { display: inline-flex; align-items: center; gap: var(--s2); }
+.vp-turn-speaker { font-size: var(--fs-sm); padding: 2px var(--s2h); }
+/* .vp-turn-text inherits font-size/line-height from the shared transcript rule (theme.css). */
+.vp-turn-text { margin: var(--s2) 0 0; cursor: pointer; }
 .vp-turn-text:hover { color: var(--accent-2); }
 .vp-turn-edit { display: grid; gap: var(--s2); margin-top: var(--s2); }
-.vp-turn-edit textarea { width: 100%; resize: vertical; }
+/* Base input/textarea rule provides bg/border/radius/focus; only width is unique here. */
+.vp-turn-edit textarea { width: 100%; }
 .vp-turn-edit-actions { display: flex; gap: var(--s3); }
 .icon-btn.playing { color: var(--accent); }
 
 /* ---- prompt (right, collapsible) ---- */
-.vp-prompt > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); user-select: none; }
+.vp-prompt > summary { cursor: pointer; display: flex; align-items: center; gap: var(--s2h); font-size: var(--fs-sm); color: var(--text-2); user-select: none; }
 .vp-prompt > summary::-webkit-details-marker { display: none; }
+/* .vp-badge is a .tag with an accent tint. */
 .vp-badge {
-  margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 999px;
-  color: var(--accent-2); background: var(--accent-dim); border: 1px solid var(--accent);
+  margin-left: auto;
+  color: var(--accent-2); background: var(--accent-dim); border-color: var(--accent);
 }
 .vp-prompt-body { display: grid; gap: var(--s3); margin-top: var(--s3); }
-.vp-prompt-body textarea { width: 100%; resize: vertical; font: inherit; }
+.vp-prompt-body textarea { width: 100%; }
 .vp-prompt-actions { display: flex; gap: var(--s3); flex-wrap: wrap; }
 
 /* ---- result (right) ---- */
 .vp-result { display: grid; gap: var(--s4); }
 .vp-result-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
-.vp-result-head .status { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.vp-result-head .status { font-size: var(--fs-xs); padding: 1px var(--s3); border-radius: var(--radius-pill); border: 1px solid var(--border); }
 .status.s-draft { color: var(--text-dim); }
 .status.s-edited { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 .status.s-published { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
@@ -1016,19 +1033,27 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 
 .vp-fields { display: grid; gap: var(--s4); }
 .vp-field { display: grid; gap: var(--s2); }
-.vp-field-label { font-size: 11px; color: var(--text-dim); letter-spacing: .04em; }
-.vp-fields input, .vp-fields textarea { width: 100%; font: inherit; resize: vertical; }
+.vp-field-label { font-size: var(--fs-xs); color: var(--text-dim); letter-spacing: .04em; }
+/* Base input/textarea rule supplies the well; only width is unique. */
+.vp-fields input, .vp-fields textarea { width: 100%; }
 
 .vp-group { border: 1px solid var(--border); border-radius: var(--r1); padding: var(--s3); display: grid; gap: var(--s3); margin: 0; }
-.vp-group legend { font-size: 11px; color: var(--text-dim); padding: 0 6px; text-transform: uppercase; letter-spacing: .06em; }
+.vp-group legend { font-size: var(--fs-xs); color: var(--text-dim); padding: 0 var(--s2h); text-transform: uppercase; letter-spacing: .06em; }
 .vp-row { display: grid; gap: var(--s2); }
 .vp-row .vp-owner { max-width: 220px; }
-.vp-refs { font-size: 11px; }
+.vp-refs { font-size: var(--fs-xs); }
 .vp-list-row { display: flex; gap: var(--s2); align-items: center; }
 .vp-list-row input { flex: 1; }
 .vp-speaker-meta { display: flex; gap: var(--s4); flex-wrap: wrap; }
 .vp-speaker-meta .vp-field { flex: 1; min-width: 120px; }
 
-.vp-result-actions { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
-.vp-published { font-size: 12px; color: var(--ok); margin: 0; }
-.vp-error { font-size: 12px; color: var(--err); margin: var(--s2) 0 0; }
+/* .vp-result-actions inherits the .toolbar primitive. */
+.vp-result-actions { align-items: center; }
+.vp-published { font-size: var(--fs-sm); color: var(--ok); margin: 0; }
+.vp-error { font-size: var(--fs-sm); color: var(--err); margin: var(--s2) 0 0; }
+
+/* ---- 日报汇总 read-only daily rollup (LlmResultPanel) ----
+   .llm-panel is a real .card modifier: it adds the result-grid gap on top of .card,
+   so the styling intent is explicit (no silent reliance on .card alone). */
+.llm-panel { display: grid; gap: var(--s4); }
+.llm-panel .viewpoint { margin: 0; }

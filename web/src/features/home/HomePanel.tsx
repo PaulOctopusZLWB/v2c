@@ -36,7 +36,7 @@ export function HomePanel({ onGoReview, onGoSpeakers, onGoLlm, onOpenSession }: 
 
   if (error) {
     return (
-      <div className="tab-page single">
+      <div className="tab-page single is-reading">
         <div className="empty error-state" role="alert">
           <Icon name="run" className="empty-icon" />
           <h3>首页加载失败</h3>
@@ -48,7 +48,7 @@ export function HomePanel({ onGoReview, onGoSpeakers, onGoLlm, onOpenSession }: 
 
   if (!overview) {
     return (
-      <div className="tab-page single">
+      <div className="tab-page single is-reading">
         <div className="empty">
           <Icon name="refresh" className="empty-icon" />
           <h3>正在加载概览…</h3>
@@ -61,7 +61,7 @@ export function HomePanel({ onGoReview, onGoSpeakers, onGoLlm, onOpenSession }: 
   const noBacklog = review.pending_sessions === 0;
 
   return (
-    <div className="tab-page home">
+    <div className="tab-page single is-reading home">
       <div className="home-grid">
         {/* 待审 — the single most actionable number; the whole card jumps to 审核. */}
         <button type="button" aria-label="待审" className={`home-card home-card-review${noBacklog ? " is-clear" : ""}`} onClick={onGoReview}>
