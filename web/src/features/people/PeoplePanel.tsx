@@ -65,7 +65,9 @@ export function PeoplePanel({
   const create = useAsyncAction(async (name: string) => {
     await api.createPerson(name);
     setNewName("");
-    await load();
+    // refresh() (not just load()) so the parent's persons roster — and the assign-person
+    // <select> fed by it — picks up the new person immediately, not just this panel's list.
+    await refresh();
   });
 
   // One-tap 噪音/多人 bucket: create a ready-to-use non_speaker person so the user can box-select
