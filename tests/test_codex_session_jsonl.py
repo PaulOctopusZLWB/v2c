@@ -459,3 +459,73 @@ def test_parse_codex_session_jsonl_does_not_move_ended_at_back_for_bad_timestamp
     document_metadata = json.dumps(asdict(document), ensure_ascii=False, sort_keys=True)
     assert "BAD_ENDED_AT_SECRET" not in document.searchable_text
     assert "BAD_ENDED_AT_SECRET" not in document_metadata
+
+
+def test_parse_codex_session_jsonl_rejects_invalid_session_timestamp_string(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "invalid-start-timestamp.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": "thread_1",
+                    "timestamp": "NOT_A_START_TIMESTAMP_SECRET",
+                },
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="missing session timestamp"):
+        parse_codex_session_jsonl(path)
+
+
+def test_parse_codex_session_jsonl_ignores_malformed_string_timestamps(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bad-string-timestamps.jsonl"
+    started_at = "2026-06-22T02:11:53.245Z"
+    later_at = "2026-06-22T02:13:01.000Z"
+    secret_timestamp = "NOT_A_TIMESTAMP_SECRET"
+    _write_jsonl(
+        path,
+        [
+            {
+                "timestamp": started_at,
+                "type": "session_meta",
+                "payload": {
+                    "id": "thread_1",
+                    "timestamp": started_at,
+                },
+            },
+            {
+                "timestamp": later_at,
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "latest visible"}],
+                },
+            },
+            {
+                "timestamp": secret_timestamp,
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{}",
+                    "call_id": "call_bad_string_timestamp",
+                },
+            },
+        ],
+    )
+
+    document = parse_codex_session_jsonl(path)
+
+    assert document.ended_at == later_at
+    assert document.tool_events[0].occurred_at == started_at
+    document_metadata = json.dumps(asdict(document), ensure_ascii=False, sort_keys=True)
+    assert secret_timestamp not in document.searchable_text
+    assert secret_timestamp not in document_metadata

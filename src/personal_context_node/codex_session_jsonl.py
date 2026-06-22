@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
@@ -32,7 +33,7 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
     ended_at: str | None = started_at
 
     for row in rows:
-        row_timestamp = _optional_non_empty_str(row.get("timestamp"))
+        row_timestamp = _valid_timestamp_str(row.get("timestamp"))
         event_timestamp = row_timestamp or started_at
         if row_timestamp is not None:
             ended_at = row_timestamp
@@ -179,6 +180,19 @@ def _optional_non_empty_str(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _valid_timestamp_str(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    parse_value = value.removesuffix("Z")
+    if value.endswith("Z"):
+        parse_value += "+00:00"
+    try:
+        datetime.fromisoformat(parse_value)
+    except ValueError:
+        return None
+    return value
+
+
 def _required_str(value: object, message: str) -> str:
     if isinstance(value, str) and value:
         return value
@@ -186,9 +200,12 @@ def _required_str(value: object, message: str) -> str:
 
 
 def _session_started_at(meta: dict[str, Any], rows: list[dict[str, Any]]) -> str:
-    timestamp = meta.get("timestamp") or (rows[0].get("timestamp") if rows else None)
-    if isinstance(timestamp, str) and timestamp:
+    timestamp = _valid_timestamp_str(meta.get("timestamp"))
+    if timestamp is not None:
         return timestamp
+    first_row_timestamp = _valid_timestamp_str(rows[0].get("timestamp") if rows else None)
+    if first_row_timestamp is not None:
+        return first_row_timestamp
     raise ValueError("missing session timestamp")
 
 
