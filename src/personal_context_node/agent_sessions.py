@@ -308,7 +308,24 @@ def _is_simple_inline_markdown(text: str) -> bool:
 
 
 def _frontmatter_scalar(value: object) -> str:
-    return json.dumps(str(value), ensure_ascii=False)
+    text = str(value)
+    if _is_safe_plain_frontmatter_scalar(text):
+        return text
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _is_safe_plain_frontmatter_scalar(text: str) -> bool:
+    if text == "":
+        return False
+    if "\n" in text or "\r" in text:
+        return False
+    if text.strip() != text:
+        return False
+    if text in {"---", "..."}:
+        return False
+    if ": " in text or " #" in text:
+        return False
+    return True
 
 
 def _append_fenced_block(lines: list[str], text: str, *, indent: str = "") -> None:
