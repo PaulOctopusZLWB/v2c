@@ -50,7 +50,7 @@ PIPELINE = (
     # stage fans into session_derive once every same-day file has settled (round-7 invariant,
     # per audio_file). Only the active mode's tasks exist at runtime, so coexistence is safe.
     PipelineEdge("transcribe_diarize", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=target_id, config=config)),
-    PipelineEdge("session_derive", "summarize_session", "session", lambda conn, config, target_id: _session_ids_for_day_in_conn(conn, day=target_id)),
+    PipelineEdge("session_derive", "summarize_session", "session", lambda conn, config, target_id: _session_ids_for_day_in_conn(conn, day=target_id, config=config)),
     PipelineEdge("summarize_session", "daily_generate", "date_key", lambda conn, config, target_id: _ready_daily_generate_dates_in_conn(conn, session_id=target_id)),
     PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
 )
@@ -451,9 +451,6 @@ def _ready_session_derive_dates_in_conn(
     )
     if pending:
         return []
-    # Speaker-first gate: hold the day until every voice is identified (see helper).
-    if config is not None and config.require_identified_speakers and _day_has_unidentified_speakers_in_conn(conn, date_key=date_key):
-        return []
     return [date_key]
 
 
@@ -525,21 +522,18 @@ def _ready_session_derive_dates_for_file_in_conn(
     )
     if pending:
         return []
-    # Speaker-first gate: hold the day until every voice is identified (see helper).
-    if config is not None and config.require_identified_speakers and _day_has_unidentified_speakers_in_conn(conn, date_key=date_key):
-        return []
     return [date_key]
 
 
 def _session_ids_for_day(*, config: AppConfig, day: str) -> list[str]:
     conn = connect(config.database_path)
     try:
-        return _session_ids_for_day_in_conn(conn, day=day)
+        return _session_ids_for_day_in_conn(conn, day=day, config=config)
     finally:
         conn.close()
 
 
-def _session_ids_for_day_in_conn(conn: sqlite3.Connection, *, day: str) -> list[str]:
+def _session_ids_for_day_in_conn(conn: sqlite3.Connection, *, day: str, config: AppConfig | None = None) -> list[str]:
     # `day` is the file recorded-day that session_derive ran for. Select sessions by
     # their first segment's file-day (NOT by date_key): a cross-midnight session has a
     # next-day date_key but is still produced by this file-day's derive, so keying on
@@ -556,6 +550,10 @@ def _session_ids_for_day_in_conn(conn: sqlite3.Connection, *, day: str) -> list[
         """,
         (day,),
     )
+    # Speaker-first gate: sessions exist (so the review UI can list/clusters/listen), but the
+    # day's content is NOT summarized until every voice that day is attributed to a person.
+    if config is not None and config.require_identified_speakers and _day_has_unidentified_speakers_in_conn(conn, date_key=day):
+        return []
     return [str(row["session_id"]) for row in rows]
 
 

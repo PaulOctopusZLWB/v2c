@@ -15,6 +15,7 @@ from personal_context_node.core.ports.file_import import (
 )
 from personal_context_node.process_runner import (
     _ready_session_derive_dates_for_file,
+    _session_ids_for_day,
     process_once,
 )
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -218,10 +219,29 @@ def _attribute_segment(database_path: Path, *, segment_id: str, person_id: str) 
         conn.close()
 
 
-def test_require_identified_speakers_gates_session_derive(tmp_path: Path) -> None:
-    # Speaker-first: with the gate on, a day with any unattributed active segment is held at the
-    # transcribe_diarize -> session_derive edge until every voice is identified. Diarize labels
-    # (spk_NN) collide across files, so identity is per-segment attribution, not the raw label.
+def _seed_session(database_path: Path, *, session_id: str, date_key: str, first_segment_id: str) -> None:
+    conn = connect(database_path)
+    try:
+        conn.execute(
+            """
+            insert into sessions (
+              session_id, date_key, started_at, ended_at, source, segment_count,
+              active_speech_ms, first_segment_id, created_at, updated_at
+            ) values (?, ?, ?, ?, 'derive', 1, 500, ?, ?, ?)
+            """,
+            (session_id, date_key, f"{date_key}T09:00:00+08:00", f"{date_key}T09:01:00+08:00",
+             first_segment_id, f"{date_key}T09:01:00+08:00", f"{date_key}T09:01:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_require_identified_speakers_gates_summarize_not_session_derive(tmp_path: Path) -> None:
+    # Speaker-first: session_derive STILL runs (the review UI lists clusters/segments per session,
+    # so sessions must exist to identify on). With the gate on, the day is held at the
+    # session_derive -> summarize_session edge until every voice is attributed to a person.
+    # Diarize labels (spk_NN) collide across files, so identity is per-segment attribution.
     config = AppConfig(
         data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault",
         asr_mode="diarize", require_identified_speakers=True,
@@ -239,19 +259,23 @@ def test_require_identified_speakers_gates_session_derive(tmp_path: Path) -> Non
     _set_task_status(config.database_path, task_id=t1.task_id, status="succeeded")
     _seed_segment(config.database_path, segment_id="seg_self", audio_file_id="aud_1", speaker="self")
     _seed_segment(config.database_path, segment_id="seg_spk1", audio_file_id="aud_1", speaker="spk_01")
+    _seed_session(config.database_path, session_id="ses_1", date_key="2026-06-14", first_segment_id="seg_self")
 
-    # Diarize settled, but speakers unidentified -> gate holds the day.
-    assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_1") == []
-    # With the gate OFF the same state is ready (default behavior unchanged).
-    assert _ready_session_derive_dates_for_file(config=config_off, audio_file_id="aud_1") == ["2026-06-14"]
+    # session_derive is NEVER gated (sessions must exist for the review UI).
+    assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_1") == ["2026-06-14"]
+
+    # Sessions exist but speakers unidentified -> summarize is held.
+    assert _session_ids_for_day(config=config, day="2026-06-14") == []
+    # Gate OFF -> the session is ready to summarize (default behavior unchanged).
+    assert _session_ids_for_day(config=config_off, day="2026-06-14") == ["ses_1"]
 
     # Identify one of two voices -> still gated (the other is unattributed).
     _attribute_segment(config.database_path, segment_id="seg_self", person_id="per_owner")
-    assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_1") == []
+    assert _session_ids_for_day(config=config, day="2026-06-14") == []
 
-    # Identify the last voice -> the day is released.
+    # Identify the last voice -> the day's sessions are released to summarize.
     _attribute_segment(config.database_path, segment_id="seg_spk1", person_id="per_alice")
-    assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_1") == ["2026-06-14"]
+    assert _session_ids_for_day(config=config, day="2026-06-14") == ["ses_1"]
 
 
 def test_ingest_in_diarize_mode_enqueues_transcribe_diarize_not_vad(tmp_path: Path) -> None:
