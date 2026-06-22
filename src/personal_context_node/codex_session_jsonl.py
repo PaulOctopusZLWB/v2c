@@ -5,20 +5,24 @@ import json
 from pathlib import Path
 from typing import Any
 
-from personal_context_node.agent_session_types import AgentSessionDocument, AgentToolEvent, AgentTurn
+from personal_context_node.agent_session_types import (
+    AgentSessionDocument,
+    AgentToolEvent,
+    AgentTurn,
+)
 
 
 VISIBLE_MESSAGE_ROLES = {"user", "assistant"}
 
 
 def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
-    rows = [_load_json_line(line, line_number=index + 1) for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()) if line.strip()]
+    rows = _load_jsonl_rows(path)
     meta = _first_payload(rows, "session_meta")
     if meta is None:
         raise ValueError("missing session_meta")
 
-    session_id = str(meta["id"])
-    started_at = str(meta.get("timestamp") or rows[0].get("timestamp"))
+    session_id = _required_str(meta.get("id"), "missing session_meta.id")
+    started_at = _session_started_at(meta, rows)
     cwd = _optional_str(meta.get("cwd"))
     originator = _optional_str(meta.get("originator"))
     cli_version = _optional_str(meta.get("cli_version"))
@@ -102,13 +106,34 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
     )
 
 
+def _load_jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    non_empty_lines = [
+        (line_number, line)
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        )
+        if line.strip()
+    ]
+    rows: list[dict[str, Any]] = []
+    final_index = len(non_empty_lines) - 1
+    for index, (line_number, line) in enumerate(non_empty_lines):
+        try:
+            rows.append(_load_json_line(line, line_number=line_number))
+        except ValueError:
+            if index == final_index:
+                continue
+            raise
+    return rows
+
+
 def _load_json_line(line: str, *, line_number: int) -> dict[str, Any]:
     try:
         value = json.loads(line)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid JSONL at line {line_number}: {exc.msg}") from exc
+    except json.JSONDecodeError:
+        raise ValueError(f"invalid JSONL at line {line_number}") from None
     if not isinstance(value, dict):
-        raise ValueError(f"invalid JSONL at line {line_number}: expected object")
+        raise ValueError(f"invalid JSONL at line {line_number}")
     return value
 
 
@@ -146,6 +171,19 @@ def _parse_arguments(arguments: object) -> dict[str, object]:
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _required_str(value: object, message: str) -> str:
+    if isinstance(value, str) and value:
+        return value
+    raise ValueError(message)
+
+
+def _session_started_at(meta: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+    timestamp = meta.get("timestamp") or (rows[0].get("timestamp") if rows else None)
+    if isinstance(timestamp, str) and timestamp:
+        return timestamp
+    raise ValueError("missing session timestamp")
 
 
 def _title_from_turns(turns: list[AgentTurn]) -> str | None:
