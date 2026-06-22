@@ -35,6 +35,7 @@ from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.memory_export import export_memory_events
 from personal_context_node.memory_import import import_memory_events
 from personal_context_node.memory_verify import verify_memory_events
+from personal_context_node.obsidian_agent_sessions import publish_agent_session_note
 from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates, publish_candidate_review
 from personal_context_node.obsidian_sessions import publish_session_notes, session_transcript_lines
@@ -976,9 +977,13 @@ def agent_import_codex_group(
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     try:
         document = parse_codex_session_jsonl(jsonl_path)
-        result = import_agent_session(config=config, document=document)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    try:
+        result = import_agent_session(config=config, document=document)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     typer.echo(
         " ".join(
             [
@@ -1003,11 +1008,31 @@ def agent_show_group(
     ),
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    if not config.database_path.exists():
+        raise typer.BadParameter(f"agent session store not found: {config.database_path}")
     try:
         markdown = render_agent_session_markdown(config=config, agent_session_id=session_id)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(markdown, nl=False)
+
+
+@agent_app.command(name="publish")
+def agent_publish_group(
+    session_id: str = typer.Option(..., "--session-id", help="Agent session id."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    try:
+        note_path = publish_agent_session_note(config=config, agent_session_id=session_id)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"note_path={note_path}")
 
 
 @app.command(name="launchd-write-plists")
