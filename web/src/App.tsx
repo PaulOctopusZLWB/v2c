@@ -60,7 +60,10 @@ function stageBreakdownFromSummary(
 function buildRequest(scope: Scope, params: ProjParams): ProjectionRequest | null {
   if (scope.session_ids.length === 0 && scope.days.length === 0) return null;
   const method = params.method ?? "umap";
+  // max_points: 0 = project everything (no subsample); omit when at the default so the backend
+  // applies its own cap.
   const base: ProjectionRequest = { session_ids: scope.session_ids, days: scope.days, method };
+  if (params.max_points !== undefined) base.max_points = params.max_points;
   if (method === "umap") return { ...base, n_neighbors: params.n_neighbors, min_dist: params.min_dist };
   if (method === "pca") return { ...base, pca_x: params.pca_x, pca_y: params.pca_y };
   return { ...base, perplexity: params.perplexity };
@@ -818,10 +821,11 @@ export function App() {
             />
             <ProjectionControls
               value={projParams}
-              onChange={(next) => {
+              onChange={(next, apply) => {
                 setProjParams(next);
-                // A method switch auto-applies; pure param (slider/dropdown) edits wait for 投射.
-                if (next.method !== projParams.method) setAppliedRequest(buildRequest(scope, next));
+                // A method switch (or an explicit apply, e.g. 投射全部) applies immediately;
+                // pure param (slider/dropdown) edits wait for 投射.
+                if (apply || next.method !== projParams.method) setAppliedRequest(buildRequest(scope, next));
               }}
               onApply={() => setAppliedRequest(buildRequest(scope, projParams))}
               capped={projCapped?.capped}

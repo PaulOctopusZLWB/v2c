@@ -689,8 +689,15 @@
 .proj-capped {
   font-size: var(--fs-xs); margin: 0; text-align: center;
   color: var(--text-dim);
+  display: grid; gap: var(--s2);
 }
 .proj-capped .num { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.proj-all {
+  width: 100%; font-size: var(--fs-sm);
+  border: 1px solid var(--border); background: transparent; color: var(--text-2);
+  border-radius: var(--radius); padding: var(--s2) var(--s3); cursor: pointer;
+}
+.proj-all:hover { color: var(--text); border-color: var(--accent); }
 
 /* Subsample overlay note inside the map (top-right). */
 .vmap-capped-note {

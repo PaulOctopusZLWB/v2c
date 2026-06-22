@@ -4,7 +4,7 @@ import { Icon } from "../../components/Icon";
 /** The tunable subset of a projection request this control owns. */
 export type ProjParams = Pick<
   ProjectionRequest,
-  "method" | "n_neighbors" | "min_dist" | "pca_x" | "pca_y" | "perplexity"
+  "method" | "n_neighbors" | "min_dist" | "pca_x" | "pca_y" | "perplexity" | "max_points"
 >;
 
 /** Sensible defaults for each method's params (backend has matching defaults). */
@@ -14,7 +14,8 @@ export const PROJ_DEFAULTS: Required<Omit<ProjParams, "method">> & { method: Pro
   min_dist: 0.1,
   pca_x: 0,
   pca_y: 1,
-  perplexity: 30
+  perplexity: 30,
+  max_points: 4000
 };
 
 const METHODS: Array<{ id: ProjectionMethod; label: string; title?: string }> = [
@@ -41,7 +42,7 @@ export function ProjectionControls({
   total
 }: {
   value: ProjParams;
-  onChange: (v: ProjParams) => void;
+  onChange: (v: ProjParams, apply?: boolean) => void;
   onApply: () => void;
   /** Last result was evenly subsampled to stay responsive. */
   capped?: boolean;
@@ -170,10 +171,30 @@ export function ProjectionControls({
       </button>
 
       {capped ? (
-        <p className="proj-capped muted" role="note">
-          点数过多,已采样 <span className="num">{n ?? "?"}</span>/
-          <span className="num">{total ?? "?"}</span>
-        </p>
+        <div className="proj-capped" role="note">
+          <p className="muted" style={{ margin: 0 }}>
+            点数过多,已采样 <span className="num">{n ?? "?"}</span>/
+            <span className="num">{total ?? "?"}</span>
+          </p>
+          <button
+            type="button"
+            className="proj-all"
+            title="不采样,投射全部片段(数据量大时较慢)"
+            onClick={() => onChange({ ...value, max_points: 0 }, true)}
+          >
+            投射全部{total ? ` (${total})` : ""}
+          </button>
+        </div>
+      ) : null}
+      {(value.max_points ?? PROJ_DEFAULTS.max_points) === 0 ? (
+        <button
+          type="button"
+          className="proj-all"
+          title="恢复采样上限(4000),投射更快"
+          onClick={() => onChange({ ...value, max_points: PROJ_DEFAULTS.max_points }, true)}
+        >
+          恢复采样 ({PROJ_DEFAULTS.max_points})
+        </button>
       ) : null}
     </section>
   );
