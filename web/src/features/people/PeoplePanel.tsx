@@ -42,6 +42,8 @@ export function PeoplePanel({
   const [threshold, setThreshold] = useState(0.6);
   // Identity scope: 全部 (global, cross-session — the default and the whole point) vs 本会话.
   const [scope, setScope] = useState<"all" | "session">("all");
+  // Auto-noise duration threshold (ms): segments shorter than this are bulk-marked noise.
+  const [noiseMs, setNoiseMs] = useState(300);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -79,6 +81,28 @@ export function PeoplePanel({
       await refresh();
     } catch (err) {
       push("创建失败", err instanceof Error ? err.message : undefined);
+    }
+  });
+
+  // Bulk-mark noise (filler text and/or short segments) into the noise bucket. Respects the 全部/
+  // 本会话 scope toggle; never overwrites a manual label to a real person.
+  const markNoise = useAsyncAction(async (kind: "filler" | "short") => {
+    const useSession = scope === "session" && !!sessionId;
+    try {
+      const res = await api.markNoise({
+        filler: kind === "filler",
+        max_duration_ms: kind === "short" ? noiseMs : null,
+        session_id: useSession ? sessionId : null,
+        day: useSession ? null : day ?? null,
+      });
+      push(
+        kind === "filler" ? "已标注语气词为噪音" : `已标注短段(<${noiseMs}ms)为噪音`,
+        `本次新增 ${res.marked} 段 → ${res.noise_label}`,
+      );
+      await refresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : undefined;
+      push("标注噪音失败", msg?.includes("400") ? "请先创建「噪音/多人」类别" : msg);
     }
   });
 
@@ -296,6 +320,46 @@ export function PeoplePanel({
             把噪音、多人重叠或无效的片段框选后标到这里,它们就不会冒充真实发言人。
           </p>
         )}
+        {hasNonSpeaker ? (
+          <div className="noise-tools">
+            <button
+              className="ghost ghost-sm"
+              onClick={() => void markNoise.run("filler")}
+              disabled={markNoise.pending}
+              aria-busy={markNoise.pending}
+              title="把纯语气词(嗯/啊/呃/哦…)的片段一键标为噪音,不动已标注的真实发言人"
+            >
+              {markNoise.pending ? <span className="spinner" aria-hidden /> : <Icon name="noise" />}
+              一键标注语气词
+            </button>
+            <span className="noise-short">
+              <button
+                className="ghost ghost-sm"
+                onClick={() => void markNoise.run("short")}
+                disabled={markNoise.pending}
+                aria-busy={markNoise.pending}
+                title={`把短于 ${noiseMs}ms 的片段标为噪音(已标噪音段中位时长约 240ms)`}
+              >
+                标注短段
+              </button>
+              <input
+                type="number"
+                aria-label="噪音时长阈值(毫秒)"
+                className="noise-ms"
+                min={50}
+                max={2000}
+                step={50}
+                value={noiseMs}
+                onChange={(e) => setNoiseMs(Number(e.target.value) || 0)}
+                disabled={markNoise.pending}
+              />
+              <span className="muted">ms 以下</span>
+            </span>
+            <span className="muted noise-scope-note">
+              范围:{scope === "session" && sessionId ? "本会话" : "全部"}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="people-add">

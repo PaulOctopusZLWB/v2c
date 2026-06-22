@@ -106,6 +106,9 @@ export const api = {
     request<EmotionLabels>(`/api/emotions/labels${query(scope)}`),
   recluster: (body: { anchors: Record<string, string>; threshold: number; session_id?: string | null; day?: string | null }) =>
     request<ReclusterResult>("/api/speakers/recluster", { method: "POST", body: JSON.stringify(body) }),
+  // Bulk-mark meaningless segments as noise: filler/backchannel text and/or short segments.
+  markNoise: (body: { filler?: boolean; max_duration_ms?: number | null; noise_person_id?: string | null; session_id?: string | null; day?: string | null }) =>
+    request<{ marked: number; noise_label: string; scope_segments: number }>("/api/speakers/mark-noise", { method: "POST", body: JSON.stringify(body) }),
   speakerSegments: (params: { session_id?: string | null; speaker?: string | null; limit?: number | null }) =>
     request<{ segments: LabelSegment[] }>(`/api/speakers/segments${query(params)}`),
   // 2D voiceprint map: project stored CAM++ embeddings to a scatter (UMAP default, PCA fallback)

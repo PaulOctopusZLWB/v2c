@@ -17,6 +17,7 @@ from personal_context_node.speaker_embeddings import (
     get_embeddings,
     get_person_centroids,
     label_segments_as_person,
+    mark_noise_segments,
     pending_embedding_segment_ids,
     project_embeddings,
     put_embedding,
@@ -1204,3 +1205,68 @@ def test_cluster_voiceprints_groups_by_voice_and_preserves_self(tmp_path: Path) 
     assert next(iter(a_clusters)).startswith("vp_")
     # Original per-file label preserved (reversible).
     assert rows["a0"][0] == "spk_01"
+
+
+def _insert_person_row(database_path: Path, *, person_id: str, name: str, ptype: str) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, 0, ?, ?)",
+            (person_id, name, ptype, "2026-06-09T00:00:00+08:00", "2026-06-09T00:00:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_seg(database_path: Path, *, seg_id: str, text: str, dur_ms: int) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert or ignore into audio_files (audio_file_id, source_device, source_path, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values ('aud_n','d','/s','/r','sha',1,'2026-06-09T08:00:00+08:00','2026-06-09T08:00:00+08:00','imported')",
+        )
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, is_active, created_at) values (?, 'aud_n', ?, 0, ?, ?, 'zh', 'spk_01', 'spk_01', ?, 1, '2026-06-09T08:00:00+08:00')",
+            (seg_id, f"chk_{seg_id}", dur_ms, text, f"ev_{seg_id}"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_mark_noise_filler_and_short_preserves_manual_labels(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_row(config.database_path, person_id="per_noise", name="噪音/多人", ptype="non_speaker")
+    _insert_person_row(config.database_path, person_id="per_alice", name="Alice", ptype="contact")
+    _insert_seg(config.database_path, seg_id="s_fill", text="嗯嗯，", dur_ms=1500)   # filler -> noise
+    _insert_seg(config.database_path, seg_id="s_short", text="有意义", dur_ms=200)    # short -> noise
+    _insert_seg(config.database_path, seg_id="s_norm", text="这是一句正常的长话", dur_ms=3000)  # untouched
+    _insert_seg(config.database_path, seg_id="s_fill_real", text="啊", dur_ms=1500)  # filler BUT manually labeled
+    # s_fill_real is already a manual label to a real person -> must be preserved.
+    label_segments_as_person(config=config, person_id="per_alice", segment_ids=["s_fill_real"]) if False else None
+    conn = connect(config.database_path)
+    conn.execute(
+        "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values ('s_fill_real','Alice','2026-06-09T08:00:00+08:00','per_alice','manual')"
+    )
+    conn.commit(); conn.close()
+
+    result = mark_noise_segments(config=config, noise_person_id="per_noise", filler=True, max_duration_ms=300)
+
+    assert result["marked"] == 2
+    overrides = _override_rows(config.database_path)
+    assert overrides["s_fill"]["person_id"] == "per_noise"
+    assert overrides["s_short"]["person_id"] == "per_noise"
+    assert "s_norm" not in overrides  # normal long segment untouched
+    assert overrides["s_fill_real"]["person_id"] == "per_alice"  # manual label preserved
+
+
+def test_mark_noise_requires_a_criterion(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_row(config.database_path, person_id="per_noise", name="噪音", ptype="non_speaker")
+    try:
+        mark_noise_segments(config=config, noise_person_id="per_noise")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass

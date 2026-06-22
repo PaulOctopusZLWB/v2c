@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
@@ -1249,5 +1250,87 @@ def cluster_voiceprints(
         )
         conn.commit()
         return {"clusters": len(vp_of), "assigned": assigned, "unassigned": unassigned, "scope_segments": len(ids)}
+    finally:
+        conn.close()
+
+
+# Pure filler / backchannel interjections (no semantic content) — repetitions and punctuation
+# only. Deliberately conservative: 对/行/不是/OK carry meaning and are NOT included.
+_FILLER_RE = re.compile(r"^[嗯啊呃哦哎唉呣呵\s，。、？！!?,.~…\-]+$")
+
+
+def mark_noise_segments(
+    *,
+    config: AppConfig,
+    noise_person_id: str | None = None,
+    filler: bool = False,
+    max_duration_ms: int | None = None,
+    scope_session_id: str | None = None,
+    scope_day: str | None = None,
+) -> dict:
+    """Bulk-attribute meaningless segments to a non_speaker "noise" person (one-click cleanup).
+
+    Targets segments matching EITHER criterion (union): ``filler`` = text is pure filler/backchannel
+    ("嗯", "啊啊", …); ``max_duration_ms`` = shorter than the threshold. Segments already MANUALLY
+    attributed to a different (real) person are left untouched, so this never clobbers ground truth.
+    Writes ``segment_person_overrides`` (source='manual'); does NOT enroll a voiceprint (filler
+    voiceprints are unreliable and must not drift any centroid).
+
+    Returns ``{"marked", "noise_person_id", "noise_label", "scope_segments"}``.
+    """
+    if not filler and max_duration_ms is None:
+        raise ValueError("specify filler=True and/or max_duration_ms")
+    from personal_context_node.speaker_review import upsert_segment_person_override
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        if noise_person_id is None:
+            rows = fetch_all(conn, "select person_id from persons where person_type = 'non_speaker' order by created_at limit 1")
+            if not rows:
+                raise ValueError("no non_speaker (noise) person exists; create one first")
+            noise_person_id = str(rows[0]["person_id"])
+        label_rows = fetch_all(conn, "select display_name from persons where person_id = ?", (noise_person_id,))
+        if not label_rows:
+            raise ValueError(f"unknown person_id: {noise_person_id}")
+        noise_label = str(label_rows[0]["display_name"])
+
+        where = ["ts.is_active = 1"]
+        params: list[object] = []
+        join = ""
+        if scope_session_id is not None:
+            where.append("ts.session_id = ?")
+            params.append(scope_session_id)
+        if scope_day is not None:
+            join = "join sessions s on s.session_id = ts.session_id"
+            where.append("s.date_key = ?")
+            params.append(scope_day)
+        # Never overwrite an existing MANUAL label to a different (real) person.
+        where.append(
+            "not exists (select 1 from segment_person_overrides o where o.segment_id = ts.segment_id "
+            "and o.source = 'manual' and o.person_id != ?)"
+        )
+        params.append(noise_person_id)
+        rows = fetch_all(
+            conn,
+            f"select ts.segment_id, ts.text, (ts.end_ms - ts.start_ms) as dur from transcript_segments ts {join} where {' and '.join(where)}",
+            tuple(params),
+        )
+        scope_n = len(rows)
+        now = _now()
+        marked = 0
+        for row in rows:
+            dur = int(row["dur"])
+            text = str(row["text"] or "")
+            is_short = max_duration_ms is not None and dur < max_duration_ms
+            is_filler = filler and bool(text.strip()) and _FILLER_RE.match(text.strip()) is not None
+            if is_short or is_filler:
+                upsert_segment_person_override(
+                    conn, segment_id=str(row["segment_id"]), person_id=noise_person_id,
+                    person_label=noise_label, now=now, source="manual",
+                )
+                marked += 1
+        conn.commit()
+        return {"marked": marked, "noise_person_id": noise_person_id, "noise_label": noise_label, "scope_segments": scope_n}
     finally:
         conn.close()

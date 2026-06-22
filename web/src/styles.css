@@ -555,6 +555,10 @@
 .people-nonspeakers { border-top: 1px solid var(--border); padding-top: var(--s4); display: grid; gap: var(--s3); }
 .people-nonspeakers-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
 .people-nonspeaker-hint { font-size: var(--fs-sm); line-height: var(--lh-snug); margin: 0; }
+.noise-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+.noise-short { display: inline-flex; align-items: center; gap: var(--s2); }
+.noise-ms { width: 64px; text-align: right; }
+.noise-scope-note { margin-left: auto; font-size: var(--fs-xs); }
 .person-nonspeaker .chip.chip-noise {
   display: inline-flex; align-items: center; gap: var(--s2);
   background: var(--panel-2); color: var(--text-2);

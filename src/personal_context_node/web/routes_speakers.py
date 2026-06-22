@@ -13,6 +13,7 @@ from personal_context_node.speaker_embeddings import (
     clear_projection_cache,
     cluster_voiceprints,
     embedding_projection,
+    mark_noise_segments,
     enroll_person,
     label_segments_as_person,
     project_embeddings,
@@ -49,6 +50,14 @@ class ReclusterRequest(BaseModel):
 
 class AutoClusterRequest(BaseModel):
     min_cluster_size: int = 30
+    session_id: str | None = None
+    day: str | None = None
+
+
+class MarkNoiseRequest(BaseModel):
+    filler: bool = False
+    max_duration_ms: int | None = None
+    noise_person_id: str | None = None
     session_id: str | None = None
     day: str | None = None
 
@@ -503,6 +512,25 @@ def auto_cluster_route(request: Request, payload: AutoClusterRequest) -> dict[st
         scope_session_id=payload.session_id,
         scope_day=payload.day,
     )
+
+
+@router.post("/speakers/mark-noise")
+def mark_noise_route(request: Request, payload: MarkNoiseRequest) -> dict[str, object]:
+    """Bulk-attribute meaningless segments to a non_speaker noise person: filler/backchannel text
+    (嗯/啊/…) and/or segments shorter than a duration threshold. Never overwrites a manual label to
+    a real person."""
+    config: AppConfig = request.app.state.config
+    try:
+        return mark_noise_segments(
+            config=config,
+            noise_person_id=payload.noise_person_id,
+            filler=payload.filler,
+            max_duration_ms=payload.max_duration_ms,
+            scope_session_id=payload.session_id,
+            scope_day=payload.day,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/speakers/segments")
