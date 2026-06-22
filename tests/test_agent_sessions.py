@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from personal_context_node.agent_session_types import AgentSessionDocument, AgentToolEvent, AgentTurn
 from personal_context_node.agent_sessions import import_agent_session, render_agent_session_markdown
 from personal_context_node.config import AppConfig
-from personal_context_node.storage.sqlite import connect, fetch_all
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
 def _document(source_path: str = "/tmp/session.jsonl", source_sha256: str = "abc123") -> AgentSessionDocument:
@@ -49,6 +51,24 @@ def _document(source_path: str = "/tmp/session.jsonl", source_sha256: str = "abc
     )
 
 
+def _counts(config: AppConfig) -> dict[str, int]:
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(
+            conn,
+            """
+            select
+              (select count(*) from agent_sessions) as agent_sessions,
+              (select count(*) from agent_turns) as agent_turns,
+              (select count(*) from agent_tool_events) as agent_tool_events,
+              (select count(*) from evidence_refs where source_type = 'agent_session_turn') as evidence_refs
+            """,
+        )
+    finally:
+        conn.close()
+    return rows[0]
+
+
 def test_import_agent_session_persists_rows_and_evidence_refs(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
@@ -88,25 +108,154 @@ def test_import_agent_session_persists_rows_and_evidence_refs(tmp_path: Path) ->
     ]
 
 
-def test_import_agent_session_is_idempotent_for_same_thread(tmp_path: Path) -> None:
+def test_import_agent_session_is_idempotent_for_same_source_identity(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
     first = import_agent_session(config=config, document=_document())
-    second = import_agent_session(config=config, document=_document(source_sha256="def456"))
+    second = import_agent_session(config=config, document=_document())
 
     assert first.sessions_imported == 1
     assert second.sessions_imported == 0
+    assert _counts(config) == {
+        "agent_sessions": 1,
+        "agent_turns": 2,
+        "agent_tool_events": 1,
+        "evidence_refs": 2,
+    }
+
+
+@pytest.mark.parametrize(
+    "changed_document",
+    [
+        _document(source_path="/tmp/session-copy.jsonl"),
+        _document(source_sha256="def456"),
+    ],
+    ids=["changed-path", "changed-hash"],
+)
+def test_import_agent_session_rejects_changed_source_identity(
+    tmp_path: Path, changed_document: AgentSessionDocument
+) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    import_agent_session(config=config, document=_document())
+
+    with pytest.raises(ValueError, match="source identity differs"):
+        import_agent_session(config=config, document=changed_document)
+
     conn = connect(config.database_path)
     try:
-        session_count = fetch_all(conn, "select count(*) as count from agent_sessions")
-        turn_count = fetch_all(conn, "select count(*) as count from agent_turns")
-        ref_count = fetch_all(conn, "select count(*) as count from evidence_refs where source_type = 'agent_session_turn'")
+        sessions = fetch_all(conn, "select agent_session_id, source_path, source_sha256 from agent_sessions")
     finally:
         conn.close()
 
-    assert session_count == [{"count": 1}]
-    assert turn_count == [{"count": 2}]
-    assert ref_count == [{"count": 2}]
+    assert sessions == [
+        {"agent_session_id": "thread_1", "source_path": "/tmp/session.jsonl", "source_sha256": "abc123"}
+    ]
+    assert _counts(config) == {
+        "agent_sessions": 1,
+        "agent_turns": 2,
+        "agent_tool_events": 1,
+        "evidence_refs": 2,
+    }
+
+
+def test_import_agent_session_counts_only_created_evidence_refs(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into evidence_refs (
+              evidence_id, source_type, source_ref, source_id, owner_id, quote, summary, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ev_thread_1:turn:1",
+                "agent_session_turn",
+                "codex_jsonl:thread_1:turn:1",
+                "thread_1:turn:1",
+                None,
+                "用户问题",
+                None,
+                "2026-06-22T02:12:21.053Z",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = import_agent_session(config=config, document=_document())
+
+    assert result.evidence_refs_created == 1
+    assert _counts(config) == {
+        "agent_sessions": 1,
+        "agent_turns": 2,
+        "agent_tool_events": 1,
+        "evidence_refs": 2,
+    }
+
+
+@pytest.mark.parametrize(
+    ("evidence_id", "source_type", "source_ref", "source_id", "match"),
+    [
+        ("ev_thread_1:turn:1", "manual_note", "manual:1", "manual:1", "evidence_id"),
+        ("ev_other", "agent_session_turn", "codex_jsonl:thread_1:turn:1", "other:turn:1", "source_ref"),
+    ],
+    ids=["evidence-id-conflict", "source-ref-conflict"],
+)
+def test_import_agent_session_rejects_conflicting_evidence_ref_and_rolls_back(
+    tmp_path: Path,
+    evidence_id: str,
+    source_type: str,
+    source_ref: str,
+    source_id: str,
+    match: str,
+) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into evidence_refs (
+              evidence_id, source_type, source_ref, source_id, owner_id, quote, summary, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (evidence_id, source_type, source_ref, source_id, None, "preexisting", None, "2026-06-22T02:00:00Z"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(ValueError, match=match):
+        import_agent_session(config=config, document=_document())
+
+    conn = connect(config.database_path)
+    try:
+        all_counts = fetch_all(
+            conn,
+            """
+            select
+              (select count(*) from agent_sessions) as agent_sessions,
+              (select count(*) from agent_turns) as agent_turns,
+              (select count(*) from agent_tool_events) as agent_tool_events,
+              (select count(*) from evidence_refs) as evidence_refs
+            """,
+        )
+        refs = fetch_all(conn, "select evidence_id, source_type, source_ref, source_id, quote from evidence_refs")
+    finally:
+        conn.close()
+
+    assert all_counts == [{"agent_sessions": 0, "agent_turns": 0, "agent_tool_events": 0, "evidence_refs": 1}]
+    assert refs == [
+        {
+            "evidence_id": evidence_id,
+            "source_type": source_type,
+            "source_ref": source_ref,
+            "source_id": source_id,
+            "quote": "preexisting",
+        }
+    ]
 
 
 def test_render_agent_session_markdown_reads_storage(tmp_path: Path) -> None:
@@ -116,8 +265,53 @@ def test_render_agent_session_markdown_reads_storage(tmp_path: Path) -> None:
     markdown = render_agent_session_markdown(config=config, agent_session_id="thread_1")
 
     assert "# Codex Session thread_1" in markdown
+    assert "**Title**: 用户问题" in markdown
     assert "## Turns" in markdown
     assert "**user**: 用户问题" in markdown
     assert "**assistant**: 助手回答" in markdown
     assert "## Tool Events" in markdown
     assert "`exec_command`" in markdown
+
+
+def test_render_agent_session_markdown_uses_safe_blocks_for_complex_text(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    document = AgentSessionDocument(
+        session_id="thread_1",
+        source_type="codex_jsonl",
+        source_path="/tmp/session.jsonl",
+        source_sha256="abc123",
+        originator="Codex Desktop",
+        cli_version="0.142.0-alpha.6",
+        cwd="/repo",
+        model="gpt-5.5",
+        started_at="2026-06-22T02:11:53.245Z",
+        ended_at="2026-06-22T02:13:01.000Z",
+        title='title: "用户"\n---\n`bad`',
+        turns=[
+            AgentTurn(
+                turn_index=1,
+                role="user",
+                occurred_at="2026-06-22T02:12:21.053Z",
+                text="line 1\nline with `tick`\nline with ``` fence",
+            ),
+        ],
+        tool_events=[
+            AgentToolEvent(
+                event_index=1,
+                occurred_at="2026-06-22T02:12:25.176Z",
+                tool_name="exec_command",
+                call_id="call_pwd",
+                arguments={"cmd": "printf '`'"},
+                output_text="output line\n```json\n{}\n```",
+                status="completed",
+            )
+        ],
+    )
+    import_agent_session(config=config, document=document)
+
+    markdown = render_agent_session_markdown(config=config, agent_session_id="thread_1")
+
+    assert '## Title\n\n```\ntitle: "用户"\n---\n`bad`\n```' in markdown
+    assert "**user**:\n  ````\n  line 1\n  line with `tick`\n  line with ``` fence\n  ````" in markdown
+    assert "arguments:\n    ```\n    {\"cmd\": \"printf '`'\"}\n    ```" in markdown
+    assert "output:\n    ````\n    output line\n    ```json\n    {}\n    ```\n    ````" in markdown
