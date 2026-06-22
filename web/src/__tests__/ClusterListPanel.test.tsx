@@ -40,9 +40,9 @@ describe("ClusterListPanel", () => {
     expect(await screen.findByText("vp_001")).toBeInTheDocument();
     expect(screen.getByText("2062 段")).toBeInTheDocument();
     expect(screen.getByText("加班公司开会")).toBeInTheDocument();
-    // vp_002 is already assigned -> its dropdown defaults to that person.
-    const sel2 = (await screen.findByLabelText("分配 vp_002")) as HTMLSelectElement;
-    expect(sel2.value).toBe("per_a");
+    // vp_002 is already assigned -> its dropdown trigger shows that person.
+    const sel2 = await screen.findByRole("combobox", { name: "分配 vp_002" });
+    expect(sel2.textContent).toContain("胡春东");
   });
 
   it("assigns a whole cluster to a person via the row dropdown", async () => {
@@ -51,8 +51,10 @@ describe("ClusterListPanel", () => {
     const onChanged = vi.fn();
     render(<ClusterListPanel onChanged={onChanged} push={noop} />);
 
-    const select = (await screen.findByLabelText("分配 vp_001")) as HTMLSelectElement;
-    await userEvent.selectOptions(select, "per_a");
+    // Open the portalled Select and pick the person.
+    const trigger = await screen.findByRole("combobox", { name: "分配 vp_001" });
+    await userEvent.click(trigger);
+    await userEvent.click(await screen.findByRole("option", { name: "胡春东" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(

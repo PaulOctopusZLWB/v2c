@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Portal } from "../../components/ui/Portal";
 
 export interface Command {
   id: string;
@@ -129,6 +130,7 @@ export function CommandPalette({
   let flatIndex = 0;
 
   return (
+    <Portal>
     <div className="cmdk-overlay" onMouseDown={onClose}>
       <div
         className="cmdk-panel"
@@ -179,5 +181,6 @@ export function CommandPalette({
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

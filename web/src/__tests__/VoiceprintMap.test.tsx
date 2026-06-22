@@ -271,7 +271,8 @@ describe("VoiceprintMap", () => {
     expect(await screen.findByText(/已选 2 点/)).toBeInTheDocument();
     expect(selectedCounts).toContain(2);
 
-    await userEvent.selectOptions(screen.getByLabelText(/标注为/), "per_b");
+    await userEvent.click(screen.getByRole("combobox", { name: /标注为/ }));
+    await userEvent.click(await screen.findByRole("option", { name: "韩文巧" }));
     await userEvent.click(screen.getByRole("button", { name: /^标注$/ }));
 
     await waitFor(() => {

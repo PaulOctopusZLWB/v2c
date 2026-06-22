@@ -5,6 +5,7 @@ import { speakerColor } from "../../lib/speakerColors";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { Icon } from "../../components/Icon";
 import { InspectorPanel, StatusBadge } from "../../components/ui";
+import { Select } from "../../components/ui/Select";
 
 /**
  * 声纹聚类 — the PRIMARY identification surface. Global voiceprint clusters (vp_*) are high-purity
@@ -129,20 +130,15 @@ export function ClusterListPanel({
               <p className="cluster-sample muted" title={c.sample_text ?? ""}>
                 {c.sample_text ?? "(无样例文本)"}
               </p>
-              <select
-                aria-label={`分配 ${c.speaker_cluster_id}`}
+              <Select
+                ariaLabel={`分配 ${c.speaker_cluster_id}`}
                 className="cluster-assign"
                 value={c.person_id ?? ""}
                 disabled={busyId === c.speaker_cluster_id}
-                onChange={(e) => void assign(c, e.target.value)}
-              >
-                <option value="">选择人物…</option>
-                {persons.map((p) => (
-                  <option key={p.person_id} value={p.person_id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </select>
+                placeholder="选择人物…"
+                options={persons.map((p) => ({ value: p.person_id, label: p.display_name }))}
+                onChange={(v) => void assign(c, v)}
+              />
             </li>
           ))}
         </ul>

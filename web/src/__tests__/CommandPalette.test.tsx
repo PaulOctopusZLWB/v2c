@@ -63,8 +63,9 @@ describe("CommandPalette", () => {
 
   it("clicking the overlay closes", async () => {
     const onClose = vi.fn();
-    const { container } = render(<CommandPalette open commands={makeCommands()} onClose={onClose} />);
-    const overlay = container.querySelector(".cmdk-overlay") as HTMLElement;
+    render(<CommandPalette open commands={makeCommands()} onClose={onClose} />);
+    // Portalled to #overlay-root (outside the render container), so query the document.
+    const overlay = document.querySelector(".cmdk-overlay") as HTMLElement;
     await userEvent.click(overlay);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

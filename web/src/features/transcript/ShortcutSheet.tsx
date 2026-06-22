@@ -10,8 +10,11 @@ const SHORTCUTS: { keys: string; label: string }[] = [
   { keys: "?", label: "显示 / 隐藏帮助" }
 ];
 
+import { Portal } from "../../components/ui/Portal";
+
 export function ShortcutSheet({ onClose }: { onClose: () => void }) {
   return (
+    <Portal>
     <div className="shortcut-overlay" onMouseDown={onClose}>
       <div
         className="shortcut-sheet"
@@ -34,5 +37,6 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
         <p className="dim shortcut-foot">按 Esc 或点击空白处关闭</p>
       </div>
     </div>
+    </Portal>
   );
 }

@@ -1,5 +1,6 @@
 import type { ProjectionMethod, ProjectionRequest } from "../../api/types";
 import { Icon } from "../../components/Icon";
+import { Select } from "../../components/ui/Select";
 
 /** The tunable subset of a projection request this control owns. */
 export type ProjParams = Pick<
@@ -118,30 +119,24 @@ export function ProjectionControls({
 
       {method === "pca" ? (
         <div className="proj-params proj-pca">
-          <label className="proj-dropdown">
+          <div className="proj-dropdown">
             <span>主成分 X</span>
-            <select
-              aria-label="主成分 X"
-              value={pcaX}
-              onChange={(e) => set({ pca_x: Number(e.target.value) })}
-            >
-              {PCS.map((i) => (
-                <option key={i} value={i}>{`PC${i + 1}`}</option>
-              ))}
-            </select>
-          </label>
-          <label className="proj-dropdown">
+            <Select
+              ariaLabel="主成分 X"
+              value={String(pcaX)}
+              options={PCS.map((i) => ({ value: String(i), label: `PC${i + 1}` }))}
+              onChange={(v) => set({ pca_x: Number(v) })}
+            />
+          </div>
+          <div className="proj-dropdown">
             <span>主成分 Y</span>
-            <select
-              aria-label="主成分 Y"
-              value={pcaY}
-              onChange={(e) => set({ pca_y: Number(e.target.value) })}
-            >
-              {PCS.map((i) => (
-                <option key={i} value={i}>{`PC${i + 1}`}</option>
-              ))}
-            </select>
-          </label>
+            <Select
+              ariaLabel="主成分 Y"
+              value={String(pcaY)}
+              options={PCS.map((i) => ({ value: String(i), label: `PC${i + 1}` }))}
+              onChange={(v) => set({ pca_y: Number(v) })}
+            />
+          </div>
         </div>
       ) : null}
 

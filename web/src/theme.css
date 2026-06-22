@@ -64,6 +64,25 @@
 
   /* one rail width for both two-col tabs (replaces ingest 340 / review 260) */
   --rail-w: 300px;
+  --rail-w-proj: 240px;  /* 声纹 projection-controls rail */
+  --col-people-w: 380px; /* 声纹 cluster/people column (the primary identify path) */
+
+  /*
+   * ───────────── STACKING CONTEXT MAP (single source of z-index truth) ─────────────
+   * Use these tokens — never raw z-index numbers. Gapped so layers can be inserted later.
+   * Stacking-context creators in the app: .workbench (overflow:hidden), .vmap-stage
+   * (position:relative + isolation), every .panel/.card/.panel-scroll (isolation:isolate),
+   * and #overlay-root (the portal target). RULE: any floating UI that must cover other
+   * content lives in #overlay-root (via <Portal>), so it is never clipped and stacks by token.
+   */
+  --z-base: 0;            /* normal flow */
+  --z-raised: 10;         /* sticky-ish bits inside a panel */
+  --z-canvas-overlay: 20; /* absolute UI INSIDE a canvas/card (vmap tooltip/rect/note) — stays local */
+  --z-sticky: 100;        /* sticky table/list headers, in-flow toolbars */
+  --z-dropdown: 700;      /* portalled menus / select popovers */
+  --z-toast: 800;         /* transient toasts (below modal, so a modal covers them) */
+  --z-modal: 1000;        /* command palette, shortcut sheet, dialogs */
+  --z-modal-top: 1100;    /* a confirm/nested dialog above a modal */
 }
 
 /* ---- LIGHT colors (default / fallback) ---- */
@@ -343,7 +362,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 /* ---- cards / sections ---- */
 .section-title { font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin: var(--s5) 0 var(--s3); display: flex; align-items: center; gap: var(--s2h); }
 .section-title:first-child { margin-top: 0; }
-.card { background: var(--elev); border: 1px solid var(--border); border-radius: var(--r2); padding: var(--s5); box-shadow: var(--shadow); }
+.card { background: var(--elev); border: 1px solid var(--border); border-radius: var(--r2); padding: var(--s5); box-shadow: var(--shadow); isolation: isolate; }
 /* card modifiers (layout spec): hero = lifted lg-radius tile; inset = sub-well. */
 .card--hero { border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
 .card--inset { background: var(--surface-2); box-shadow: none; }
@@ -430,7 +449,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 @keyframes skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .skeleton-row { animation: none; } }
 
-.inspector-panel { display: grid; gap: var(--s4); align-content: start; }
+.inspector-panel { display: grid; gap: var(--s4); align-content: start; isolation: isolate; }
 .inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); }
 .inspector-subtitle { margin: var(--s2) 0 0; font-size: var(--fs-sm); line-height: var(--lh-snug); }
 .inspector-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end; }
@@ -467,7 +486,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 
 /* ---- toast (errors) ---- */
-.toasts { position: fixed; right: var(--s5); bottom: var(--s5); display: flex; flex-direction: column; gap: var(--s3); z-index: 50; }
+.toasts { position: fixed; right: var(--s5); bottom: var(--s5); display: flex; flex-direction: column; gap: var(--s3); z-index: var(--z-toast); }
 .toast { background: var(--elev); border: 1px solid var(--err); border-left-width: 3px; border-radius: var(--r2); padding: var(--s4); box-shadow: var(--shadow); max-width: 360px; font-size: var(--fs-sm); animation: slidein .18s ease-out; }
 .toast .t-title { color: var(--err); font-weight: var(--fw-semibold); }
 .toast .toast-action { margin-top: var(--s3); font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--accent-2); border-color: var(--accent); background: var(--accent-dim); }

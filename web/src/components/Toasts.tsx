@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { Portal } from "./ui/Portal";
 
 export interface Toast {
   id: number;
@@ -56,6 +57,8 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
   return (
     // Each toast is its own role="alert" live region; the container is a plain wrapper so
     // we don't nest an assertive alert inside a polite status region (ARIA anti-pattern).
+    // Portalled to #overlay-root so toasts are never clipped by the active tab's overflow.
+    <Portal>
     <div className="toasts">
       {toasts.map((toast) => (
         <div className="toast" key={toast.id} role="alert">
@@ -72,5 +75,6 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
         </div>
       ))}
     </div>
+    </Portal>
   );
 }

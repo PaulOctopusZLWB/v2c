@@ -20,6 +20,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Overlay root: a sibling of #root, OUTSIDE the app shell's overflow:hidden. All floating UI
+         (dropdowns, menus, tooltips, command palette, toasts, dialogs) portals here so it is never
+         clipped by a scroll/transform ancestor and stacks purely via the z-index token scale. -->
+    <div id="overlay-root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

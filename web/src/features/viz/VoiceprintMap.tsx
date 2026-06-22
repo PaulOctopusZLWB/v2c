@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import type { PersonRow, ProjectionPoint, ProjectionRequest } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
 import { emotionColor, emotionMeta } from "../../lib/emotionColors";
+import { Select } from "../../components/ui/Select";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 
@@ -665,19 +666,17 @@ export function VoiceprintMap({
       {canLabel && selectMode ? (
         <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
           <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>
-          <select
-            aria-label="标注为"
+          <Select
+            ariaLabel="标注为"
             value={labelPersonId}
             disabled={labeling}
-            onChange={(e) => setLabelPersonId(e.target.value)}
-          >
-            <option value="" disabled>选择人物…</option>
-            {(people ?? []).map((p) => (
-              <option key={p.person_id} value={p.person_id}>
-                {p.person_type === "non_speaker" ? `非发言人 · ${p.display_name}` : p.display_name}
-              </option>
-            ))}
-          </select>
+            placeholder="选择人物…"
+            options={(people ?? []).map((p) => ({
+              value: p.person_id,
+              label: p.person_type === "non_speaker" ? `非发言人 · ${p.display_name}` : p.display_name,
+            }))}
+            onChange={(v) => setLabelPersonId(v)}
+          />
           <button
             type="button"
             className="primary"
