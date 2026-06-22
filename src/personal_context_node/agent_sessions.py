@@ -223,12 +223,12 @@ def _markdown(*, session: dict[str, object], turns: list[dict[str, object]], too
         f"# {title}",
         "",
         "---",
-        "note_type: agent_session",
-        f"agent_session_id: {session['agent_session_id']}",
-        f"source_type: {session['source_type']}",
-        f"started_at: {session['started_at']}",
-        f"cwd: {session.get('cwd') or ''}",
-        f"model: {session.get('model') or ''}",
+        f"note_type: {_frontmatter_scalar('agent_session')}",
+        f"agent_session_id: {_frontmatter_scalar(session['agent_session_id'])}",
+        f"source_type: {_frontmatter_scalar(session['source_type'])}",
+        f"started_at: {_frontmatter_scalar(session['started_at'])}",
+        f"cwd: {_frontmatter_scalar(session.get('cwd') or '')}",
+        f"model: {_frontmatter_scalar(session.get('model') or '')}",
         "---",
         "",
     ]
@@ -244,10 +244,16 @@ def _markdown(*, session: dict[str, object], turns: list[dict[str, object]], too
             _append_fenced_block(lines, turn_text, indent="  ")
     lines.extend(["", "## Tool Events", ""])
     for tool in tools:
-        arguments = json.loads(str(tool["arguments_json"]))
+        arguments_raw = str(tool["arguments_json"])
         lines.append(
             f"- `{tool['occurred_at']}` `{tool['tool_name']}` status={tool['status']} call_id={tool.get('call_id') or ''}"
         )
+        try:
+            arguments = json.loads(arguments_raw)
+        except json.JSONDecodeError:
+            lines.append("  - arguments:")
+            _append_fenced_block(lines, arguments_raw, indent="    ")
+            arguments = None
         if arguments:
             arguments_json = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
             if _is_simple_inline_markdown(arguments_json):
@@ -256,7 +262,7 @@ def _markdown(*, session: dict[str, object], turns: list[dict[str, object]], too
                 lines.append("  - arguments:")
                 _append_fenced_block(lines, arguments_json, indent="    ")
         if tool.get("output_text"):
-            output_text = str(tool["output_text"]).strip()
+            output_text = str(tool["output_text"])
             if _is_simple_inline_markdown(output_text):
                 lines.append(f"  - output: `{output_text}`")
             else:
@@ -301,10 +307,14 @@ def _is_simple_inline_markdown(text: str) -> bool:
     return "\n" not in text and "\r" not in text and "`" not in text
 
 
+def _frontmatter_scalar(value: object) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+
 def _append_fenced_block(lines: list[str], text: str, *, indent: str = "") -> None:
     fence = _fence_for(text)
     lines.append(f"{indent}{fence}")
-    text_lines = text.splitlines() or [""]
+    text_lines = text.split("\n")
     for line in text_lines:
         lines.append(f"{indent}{line}")
     lines.append(f"{indent}{fence}")

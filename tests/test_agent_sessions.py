@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -315,3 +316,66 @@ def test_render_agent_session_markdown_uses_safe_blocks_for_complex_text(tmp_pat
     assert "**user**:\n  ````\n  line 1\n  line with `tick`\n  line with ``` fence\n  ````" in markdown
     assert "arguments:\n    ```\n    {\"cmd\": \"printf '`'\"}\n    ```" in markdown
     assert "output:\n    ````\n    output line\n    ```json\n    {}\n    ```\n    ````" in markdown
+
+
+def test_render_agent_session_markdown_quotes_frontmatter_scalars(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    document = replace(
+        _document(),
+        cwd="/repo\n---\ninjected: true",
+        model="gpt-5.5\nmodel_injected: true",
+    )
+    import_agent_session(config=config, document=document)
+
+    markdown = render_agent_session_markdown(config=config, agent_session_id="thread_1")
+
+    assert markdown.count("\n---\n") == 2
+    assert 'note_type: "agent_session"' in markdown
+    assert 'agent_session_id: "thread_1"' in markdown
+    assert 'source_type: "codex_jsonl"' in markdown
+    assert 'started_at: "2026-06-22T02:11:53.245Z"' in markdown
+    assert 'cwd: "/repo\\n---\\ninjected: true"' in markdown
+    assert 'model: "gpt-5.5\\nmodel_injected: true"' in markdown
+    assert "\ninjected: true\n" not in markdown
+    assert "\nmodel_injected: true\n" not in markdown
+
+
+def test_render_agent_session_markdown_fences_malformed_arguments_json(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    import_agent_session(config=config, document=_document())
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "update agent_tool_events set arguments_json = ? where agent_tool_event_id = ?",
+            ("not json\n`raw`", "thread_1:tool:1"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    markdown = render_agent_session_markdown(config=config, agent_session_id="thread_1")
+
+    assert "arguments:\n    ```\n    not json\n    `raw`\n    ```" in markdown
+
+
+def test_render_agent_session_markdown_preserves_fenced_tool_output(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    document = replace(
+        _document(),
+        tool_events=[
+            AgentToolEvent(
+                event_index=1,
+                occurred_at="2026-06-22T02:12:25.176Z",
+                tool_name="exec_command",
+                call_id="call_pwd",
+                arguments={"cmd": "printf"},
+                output_text="  leading\ntrailing  \n",
+                status="completed",
+            )
+        ],
+    )
+    import_agent_session(config=config, document=document)
+
+    markdown = render_agent_session_markdown(config=config, agent_session_id="thread_1")
+
+    assert "output:\n    ```\n      leading\n    trailing  \n    \n    ```" in markdown
