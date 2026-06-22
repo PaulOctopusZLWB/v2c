@@ -26,8 +26,8 @@ describe("SettingsPanel", () => {
 
   it("renders the current settings loaded from GET /api/settings", async () => {
     render(<SettingsPanel />);
-    // ASR mode select reflects the current value.
-    await waitFor(() => expect(screen.getByLabelText(/ASR 模式/)).toHaveValue("chunk"));
+    // ASR mode select (portalled combobox) reflects the current value via its trigger label.
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /ASR 模式/ }).textContent).toContain("一次性"));
     expect(screen.getByLabelText(/LLM 模型/)).toHaveValue("glm-5.1");
     expect(screen.getByLabelText(/GLM Base URL/)).toHaveValue("https://open.bigmodel.cn/api/paas/v4");
     expect((screen.getByLabelText(/深度思考/) as HTMLInputElement).checked).toBe(true);
@@ -37,10 +37,11 @@ describe("SettingsPanel", () => {
 
   it("saves only the changed ASR mode via PUT /api/settings", async () => {
     render(<SettingsPanel />);
-    const select = await screen.findByLabelText(/ASR 模式/);
-    await waitFor(() => expect(select).toHaveValue("chunk"));
+    const trigger = await screen.findByRole("combobox", { name: /ASR 模式/ });
+    await waitFor(() => expect(trigger.textContent).toContain("一次性"));
 
-    await userEvent.selectOptions(select, "diarize");
+    await userEvent.click(trigger);
+    await userEvent.click(await screen.findByRole("option", { name: "声纹" }));
     await userEvent.click(screen.getByRole("button", { name: /保存/ }));
 
     const put = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find(

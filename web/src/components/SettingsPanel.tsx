@@ -4,6 +4,7 @@ import type { AsrMode, Settings } from "../api/types";
 import { t } from "../i18n";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { Icon } from "./Icon";
+import { Select } from "./ui/Select";
 
 const GLM_PRESETS = ["glm-5.1", "glm-4-flash"] as const;
 
@@ -71,73 +72,79 @@ export function SettingsPanel({ onSaved }: { onSaved?: () => void } = {}) {
     <section className="settings-panel card">
       <div className="section-title">{t.settings.title}</div>
 
-      <label className="settings-field">
-        <span>{t.settings.asrMode}</span>
-        <select
-          aria-label={t.settings.asrMode}
-          value={draft.asr_mode}
-          disabled={save.pending}
-          onChange={(e) => setDraft({ ...draft, asr_mode: e.target.value as AsrMode })}
-        >
-          <option value="chunk">{t.settings.asrChunk}</option>
-          <option value="diarize">{t.settings.asrDiarize}</option>
-        </select>
-      </label>
+      <div className="settings-grid">
+        <fieldset className="settings-group">
+          <legend>识别 (ASR)</legend>
+          <div className="settings-field">
+            <span>{t.settings.asrMode}</span>
+            <Select
+              ariaLabel={t.settings.asrMode}
+              value={draft.asr_mode}
+              disabled={save.pending}
+              options={[
+                { value: "chunk", label: t.settings.asrChunk },
+                { value: "diarize", label: t.settings.asrDiarize },
+              ]}
+              onChange={(v) => setDraft({ ...draft, asr_mode: v as AsrMode })}
+            />
+          </div>
+          <div className="settings-field">
+            <span>{t.settings.presetSpkNum}</span>
+            <input
+              type="number"
+              min={1}
+              aria-label={t.settings.presetSpkNum}
+              placeholder={t.settings.presetSpkNumAuto}
+              value={draft.asr_preset_spk_num ?? ""}
+              disabled={save.pending}
+              onChange={(e) => {
+                const v = e.target.value.trim();
+                setDraft({ ...draft, asr_preset_spk_num: v === "" ? null : Number(v) });
+              }}
+            />
+          </div>
+        </fieldset>
 
-      <label className="settings-field">
-        <span>{t.settings.presetSpkNum}</span>
-        <input
-          type="number"
-          min={1}
-          aria-label={t.settings.presetSpkNum}
-          placeholder={t.settings.presetSpkNumAuto}
-          value={draft.asr_preset_spk_num ?? ""}
-          disabled={save.pending}
-          onChange={(e) => {
-            const v = e.target.value.trim();
-            setDraft({ ...draft, asr_preset_spk_num: v === "" ? null : Number(v) });
-          }}
-        />
-      </label>
-
-      <label className="settings-field">
-        <span>{t.settings.glmModel}</span>
-        <input
-          type="text"
-          list="glm-model-presets"
-          aria-label={t.settings.glmModel}
-          value={draft.glm_model}
-          disabled={save.pending}
-          onChange={(e) => setDraft({ ...draft, glm_model: e.target.value })}
-        />
-        <datalist id="glm-model-presets">
-          {GLM_PRESETS.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-      </label>
-
-      <label className="settings-field">
-        <span>{t.settings.glmBaseUrl}</span>
-        <input
-          type="text"
-          aria-label={t.settings.glmBaseUrl}
-          value={draft.glm_base_url}
-          disabled={save.pending}
-          onChange={(e) => setDraft({ ...draft, glm_base_url: e.target.value })}
-        />
-      </label>
-
-      <label className="settings-field settings-check">
-        <input
-          type="checkbox"
-          aria-label={t.settings.glmThinking}
-          checked={draft.glm_thinking}
-          disabled={save.pending}
-          onChange={(e) => setDraft({ ...draft, glm_thinking: e.target.checked })}
-        />
-        <span>{t.settings.glmThinking}</span>
-      </label>
+        <fieldset className="settings-group">
+          <legend>大模型 (GLM)</legend>
+          <div className="settings-field">
+            <span>{t.settings.glmModel}</span>
+            <input
+              type="text"
+              list="glm-model-presets"
+              aria-label={t.settings.glmModel}
+              value={draft.glm_model}
+              disabled={save.pending}
+              onChange={(e) => setDraft({ ...draft, glm_model: e.target.value })}
+            />
+            <datalist id="glm-model-presets">
+              {GLM_PRESETS.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </div>
+          <div className="settings-field">
+            <span>{t.settings.glmBaseUrl}</span>
+            <input
+              type="text"
+              aria-label={t.settings.glmBaseUrl}
+              value={draft.glm_base_url}
+              disabled={save.pending}
+              onChange={(e) => setDraft({ ...draft, glm_base_url: e.target.value })}
+            />
+          </div>
+          <label className="settings-field settings-check">
+            <input
+              type="checkbox"
+              aria-label={t.settings.glmThinking}
+              checked={draft.glm_thinking}
+              disabled={save.pending}
+              onChange={(e) => setDraft({ ...draft, glm_thinking: e.target.checked })}
+            />
+            <span>{t.settings.glmThinking}</span>
+          </label>
+        </fieldset>
+      </div>
 
       <div className="settings-actions">
         <button className="primary" onClick={() => void save.run()} disabled={save.pending} aria-busy={save.pending}>
