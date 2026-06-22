@@ -61,7 +61,9 @@ def test_funasr_example_config_enables_real_model_backends() -> None:
     # Anchor the ASR backend to its own section header: a bare 'backend = "funasr"' substring
     # would also match the [vad] section above, so the section-prefixed form is required.
     assert '[asr]\nbackend = "funasr"' in config or '[asr]\nbackend = "funasr_server"' in config
-    assert 'model_id = "iic/SenseVoiceSmall"' in config
+    # Standard path is whole-file diarization (chunk/SenseVoice is deprecated).
+    assert 'mode = "diarize"' in config
+    assert 'diarize_model = "paraformer-zh"' in config
 
 
 def test_runbook_docker_funasr_doctor_uses_funasr_config() -> None:

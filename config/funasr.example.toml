@@ -16,17 +16,16 @@ chunk_overlap_ms = 1000
 backend = "funasr_server"
 device = "mps"
 language = "zh"
-# ASR mode: "chunk" (default) = per-chunk SenseVoice; "diarize" = whole-file
-# Paraformer + CAM++ diarization (per-sentence text + speaker + timestamps).
-mode = "chunk"
-model_name = "sensevoice"
-model_id = "iic/SenseVoiceSmall"
-model_version = "funasr-sensevoice-local"
-# Diarize-mode knobs (only used when mode = "diarize"):
-# diarize_model = "paraformer-zh"
-# punc_model = "ct-punc"
-# spk_model = "cam++"
-# spk_mode = "punc_segment"
+# ASR mode: "diarize" (standard) = whole-file Paraformer + internal FSMN-VAD + CAM++
+# diarization (one task per file, per-sentence text + speaker + timestamps).
+# "chunk" is DEPRECATED: it pre-splits audio with an energy VAD into thousands of
+# sub-second segments (one ASR task each) and carries no speaker labels — do not use it.
+mode = "diarize"
+# Diarize-mode models:
+diarize_model = "paraformer-zh"
+punc_model = "ct-punc"
+spk_model = "cam++"
+spk_mode = "punc_segment"
 # preset_spk_num = 2  # omit to auto-detect speaker count
 
 [llm]
