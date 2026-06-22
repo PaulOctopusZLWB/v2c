@@ -357,3 +357,105 @@ def test_parse_codex_session_jsonl_sanitizes_non_string_scalar_fields(
     for secret in ("TIMESTAMP_SECRET", "TOOL_TIMESTAMP_SECRET", "TOOL_NAME_SECRET"):
         assert secret not in document_metadata
         assert secret not in document.searchable_text
+
+
+def test_parse_codex_session_jsonl_ignores_malformed_message_roles(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "malformed-roles.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {
+                "timestamp": "2026-06-22T02:12:21.042Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "thread_1",
+                    "timestamp": "2026-06-22T02:11:53.245Z",
+                },
+            },
+            {
+                "timestamp": "2026-06-22T02:12:22.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": {"secret": "ROLE_DICT_SECRET"},
+                    "content": [{"type": "input_text", "text": "dict role text"}],
+                },
+            },
+            {
+                "timestamp": "2026-06-22T02:12:23.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": ["ROLE_LIST_SECRET"],
+                    "content": [{"type": "input_text", "text": "list role text"}],
+                },
+            },
+            {
+                "timestamp": "2026-06-22T02:12:24.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "visible"}],
+                },
+            },
+        ],
+    )
+
+    document = parse_codex_session_jsonl(path)
+
+    assert [turn.text for turn in document.turns] == ["visible"]
+    document_metadata = json.dumps(asdict(document), ensure_ascii=False, sort_keys=True)
+    for secret in ("ROLE_DICT_SECRET", "ROLE_LIST_SECRET"):
+        assert secret not in document.searchable_text
+        assert secret not in document_metadata
+
+
+def test_parse_codex_session_jsonl_does_not_move_ended_at_back_for_bad_timestamp(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bad-ended-at.jsonl"
+    started_at = "2026-06-22T02:11:53.245Z"
+    later_at = "2026-06-22T02:13:01.000Z"
+    _write_jsonl(
+        path,
+        [
+            {
+                "timestamp": started_at,
+                "type": "session_meta",
+                "payload": {
+                    "id": "thread_1",
+                    "timestamp": started_at,
+                },
+            },
+            {
+                "timestamp": later_at,
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "latest visible"}],
+                },
+            },
+            {
+                "timestamp": {"secret": "BAD_ENDED_AT_SECRET"},
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{}",
+                    "call_id": "call_bad_timestamp",
+                },
+            },
+        ],
+    )
+
+    document = parse_codex_session_jsonl(path)
+
+    assert document.ended_at == later_at
+    assert document.tool_events[0].occurred_at == started_at
+    document_metadata = json.dumps(asdict(document), ensure_ascii=False, sort_keys=True)
+    assert "BAD_ENDED_AT_SECRET" not in document.searchable_text
+    assert "BAD_ENDED_AT_SECRET" not in document_metadata

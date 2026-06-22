@@ -32,8 +32,10 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
     ended_at: str | None = started_at
 
     for row in rows:
-        timestamp = _optional_non_empty_str(row.get("timestamp")) or started_at
-        ended_at = timestamp
+        row_timestamp = _optional_non_empty_str(row.get("timestamp"))
+        event_timestamp = row_timestamp or started_at
+        if row_timestamp is not None:
+            ended_at = row_timestamp
         row_type = row.get("type")
         payload = row.get("payload")
         if not isinstance(payload, dict):
@@ -50,7 +52,7 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
         item_type = payload.get("type")
         if item_type == "message":
             role = payload.get("role")
-            if role not in VISIBLE_MESSAGE_ROLES:
+            if not isinstance(role, str) or role not in VISIBLE_MESSAGE_ROLES:
                 continue
             text = _content_text(payload.get("content"))
             if not text:
@@ -58,8 +60,8 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
             turns.append(
                 AgentTurn(
                     turn_index=len(turns) + 1,
-                    role=str(role),
-                    occurred_at=timestamp,
+                    role=role,
+                    occurred_at=event_timestamp,
                     text=text,
                     metadata={"source": "response_item"},
                 )
@@ -68,7 +70,7 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
             tool_events.append(
                 AgentToolEvent(
                     event_index=len(tool_events) + 1,
-                    occurred_at=timestamp,
+                    occurred_at=event_timestamp,
                     tool_name=_optional_non_empty_str(payload.get("name")) or "unknown",
                     call_id=_optional_str(payload.get("call_id")),
                     arguments=_parse_arguments(payload.get("arguments")),
@@ -80,7 +82,7 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
             tool_events.append(
                 AgentToolEvent(
                     event_index=len(tool_events) + 1,
-                    occurred_at=timestamp,
+                    occurred_at=event_timestamp,
                     tool_name="function_call_output",
                     call_id=_optional_str(payload.get("call_id")),
                     arguments={},
