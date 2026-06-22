@@ -8,6 +8,7 @@ import typer
 
 from personal_context_node.adapters.archive.local_filesystem import LocalFilesystemArchiveAdapter
 from personal_context_node.adapters.file_import.local_directory import LocalDirectoryFileImportAdapter
+from personal_context_node.agent_sessions import import_agent_session, render_agent_session_markdown
 from personal_context_node.archive import (
     archive_completed_audio,
     archive_status_rows,
@@ -16,6 +17,7 @@ from personal_context_node.archive import (
 )
 from personal_context_node.archive_adapters import build_archive_adapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
+from personal_context_node.codex_session_jsonl import parse_codex_session_jsonl
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
 from personal_context_node.doctor import run_doctor
@@ -59,6 +61,8 @@ memory_app = typer.Typer(help="Memory protocol commands.")
 app.add_typer(memory_app, name="memory")
 archive_app = typer.Typer(help="Archive commands.")
 app.add_typer(archive_app, name="archive")
+agent_app = typer.Typer(help="Agent session commands.")
+app.add_typer(agent_app, name="agent")
 
 
 @app.callback()
@@ -950,6 +954,60 @@ def _load_config(
         data_dir=data_dir or Path("data"),
         obsidian_vault=obsidian_vault or Path("/Users/paul/Documents/Obsidian/PersonalContext"),
     )
+
+
+@agent_app.command(name="import-codex")
+def agent_import_codex_group(
+    jsonl_path: Path = typer.Option(
+        ...,
+        "--jsonl",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Codex session JSONL path.",
+    ),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    try:
+        document = parse_codex_session_jsonl(jsonl_path)
+        result = import_agent_session(config=config, document=document)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(
+        " ".join(
+            [
+                f"agent_session_id={result.agent_session_id}",
+                f"sessions_imported={result.sessions_imported}",
+                f"turns_imported={result.turns_imported}",
+                f"tool_events_imported={result.tool_events_imported}",
+                f"evidence_refs_created={result.evidence_refs_created}",
+            ]
+        )
+    )
+
+
+@agent_app.command(name="show")
+def agent_show_group(
+    session_id: str = typer.Option(..., "--session-id", help="Agent session id."),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    try:
+        markdown = render_agent_session_markdown(config=config, agent_session_id=session_id)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(markdown, nl=False)
 
 
 @app.command(name="launchd-write-plists")
