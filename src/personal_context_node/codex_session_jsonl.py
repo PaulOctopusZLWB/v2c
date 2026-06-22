@@ -32,7 +32,7 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
     ended_at: str | None = started_at
 
     for row in rows:
-        timestamp = str(row.get("timestamp") or started_at)
+        timestamp = _optional_non_empty_str(row.get("timestamp")) or started_at
         ended_at = timestamp
         row_type = row.get("type")
         payload = row.get("payload")
@@ -69,7 +69,7 @@ def parse_codex_session_jsonl(path: Path) -> AgentSessionDocument:
                 AgentToolEvent(
                     event_index=len(tool_events) + 1,
                     occurred_at=timestamp,
-                    tool_name=str(payload.get("name") or "unknown"),
+                    tool_name=_optional_non_empty_str(payload.get("name")) or "unknown",
                     call_id=_optional_str(payload.get("call_id")),
                     arguments=_parse_arguments(payload.get("arguments")),
                     output_text=None,
@@ -171,6 +171,10 @@ def _parse_arguments(arguments: object) -> dict[str, object]:
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _optional_non_empty_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _required_str(value: object, message: str) -> str:

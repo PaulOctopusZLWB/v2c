@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
@@ -306,3 +307,53 @@ def test_parse_codex_session_jsonl_preserves_invalid_function_call_arguments(
     document = parse_codex_session_jsonl(path)
 
     assert document.tool_events[0].arguments == {"raw": "{not-json"}
+
+
+def test_parse_codex_session_jsonl_sanitizes_non_string_scalar_fields(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "non-string-scalars.jsonl"
+    started_at = "2026-06-22T02:11:53.245Z"
+    _write_jsonl(
+        path,
+        [
+            {
+                "timestamp": started_at,
+                "type": "session_meta",
+                "payload": {
+                    "id": "thread_1",
+                    "timestamp": started_at,
+                },
+            },
+            {
+                "timestamp": {"secret": "TIMESTAMP_SECRET"},
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "visible"}],
+                },
+            },
+            {
+                "timestamp": ["TOOL_TIMESTAMP_SECRET"],
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "name": {"secret": "TOOL_NAME_SECRET"},
+                    "arguments": "{}",
+                    "call_id": "call_bad_scalars",
+                },
+            },
+        ],
+    )
+
+    document = parse_codex_session_jsonl(path)
+
+    assert document.turns[0].occurred_at == started_at
+    assert document.tool_events[0].occurred_at == started_at
+    assert document.tool_events[0].tool_name == "unknown"
+    assert document.ended_at == started_at
+    document_metadata = json.dumps(asdict(document), ensure_ascii=False, sort_keys=True)
+    for secret in ("TIMESTAMP_SECRET", "TOOL_TIMESTAMP_SECRET", "TOOL_NAME_SECRET"):
+        assert secret not in document_metadata
+        assert secret not in document.searchable_text
