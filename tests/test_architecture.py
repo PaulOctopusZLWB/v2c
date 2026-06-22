@@ -32,3 +32,26 @@ def test_core_does_not_import_concrete_adapters() -> None:
                 offenders.append(f"{path}: {import_name}")
 
     assert offenders == []
+
+
+def test_codex_parser_does_not_depend_on_storage_cli_or_obsidian() -> None:
+    imports = _imports_for(Path("src/personal_context_node/codex_session_jsonl.py"))
+
+    forbidden = {
+        "typer",
+        "personal_context_node.storage.sqlite",
+        "personal_context_node.obsidian_agent_sessions",
+        "personal_context_node.cli",
+    }
+    assert imports.isdisjoint(forbidden)
+
+
+def test_agent_session_storage_does_not_import_codex_parser_or_obsidian() -> None:
+    imports = _imports_for(Path("src/personal_context_node/agent_sessions.py"))
+
+    forbidden = {
+        "personal_context_node.codex_session_jsonl",
+        "personal_context_node.obsidian_agent_sessions",
+        "personal_context_node.cli",
+    }
+    assert imports.isdisjoint(forbidden)
