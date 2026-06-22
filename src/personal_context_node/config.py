@@ -66,6 +66,9 @@ class AppConfig(BaseModel):
     send_person_names: bool = True
     send_speaker_labels: bool = True
     require_accepted_transcripts: bool = False
+    # Speaker-first gate: when on, a day does not advance from ASR to session_derive until every
+    # active segment that day is attributed to a person (identify-who-then-review the content).
+    require_identified_speakers: bool = False
     max_chunk_tokens: int = 6000
     archive_backend: str = "filesystem"
     archive_command: str | None = None
@@ -112,6 +115,7 @@ class AppConfig(BaseModel):
         audio = raw.get("audio", {})
         tasks = raw.get("tasks", {})
         session = raw.get("session", {})
+        speakers = raw.get("speakers", {})
         logging_cfg = raw.get("logging", {})
         values: dict[str, Any] = {
             "data_dir": _resolve_path(base_dir, paths.get("data_dir", cls.model_fields["data_dir"].default)),
@@ -152,6 +156,10 @@ class AppConfig(BaseModel):
             "require_accepted_transcripts": llm.get(
                 "require_accepted_transcripts",
                 cls.model_fields["require_accepted_transcripts"].default,
+            ),
+            "require_identified_speakers": speakers.get(
+                "require_identified_speakers",
+                cls.model_fields["require_identified_speakers"].default,
             ),
             "max_chunk_tokens": llm.get("max_chunk_tokens", cls.model_fields["max_chunk_tokens"].default),
             "archive_backend": archive.get("backend", cls.model_fields["archive_backend"].default),

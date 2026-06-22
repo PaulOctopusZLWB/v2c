@@ -188,6 +188,72 @@ def test_terminally_failed_same_day_file_does_not_block_day(tmp_path: Path) -> N
     assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_ok") == ["2026-06-14"]
 
 
+def _seed_segment(database_path: Path, *, segment_id: str, audio_file_id: str, speaker: str) -> None:
+    conn = connect(database_path)
+    try:
+        conn.execute(
+            """
+            insert into transcript_segments (
+              segment_id, audio_file_id, chunk_id, start_ms, end_ms, text, language,
+              speaker, speaker_cluster_id, evidence_id, is_active
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (segment_id, audio_file_id, f"chk_{segment_id}", 0, 500, "hi", "zh", speaker, speaker, f"ev_{segment_id}"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _attribute_segment(database_path: Path, *, segment_id: str, person_id: str) -> None:
+    conn = connect(database_path)
+    try:
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) "
+            "values (?, ?, ?, ?, 'manual')",
+            (segment_id, person_id, "2026-06-14T00:00:00+08:00", person_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_require_identified_speakers_gates_session_derive(tmp_path: Path) -> None:
+    # Speaker-first: with the gate on, a day with any unattributed active segment is held at the
+    # transcribe_diarize -> session_derive edge until every voice is identified. Diarize labels
+    # (spk_NN) collide across files, so identity is per-segment attribution, not the raw label.
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault",
+        asr_mode="diarize", require_identified_speakers=True,
+    )
+    config_off = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_mode="diarize",
+    )
+    _seed_audio_file(database_path=config.database_path, audio_file_id="aud_1", recorded_at="2026-06-14T09:00:00+08:00")
+    conn = connect(config.database_path)
+    try:
+        t1 = enqueue_task_in_conn(conn, task_type="transcribe_diarize", target_type="audio_file", target_id="aud_1")
+        conn.commit()
+    finally:
+        conn.close()
+    _set_task_status(config.database_path, task_id=t1.task_id, status="succeeded")
+    _seed_segment(config.database_path, segment_id="seg_self", audio_file_id="aud_1", speaker="self")
+    _seed_segment(config.database_path, segment_id="seg_spk1", audio_file_id="aud_1", speaker="spk_01")
+
+    # Diarize settled, but speakers unidentified -> gate holds the day.
+    assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_1") == []
+    # With the gate OFF the same state is ready (default behavior unchanged).
+    assert _ready_session_derive_dates_for_file(config=config_off, audio_file_id="aud_1") == ["2026-06-14"]
+
+    # Identify one of two voices -> still gated (the other is unattributed).
+    _attribute_segment(config.database_path, segment_id="seg_self", person_id="per_owner")
+    assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_1") == []
+
+    # Identify the last voice -> the day is released.
+    _attribute_segment(config.database_path, segment_id="seg_spk1", person_id="per_alice")
+    assert _ready_session_derive_dates_for_file(config=config, audio_file_id="aud_1") == ["2026-06-14"]
+
+
 def test_ingest_in_diarize_mode_enqueues_transcribe_diarize_not_vad(tmp_path: Path) -> None:
     from personal_context_node.ingest import import_audio_files_from_port
     from personal_context_node.config import DeviceDiscoveryConfig

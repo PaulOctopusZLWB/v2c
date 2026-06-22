@@ -45,11 +45,11 @@ class PipelineEdge:
 
 PIPELINE = (
     PipelineEdge("vad", "asr", "audio_chunk", lambda conn, config, target_id: _chunk_ids_for_audio_file_in_conn(conn, audio_file_id=target_id)),
-    PipelineEdge("asr", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_in_conn(conn, chunk_id=target_id)),
+    PipelineEdge("asr", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_in_conn(conn, chunk_id=target_id, config=config)),
     # Diarize-mode sibling of the asr->session_derive edge: the whole-FILE transcribe_diarize
     # stage fans into session_derive once every same-day file has settled (round-7 invariant,
     # per audio_file). Only the active mode's tasks exist at runtime, so coexistence is safe.
-    PipelineEdge("transcribe_diarize", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=target_id)),
+    PipelineEdge("transcribe_diarize", "session_derive", "date_key", lambda conn, config, target_id: _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=target_id, config=config)),
     PipelineEdge("session_derive", "summarize_session", "session", lambda conn, config, target_id: _session_ids_for_day_in_conn(conn, day=target_id)),
     PipelineEdge("summarize_session", "daily_generate", "date_key", lambda conn, config, target_id: _ready_daily_generate_dates_in_conn(conn, session_id=target_id)),
     PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
@@ -400,12 +400,14 @@ def _chunk_ids_for_audio_file_in_conn(conn: sqlite3.Connection, *, audio_file_id
 def _ready_session_derive_dates(*, config: AppConfig, chunk_id: str) -> list[str]:
     conn = connect(config.database_path)
     try:
-        return _ready_session_derive_dates_in_conn(conn, chunk_id=chunk_id)
+        return _ready_session_derive_dates_in_conn(conn, chunk_id=chunk_id, config=config)
     finally:
         conn.close()
 
 
-def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: str) -> list[str]:
+def _ready_session_derive_dates_in_conn(
+    conn: sqlite3.Connection, *, chunk_id: str, config: AppConfig | None = None
+) -> list[str]:
     rows = fetch_all(
         conn,
         """
@@ -449,18 +451,49 @@ def _ready_session_derive_dates_in_conn(conn: sqlite3.Connection, *, chunk_id: s
     )
     if pending:
         return []
+    # Speaker-first gate: hold the day until every voice is identified (see helper).
+    if config is not None and config.require_identified_speakers and _day_has_unidentified_speakers_in_conn(conn, date_key=date_key):
+        return []
     return [date_key]
+
+
+def _day_has_unidentified_speakers_in_conn(conn: sqlite3.Connection, *, date_key: str) -> bool:
+    """True if any active segment from that file-day has no person attribution yet.
+
+    Mirrors v_segment_attribution (override.person_id, else cluster mapping.person_id). The
+    speaker-first gate (require_identified_speakers) uses this to hold a day at the ASR→
+    session_derive edge until every voice that day is identified — diarize labels (spk_NN) are
+    per-file and collide across files, so identity must come from per-segment attribution, not
+    the raw label.
+    """
+    rows = fetch_all(
+        conn,
+        """
+        select 1
+        from transcript_segments ts
+        join audio_files af on af.audio_file_id = ts.audio_file_id
+        join v_segment_attribution va on va.segment_id = ts.segment_id
+        where substr(af.recorded_at, 1, 10) = ?
+          and ts.is_active = 1
+          and va.person_id is null
+        limit 1
+        """,
+        (date_key,),
+    )
+    return bool(rows)
 
 
 def _ready_session_derive_dates_for_file(*, config: AppConfig, audio_file_id: str) -> list[str]:
     conn = connect(config.database_path)
     try:
-        return _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=audio_file_id)
+        return _ready_session_derive_dates_for_file_in_conn(conn, audio_file_id=audio_file_id, config=config)
     finally:
         conn.close()
 
 
-def _ready_session_derive_dates_for_file_in_conn(conn: sqlite3.Connection, *, audio_file_id: str) -> list[str]:
+def _ready_session_derive_dates_for_file_in_conn(
+    conn: sqlite3.Connection, *, audio_file_id: str, config: AppConfig | None = None
+) -> list[str]:
     rows = fetch_all(
         conn,
         "select substr(recorded_at,1,10) as date_key from audio_files where audio_file_id = ?",
@@ -491,6 +524,9 @@ def _ready_session_derive_dates_for_file_in_conn(conn: sqlite3.Connection, *, au
         (date_key,),
     )
     if pending:
+        return []
+    # Speaker-first gate: hold the day until every voice is identified (see helper).
+    if config is not None and config.require_identified_speakers and _day_has_unidentified_speakers_in_conn(conn, date_key=date_key):
         return []
     return [date_key]
 
