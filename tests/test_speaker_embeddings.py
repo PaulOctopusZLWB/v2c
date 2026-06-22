@@ -9,6 +9,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
     clear_projection_cache,
+    cluster_voiceprints,
     embedding_projection,
     enroll_person,
     ensure_person,
@@ -1143,3 +1144,63 @@ def _insert_session_with_segments(
         conn.commit()
     finally:
         conn.close()
+
+
+def _insert_segments_with_speakers(database_path: Path, rows: list[tuple[str, str]]) -> None:
+    """rows = [(segment_id, speaker)] — speaker_cluster_id starts equal to speaker (per-file label)."""
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aud_c", "DJI Mic 3", "/source/aud_c.wav", 1, 1, "/raw/aud_c.wav", "sha256:aud_c", 2000, "2026-06-09T08:00:00+08:00", "2026-06-09T08:00:00+08:00", "imported"),
+        )
+        for index, (segment_id, speaker) in enumerate(rows):
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (segment_id, "aud_c", f"chk_{segment_id}", index * 1000, (index + 1) * 1000, "t", "zh", speaker, speaker, f"ev_{segment_id}", "2026-06-09T08:00:00+08:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _cluster_ids(database_path: Path) -> dict[str, str]:
+    conn = connect(database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id, speaker, speaker_cluster_id from transcript_segments")
+    finally:
+        conn.close()
+    return {str(r["segment_id"]): (str(r["speaker"]), str(r["speaker_cluster_id"])) for r in rows}
+
+
+def test_cluster_voiceprints_groups_by_voice_and_preserves_self(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    # Two voices (axis 0 / axis 1) under colliding per-file labels (spk_01 reused), plus self.
+    a = [(f"a{i}", "spk_01") for i in range(8)]
+    b = [(f"b{i}", "spk_02") for i in range(8)]
+    s = [(f"s{i}", "self") for i in range(3)]
+    _insert_segments_with_speakers(config.database_path, a + b + s)
+    put_embeddings_bulk(
+        config=config,
+        items=[(sid, _unit_axis(0, noise=0.05 + 0.02 * i)) for i, (sid, _) in enumerate(a)]
+        + [(sid, _unit_axis(1, noise=0.05 + 0.02 * i)) for i, (sid, _) in enumerate(b)]
+        + [(sid, _unit_axis(0, noise=0.05)) for sid, _ in s],  # self embeddings exist but are skipped
+    )
+
+    result = cluster_voiceprints(config=config, min_cluster_size=5)
+
+    assert result["clusters"] == 2
+    assert result["scope_segments"] == 16  # self excluded
+    rows = _cluster_ids(config.database_path)
+    # self untouched (still 'self'), original per-file speaker preserved for all.
+    for sid, _ in s:
+        assert rows[sid] == ("self", "self")
+    # Each voice group collapsed to ONE vp cluster, and the two groups differ.
+    a_clusters = {rows[sid][1] for sid, _ in a}
+    b_clusters = {rows[sid][1] for sid, _ in b}
+    assert len(a_clusters) == 1 and len(b_clusters) == 1
+    assert a_clusters != b_clusters
+    assert next(iter(a_clusters)).startswith("vp_")
+    # Original per-file label preserved (reversible).
+    assert rows["a0"][0] == "spk_01"

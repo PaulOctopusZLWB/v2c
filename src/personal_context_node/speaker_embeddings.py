@@ -1148,3 +1148,106 @@ def extract_pending_embeddings(
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def cluster_voiceprints(
+    *,
+    config: AppConfig,
+    min_cluster_size: int = 30,
+    scope_session_id: str | None = None,
+    scope_day: str | None = None,
+    model: str = "cam++",
+) -> dict:
+    """Coarse unsupervised speaker grouping by voiceprint (HDBSCAN over CAM++ embeddings).
+
+    Overwrites ``transcript_segments.speaker_cluster_id`` with GLOBAL voiceprint cluster ids
+    ("vp_001", … by descending size) so the per-file, collision-prone diarize labels (spk_NN —
+    the same string reused across files for different people) are replaced by cross-file groups.
+    Assigning a vp_* cluster to a person then attributes that voice everywhere it occurs.
+
+    - ``speaker = 'self'`` segments are left untouched (the owner stays auto-identified).
+    - The original per-file label is preserved in ``transcript_segments.speaker``, so this is
+      reversible (``update transcript_segments set speaker_cluster_id = speaker``).
+    - Deterministic and re-runnable. HDBSCAN noise (-1) is bucketed as "vp_unassigned" for
+      manual cleanup.
+
+    Returns ``{"clusters", "assigned", "unassigned", "scope_segments"}``.
+    """
+    from collections import Counter
+
+    from sklearn.cluster import HDBSCAN
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        where = [
+            "ts.is_active = 1",
+            "ts.speaker != 'self'",
+            "exists (select 1 from segment_embeddings se where se.segment_id = ts.segment_id)",
+        ]
+        params: list[object] = []
+        join = ""
+        if scope_session_id is not None:
+            where.append("ts.session_id = ?")
+            params.append(scope_session_id)
+        if scope_day is not None:
+            join = "join sessions s on s.session_id = ts.session_id"
+            where.append("s.date_key = ?")
+            params.append(scope_day)
+        rows = fetch_all(
+            conn,
+            f"select ts.segment_id from transcript_segments ts {join} where {' and '.join(where)} order by ts.segment_id",
+            tuple(params),
+        )
+        ids = [str(r["segment_id"]) for r in rows]
+        embs = get_embeddings(config=config, segment_ids=ids)
+        ids = [i for i in ids if i in embs]
+        if len(ids) < max(min_cluster_size, 2):
+            return {"clusters": 0, "assigned": 0, "unassigned": 0, "scope_segments": len(ids)}
+        matrix = np.stack([np.asarray(embs[i], dtype=np.float64) for i in ids])
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms[norms == 0.0] = 1.0
+        X = matrix / norms  # L2-normalize -> euclidean distance is monotone in cosine
+        # Reduce with UMAP before HDBSCAN: density clustering on the raw ~192-d voiceprints fails
+        # (distances concentrate -> one giant cluster + mostly noise). UMAP (cosine) gives the
+        # clean, density-friendly geometry the voiceprint map already shows. Raw fallback if UMAP
+        # is unavailable or there are too few points.
+        space = X
+        if len(X) >= 5:
+            try:
+                import umap  # type: ignore
+
+                reducer = umap.UMAP(
+                    n_components=min(10, len(X) - 2),
+                    n_neighbors=min(15, len(X) - 1),
+                    min_dist=0.0,
+                    metric="cosine",
+                    random_state=42,
+                )
+                with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two UMAPs at once
+                    space = np.asarray(reducer.fit_transform(X), dtype=np.float64)
+            except Exception:
+                space = X
+        labels = HDBSCAN(min_cluster_size=min_cluster_size).fit_predict(space)
+        # Stable vp ids: largest cluster -> vp_001 (deterministic naming across re-runs).
+        counts = Counter(int(label) for label in labels if label >= 0)
+        vp_of = {label: f"vp_{rank + 1:03d}" for rank, (label, _) in enumerate(counts.most_common())}
+        updates: list[tuple[str, str]] = []
+        assigned = 0
+        unassigned = 0
+        for segment_id, label in zip(ids, labels):
+            label = int(label)
+            if label < 0:
+                updates.append(("vp_unassigned", segment_id))
+                unassigned += 1
+            else:
+                updates.append((vp_of[label], segment_id))
+                assigned += 1
+        conn.executemany(
+            "update transcript_segments set speaker_cluster_id = ? where segment_id = ?",
+            updates,
+        )
+        conn.commit()
+        return {"clusters": len(vp_of), "assigned": assigned, "unassigned": unassigned, "scope_segments": len(ids)}
+    finally:
+        conn.close()

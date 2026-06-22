@@ -11,6 +11,7 @@ from personal_context_node.segment_emotions import emotion_distribution, emotion
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
     clear_projection_cache,
+    cluster_voiceprints,
     embedding_projection,
     enroll_person,
     label_segments_as_person,
@@ -42,6 +43,12 @@ class AssignPersonBulkRequest(BaseModel):
 class ReclusterRequest(BaseModel):
     anchors: dict[str, str]
     threshold: float = 0.5
+    session_id: str | None = None
+    day: str | None = None
+
+
+class AutoClusterRequest(BaseModel):
+    min_cluster_size: int = 30
     session_id: str | None = None
     day: str | None = None
 
@@ -482,6 +489,20 @@ def recluster_route(request: Request, payload: ReclusterRequest) -> dict[str, ob
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/speakers/auto-cluster")
+def auto_cluster_route(request: Request, payload: AutoClusterRequest) -> dict[str, object]:
+    """Coarse unsupervised speaker grouping by voiceprint: rewrites speaker_cluster_id to global
+    vp_* groups (replacing the per-file, collision-prone spk_NN labels). Run once for a first
+    pass, then refine in the panel (rename / assign / merge). Reversible and re-runnable."""
+    config: AppConfig = request.app.state.config
+    return cluster_voiceprints(
+        config=config,
+        min_cluster_size=payload.min_cluster_size,
+        scope_session_id=payload.session_id,
+        scope_day=payload.day,
+    )
 
 
 @router.get("/speakers/segments")
