@@ -1334,3 +1334,96 @@ def mark_noise_segments(
         return {"marked": marked, "noise_person_id": noise_person_id, "noise_label": noise_label, "scope_segments": scope_n}
     finally:
         conn.close()
+
+
+def global_clusters(*, config: AppConfig, min_size: int = 1) -> list[dict]:
+    """List GLOBAL voiceprint clusters (vp_*) across ALL active segments, largest first.
+
+    Each entry carries size, total speech ms, a representative sample (longest segment), and the
+    cluster's DOMINANT manual person attribution (if any) so the UI can show what is already
+    assigned. Unlike the per-day /speakers/clusters, this aggregates cross-file vp_* groups, which
+    is what the cluster→person panel assigns against.
+
+    Returns ``[{cluster_id, segment_count, total_speech_ms, sample_segment_id, sample_text,
+    person_id, person_label, labeled_count}]``.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            """
+            select ts.speaker_cluster_id as cluster_id,
+                   count(*) as segment_count,
+                   coalesce(sum(ts.end_ms - ts.start_ms), 0) as total_speech_ms,
+                   (select s.segment_id from transcript_segments s
+                      where s.speaker_cluster_id = ts.speaker_cluster_id and s.is_active = 1
+                      order by (s.end_ms - s.start_ms) desc, s.segment_id limit 1) as sample_segment_id,
+                   (select s.text from transcript_segments s
+                      where s.speaker_cluster_id = ts.speaker_cluster_id and s.is_active = 1
+                      order by (s.end_ms - s.start_ms) desc, s.segment_id limit 1) as sample_text
+            from transcript_segments ts
+            where ts.is_active = 1 and ts.speaker_cluster_id like 'vp_%'
+            group by ts.speaker_cluster_id
+            having count(*) >= ?
+            order by segment_count desc, ts.speaker_cluster_id
+            """,
+            (min_size,),
+        )
+        dom = fetch_all(
+            conn,
+            """
+            select cluster_id, person_id, person_label, c from (
+              select ts.speaker_cluster_id as cluster_id, o.person_id, o.person_label, count(*) as c,
+                     row_number() over (partition by ts.speaker_cluster_id order by count(*) desc) as rn
+              from transcript_segments ts
+              join segment_person_overrides o on o.segment_id = ts.segment_id and o.source = 'manual'
+              where ts.is_active = 1 and ts.speaker_cluster_id like 'vp_%'
+              group by ts.speaker_cluster_id, o.person_id, o.person_label
+            ) where rn = 1
+            """,
+        )
+        dom_by_cluster = {str(r["cluster_id"]): r for r in dom}
+        out: list[dict] = []
+        for row in rows:
+            cid = str(row["cluster_id"])
+            d = dom_by_cluster.get(cid)
+            out.append(
+                {
+                    "speaker_cluster_id": cid,
+                    "segment_count": int(row["segment_count"]),
+                    "total_speech_ms": int(row["total_speech_ms"]),
+                    "sample_segment_id": row["sample_segment_id"],
+                    "sample_text": row["sample_text"],
+                    "person_id": (d["person_id"] if d else None),
+                    "person_label": (d["person_label"] if d else None),
+                    "labeled_count": (int(d["c"]) if d else 0),
+                }
+            )
+        return out
+    finally:
+        conn.close()
+
+
+def assign_cluster_to_person(*, config: AppConfig, cluster_id: str, person_id: str) -> dict:
+    """Attribute EVERY active segment of a voiceprint cluster to one person (one-click cluster→人).
+
+    Writes per-segment manual overrides (via label_segments_as_person), so it is consistent with
+    map-lasso labels, survives a re-cluster (overrides are per-segment, not keyed on the vp id), and
+    re-enrolls the person's voiceprint from the enlarged manual set. Returns the labeled count.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(
+            conn,
+            "select segment_id from transcript_segments where speaker_cluster_id = ? and is_active = 1",
+            (cluster_id,),
+        )
+        segment_ids = [str(r["segment_id"]) for r in rows]
+    finally:
+        conn.close()
+    if not segment_ids:
+        return {"cluster_id": cluster_id, "person_id": person_id, "labeled": 0}
+    labeled = label_segments_as_person(config=config, person_id=person_id, segment_ids=segment_ids)
+    return {"cluster_id": cluster_id, "person_id": person_id, "labeled": labeled}

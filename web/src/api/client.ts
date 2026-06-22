@@ -109,6 +109,15 @@ export const api = {
   // Bulk-mark meaningless segments as noise: filler/backchannel text and/or short segments.
   markNoise: (body: { filler?: boolean; max_duration_ms?: number | null; noise_person_id?: string | null; session_id?: string | null; day?: string | null }) =>
     request<{ marked: number; noise_label: string; scope_segments: number }>("/api/speakers/mark-noise", { method: "POST", body: JSON.stringify(body) }),
+  // GLOBAL voiceprint clusters (vp_*), largest-first — feeds the cluster→person panel.
+  globalClusters: (minSize = 1) =>
+    request<{ clusters: SpeakerCluster[] }>(`/api/speakers/global-clusters${query({ min_size: minSize })}`),
+  // Coarse unsupervised re-clustering (UMAP→HDBSCAN) → global vp_* groups.
+  autoCluster: (body?: { min_cluster_size?: number; session_id?: string | null; day?: string | null }) =>
+    request<{ clusters: number; assigned: number; unassigned: number; scope_segments: number }>("/api/speakers/auto-cluster", { method: "POST", body: JSON.stringify(body ?? {}) }),
+  // Assign an ENTIRE voiceprint cluster to one person (per-segment manual overrides).
+  assignCluster: (clusterId: string, person_id: string) =>
+    request<{ cluster_id: string; person_id: string; labeled: number }>(`/api/speakers/clusters/${encodeURIComponent(clusterId)}/assign-person`, { method: "POST", body: JSON.stringify({ person_id }) }),
   speakerSegments: (params: { session_id?: string | null; speaker?: string | null; limit?: number | null }) =>
     request<{ segments: LabelSegment[] }>(`/api/speakers/segments${query(params)}`),
   // 2D voiceprint map: project stored CAM++ embeddings to a scatter (UMAP default, PCA fallback)

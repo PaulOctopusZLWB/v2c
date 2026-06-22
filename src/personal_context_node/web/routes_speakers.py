@@ -10,9 +10,11 @@ from personal_context_node.config import AppConfig
 from personal_context_node.segment_emotions import emotion_distribution, emotion_labels_for_scope
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
+    assign_cluster_to_person,
     clear_projection_cache,
     cluster_voiceprints,
     embedding_projection,
+    global_clusters,
     mark_noise_segments,
     enroll_person,
     label_segments_as_person,
@@ -496,6 +498,25 @@ def recluster_route(request: Request, payload: ReclusterRequest) -> dict[str, ob
             scope_session_id=payload.session_id,
             scope_day=payload.day,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/speakers/global-clusters")
+def global_clusters_route(request: Request, min_size: int = 1) -> dict[str, object]:
+    """List GLOBAL voiceprint clusters (vp_*) largest-first, with size + sample + current person.
+    Feeds the cluster→person panel (cross-file, unlike the per-day /speakers/clusters)."""
+    config: AppConfig = request.app.state.config
+    return {"clusters": global_clusters(config=config, min_size=min_size)}
+
+
+@router.post("/speakers/clusters/{cluster_id}/assign-person")
+def assign_cluster_route(request: Request, cluster_id: str, payload: AssignPersonRequest) -> dict[str, object]:
+    """Attribute every active segment of a voiceprint cluster to one person (one-click cluster→人).
+    Writes per-segment manual overrides (consistent with map-lasso labels, survives re-cluster)."""
+    config: AppConfig = request.app.state.config
+    try:
+        return assign_cluster_to_person(config=config, cluster_id=cluster_id, person_id=payload.person_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

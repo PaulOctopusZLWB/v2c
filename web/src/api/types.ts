@@ -136,6 +136,8 @@ export interface SpeakerCluster {
   total_speech_ms: number;
   sample_segment_id: string;
   sample_text: string;
+  /** Global cluster list only: how many of the cluster's segments are manually labeled. */
+  labeled_count?: number;
 }
 
 /** Embedding (voiceprint) extraction coverage for a session/day. */

@@ -610,10 +610,17 @@
 .speakers-main-proj {
   grid-template-columns: 260px minmax(0, 1fr) 320px;
 }
-.speakers-map, .speakers-people, .speakers-proj-rail { min-width: 0; }
+.speakers-map, .speakers-people, .speakers-proj-rail { min-width: 0; min-height: 0; }
 .speakers-proj-rail { display: grid; gap: var(--s4); align-content: start; }
+.speakers-people { display: grid; gap: var(--s3); align-content: start; }
 /* Let the hero map breathe with a taller stage. */
 .speakers-map .vmap-stage { min-height: 460px; }
+/* Fix ask-B (overlong right column): in the 3-col layout the people/cluster column is its OWN
+   scroll owner, bounded to the viewport, so the card frame never runs far past the map. Gated to
+   the wide layout — the <1200 stacked column keeps the page as the natural scroll owner. */
+@media (min-width: 1201px) {
+  .speakers-main-proj .speakers-people { max-height: calc(100vh - 240px); overflow-y: auto; scrollbar-gutter: stable; }
+}
 /* Below ~1200 the 3-col collapses to one stacked column (single scroll owner). */
 @media (max-width: 1200px) {
   .speakers-main-proj { grid-template-columns: minmax(0, 1fr); }
@@ -676,6 +683,23 @@
 }
 .proj-method button:hover:not(:disabled) { color: var(--text); background: transparent; }
 .proj-method button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
+/* 聚类/人物 right-column toggle — same segmented-pill recipe, full width. */
+.people-mode {
+  display: inline-flex; gap: var(--s1); padding: var(--s1); width: 100%;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-2);
+}
+.people-mode button {
+  flex: 1; font-size: var(--fs-sm); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x);
+  border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-2); cursor: pointer;
+}
+.people-mode button:hover:not(:disabled) { color: var(--text); }
+.people-mode button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
+/* 声纹聚类 list: one row per global vp_* cluster — chip + size + sample + assign <select>. */
+.cluster-tools { display: flex; align-items: center; gap: var(--s2); }
+.cluster-list { display: grid; gap: var(--s1); list-style: none; margin: 0; padding: 0; }
+.cluster-row { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; border-bottom: 1px solid var(--border); }
+.cluster-sample { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.cluster-assign { max-width: 130px; flex: none; }
 .proj-params { display: grid; gap: var(--s4); }
 .proj-slider { display: grid; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-2); }
 .proj-slider-head { display: flex; align-items: center; justify-content: space-between; }

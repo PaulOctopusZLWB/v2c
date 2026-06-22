@@ -9,12 +9,14 @@ from personal_context_node.config import AppConfig
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
     clear_projection_cache,
+    assign_cluster_to_person,
     cluster_voiceprints,
     embedding_projection,
     enroll_person,
     ensure_person,
     extract_pending_embeddings,
     get_embeddings,
+    global_clusters,
     get_person_centroids,
     label_segments_as_person,
     mark_noise_segments,
@@ -1270,3 +1272,48 @@ def test_mark_noise_requires_a_criterion(tmp_path: Path) -> None:
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def test_global_clusters_lists_vp_sorted_with_dominant_person(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_row(config.database_path, person_id="per_a", name="Alice", ptype="contact")
+    # vp_001 (3 segs) > vp_002 (2 segs); a self seg must be excluded (not vp_*).
+    _insert_segments_with_speakers(
+        config.database_path,
+        [("c1", "vp_001"), ("c2", "vp_001"), ("c3", "vp_001"), ("d1", "vp_002"), ("d2", "vp_002"), ("self1", "self")],
+    )
+    # Label 2 of vp_001's 3 segments as Alice -> dominant person for vp_001.
+    conn = connect(config.database_path)
+    for sid in ("c1", "c2"):
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, 'Alice', '2026-06-09T00:00:00+08:00', 'per_a', 'manual')",
+            (sid,),
+        )
+    conn.commit(); conn.close()
+
+    clusters = global_clusters(config=config)
+    ids = [c["speaker_cluster_id"] for c in clusters]
+    assert ids == ["vp_001", "vp_002"]  # largest first, self excluded
+    vp1 = clusters[0]
+    assert vp1["segment_count"] == 3
+    assert vp1["person_id"] == "per_a" and vp1["person_label"] == "Alice" and vp1["labeled_count"] == 2
+    assert vp1["sample_text"] is not None
+    assert clusters[1]["person_id"] is None  # vp_002 unassigned
+
+
+def test_assign_cluster_to_person_labels_every_segment(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_row(config.database_path, person_id="per_b", name="Bob", ptype="contact")
+    _insert_segments_with_speakers(config.database_path, [("x1", "vp_007"), ("x2", "vp_007"), ("x3", "vp_007")])
+
+    result = assign_cluster_to_person(config=config, cluster_id="vp_007", person_id="per_b")
+    assert result["labeled"] == 3
+    overrides = _override_rows(config.database_path)
+    assert {overrides[s]["person_id"] for s in ("x1", "x2", "x3")} == {"per_b"}
+
+
+def test_assign_cluster_unknown_is_empty(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_row(config.database_path, person_id="per_b", name="Bob", ptype="contact")
+    result = assign_cluster_to_person(config=config, cluster_id="vp_nope", person_id="per_b")
+    assert result["labeled"] == 0

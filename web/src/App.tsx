@@ -13,6 +13,7 @@ import { ReviewQueue } from "./features/transcript/ReviewQueue";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
+import { ClusterListPanel } from "./features/speakers/ClusterListPanel";
 import { PeoplePanel } from "./features/people/PeoplePanel";
 import { VoiceprintMap, type VoiceprintMapState } from "./features/viz/VoiceprintMap";
 import { VoiceprintWorkflowPanel } from "./features/speakers/VoiceprintWorkflowPanel";
@@ -124,6 +125,8 @@ export function App() {
   const [lastAutoAttributeCount, setLastAutoAttributeCount] = useState<number | null>(null);
   // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
   const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
+  // Right column of the 声纹 tab: 聚类 (cluster→person, the primary path) vs 人物 (roster/noise).
+  const [rightTab, setRightTab] = useState<"clusters" | "people">("clusters");
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
   // 观点 tab view: the per-session editable workspace (default) vs. the legacy read-only
   // 日报汇总 (daily rollup) reusing LlmResultPanel.
@@ -849,14 +852,36 @@ export function App() {
             />
           </div>
           <div className="speakers-people">
-            <PeoplePanel
-              sessionId={selectedSessionId}
-              day={inspectDay}
-              onChanged={onPeopleChanged}
-              onAutoAttributed={setLastAutoAttributeCount}
-              push={push}
-              pushAction={pushAction}
-            />
+            <div className="people-mode" role="group" aria-label="右栏切换">
+              <button
+                type="button"
+                className={rightTab === "clusters" ? "active" : ""}
+                aria-pressed={rightTab === "clusters"}
+                onClick={() => setRightTab("clusters")}
+              >
+                聚类
+              </button>
+              <button
+                type="button"
+                className={rightTab === "people" ? "active" : ""}
+                aria-pressed={rightTab === "people"}
+                onClick={() => setRightTab("people")}
+              >
+                人物
+              </button>
+            </div>
+            {rightTab === "clusters" ? (
+              <ClusterListPanel onChanged={onPeopleChanged} push={push} />
+            ) : (
+              <PeoplePanel
+                sessionId={selectedSessionId}
+                day={inspectDay}
+                onChanged={onPeopleChanged}
+                onAutoAttributed={setLastAutoAttributeCount}
+                push={push}
+                pushAction={pushAction}
+              />
+            )}
           </div>
         </div>
 
