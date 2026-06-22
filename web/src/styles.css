@@ -608,7 +608,8 @@
 /* The decoupled 声纹 view: a proportioned 3-zone grid — rail | map-hero | people.
    Only the map column flexes, so the hero always claims surplus width. */
 .speakers-main-proj {
-  grid-template-columns: 260px minmax(0, 1fr) 320px;
+  /* rail (map controls) | map (verification) | cluster/people (the primary identify path → widest). */
+  grid-template-columns: 240px minmax(0, 1fr) 380px;
 }
 .speakers-map, .speakers-people, .speakers-proj-rail { min-width: 0; min-height: 0; }
 .speakers-proj-rail { display: grid; gap: var(--s4); align-content: start; }
@@ -696,10 +697,20 @@
 .people-mode button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
 /* 声纹聚类 list: one row per global vp_* cluster — chip + size + sample + assign <select>. */
 .cluster-tools { display: flex; align-items: center; gap: var(--s2); }
-.cluster-list { display: grid; gap: var(--s1); list-style: none; margin: 0; padding: 0; }
-.cluster-row { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; border-bottom: 1px solid var(--border); }
-.cluster-sample { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
-.cluster-assign { max-width: 130px; flex: none; }
+/* Bound the list to the column (a bare display:grid track is auto-sized to content,
+   which let rows overflow far past the panel). Each row stacks: identifiers → sample → assign. */
+.cluster-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); list-style: none; margin: 0; padding: 0; }
+.cluster-row { display: grid; gap: var(--s2); min-width: 0; padding: var(--s3) 0; border-bottom: 1px solid var(--border); }
+.cluster-row-head { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.cluster-row-head .chip { min-width: 0; overflow: hidden; }
+.cluster-assigned, .cluster-unassigned { margin-left: auto; flex: none; }
+.cluster-unassigned { font-size: var(--fs-xs); }
+/* Sample peek: up to two lines, clamped — readable without blowing out the row width. */
+.cluster-sample {
+  margin: 0; min-width: 0; font-size: var(--fs-sm); line-height: var(--lh-snug);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.cluster-assign { width: 100%; }
 .proj-params { display: grid; gap: var(--s4); }
 .proj-slider { display: grid; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-2); }
 .proj-slider-head { display: flex; align-items: center; justify-content: space-between; }

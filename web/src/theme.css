@@ -375,7 +375,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .task-filter { display: flex; align-items: center; gap: var(--s2); color: var(--text-2); cursor: pointer; }
 
 /* ---- BADGE — status outline pill (one recipe; color via .s-* semantics) ---- */
-.badge { font-size: var(--fs-xs); padding: 1px var(--s2h); border-radius: var(--radius-pill); border: 1px solid var(--border-strong); color: var(--text-dim); }
+.badge { font-size: var(--fs-xs); padding: 1px var(--s2h); border-radius: var(--radius-pill); border: 1px solid var(--border-strong); color: var(--text-dim); white-space: nowrap; }
 .badge.s-accepted { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 .badge.s-rejected { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
 .badge.s-needs_fix { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }

@@ -114,17 +114,21 @@ export function ClusterListPanel({
       ) : (
         <ul className="cluster-list" role="list">
           {clusters.map((c) => (
-            <li className="cluster-row list-row" key={c.speaker_cluster_id} role="listitem">
-              <span className="chip" style={{ background: speakerColor(c.person_id ?? c.speaker_cluster_id) }}>
-                <Icon name="person" /> {c.speaker_cluster_id}
-              </span>
-              <span className="confidence-chip" title="该组片段数">{c.segment_count} 段</span>
-              <span className="cluster-sample muted" title={c.sample_text ?? ""}>
-                {c.sample_text ?? ""}
-              </span>
-              {c.person_id ? (
-                <StatusBadge status="success">{c.person_label}</StatusBadge>
-              ) : null}
+            <li className="cluster-row" key={c.speaker_cluster_id} role="listitem">
+              <div className="cluster-row-head">
+                <span className="chip" style={{ background: speakerColor(c.person_id ?? c.speaker_cluster_id) }}>
+                  <Icon name="person" /> {c.speaker_cluster_id}
+                </span>
+                <span className="confidence-chip" title="该组片段数">{c.segment_count} 段</span>
+                {c.person_id ? (
+                  <StatusBadge status="success" className="cluster-assigned">{c.person_label}</StatusBadge>
+                ) : (
+                  <span className="cluster-unassigned muted">未分配</span>
+                )}
+              </div>
+              <p className="cluster-sample muted" title={c.sample_text ?? ""}>
+                {c.sample_text ?? "(无样例文本)"}
+              </p>
               <select
                 aria-label={`分配 ${c.speaker_cluster_id}`}
                 className="cluster-assign"
