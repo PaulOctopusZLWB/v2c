@@ -3,7 +3,6 @@ import { api } from "./api/client";
 import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { ClusterPanel } from "./components/ClusterPanel";
 import { TaskList } from "./components/TaskList";
 import { Icon } from "./components/Icon";
 import { Toasts, useToasts } from "./components/Toasts";
@@ -874,24 +873,6 @@ export function App() {
                 <EmotionCharts sessionId={selectedSessionId} nonSpeakerLabels={nonSpeakerLabels} />
               </>
             ) : null}
-          </div>
-        </details>
-
-        {/* 高级 — the legacy day-cluster merge tool; tucked away, collapsed by default. */}
-        <details className="speakers-advanced card">
-          <summary>高级 — 按天聚类合并(旧版)</summary>
-          <div className="speakers-advanced-body">
-            {inspectDay ? (
-              <ClusterPanel
-                key={inspectDay}
-                day={inspectDay}
-                persons={persons ?? []}
-                onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
-                onPlaybackError={(message) => push("音频播放失败", message)}
-              />
-            ) : (
-              <p className="muted">选择一个日期后可使用按天聚类合并。</p>
-            )}
           </div>
         </details>
       </div>

@@ -586,12 +586,10 @@ describe("App container", () => {
     await gotoTab("声纹");
     expect(await screen.findByText("声纹覆盖")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).not.toBeInTheDocument();
-    // The 对话分析 / 高级 sections are secondary — collapsed by default (not open).
+    // The 对话分析 section is secondary — collapsed by default (not open).
     const analysis = container.querySelector("details.speakers-analysis") as HTMLDetailsElement;
-    const advanced = container.querySelector("details.speakers-advanced") as HTMLDetailsElement;
     expect(analysis).toBeTruthy();
     expect(analysis.open).toBe(false);
-    expect(advanced.open).toBe(false);
 
     // Switch back to 审核: the transcript reappears with the same session still selected — no
     // need to re-pick the day/session.
