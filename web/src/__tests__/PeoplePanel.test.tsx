@@ -286,12 +286,12 @@ describe("PeoplePanel", () => {
     });
   });
 
-  it("the 全局识别 control carries a one-line '标注后点此重新识别' helper", async () => {
+  it("the 全局识别 control carries a one-line '按声纹补齐' helper", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
     await screen.findByText("韩文巧");
-    expect(screen.getByText(/标注后点此重新识别/)).toBeInTheDocument();
+    expect(screen.getByText(/按声纹补齐/)).toBeInTheDocument();
   });
 
   // --- 非发言人 (non_speaker / 噪音·多人) class ---

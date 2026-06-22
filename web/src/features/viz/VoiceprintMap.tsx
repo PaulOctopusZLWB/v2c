@@ -23,14 +23,24 @@ function sessionKey(p: ProjectionPoint): string {
   return p.session_id ?? "未知会话";
 }
 
-/** The stable cluster key for a point: prefer the labelled person, else the raw speaker. */
+/** Points with no person attribution collapse to ONE 未识别 group (a distinct neutral hue), so the
+ *  gate's remaining work is visible spatially — assigned points keep their person colour. */
+const UNASSIGNED_KEY = "__未识别__";
+const UNASSIGNED_COLOR = "#8b93a7";
+
+/** The stable cluster key for a point: the labelled person, else the shared 未识别 bucket. */
 function clusterKey(p: ProjectionPoint): string {
-  return p.person_id ?? p.speaker ?? "未知";
+  return p.person_id ?? UNASSIGNED_KEY;
 }
 
-/** Human label for a cluster key: prefer person_label, else the key itself. */
+/** Human label for a cluster key: the person, else 未识别. */
 function clusterLabel(p: ProjectionPoint): string {
-  return p.person_label ?? p.speaker ?? p.person_id ?? "未知";
+  return p.person_id ? p.person_label ?? p.person_id : "未识别";
+}
+
+/** Colour for a person/cluster key — fixed grey for the 未识别 bucket, generated hue otherwise. */
+function keyColor(key: string): string {
+  return key === UNASSIGNED_KEY ? UNASSIGNED_COLOR : speakerColor(key);
 }
 
 interface View {
@@ -256,7 +266,7 @@ export function VoiceprintMap({
     const by = new Map<string, { key: string; label: string; color: string; emoji: string; count: number }>();
     for (const p of points ?? []) {
       const key = clusterKey(p);
-      const entry = by.get(key) ?? { key, label: clusterLabel(p), color: speakerColor(key), emoji: "", count: 0 };
+      const entry = by.get(key) ?? { key, label: clusterLabel(p), color: keyColor(key), emoji: "", count: 0 };
       entry.count += 1;
       by.set(key, entry);
     }
@@ -320,7 +330,7 @@ export function VoiceprintMap({
       // The "key" governs both colour and focus; emotion class in 情绪, session id in 会话.
       const key = mode === "emotion" ? (emoLabels[p.segment_id] ?? DEFAULT_EMOTION) : mode === "session" ? sessionKey(p) : clusterKey(p);
       const dim = focus !== null && key !== focus;
-      const color = mode === "emotion" ? emotionColor(key) : speakerColor(key);
+      const color = mode === "emotion" ? emotionColor(key) : mode === "session" ? speakerColor(key) : keyColor(key);
       const isSel = selected.has(p.segment_id);
       ctx.globalAlpha = dim ? 0.08 : isSel ? 0.95 : 0.78;
       ctx.fillStyle = color;
@@ -726,7 +736,7 @@ export function VoiceprintMap({
                       ? emotionColor(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION)
                       : colorMode === "session"
                         ? speakerColor(sessionKey(hover.point))
-                        : speakerColor(clusterKey(hover.point))
+                        : keyColor(clusterKey(hover.point))
                 }}
               />
               {colorMode === "emotion"

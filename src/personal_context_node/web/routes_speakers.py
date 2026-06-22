@@ -15,6 +15,7 @@ from personal_context_node.speaker_embeddings import (
     cluster_voiceprints,
     embedding_projection,
     global_clusters,
+    identification_status,
     mark_noise_segments,
     enroll_person,
     label_segments_as_person,
@@ -500,6 +501,14 @@ def recluster_route(request: Request, payload: ReclusterRequest) -> dict[str, ob
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/speakers/identification-status")
+def identification_status_route(request: Request) -> dict[str, object]:
+    """Progress signals for the 声纹 gate + stepper: total/embedded/clusters/identified/unidentified
+    over all active segments. unidentified=0 means every voice is attributed (gate-ready)."""
+    config: AppConfig = request.app.state.config
+    return identification_status(config=config)
 
 
 @router.get("/speakers/global-clusters")

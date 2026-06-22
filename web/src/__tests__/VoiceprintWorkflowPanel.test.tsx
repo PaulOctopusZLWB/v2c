@@ -3,33 +3,25 @@ import { describe, expect, it } from "vitest";
 import { VoiceprintWorkflowPanel } from "../features/speakers/VoiceprintWorkflowPanel";
 
 describe("VoiceprintWorkflowPanel", () => {
-  it("shows blocked projection when no scope is selected", () => {
-    render(
-      <VoiceprintWorkflowPanel
-        selectedScopeCount={0}
-        projection={{ status: "idle" }}
-        selectedSegmentCount={0}
-        hasKnownPeople={false}
-        lastAutoAttributeCount={null}
-        hasReviewTarget={false}
-      />
-    );
+  it("renders the identify-first pipeline steps", () => {
+    render(<VoiceprintWorkflowPanel status={null} />);
     expect(screen.getByText("声纹主路径")).toBeInTheDocument();
-    expect(screen.getByText("先选择范围")).toBeInTheDocument();
+    expect(screen.getByText("提取声纹")).toBeInTheDocument();
+    expect(screen.getByText("自动聚类")).toBeInTheDocument();
+    expect(screen.getByText("分配聚类")).toBeInTheDocument();
   });
 
-  it("shows projected point count", () => {
-    render(
-      <VoiceprintWorkflowPanel
-        selectedScopeCount={2}
-        projection={{ status: "ready", pointCount: 400, capped: false }}
-        selectedSegmentCount={0}
-        hasKnownPeople={true}
-        lastAutoAttributeCount={null}
-        hasReviewTarget={true}
-      />
+  it("shows the unidentified gate counter and flips to ready at 0", () => {
+    const { rerender } = render(
+      <VoiceprintWorkflowPanel status={{ total: 100, embedded: 100, clusters: 5, identified: 70, unidentified: 30 }} />
     );
-    expect(screen.getByText("400 点")).toBeInTheDocument();
-    expect(screen.getByText("在图上框选样本")).toBeInTheDocument();
+    // The gate badge AND the confirm step both surface the count.
+    expect(screen.getAllByText(/未识别/).length).toBeGreaterThan(0);
+    expect(screen.getByText("30")).toBeInTheDocument();
+
+    rerender(
+      <VoiceprintWorkflowPanel status={{ total: 100, embedded: 100, clusters: 5, identified: 100, unidentified: 0 }} />
+    );
+    expect(screen.getAllByText("可进入汇总").length).toBeGreaterThan(0);
   });
 });

@@ -1,74 +1,63 @@
 import type { WorkflowStep } from "../../components/ui";
 
-export type ProjectionWorkflowState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "empty" }
-  | { status: "error"; message: string }
-  | { status: "ready"; pointCount: number; capped: boolean; total?: number };
-
-export interface VoiceprintWorkflowInput {
-  selectedScopeCount: number;
-  projection: ProjectionWorkflowState;
-  selectedSegmentCount: number;
-  hasKnownPeople: boolean;
-  lastAutoAttributeCount: number | null;
-  hasReviewTarget: boolean;
+/** Identification progress over all active segments (GET /api/speakers/identification-status). */
+export interface IdentificationStatus {
+  total: number;
+  embedded: number;
+  clusters: number;
+  identified: number;
+  unidentified: number;
 }
 
+export interface VoiceprintWorkflowInput {
+  status: IdentificationStatus | null;
+}
+
+/**
+ * The identify-first pipeline that gates summaries: 提取声纹 → 自动聚类 → 分配聚类 → 清理噪音 → 确认.
+ * Every step's state is derived from real counts; the run is done when 未识别 (unidentified) hits 0.
+ */
 export function buildVoiceprintWorkflow(input: VoiceprintWorkflowInput): WorkflowStep[] {
-  const hasScope = input.selectedScopeCount > 0;
-  const projected = input.projection.status === "ready";
-  const hasSelection = input.selectedSegmentCount > 0;
-  const identified = input.lastAutoAttributeCount !== null;
+  const s = input.status;
+  const total = s?.total ?? 0;
+  const embedded = s?.embedded ?? 0;
+  const clusters = s?.clusters ?? 0;
+  const identified = s?.identified ?? 0;
+  const unidentified = s?.unidentified ?? 0;
+  const hasData = total > 0;
+  const allEmbedded = hasData && embedded >= total;
+  const done = hasData && unidentified === 0;
 
   return [
     {
-      id: "scope",
-      label: "选择范围",
-      state: hasScope ? "complete" : "current",
-      detail: hasScope ? `${input.selectedScopeCount} 个范围` : "选择日期或会话"
+      id: "extract",
+      label: "提取声纹",
+      state: !hasData ? "current" : allEmbedded ? "complete" : embedded > 0 ? "running" : "current",
+      detail: hasData ? `已抽 ${embedded}/${total}` : "导入并转写后在工具栏提取",
     },
     {
-      id: "project",
-      label: "投射",
-      state: projectStepState(input.projection, hasScope),
-      detail: projectStepDetail(input.projection, hasScope)
+      id: "cluster",
+      label: "自动聚类",
+      state: embedded === 0 ? "pending" : clusters > 0 ? "complete" : "current",
+      detail: clusters > 0 ? `${clusters} 个声纹组` : "把声纹分成 vp_ 组",
     },
     {
-      id: "label",
-      label: "框选/标注",
-      state: !projected ? "pending" : hasSelection ? "complete" : "current",
-      detail: hasSelection ? `已选 ${input.selectedSegmentCount} 段` : "在图上框选样本"
+      id: "assign",
+      label: "分配聚类",
+      state: clusters === 0 ? "pending" : done ? "complete" : "current",
+      detail: hasData ? `已识别 ${identified}/${total}` : "逐组选人,整组归属",
     },
     {
-      id: "identify",
-      label: "全局识别",
-      state: !projected ? "pending" : identified ? "complete" : hasSelection || input.hasKnownPeople ? "current" : "blocked",
-      detail: identified ? `已归属 ${input.lastAutoAttributeCount} 段` : input.hasKnownPeople ? "按已登记声纹归属" : "先登记至少一人"
+      id: "noise",
+      label: "清理噪音",
+      state: clusters === 0 ? "pending" : done ? "complete" : "current",
+      detail: "语气词/短段一键归噪音",
     },
     {
-      id: "verify",
-      label: "回审核验证",
-      state: identified ? "current" : "pending",
-      detail: input.hasReviewTarget ? "打开待审会话核对" : "识别后回到审核"
-    }
+      id: "confirm",
+      label: "确认",
+      state: !hasData ? "pending" : done ? "complete" : "current",
+      detail: done ? "可进入汇总" : `未识别 ${unidentified} 段`,
+    },
   ];
-}
-
-function projectStepState(projection: ProjectionWorkflowState, hasScope: boolean): WorkflowStep["state"] {
-  if (!hasScope) return "blocked";
-  if (projection.status === "loading") return "running";
-  if (projection.status === "ready") return "complete";
-  if (projection.status === "error" || projection.status === "empty") return "blocked";
-  return "current";
-}
-
-function projectStepDetail(projection: ProjectionWorkflowState, hasScope: boolean): string {
-  if (!hasScope) return "先选择范围";
-  if (projection.status === "loading") return "正在计算声纹云图";
-  if (projection.status === "empty") return "范围内没有声纹";
-  if (projection.status === "error") return projection.message;
-  if (projection.status === "ready") return `${projection.pointCount} 点${projection.capped ? " · 已采样" : ""}`;
-  return "点击投射生成地图";
 }

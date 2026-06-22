@@ -17,6 +17,7 @@ from personal_context_node.speaker_embeddings import (
     extract_pending_embeddings,
     get_embeddings,
     global_clusters,
+    identification_status,
     get_person_centroids,
     label_segments_as_person,
     mark_noise_segments,
@@ -1317,3 +1318,24 @@ def test_assign_cluster_unknown_is_empty(tmp_path: Path) -> None:
     _insert_person_row(config.database_path, person_id="per_b", name="Bob", ptype="contact")
     result = assign_cluster_to_person(config=config, cluster_id="vp_nope", person_id="per_b")
     assert result["labeled"] == 0
+
+
+def test_identification_status_counts(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_person_row(config.database_path, person_id="per_a", name="Alice", ptype="contact")
+    _insert_segments_with_speakers(config.database_path, [("g1", "vp_001"), ("g2", "vp_001"), ("g3", "vp_002"), ("g4", "self")])
+    put_embeddings_bulk(config=config, items=[("g1", [1.0, 0.0]), ("g2", [1.0, 0.0]), ("g3", [0.0, 1.0])])  # 3 of 4 embedded
+    conn = connect(config.database_path)
+    for sid in ("g1", "g2"):
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, 'Alice', '2026-06-09T00:00:00+08:00', 'per_a', 'manual')",
+            (sid,),
+        )
+    conn.commit(); conn.close()
+
+    st = identification_status(config=config)
+    assert st["total"] == 4
+    assert st["embedded"] == 3
+    assert st["clusters"] == 2  # vp_001, vp_002 (self is not vp_*)
+    assert st["identified"] == 2
+    assert st["unidentified"] == 2

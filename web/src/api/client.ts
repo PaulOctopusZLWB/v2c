@@ -109,6 +109,9 @@ export const api = {
   // Bulk-mark meaningless segments as noise: filler/backchannel text and/or short segments.
   markNoise: (body: { filler?: boolean; max_duration_ms?: number | null; noise_person_id?: string | null; session_id?: string | null; day?: string | null }) =>
     request<{ marked: number; noise_label: string; scope_segments: number }>("/api/speakers/mark-noise", { method: "POST", body: JSON.stringify(body) }),
+  // Identification progress (gate + stepper): total/embedded/clusters/identified/unidentified.
+  identificationStatus: () =>
+    request<{ total: number; embedded: number; clusters: number; identified: number; unidentified: number }>("/api/speakers/identification-status"),
   // GLOBAL voiceprint clusters (vp_*), largest-first — feeds the cluster→person panel.
   globalClusters: (minSize = 1) =>
     request<{ clusters: SpeakerCluster[] }>(`/api/speakers/global-clusters${query({ min_size: minSize })}`),

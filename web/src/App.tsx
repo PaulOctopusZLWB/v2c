@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
@@ -14,6 +14,7 @@ import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPan
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { ClusterListPanel } from "./features/speakers/ClusterListPanel";
+import type { IdentificationStatus } from "./features/speakers/voiceprintWorkflow";
 import { PeoplePanel } from "./features/people/PeoplePanel";
 import { VoiceprintMap, type VoiceprintMapState } from "./features/viz/VoiceprintMap";
 import { VoiceprintWorkflowPanel } from "./features/speakers/VoiceprintWorkflowPanel";
@@ -127,6 +128,8 @@ export function App() {
   const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
   // Right column of the 声纹 tab: 聚类 (cluster→person, the primary path) vs 人物 (roster/noise).
   const [rightTab, setRightTab] = useState<"clusters" | "people">("clusters");
+  // Identification progress for the 声纹 gate row + stepper.
+  const [idStatus, setIdStatus] = useState<IdentificationStatus | null>(null);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
   // 观点 tab view: the per-session editable workspace (default) vs. the legacy read-only
   // 日报汇总 (daily rollup) reusing LlmResultPanel.
@@ -199,8 +202,14 @@ export function App() {
   function onPeopleChanged() {
     void refreshPeople();
     void api.persons().then((r) => setPersons(r.persons ?? [])).catch(() => undefined);
+    void refreshIdStatus();
     setMapKey((k) => k + 1);
   }
+
+  // Identification progress (未识别 counter + stepper signals) for the 声纹 tab.
+  const refreshIdStatus = useCallback(() => {
+    void api.identificationStatus().then(setIdStatus).catch(() => undefined);
+  }, []);
 
   // Lazily load the full task list — only when the TaskList panel is open. The SSE
   // summary feeds counts/progress; the heavy per-row detail is fetched on demand.
@@ -231,6 +240,11 @@ export function App() {
       setBootstrapError(err instanceof Error ? err.message : "API bootstrap failed");
     }
   }
+
+  // Refresh the identification progress (gate + stepper) whenever the 声纹 tab is opened.
+  useEffect(() => {
+    if (tab === "speakers") refreshIdStatus();
+  }, [tab, refreshIdStatus]);
 
   useEffect(() => {
     void refreshBootstrap();
@@ -798,14 +812,7 @@ export function App() {
           </div>
         </section>
 
-        <VoiceprintWorkflowPanel
-          selectedScopeCount={scope.days.length + scope.session_ids.length}
-          projection={voiceprintProjectionState}
-          selectedSegmentCount={voiceprintSelectedCount}
-          hasKnownPeople={(people ?? []).some((p) => p.person_type !== "non_speaker" && p.enrolled)}
-          lastAutoAttributeCount={lastAutoAttributeCount}
-          hasReviewTarget={!!selectedSessionId || days.length > 0}
-        />
+        <VoiceprintWorkflowPanel status={idStatus} />
 
         {/* Main row: the projection controls rail, the map (hero), the labeling/identify controls. */}
         <div className="speakers-main speakers-main-proj">

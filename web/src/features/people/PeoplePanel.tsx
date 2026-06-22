@@ -218,7 +218,7 @@ export function PeoplePanel({
   return (
     <InspectorPanel
       title="人物证据"
-      subtitle="声纹登记、归属计数、智能建议与全局识别"
+      subtitle="名册、登记声纹与微调补漏(主路径在「聚类」)"
       actions={
         <StatusBadge status="info">
           <span className="num">{speakers.length}</span> 人
@@ -227,7 +227,7 @@ export function PeoplePanel({
       className="people-panel"
     >
       <p className="people-explainer muted">
-        标注几段是谁 → 全局识别 → 每个人在所有会话里一致;标得越多,边界越准。
+        主路径在「聚类」逐组指认;这里管理名册、清理噪音,并用全局识别补漏剩余片段。
       </p>
 
       <label className="people-search">
@@ -426,8 +426,8 @@ export function PeoplePanel({
       {/* 全局识别 — assign every segment to the nearest enrolled voiceprint, manual labels kept. */}
       <div className="people-auto">
         <div className="people-auto-head">
-          <span className="section-subtitle">全局识别(按声纹)</span>
-          <span className="people-auto-helper muted">标注后点此重新识别(无需训练,即时生效)</span>
+          <span className="section-subtitle">微调 · 全局识别补漏</span>
+          <span className="people-auto-helper muted">聚类分配后,用它按声纹补齐剩余未识别片段(手动标注保留)</span>
           <div className="people-scope" role="radiogroup" aria-label="识别范围">
             <span className="muted">范围:</span>
             <button

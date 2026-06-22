@@ -1427,3 +1427,30 @@ def assign_cluster_to_person(*, config: AppConfig, cluster_id: str, person_id: s
         return {"cluster_id": cluster_id, "person_id": person_id, "labeled": 0}
     labeled = label_segments_as_person(config=config, person_id=person_id, segment_ids=segment_ids)
     return {"cluster_id": cluster_id, "person_id": person_id, "labeled": labeled}
+
+
+def identification_status(*, config: AppConfig) -> dict:
+    """Progress signals for the 声纹 tab's gate + stepper, over ALL active segments.
+
+    - ``total`` active segments; ``embedded`` with a voiceprint; ``clusters`` distinct vp_* groups.
+    - ``identified`` segments attributed to a person (override or cluster mapping, via
+      v_segment_attribution); ``unidentified`` = total - identified. The day-level gate
+      (require_identified_speakers) opens a day when its unidentified reaches 0; this global count
+      is the overall "how close am I" signal.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        total = int(fetch_all(conn, "select count(*) c from transcript_segments where is_active=1")[0]["c"])
+        embedded = int(fetch_all(conn, "select count(*) c from transcript_segments ts where ts.is_active=1 and exists (select 1 from segment_embeddings se where se.segment_id=ts.segment_id)")[0]["c"])
+        clusters = int(fetch_all(conn, "select count(distinct speaker_cluster_id) c from transcript_segments where is_active=1 and speaker_cluster_id like 'vp_%'")[0]["c"])
+        identified = int(fetch_all(conn, "select count(*) c from transcript_segments ts join v_segment_attribution va on va.segment_id=ts.segment_id where ts.is_active=1 and va.person_id is not null")[0]["c"])
+        return {
+            "total": total,
+            "embedded": embedded,
+            "clusters": clusters,
+            "identified": identified,
+            "unidentified": max(0, total - identified),
+        }
+    finally:
+        conn.close()

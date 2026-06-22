@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -550,10 +550,11 @@ describe("App container", () => {
     renderApp();
     await gotoTab("声纹");
 
-    expect(await screen.findByText("声纹主路径")).toBeInTheDocument();
-    expect(screen.getByText("选择范围")).toBeInTheDocument();
-    expect(screen.getByText("在图上框选样本")).toBeInTheDocument();
-    expect(screen.getByText("回审核验证")).toBeInTheDocument();
+    // Scope to the workflow section — these step labels also appear as buttons elsewhere on the tab.
+    const wf = (await screen.findByText("声纹主路径")).closest(".voiceprint-workflow") as HTMLElement;
+    expect(within(wf).getByText("提取声纹")).toBeInTheDocument();
+    expect(within(wf).getByText("自动聚类")).toBeInTheDocument();
+    expect(within(wf).getByText("确认")).toBeInTheDocument();
   });
 
   it("renders only the active tab and keeps the selected session across tab switches", async () => {

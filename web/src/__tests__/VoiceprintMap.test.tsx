@@ -74,7 +74,7 @@ describe("VoiceprintMap", () => {
     const items = await screen.findAllByRole("listitem");
     expect(items).toHaveLength(2);
     expect(screen.getByText("李雷")).toBeInTheDocument(); // labelled key
-    expect(screen.getByText("spk_1")).toBeInTheDocument(); // unlabelled falls back to speaker
+    expect(screen.getByText("未识别")).toBeInTheDocument(); // unlabelled -> shared 未识别 bucket
     const counts = legend.querySelectorAll(".vmap-legend-count");
     expect(Array.from(counts).map((c) => c.textContent)).toEqual(["2", "2"]);
   });
@@ -104,7 +104,7 @@ describe("VoiceprintMap", () => {
     await screen.findByRole("list", { name: /图例/ });
 
     const leiItem = screen.getByText("李雷").closest(".vmap-legend-item") as HTMLElement;
-    const spkItem = screen.getByText("spk_1").closest(".vmap-legend-item") as HTMLElement;
+    const spkItem = screen.getByText("未识别").closest(".vmap-legend-item") as HTMLElement;
     expect(leiItem).toBeTruthy();
 
     expect(leiItem.classList.contains("focused")).toBe(false);

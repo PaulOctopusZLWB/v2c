@@ -2,73 +2,41 @@ import { describe, expect, it } from "vitest";
 import { buildVoiceprintWorkflow } from "../features/speakers/voiceprintWorkflow";
 
 describe("buildVoiceprintWorkflow", () => {
-  it("blocks projection when no scope is selected", () => {
-    const steps = buildVoiceprintWorkflow({
-      selectedScopeCount: 0,
-      projection: { status: "idle" },
-      selectedSegmentCount: 0,
-      hasKnownPeople: true,
-      lastAutoAttributeCount: null,
-      hasReviewTarget: false
-    });
+  it("starts at 提取声纹 with the rest pending when there is no data", () => {
+    const steps = buildVoiceprintWorkflow({ status: null });
     expect(steps.map((s) => [s.id, s.state])).toEqual([
-      ["scope", "current"],
-      ["project", "blocked"],
-      ["label", "pending"],
-      ["identify", "pending"],
-      ["verify", "pending"]
+      ["extract", "current"],
+      ["cluster", "pending"],
+      ["assign", "pending"],
+      ["noise", "pending"],
+      ["confirm", "pending"],
     ]);
   });
 
-  it("marks projection as running while the map is loading", () => {
+  it("marks extraction running while voiceprints are still being computed", () => {
     const steps = buildVoiceprintWorkflow({
-      selectedScopeCount: 1,
-      projection: { status: "loading" },
-      selectedSegmentCount: 0,
-      hasKnownPeople: true,
-      lastAutoAttributeCount: null,
-      hasReviewTarget: false
+      status: { total: 100, embedded: 40, clusters: 0, identified: 0, unidentified: 100 },
     });
-    expect(steps.find((s) => s.id === "scope")?.state).toBe("complete");
-    expect(steps.find((s) => s.id === "project")?.state).toBe("running");
+    expect(steps.find((s) => s.id === "extract")?.state).toBe("running");
+    expect(steps.find((s) => s.id === "extract")?.detail).toContain("40/100");
+    expect(steps.find((s) => s.id === "cluster")?.state).toBe("current");
   });
 
-  it("moves to labeling after projection is ready", () => {
+  it("advances to assign once clusters exist", () => {
     const steps = buildVoiceprintWorkflow({
-      selectedScopeCount: 1,
-      projection: { status: "ready", pointCount: 1200, capped: true },
-      selectedSegmentCount: 0,
-      hasKnownPeople: true,
-      lastAutoAttributeCount: null,
-      hasReviewTarget: false
+      status: { total: 100, embedded: 100, clusters: 6, identified: 50, unidentified: 50 },
     });
-    expect(steps.find((s) => s.id === "project")?.detail).toContain("1200");
-    expect(steps.find((s) => s.id === "label")?.state).toBe("current");
+    expect(steps.find((s) => s.id === "extract")?.state).toBe("complete");
+    expect(steps.find((s) => s.id === "cluster")?.state).toBe("complete");
+    expect(steps.find((s) => s.id === "assign")?.state).toBe("current");
+    expect(steps.find((s) => s.id === "confirm")?.detail).toContain("50");
   });
 
-  it("moves to identify when segments are selected", () => {
+  it("completes every step when unidentified reaches 0", () => {
     const steps = buildVoiceprintWorkflow({
-      selectedScopeCount: 1,
-      projection: { status: "ready", pointCount: 20, capped: false },
-      selectedSegmentCount: 4,
-      hasKnownPeople: true,
-      lastAutoAttributeCount: null,
-      hasReviewTarget: false
+      status: { total: 100, embedded: 100, clusters: 6, identified: 100, unidentified: 0 },
     });
-    expect(steps.find((s) => s.id === "label")?.state).toBe("complete");
-    expect(steps.find((s) => s.id === "identify")?.state).toBe("current");
-  });
-
-  it("marks verification current after auto attribution", () => {
-    const steps = buildVoiceprintWorkflow({
-      selectedScopeCount: 1,
-      projection: { status: "ready", pointCount: 20, capped: false },
-      selectedSegmentCount: 0,
-      hasKnownPeople: true,
-      lastAutoAttributeCount: 32,
-      hasReviewTarget: true
-    });
-    expect(steps.find((s) => s.id === "identify")?.state).toBe("complete");
-    expect(steps.find((s) => s.id === "verify")?.state).toBe("current");
+    expect(steps.every((s) => s.state === "complete")).toBe(true);
+    expect(steps.find((s) => s.id === "confirm")?.detail).toBe("可进入汇总");
   });
 });
