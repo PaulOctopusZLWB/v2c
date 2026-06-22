@@ -55,13 +55,21 @@ export function Progress({
         <div className="progress-bar" style={{ width: `${pct}%` }} />
       </div>
       {stages && stages.length > 0 ? (
-        <span className="progress-stages">
-          {stages.map((s) => (
-            <span key={s.label} className="progress-stage">
-              {s.label} <span className="num">{s.done}/{s.total}</span>
-            </span>
-          ))}
-        </span>
+        <div className="progress-stages">
+          {stages.map((s) => {
+            const r = s.total > 0 ? Math.max(0, Math.min(1, s.done / s.total)) : 0;
+            const p = Math.round(r * 100);
+            return (
+              <div key={s.label} className="progress-stage" title={`${s.label} ${s.done}/${s.total} · ${p}%`}>
+                <span className="progress-stage-label">{s.label}</span>
+                <div className="progress-stage-track" aria-hidden>
+                  <div className="progress-stage-bar" style={{ width: `${p}%` }} />
+                </div>
+                <span className="num progress-stage-count">{s.done}/{s.total}</span>
+              </div>
+            );
+          })}
+        </div>
       ) : null}
     </div>
   );

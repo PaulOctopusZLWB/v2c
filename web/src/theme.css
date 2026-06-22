@@ -333,6 +333,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 @media (prefers-reduced-motion: reduce) { .progress-bar { transition: none; } }
 .progress-eta { color: var(--text-dim); }
 .progress-stages { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); font-size: var(--fs-xs); color: var(--text-dim); }
+.progress-stage { display: inline-flex; align-items: center; gap: var(--s2); }
+.progress-stage-label { color: var(--text-2); }
+.progress-stage-track { width: 64px; height: 4px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-pill); overflow: hidden; flex: none; }
+.progress-stage-bar { height: 100%; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); border-radius: var(--radius-pill); transition: width .35s ease; }
+@media (prefers-reduced-motion: reduce) { .progress-stage-bar { transition: none; } }
 .progress-stage .num { color: var(--text-2); }
 
 /* ---- cards / sections ---- */
