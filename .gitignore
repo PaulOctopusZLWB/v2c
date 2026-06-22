@@ -27,3 +27,6 @@ web/playwright-report/
 web/shot.mjs
 web/shot-hl.mjs
 web/shot*.mjs
+
+# Machine-specific runtime config (absolute paths) — keep local
+config/local.toml
