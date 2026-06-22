@@ -1325,6 +1325,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "numpy" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "typer" },
@@ -1343,6 +1344,8 @@ funasr = [
 dev = [
     { name = "httpx" },
     { name = "pytest" },
+    { name = "scikit-learn" },
+    { name = "umap-learn" },
 ]
 
 [package.metadata]
@@ -1351,6 +1354,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "funasr", marker = "extra == 'funasr'", specifier = ">=1.2.0" },
     { name = "modelscope", marker = "extra == 'funasr'", specifier = ">=1.14.0" },
+    { name = "numpy", specifier = ">=2.0.0" },
     { name = "pydantic", specifier = ">=2.7.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "torch", marker = "extra == 'funasr'", specifier = ">=2.2.0" },
@@ -1364,6 +1368,8 @@ provides-extras = ["funasr"]
 dev = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pytest", specifier = ">=8.2.0" },
+    { name = "scikit-learn", specifier = ">=1.4.0" },
+    { name = "umap-learn", specifier = ">=0.5.0" },
 ]
 
 [[package]]

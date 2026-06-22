@@ -17,7 +17,10 @@ def resolve_device(requested: str, *, mps_available=None) -> str:
     if requested != "mps":
         return requested
     if mps_available is None:
-        import torch
+        try:
+            import torch
+        except ImportError:
+            return "cpu"
         mps_available = torch.backends.mps.is_available
     return "mps" if mps_available() else "cpu"
 
