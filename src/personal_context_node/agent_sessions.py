@@ -220,8 +220,6 @@ def _insert_turn_evidence_ref(
 def _markdown(*, session: dict[str, object], turns: list[dict[str, object]], tools: list[dict[str, object]]) -> str:
     title = f"Codex Session {session['agent_session_id']}"
     lines = [
-        f"# {title}",
-        "",
         "---",
         f"note_type: {_frontmatter_scalar('agent_session')}",
         f"agent_session_id: {_frontmatter_scalar(session['agent_session_id'])}",
@@ -230,6 +228,8 @@ def _markdown(*, session: dict[str, object], turns: list[dict[str, object]], too
         f"cwd: {_frontmatter_scalar(session.get('cwd') or '')}",
         f"model: {_frontmatter_scalar(session.get('model') or '')}",
         "---",
+        "",
+        f"# {title}",
         "",
     ]
     _append_visible_title(lines, session.get("title"))

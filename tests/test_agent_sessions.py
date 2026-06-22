@@ -329,7 +329,8 @@ def test_render_agent_session_markdown_quotes_frontmatter_scalars(tmp_path: Path
 
     markdown = render_agent_session_markdown(config=config, agent_session_id="thread_1")
 
-    assert markdown.count("\n---\n") == 2
+    assert markdown.startswith("---\n")
+    assert "\n---\n\n# Codex Session thread_1" in markdown
     assert "note_type: agent_session" in markdown
     assert "agent_session_id: thread_1" in markdown
     assert "source_type: codex_jsonl" in markdown

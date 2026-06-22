@@ -6,6 +6,7 @@ from pathlib import Path
 
 PUBLISHER_MODULES = [
     Path("src/personal_context_node/obsidian_daily.py"),
+    Path("src/personal_context_node/obsidian_agent_sessions.py"),
     Path("src/personal_context_node/obsidian_memory.py"),
     Path("src/personal_context_node/obsidian_review.py"),
     Path("src/personal_context_node/obsidian_sessions.py"),

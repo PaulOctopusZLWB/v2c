@@ -1028,6 +1028,8 @@ def agent_publish_group(
     ),
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    if not config.database_path.exists():
+        raise typer.BadParameter(f"agent session store not found: {config.database_path}")
     try:
         note_path = publish_agent_session_note(config=config, agent_session_id=session_id)
     except ValueError as exc:
