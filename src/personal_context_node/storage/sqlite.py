@@ -273,8 +273,7 @@ create table if not exists agent_sessions (
   message_count integer not null default 0,
   tool_event_count integer not null default 0,
   created_at text not null,
-  updated_at text not null,
-  unique(source_type, agent_session_id)
+  updated_at text not null
 );
 
 create index if not exists idx_agent_sessions_started
@@ -288,11 +287,10 @@ create table if not exists agent_turns (
   occurred_at text not null,
   text text not null,
   metadata_json text not null default '{}',
-  created_at text not null,
-  unique(agent_session_id, turn_index)
+  created_at text not null
 );
 
-create index if not exists idx_agent_turns_session_index
+create unique index if not exists idx_agent_turns_session_index
 on agent_turns(agent_session_id, turn_index);
 
 create table if not exists agent_tool_events (
@@ -305,11 +303,10 @@ create table if not exists agent_tool_events (
   arguments_json text not null default '{}',
   output_text text,
   status text not null,
-  created_at text not null,
-  unique(agent_session_id, event_index)
+  created_at text not null
 );
 
-create index if not exists idx_agent_tool_events_session_index
+create unique index if not exists idx_agent_tool_events_session_index
 on agent_tool_events(agent_session_id, event_index);
 
 create table if not exists persons (
@@ -643,8 +640,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
           message_count integer not null default 0,
           tool_event_count integer not null default 0,
           created_at text not null,
-          updated_at text not null,
-          unique(source_type, agent_session_id)
+          updated_at text not null
         )
         """
     )
@@ -659,12 +655,15 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
           occurred_at text not null,
           text text not null,
           metadata_json text not null default '{}',
-          created_at text not null,
-          unique(agent_session_id, turn_index)
+          created_at text not null
         )
         """
     )
-    conn.execute("create index if not exists idx_agent_turns_session_index on agent_turns(agent_session_id, turn_index)")
+    conn.execute("drop index if exists idx_agent_turns_session_index")
+    conn.execute(
+        "create unique index if not exists idx_agent_turns_session_index "
+        "on agent_turns(agent_session_id, turn_index)"
+    )
     conn.execute(
         """
         create table if not exists agent_tool_events (
@@ -677,13 +676,14 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
           arguments_json text not null default '{}',
           output_text text,
           status text not null,
-          created_at text not null,
-          unique(agent_session_id, event_index)
+          created_at text not null
         )
         """
     )
+    conn.execute("drop index if exists idx_agent_tool_events_session_index")
     conn.execute(
-        "create index if not exists idx_agent_tool_events_session_index on agent_tool_events(agent_session_id, event_index)"
+        "create unique index if not exists idx_agent_tool_events_session_index "
+        "on agent_tool_events(agent_session_id, event_index)"
     )
     _ensure_column(conn, "tasks", "priority", "integer not null default 100")
     _ensure_column(conn, "tasks", "retry_count", "integer not null default 0")
