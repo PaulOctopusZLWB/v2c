@@ -258,6 +258,60 @@ create table if not exists sessions (
 create index if not exists idx_sessions_date
 on sessions(date_key, started_at);
 
+create table if not exists agent_sessions (
+  agent_session_id text primary key,
+  source_type text not null,
+  source_path text not null,
+  source_sha256 text not null,
+  originator text,
+  cli_version text,
+  cwd text,
+  model text,
+  started_at text not null,
+  ended_at text,
+  title text,
+  message_count integer not null default 0,
+  tool_event_count integer not null default 0,
+  created_at text not null,
+  updated_at text not null,
+  unique(source_type, agent_session_id)
+);
+
+create index if not exists idx_agent_sessions_started
+on agent_sessions(started_at);
+
+create table if not exists agent_turns (
+  agent_turn_id text primary key,
+  agent_session_id text not null references agent_sessions(agent_session_id) on delete cascade,
+  turn_index integer not null,
+  role text not null,
+  occurred_at text not null,
+  text text not null,
+  metadata_json text not null default '{}',
+  created_at text not null,
+  unique(agent_session_id, turn_index)
+);
+
+create index if not exists idx_agent_turns_session_index
+on agent_turns(agent_session_id, turn_index);
+
+create table if not exists agent_tool_events (
+  agent_tool_event_id text primary key,
+  agent_session_id text not null references agent_sessions(agent_session_id) on delete cascade,
+  event_index integer not null,
+  occurred_at text not null,
+  tool_name text not null,
+  call_id text,
+  arguments_json text not null default '{}',
+  output_text text,
+  status text not null,
+  created_at text not null,
+  unique(agent_session_id, event_index)
+);
+
+create index if not exists idx_agent_tool_events_session_index
+on agent_tool_events(agent_session_id, event_index);
+
 create table if not exists persons (
   person_id text primary key,
   display_name text not null,
@@ -572,6 +626,65 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     # stay unnamed and show their time label instead).
     _ensure_column(conn, "sessions", "name", "text")
     conn.execute("create index if not exists idx_sessions_date on sessions(date_key, started_at)")
+    conn.execute(
+        """
+        create table if not exists agent_sessions (
+          agent_session_id text primary key,
+          source_type text not null,
+          source_path text not null,
+          source_sha256 text not null,
+          originator text,
+          cli_version text,
+          cwd text,
+          model text,
+          started_at text not null,
+          ended_at text,
+          title text,
+          message_count integer not null default 0,
+          tool_event_count integer not null default 0,
+          created_at text not null,
+          updated_at text not null,
+          unique(source_type, agent_session_id)
+        )
+        """
+    )
+    conn.execute("create index if not exists idx_agent_sessions_started on agent_sessions(started_at)")
+    conn.execute(
+        """
+        create table if not exists agent_turns (
+          agent_turn_id text primary key,
+          agent_session_id text not null references agent_sessions(agent_session_id) on delete cascade,
+          turn_index integer not null,
+          role text not null,
+          occurred_at text not null,
+          text text not null,
+          metadata_json text not null default '{}',
+          created_at text not null,
+          unique(agent_session_id, turn_index)
+        )
+        """
+    )
+    conn.execute("create index if not exists idx_agent_turns_session_index on agent_turns(agent_session_id, turn_index)")
+    conn.execute(
+        """
+        create table if not exists agent_tool_events (
+          agent_tool_event_id text primary key,
+          agent_session_id text not null references agent_sessions(agent_session_id) on delete cascade,
+          event_index integer not null,
+          occurred_at text not null,
+          tool_name text not null,
+          call_id text,
+          arguments_json text not null default '{}',
+          output_text text,
+          status text not null,
+          created_at text not null,
+          unique(agent_session_id, event_index)
+        )
+        """
+    )
+    conn.execute(
+        "create index if not exists idx_agent_tool_events_session_index on agent_tool_events(agent_session_id, event_index)"
+    )
     _ensure_column(conn, "tasks", "priority", "integer not null default 100")
     _ensure_column(conn, "tasks", "retry_count", "integer not null default 0")
     _ensure_column(conn, "tasks", "max_retries", "integer not null default 3")
