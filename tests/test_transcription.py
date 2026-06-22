@@ -30,7 +30,7 @@ def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000
 
 def test_transcribe_pending_chunks_persists_segments_with_chunk_evidence(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     preprocess_imported_audio(
@@ -91,7 +91,7 @@ def test_mock_asr_default_output_comes_from_fixture(tmp_path: Path) -> None:
 
 def test_transcribe_pending_chunks_persists_asr_segment_tags(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     preprocess_imported_audio(
@@ -146,7 +146,7 @@ def test_transcribe_works_with_relative_data_dir(tmp_path: Path, monkeypatch) ->
     # read it directly; re-prefixing a RELATIVE data_dir doubled it (data/data/...).
     monkeypatch.chdir(tmp_path)
     source = Path("recordings")
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=Path("data"), obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 

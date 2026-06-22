@@ -13,7 +13,7 @@ from personal_context_node.web.app import create_app
 
 def test_import_enqueues_vad_task_and_does_not_create_parallel_run_table(tmp_path: Path) -> None:
     source = tmp_path / "NO NAME"
-    _write_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_backend="mock", vad_backend="mock", llm_backend="mock")
     client = TestClient(create_app(config=config))
 
@@ -37,7 +37,7 @@ def test_import_enqueues_vad_task_and_does_not_create_parallel_run_table(tmp_pat
 
 def test_import_async_returns_started_without_blocking(tmp_path: Path) -> None:
     source = tmp_path / "NO NAME"
-    _write_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_backend="mock", vad_backend="mock", llm_backend="mock")
     client = TestClient(create_app(config=config))
 
@@ -54,7 +54,7 @@ def test_import_async_returns_started_without_blocking(tmp_path: Path) -> None:
 
 def test_import_with_wait_runs_pipeline_through_mock_backends(tmp_path: Path) -> None:
     source = tmp_path / "NO NAME"
-    _write_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_backend="mock", vad_backend="mock", llm_backend="mock")
     client = TestClient(create_app(config=config))
 

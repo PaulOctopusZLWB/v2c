@@ -328,12 +328,8 @@ def _recorded_at_from_name_or_none(path: Path) -> str | None:
     month = int(raw_date[4:6])
     day = int(raw_date[6:8])
 
-    if year == 2087 and month == 5:
-        # DJI Mic sample data in this repository uses a broken year/month encoding.
-        # 2087-05-* should map to 2025-06-*.
-        year = 2025
-        month += 1
-
+    # No date adaptation: the filename is the source of truth. Recordings with a wrong
+    # device clock are corrected at the source (master filename), not remapped here.
     return f"{year:04d}-{month:02d}-{day:02d}T{raw_time[:2]}:{raw_time[2:4]}:{raw_time[4:6]}+08:00"
 
 

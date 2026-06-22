@@ -17,7 +17,7 @@ from personal_context_node.pipeline import run_first_milestone
 
 def test_transcribe_cli_uses_command_asr_backend(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     preprocess_imported_audio(

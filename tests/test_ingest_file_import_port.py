@@ -14,7 +14,7 @@ from personal_context_node.storage.sqlite import connect, fetch_all
 
 def test_import_unlinks_orphan_copy_on_post_copy_dedup(tmp_path: Path, monkeypatch) -> None:
     device_root = tmp_path / "DJI_MIC"
-    source = device_root / "TX02_MIC001_20870510_173550_orig.wav"
+    source = device_root / "TX02_MIC001_20250610_173550_orig.wav"
     source.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(source), "wb") as wav:
         wav.setnchannels(1)
@@ -42,7 +42,7 @@ def test_import_audio_files_from_port_registers_stable_sources_and_enqueues_vad(
     device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
     source = SourceAudioFile(
         device=device,
-        source_path=device.root_path / "TX02_MIC001_20870510_173550_orig.wav",
+        source_path=device.root_path / "TX02_MIC001_20250610_173550_orig.wav",
         size_bytes=1024,
         mtime_ns=123456789,
     )
@@ -97,7 +97,7 @@ def test_import_enqueues_vad_task_with_recorded_date_priority(tmp_path: Path) ->
     device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
     source = SourceAudioFile(
         device=device,
-        source_path=device.root_path / "TX02_MIC001_20870510_173550_orig.wav",
+        source_path=device.root_path / "TX02_MIC001_20250610_173550_orig.wav",
         size_bytes=1024,
         mtime_ns=123456789,
     )
@@ -124,7 +124,7 @@ def test_import_audio_files_from_port_skips_existing_source_snapshot_before_copy
     device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
     source = SourceAudioFile(
         device=device,
-        source_path=device.root_path / "TX02_MIC001_20870510_173550_orig.wav",
+        source_path=device.root_path / "TX02_MIC001_20250610_173550_orig.wav",
         size_bytes=1024,
         mtime_ns=123456789,
     )

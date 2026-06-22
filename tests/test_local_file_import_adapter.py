@@ -15,7 +15,7 @@ from personal_context_node.core.ports.file_import import MountedDevice, SourceAu
 
 def test_local_directory_file_import_adapter_copies_stable_audio_to_raw_store(tmp_path: Path) -> None:
     device_root = tmp_path / "DJI_MIC"
-    source_audio = device_root / "TX02_MIC013_20870511_190910_orig.wav"
+    source_audio = device_root / "TX02_MIC013_20250611_190910_orig.wav"
     _write_tiny_wav(source_audio)
     adapter = LocalDirectoryFileImportAdapter(device_roots=[device_root], device_label="DJI Mic 3")
 
@@ -36,8 +36,8 @@ def test_local_directory_file_import_adapter_copies_stable_audio_to_raw_store(tm
 
 def test_local_directory_file_import_adapter_discovers_configured_audio_globs_recursively(tmp_path: Path) -> None:
     device_root = tmp_path / "DJI_MIC"
-    nested_audio = device_root / "REC" / "TX02_MIC013_20870511_190910_orig.wav"
-    upper_audio = device_root / "REC" / "TX02_MIC014_20870511_191010_orig.WAV"
+    nested_audio = device_root / "REC" / "TX02_MIC013_20250611_190910_orig.wav"
+    upper_audio = device_root / "REC" / "TX02_MIC014_20250611_191010_orig.WAV"
     ignored_text = device_root / "REC" / "notes.txt"
     _write_tiny_wav(nested_audio)
     _write_tiny_wav(upper_audio)
@@ -89,9 +89,9 @@ def test_local_directory_file_import_adapter_discovers_devices_from_volume_root(
 
 def test_local_directory_file_import_adapter_skips_hidden_system_audio_directories(tmp_path: Path) -> None:
     device_root = tmp_path / "NO NAME"
-    real_audio = device_root / "TX_MIC001" / "TX02_MIC013_20870511_190910_orig.wav"
-    trash_audio = device_root / ".Trashes" / "501" / "TX02_MIC014_20870511_191010_orig.wav"
-    spotlight_audio = device_root / ".Spotlight-V100" / "TX02_MIC015_20870511_192010_orig.wav"
+    real_audio = device_root / "TX_MIC001" / "TX02_MIC013_20250611_190910_orig.wav"
+    trash_audio = device_root / ".Trashes" / "501" / "TX02_MIC014_20250611_191010_orig.wav"
+    spotlight_audio = device_root / ".Spotlight-V100" / "TX02_MIC015_20250611_192010_orig.wav"
     _write_tiny_wav(real_audio)
     _write_tiny_wav(trash_audio)
     _write_tiny_wav(spotlight_audio)
@@ -109,8 +109,8 @@ def test_local_directory_file_import_adapter_skips_hidden_system_audio_directori
 
 def test_copy_to_raw_store_keeps_existing_file_when_name_collides(tmp_path: Path) -> None:
     device = MountedDevice(device_id="dev", label="DJI Mic 3", root_path=tmp_path / "device")
-    first_source = _stable_source(device, tmp_path / "first" / "TX01_MIC001_20870510_120000_orig.wav")
-    second_source = _stable_source(device, tmp_path / "second" / "TX01_MIC001_20870510_120000_orig.wav")
+    first_source = _stable_source(device, tmp_path / "first" / "TX01_MIC001_20250610_120000_orig.wav")
+    second_source = _stable_source(device, tmp_path / "second" / "TX01_MIC001_20250610_120000_orig.wav")
     adapter = LocalDirectoryFileImportAdapter(device_roots=[], device_label="DJI Mic 3")
     destination = tmp_path / "data" / "audio" / "raw"
 
@@ -128,8 +128,8 @@ def test_reserve_destination_path_reserves_atomically(tmp_path: Path) -> None:
     target = tmp_path / "raw"
     target.mkdir()
 
-    first = _reserve_destination_path(target, "TX01_MIC001_20870510_120000_orig.wav")
-    second = _reserve_destination_path(target, "TX01_MIC001_20870510_120000_orig.wav")
+    first = _reserve_destination_path(target, "TX01_MIC001_20250610_120000_orig.wav")
+    second = _reserve_destination_path(target, "TX01_MIC001_20250610_120000_orig.wav")
 
     assert first != second
     assert first.exists()
@@ -138,7 +138,7 @@ def test_reserve_destination_path_reserves_atomically(tmp_path: Path) -> None:
 
 def test_copy_to_raw_store_cleans_up_reservation_when_copy_fails(tmp_path: Path, monkeypatch) -> None:
     device = MountedDevice(device_id="dev", label="DJI Mic 3", root_path=tmp_path / "device")
-    source = _stable_source(device, tmp_path / "src" / "TX01_MIC001_20870510_120000_orig.wav")
+    source = _stable_source(device, tmp_path / "src" / "TX01_MIC001_20250610_120000_orig.wav")
     adapter = LocalDirectoryFileImportAdapter(device_roots=[], device_label="DJI Mic 3")
     destination = tmp_path / "data" / "audio" / "raw"
 

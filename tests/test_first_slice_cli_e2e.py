@@ -14,7 +14,7 @@ from personal_context_node.storage.sqlite import connect, fetch_all
 
 def test_first_slice_cli_chain_reaches_verified_signed_memory(tmp_path: Path) -> None:
     source_dir = tmp_path / "DJI_MIC"
-    _write_voice_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source_dir / "TX02_MIC001_20250610_173550_orig.wav")
     data_dir = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"

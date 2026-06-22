@@ -78,7 +78,7 @@ def test_split_range_applies_configured_chunk_overlap() -> None:
 
 def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    wav_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_wav(wav_path, [(0.20, 0), (0.50, 10_000), (0.20, 0)])
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", chunk_overlap_ms=0)
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
@@ -124,10 +124,10 @@ def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path)
     assert chunks[0]["vad_config_json"] == '{"frame_ms": 50, "merge_gap_ms": 100, "min_speech_ms": 150, "threshold": 0.05}'
     assert chunks[0]["created_at"]
     assert all((tmp_path / "data").joinpath(chunk["local_chunk_path"]).exists() for chunk in chunks)
-    audit_path = config.work_audio_dir / "2025-06-10" / "TX02_MIC001_20870510_173550_orig.vad.json"
+    audit_path = config.work_audio_dir / "2025-06-10" / "TX02_MIC001_20250610_173550_orig.vad.json"
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     assert audit["audio_file_id"]
-    assert audit["source_path"] == str(config.raw_audio_dir / "2025-06-10" / "TX02_MIC001_20870510_173550_orig.wav")
+    assert audit["source_path"] == str(config.raw_audio_dir / "2025-06-10" / "TX02_MIC001_20250610_173550_orig.wav")
     assert audit["backend"] == "EnergyVadAdapter"
     assert audit["backend_version"] is None
     assert audit["config"] == {"frame_ms": 50, "merge_gap_ms": 100, "min_speech_ms": 150, "threshold": 0.05}
@@ -139,7 +139,7 @@ def test_preprocess_imported_audio_uses_ranges_to_persist_chunks(tmp_path: Path)
 
 def test_configured_audio_storage_paths_are_used_by_ingest_and_preprocess(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    wav_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_wav(wav_path, [(0.20, 0), (0.50, 10_000), (0.20, 0)])
     config_path = tmp_path / "config" / "local.toml"
     config_path.parent.mkdir()
@@ -182,7 +182,7 @@ chunk_overlap_ms = 0
 
 def test_preprocess_writes_chunks_using_configured_audio_format(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    wav_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    wav_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_stereo_wav(wav_path, [(0.60, 10_000)], sample_rate=8_000)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", chunk_overlap_ms=0)
 

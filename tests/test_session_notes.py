@@ -317,10 +317,10 @@ def _insert_transcript_segment(database_path: Path) -> None:
             (
                 "aud_test",
                 "DJI Mic 3",
-                "/source/TX02_MIC001_20870510_080000_orig.wav",
+                "/source/TX02_MIC001_20250610_080000_orig.wav",
                 1024,
                 1,
-                "/data/audio/raw/TX02_MIC001_20870510_080000_orig.wav",
+                "/data/audio/raw/TX02_MIC001_20250610_080000_orig.wav",
                 "sha256:test",
                 10000,
                 "2087-05-10T08:00:00+08:00",

@@ -47,7 +47,7 @@ def _write_tiny_wav(path: Path) -> None:
 
 def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> None:
     source_dir = tmp_path / "mounted_dji"
-    source_wav = source_dir / "TX02_MIC001_20870510_173550_orig.wav"
+    source_wav = source_dir / "TX02_MIC001_20250610_173550_orig.wav"
     _write_tiny_wav(source_wav)
 
     config = AppConfig(
@@ -107,12 +107,12 @@ def test_first_milestone_runs_end_to_end_with_mock_adapters(tmp_path: Path) -> N
     text = daily_note.read_text(encoding="utf-8")
     assert "# 2025-06-10 Daily Context" in text
     assert "## Memory Candidates" in text
-    assert "TX02_MIC001_20870510_173550_orig.wav" in text
+    assert "TX02_MIC001_20250610_173550_orig.wav" in text
 
 
 def test_first_milestone_uses_injected_llm_subagent_for_e2e(tmp_path: Path) -> None:
     source_dir = tmp_path / "mounted_dji"
-    _write_tiny_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source_dir / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "PersonalContext")
     llm = RecordingMilestoneLLM()
 
@@ -149,7 +149,7 @@ def test_first_milestone_mock_transcript_comes_from_fixture(tmp_path: Path) -> N
     fixture_path = Path("src/personal_context_node/fixtures/mock_first_milestone_transcript.json")
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     source_dir = tmp_path / "mounted_dji"
-    _write_tiny_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source_dir / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "PersonalContext")
 
     run_first_milestone(config=config, source_dir=source_dir)
@@ -174,8 +174,8 @@ def test_first_milestone_mock_transcript_comes_from_fixture(tmp_path: Path) -> N
 
 def test_first_milestone_default_mock_keeps_one_candidate_per_recording_without_exposing_audio_names(tmp_path: Path) -> None:
     source_dir = tmp_path / "mounted_dji"
-    _write_tiny_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav")
-    _write_tiny_wav(source_dir / "TX02_MIC002_20870510_174010_orig.wav")
+    _write_tiny_wav(source_dir / "TX02_MIC001_20250610_173550_orig.wav")
+    _write_tiny_wav(source_dir / "TX02_MIC002_20250610_174010_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "PersonalContext")
 
     result = run_first_milestone(config=config, source_dir=source_dir, confirm_first_candidate=False)

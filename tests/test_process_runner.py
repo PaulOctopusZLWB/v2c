@@ -47,7 +47,7 @@ def test_preview_matches_claim_order_when_priority_and_availability_disagree(tmp
 
 def test_process_once_runs_vad_then_asr_tasks(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -80,7 +80,7 @@ def test_process_once_runs_vad_then_asr_tasks(tmp_path: Path) -> None:
 
 def test_process_once_reclaims_expired_task_before_claiming(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     task_id = next(row["task_id"] for row in process_status_rows(config=config) if row["task_type"] == "vad")
@@ -118,7 +118,7 @@ def test_process_once_reclaims_expired_task_before_claiming(tmp_path: Path) -> N
 
 def test_process_once_enqueues_downstream_tasks_with_configured_max_retries(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", task_max_retries=2)
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -140,7 +140,7 @@ def test_process_once_enqueues_downstream_tasks_with_configured_max_retries(tmp_
 
 def test_process_once_runs_archive_task(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    source_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    source_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_voice_wav(source_path)
     config = AppConfig(
         data_dir=tmp_path / "data",
@@ -187,7 +187,7 @@ def test_process_once_runs_archive_task(tmp_path: Path) -> None:
 
 def test_process_once_archive_task_uses_configured_command_backend(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    source_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    source_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_voice_wav(source_path)
     archive_root = tmp_path / "nas" / "PersonalContext"
     marker = tmp_path / "archive-command-ran.txt"
@@ -312,7 +312,7 @@ def test_terminal_failure_completing_fanin_still_enqueues_downstream(tmp_path: P
 
     source = tmp_path / "source"
     source.mkdir()
-    wav = source / "TX02_MIC001_20870510_173550_orig.wav"
+    wav = source / "TX02_MIC001_20250610_173550_orig.wav"
     with wave.open(str(wav), "wb") as handle:
         handle.setnchannels(1)
         handle.setsampwidth(2)

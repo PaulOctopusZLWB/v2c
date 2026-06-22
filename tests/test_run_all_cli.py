@@ -13,7 +13,7 @@ from personal_context_node.storage.sqlite import connect, fetch_all
 
 def test_run_all_cli_imports_processes_and_publishes_session_transcript(tmp_path: Path) -> None:
     source_dir = tmp_path / "NO NAME"
-    _write_voice_wav(source_dir / "TX02_MIC001_20870510_173550_orig.wav", seconds=1.2)
+    _write_voice_wav(source_dir / "TX02_MIC001_20250610_173550_orig.wav", seconds=1.2)
     data_dir = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"

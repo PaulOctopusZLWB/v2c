@@ -36,7 +36,7 @@ class RecordingSessionLLM:
 
 def test_asr_success_enqueues_session_derive_once(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     # auto-chain ON: this regression covers session_derive auto-enqueuing summarize_session.
     config = AppConfig(
         data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True
@@ -206,7 +206,7 @@ def test_process_once_session_derive_uses_configured_gap_minutes(tmp_path: Path)
 
 def test_summarize_session_success_fans_in_to_daily_generate(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     # auto-chain ON: this regression covers the full asr->...->daily_generate auto fan-in.
     config = AppConfig(
         data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True
@@ -244,7 +244,7 @@ def test_session_derive_does_not_enqueue_summarize_when_auto_off(tmp_path: Path)
     # With pipeline_auto_viewpoints=False (the default), the pipeline STOPS after
     # session_derive: a completed session_derive must NOT auto-enqueue summarize_session.
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -304,7 +304,7 @@ def test_manual_summarize_does_not_enqueue_daily_when_auto_off(tmp_path: Path) -
 
 def test_process_once_session_summary_uses_injected_llm_adapter(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     # auto-chain ON so session_derive enqueues the summarize_session this test then runs.
     config = AppConfig(
         data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", pipeline_auto_viewpoints=True

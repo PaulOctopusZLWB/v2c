@@ -87,11 +87,11 @@ print(json.dumps({{
                 "segment_id": "seg_1",
                 "evidence_id": "ev_1",
                 "text": "音频必须本地处理。",
-                "local_raw_path": "/private/audio/TX02_MIC001_20870510_173550_orig.wav",
+                "local_raw_path": "/private/audio/TX02_MIC001_20250610_173550_orig.wav",
                 "raw_audio_path": "/private/audio/raw.wav",
                 "audio_path": "/private/audio/work.wav",
                 "metadata": {
-                    "source_path": "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav",
+                    "source_path": "/Volumes/DJI/TX02_MIC001_20250610_173550_orig.wav",
                     "nested": {"work_audio_path": "/private/work/chk_1.wav"},
                     "note": "copied from /private/audio/hidden.wav",
                 },
@@ -224,10 +224,10 @@ print(json.dumps({{
                 "end_ms": 1000,
                 "text": "继续本地 ASR。",
                 "evidence_id": "ev_1",
-                "local_raw_path": "/private/audio/TX02_MIC001_20870510_173550_orig.wav",
+                "local_raw_path": "/private/audio/TX02_MIC001_20250610_173550_orig.wav",
                 "metadata": {
                     "raw_audio_path": "/private/audio/raw.wav",
-                    "nested": {"source_path": "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav"},
+                    "nested": {"source_path": "/Volumes/DJI/TX02_MIC001_20250610_173550_orig.wav"},
                 },
             }
         ],

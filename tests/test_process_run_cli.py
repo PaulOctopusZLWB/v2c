@@ -17,7 +17,7 @@ from personal_context_node.storage.sqlite import connect, fetch_all
 
 def test_process_run_cli_advances_vad_task(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -53,7 +53,7 @@ def test_process_run_cli_advances_vad_task(tmp_path: Path) -> None:
 
 def test_process_run_group_cli_advances_vad_task(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -80,7 +80,7 @@ def test_process_run_group_cli_advances_vad_task(tmp_path: Path) -> None:
 
 def test_process_run_group_cli_accepts_explicit_mock_flag(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -108,7 +108,7 @@ def test_process_run_group_cli_accepts_explicit_mock_flag(tmp_path: Path) -> Non
 
 def test_process_run_group_cli_dry_run_reports_next_task_without_mutating_state(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -145,7 +145,7 @@ def test_process_run_group_cli_dry_run_reports_next_task_without_mutating_state(
 
 def test_process_run_group_mock_flag_overrides_vad_asr_and_llm_config(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"
@@ -204,7 +204,7 @@ auto_viewpoints = true
 
 def test_process_run_cli_uses_command_vad_backend(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     vad_script = tmp_path / "fake_vad.py"
@@ -240,7 +240,7 @@ print(json.dumps({"ranges": [{"start_ms": 0, "end_ms": 500}]}))
 
 def test_process_run_group_cli_uses_command_llm_from_config_for_session_summary(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     # auto-chain ON: prep runs session_derive (which must enqueue summarize_session) and the

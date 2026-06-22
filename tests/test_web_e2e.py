@@ -12,7 +12,7 @@ from personal_context_node.web.app import create_app
 
 def test_import_wait_then_review_then_status_smoke(tmp_path: Path) -> None:
     source = tmp_path / "NO NAME"
-    _write_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", vad_backend="mock", asr_backend="mock", llm_backend="mock")
     client = TestClient(create_app(config=config))
 

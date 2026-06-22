@@ -250,7 +250,7 @@ def test_process_status_rows_include_daily_summary_model_version(tmp_path) -> No
             ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                "sum_daily_20870510",
+                "sum_daily_20250610",
                 "daily",
                 "date_key",
                 "2087-05-10",

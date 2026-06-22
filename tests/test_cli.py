@@ -36,7 +36,7 @@ def _write_tone_wav(path: Path, *, seconds: float, amplitude: int) -> None:
 
 def test_run_first_milestone_cli_writes_daily_note(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
 
@@ -61,7 +61,7 @@ def test_run_first_milestone_cli_writes_daily_note(tmp_path: Path) -> None:
 
 def test_run_first_milestone_cli_uses_config_path(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "configured-data"
     vault = tmp_path / "configured-vault"
     config_path = tmp_path / "config" / "local.toml"
@@ -88,7 +88,7 @@ def test_run_first_milestone_cli_uses_config_path(tmp_path: Path) -> None:
 
 def test_preprocess_cli_creates_audio_chunks(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     runner = CliRunner()
@@ -129,7 +129,7 @@ def test_preprocess_cli_creates_audio_chunks(tmp_path: Path) -> None:
 
 def test_preprocess_cli_uses_command_vad_backend(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     vad_script = tmp_path / "fake_vad.py"
@@ -169,7 +169,7 @@ print(json.dumps({"ranges": [{"start_ms": 0, "end_ms": 500}]}))
 
 def test_preprocess_cli_uses_vad_settings_from_config(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tone_wav(source / "TX02_MIC001_20870510_173550_orig.wav", seconds=0.30, amplitude=10_000)
+    _write_tone_wav(source / "TX02_MIC001_20250610_173550_orig.wav", seconds=0.30, amplitude=10_000)
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"
@@ -214,7 +214,7 @@ chunk_overlap_ms = 0
 
 def test_preprocess_cli_uses_chunk_overlap_from_config(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tone_wav(source / "TX02_MIC001_20870510_173550_orig.wav", seconds=0.90, amplitude=10_000)
+    _write_tone_wav(source / "TX02_MIC001_20250610_173550_orig.wav", seconds=0.90, amplitude=10_000)
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"
@@ -258,7 +258,7 @@ chunk_overlap_ms = 100
 
 def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     runner = CliRunner()
@@ -301,7 +301,7 @@ def test_transcribe_cli_processes_pending_chunks(tmp_path: Path) -> None:
 
 def test_transcribe_cli_default_mock_text_comes_from_fixture(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     fixture = json.loads(Path("src/personal_context_node/fixtures/mock_asr_transcript.json").read_text(encoding="utf-8"))
@@ -339,7 +339,7 @@ def test_transcribe_cli_default_mock_text_comes_from_fixture(tmp_path: Path) -> 
 
 def test_transcribe_cli_uses_asr_settings_from_config(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"

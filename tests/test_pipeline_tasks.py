@@ -12,7 +12,7 @@ from personal_context_node.tasks import process_status_rows
 
 def test_import_enqueues_vad_tasks_for_new_audio(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)

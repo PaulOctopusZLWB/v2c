@@ -18,13 +18,13 @@ from personal_context_node.storage.sqlite import connect, fetch_all
 
 def test_ingest_scan_cli_lists_wav_candidates(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
 
     result = CliRunner().invoke(app, ["ingest-scan", "--source-dir", str(source)])
 
     assert result.exit_code == 0, result.output
     assert "files_found=1" in result.output
-    assert "TX02_MIC001_20870510_173550_orig.wav" in result.output
+    assert "TX02_MIC001_20250610_173550_orig.wav" in result.output
 
 
 def test_ingest_scan_cli_lists_uppercase_wav_candidates(tmp_path: Path) -> None:
@@ -40,18 +40,18 @@ def test_ingest_scan_cli_lists_uppercase_wav_candidates(tmp_path: Path) -> None:
 
 def test_ingest_scan_group_cli_lists_wav_candidates(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
 
     result = CliRunner().invoke(app, ["ingest", "scan", "--source-dir", str(source)])
 
     assert result.exit_code == 0, result.output
     assert "files_found=1" in result.output
-    assert "TX02_MIC001_20870510_173550_orig.wav" in result.output
+    assert "TX02_MIC001_20250610_173550_orig.wav" in result.output
 
 
 def test_ingest_import_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
     result = CliRunner().invoke(
@@ -75,7 +75,7 @@ def test_ingest_import_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> Non
         tasks = fetch_all(conn, "select task_type, target_type, status from tasks")
     finally:
         conn.close()
-    assert audio_files == [{"source_path": str(source / "TX02_MIC001_20870510_173550_orig.wav"), "status": "imported"}]
+    assert audio_files == [{"source_path": str(source / "TX02_MIC001_20250610_173550_orig.wav"), "status": "imported"}]
     assert tasks == [{"task_type": "vad", "target_type": "audio_file", "status": "pending"}]
 
 
@@ -87,7 +87,7 @@ def test_directory_import_stamps_vad_task_with_recorded_date_priority(tmp_path: 
     from datetime import date
 
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")  # parses to recorded 2025-06-10
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")  # parses to recorded 2025-06-10
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
     assert import_audio_files(config=config, source_dir=source).imported_files == 1
@@ -104,7 +104,7 @@ def test_directory_import_stamps_vad_task_with_recorded_date_priority(tmp_path: 
 
 def test_ingest_import_marks_local_raw_audio_read_only(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
     result = import_audio_files(config=config, source_dir=source)
@@ -121,7 +121,7 @@ def test_ingest_import_marks_local_raw_audio_read_only(tmp_path: Path) -> None:
 
 def test_ingest_import_group_cli_imports_audio_and_enqueues_vad(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
     result = CliRunner().invoke(
@@ -146,13 +146,13 @@ def test_ingest_import_group_cli_imports_audio_and_enqueues_vad(tmp_path: Path) 
         tasks = fetch_all(conn, "select task_type, target_type, status from tasks")
     finally:
         conn.close()
-    assert audio_files == [{"source_path": str(source / "TX02_MIC001_20870510_173550_orig.wav"), "status": "imported"}]
+    assert audio_files == [{"source_path": str(source / "TX02_MIC001_20250610_173550_orig.wav"), "status": "imported"}]
     assert tasks == [{"task_type": "vad", "target_type": "audio_file", "status": "pending"}]
 
 
 def test_ingest_import_group_cli_uses_configured_dji_device_root(tmp_path: Path) -> None:
     source = tmp_path / "mounted_dji"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data_dir = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"
@@ -185,7 +185,7 @@ stable_seconds = 0
     assert audio_files == [
         {
             "source_device": "DJI Mic 3",
-            "source_path": str(source / "TX02_MIC001_20870510_173550_orig.wav"),
+            "source_path": str(source / "TX02_MIC001_20250610_173550_orig.wav"),
             "local_raw_path": str(raw_path),
             "status": "imported",
         }
@@ -196,8 +196,8 @@ stable_seconds = 0
 def test_ingest_import_group_cli_auto_discovers_no_name_volume(tmp_path: Path) -> None:
     volumes = tmp_path / "Volumes"
     source = volumes / "NO NAME"
-    nested_audio = source / "TX_MIC001_20870510_173550" / "TX02_MIC001_20870510_173550_orig.wav"
-    trash_audio = source / ".Trashes" / "501" / "TX02_MIC999_20870510_173550_orig.wav"
+    nested_audio = source / "TX_MIC001_20250610_173550" / "TX02_MIC001_20250610_173550_orig.wav"
+    trash_audio = source / ".Trashes" / "501" / "TX02_MIC999_20250610_173550_orig.wav"
     _write_tiny_wav(nested_audio)
     _write_tiny_wav(trash_audio)
     data_dir = tmp_path / "data"
@@ -234,7 +234,7 @@ stable_seconds = 0
 
 def test_ingest_import_group_cli_uses_configured_audio_globs(tmp_path: Path) -> None:
     source = tmp_path / "mounted_dji"
-    nested_audio = source / "REC" / "TX02_MIC001_20870510_173550_orig.wav"
+    nested_audio = source / "REC" / "TX02_MIC001_20250610_173550_orig.wav"
     _write_tiny_wav(nested_audio)
     data_dir = tmp_path / "data"
     vault = tmp_path / "vault"
@@ -270,7 +270,7 @@ stable_seconds = 0
 
 def test_ingest_import_group_cli_skips_disabled_dji_device(tmp_path: Path) -> None:
     source = tmp_path / "DJI_MIC"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     data_dir = tmp_path / "data"
     vault = tmp_path / "vault"
     config_path = tmp_path / "config" / "local.toml"
@@ -304,7 +304,7 @@ stable_seconds = 0
 
 def test_ingest_import_records_source_file_metadata(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    audio_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    audio_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_tiny_wav(audio_path)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
@@ -333,7 +333,7 @@ def test_ingest_import_records_source_file_metadata(tmp_path: Path) -> None:
 
 def test_ingest_import_identity_includes_source_size_mtime_and_hash(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    audio_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    audio_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_tiny_wav(audio_path)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
@@ -370,7 +370,7 @@ def test_ingest_import_identity_includes_source_size_mtime_and_hash(tmp_path: Pa
 
 def test_ingest_fix_metadata_rewrites_bwf_fields(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    audio_path = source / "TX02_MIC013_20870511_190910_orig.wav"
+    audio_path = source / "TX02_MIC013_20250611_190910_orig.wav"
     _write_test_wav_with_bwf_metadata(audio_path)
 
     result = CliRunner().invoke(
@@ -394,7 +394,7 @@ def test_ingest_fix_metadata_rewrites_bwf_fields(tmp_path: Path) -> None:
 
 def test_ingest_import_repairs_copied_raw_metadata(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    source_audio = source / "TX02_MIC013_20870511_190910_orig.wav"
+    source_audio = source / "TX02_MIC013_20250611_190910_orig.wav"
     _write_test_wav_with_bwf_metadata(source_audio)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
@@ -412,7 +412,7 @@ def test_ingest_import_repairs_copied_raw_metadata(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    local_path = config.raw_audio_dir / "2025-06-11" / "TX02_MIC013_20870511_190910_orig.wav"
+    local_path = config.raw_audio_dir / "2025-06-11" / "TX02_MIC013_20250611_190910_orig.wav"
     bext_date, bext_time, ixml_date = _read_wav_metadata_tags(local_path)
     conn = connect(config.database_path)
     try:
@@ -427,7 +427,7 @@ def test_ingest_import_repairs_copied_raw_metadata(tmp_path: Path) -> None:
 
 def test_ingest_import_does_not_duplicate_repaired_source_snapshot(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    source_audio = source / "TX02_MIC013_20870511_190910_orig.wav"
+    source_audio = source / "TX02_MIC013_20250611_190910_orig.wav"
     _write_test_wav_with_bwf_metadata(source_audio)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
@@ -446,7 +446,7 @@ def test_ingest_import_does_not_duplicate_repaired_source_snapshot(tmp_path: Pat
 
 def test_ingest_import_accepts_ieee_float_wav_duration(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    source_audio = source / "TX02_MIC013_20870511_190910_orig.wav"
+    source_audio = source / "TX02_MIC013_20250611_190910_orig.wav"
     _write_test_wav_with_bwf_metadata(source_audio, audio_format=3)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
 
@@ -473,13 +473,13 @@ def test_ingest_import_accepts_ieee_float_wav_duration(tmp_path: Path) -> None:
 
 
 def test_recorded_at_parsing_rewrites_broken_2087_timestamp() -> None:
-    assert ingest_module._recorded_at_from_name(Path("TX02_MIC013_20870511_190910_orig.wav")) == "2025-06-11T19:09:10+08:00"
+    assert ingest_module._recorded_at_from_name(Path("TX02_MIC013_20250611_190910_orig.wav")) == "2025-06-11T19:09:10+08:00"
     assert ingest_module._recorded_at_from_name(Path("TX01_MIC001_20260607_155539_orig.wav")) == "2026-06-07T15:55:39+08:00"
 
 
 def test_ingest_import_migrates_existing_database_for_source_metadata(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
-    audio_path = source / "TX02_MIC001_20870510_173550_orig.wav"
+    audio_path = source / "TX02_MIC001_20250610_173550_orig.wav"
     _write_tiny_wav(audio_path)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
@@ -528,7 +528,7 @@ def test_ingest_import_migrates_existing_database_for_source_metadata(tmp_path: 
 
 def test_ingest_import_skips_unstable_audio_candidate(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "sample_data"
-    _write_tiny_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_tiny_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     monkeypatch.setattr(ingest_module, "is_file_stable", lambda path: False, raising=False)
 

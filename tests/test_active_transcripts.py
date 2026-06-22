@@ -15,7 +15,7 @@ from personal_context_node.tasks import rerun_task
 
 def test_session_derivation_uses_latest_active_asr_segments(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -41,7 +41,7 @@ def test_session_derivation_uses_latest_active_asr_segments(tmp_path: Path) -> N
 
 def test_explicit_asr_rerun_writes_new_active_segments_without_deleting_history(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150)
@@ -81,7 +81,7 @@ def test_explicit_asr_rerun_writes_new_active_segments_without_deleting_history(
 
 def test_asr_rerun_reopens_session_derivation_for_affected_day(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
 
@@ -131,7 +131,7 @@ def test_multichunk_file_keeps_all_chunks_active_and_rerun_regenerates_all(tmp_p
     # per-chunk ASR task must not drop sibling chunks. A file-level ASR rerun
     # regenerates every chunk (§36.2 `--target aud_...`).
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav", seconds=2.0)
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav", seconds=2.0)
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=2000, min_speech_ms=150)
@@ -179,7 +179,7 @@ def test_asr_rerun_keeps_session_id_stable(tmp_path: Path) -> None:
     # (hence note filename and [[ses_*]] refs) must NOT drift — anchored on the stable
     # first chunk.
     source = tmp_path / "source"
-    _write_voice_wav(source / "TX02_MIC001_20870510_173550_orig.wav")
+    _write_voice_wav(source / "TX02_MIC001_20250610_173550_orig.wav")
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     run_first_milestone(config=config, source_dir=source, confirm_first_candidate=False)
     vad = EnergyVadAdapter(frame_ms=50, threshold=0.05, merge_gap_ms=100, min_speech_ms=150)

@@ -14,8 +14,8 @@ def _wav(path: Path) -> None:
 def test_detects_mounted_device_volume_and_counts_new_files(tmp_path: Path) -> None:
     volumes = tmp_path / "Volumes"
     device_root = volumes / "NO NAME"
-    _wav(device_root / "TX01_MIC001_20870510_090000_orig.wav")
-    _wav(device_root / "TX01_MIC002_20870510_091000_orig.wav")
+    _wav(device_root / "TX01_MIC001_20250610_090000_orig.wav")
+    _wav(device_root / "TX01_MIC002_20250610_091000_orig.wav")
     config = AppConfig(
         data_dir=tmp_path / "data",
         obsidian_vault=tmp_path / "vault",

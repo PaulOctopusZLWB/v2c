@@ -195,7 +195,7 @@ def test_ingest_in_diarize_mode_enqueues_transcribe_diarize_not_vad(tmp_path: Pa
     device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
     source = SourceAudioFile(
         device=device,
-        source_path=device.root_path / "TX02_MIC001_20870510_173550_orig.wav",
+        source_path=device.root_path / "TX02_MIC001_20250610_173550_orig.wav",
         size_bytes=1024,
         mtime_ns=123456789,
     )
@@ -241,7 +241,7 @@ def test_ingest_in_diarize_mode_keeps_date_priority(tmp_path: Path) -> None:
     device = MountedDevice(device_id="dev_dji", label="DJI Mic 3", root_path=tmp_path / "mounted_dji")
     source = SourceAudioFile(
         device=device,
-        source_path=device.root_path / "TX02_MIC001_20870510_173550_orig.wav",
+        source_path=device.root_path / "TX02_MIC001_20250610_173550_orig.wav",
         size_bytes=1024,
         mtime_ns=123456789,
     )

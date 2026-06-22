@@ -224,8 +224,8 @@ def test_generate_daily_context_sends_text_only_and_persists_candidates(tmp_path
             (
                 "aud_test",
                 "DJI Mic 3",
-                "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav",
-                "/private/raw/TX02_MIC001_20870510_173550_orig.wav",
+                "/Volumes/DJI/TX02_MIC001_20250610_173550_orig.wav",
+                "/private/raw/TX02_MIC001_20250610_173550_orig.wav",
                 "sha256:test",
                 1000,
                 "2087-05-10T00:00:00+08:00",
@@ -734,8 +734,8 @@ def _insert_transcript(database_path: Path) -> None:
             (
                 "aud_test",
                 "DJI Mic 3",
-                "/Volumes/DJI/TX02_MIC001_20870510_173550_orig.wav",
-                "/private/raw/TX02_MIC001_20870510_173550_orig.wav",
+                "/Volumes/DJI/TX02_MIC001_20250610_173550_orig.wav",
+                "/private/raw/TX02_MIC001_20250610_173550_orig.wav",
                 "sha256:test",
                 1000,
                 "2087-05-10T00:00:00+08:00",

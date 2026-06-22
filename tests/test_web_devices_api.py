@@ -12,7 +12,7 @@ def test_devices_endpoint_lists_detected_volume(tmp_path: Path) -> None:
     volumes = tmp_path / "Volumes"
     root = volumes / "NO NAME"
     root.mkdir(parents=True)
-    (root / "TX01_MIC001_20870510_090000_orig.wav").write_bytes(b"RIFF0000WAVE")
+    (root / "TX01_MIC001_20250610_090000_orig.wav").write_bytes(b"RIFF0000WAVE")
     config = AppConfig(
         data_dir=tmp_path / "data",
         obsidian_vault=tmp_path / "vault",
