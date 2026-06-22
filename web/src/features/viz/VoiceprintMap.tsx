@@ -532,23 +532,30 @@ export function VoiceprintMap({
     canvasRef.current?.releasePointerCapture?.(e.pointerId);
   }, [pointsInRect]);
 
-  const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    // Keep the wheel zooming the map instead of scrolling the page.
-    e.preventDefault();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    const view = viewRef.current;
-    const factor = Math.exp(-e.deltaY * 0.0015);
-    const next = Math.min(20, Math.max(0.4, view.scale * factor));
-    const k = next / view.scale;
-    // zoom toward the cursor: keep the point under the cursor fixed.
-    view.tx = cx - (cx - view.tx) * k;
-    view.ty = cy - (cy - view.ty) * k;
-    view.scale = next;
-    setHover(null);
-    draw();
+  // Wheel = zoom the map ONLY. React's onWheel is registered passive (preventDefault is a no-op,
+  // so the page/column also scrolled — the "four meanings" bug), so bind a NATIVE non-passive
+  // listener that can actually preventDefault and stop the scroll from bubbling.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const view = viewRef.current;
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      const next = Math.min(20, Math.max(0.4, view.scale * factor));
+      const k = next / view.scale;
+      // zoom toward the cursor: keep the point under the cursor fixed.
+      view.tx = cx - (cx - view.tx) * k;
+      view.ty = cy - (cy - view.ty) * k;
+      view.scale = next;
+      setHover(null);
+      draw();
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
   }, [draw]);
 
   const resetView = useCallback(() => {
@@ -700,7 +707,6 @@ export function VoiceprintMap({
           onPointerDown={onPointerDown}
           onPointerUp={endDrag}
           onPointerLeave={(e) => { endDrag(e); setHover(null); }}
-          onWheel={onWheel}
         />
 
         {loading ? (

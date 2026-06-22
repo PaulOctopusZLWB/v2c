@@ -616,11 +616,28 @@
 .speakers-people { display: grid; gap: var(--s3); align-content: start; }
 /* Let the hero map breathe with a taller stage. */
 .speakers-map .vmap-stage { min-height: 460px; }
-/* Fix ask-B (overlong right column): in the 3-col layout the people/cluster column is its OWN
-   scroll owner, bounded to the viewport, so the card frame never runs far past the map. Gated to
-   the wide layout — the <1200 stacked column keeps the page as the natural scroll owner. */
+/* ONE scroll model (kills the nested "三下巴"): the tab fills the viewport and does NOT scroll;
+   toolbar + stepper are fixed; the 3-col body fills the rest and EACH column scrolls on its own.
+   The map column never scrolls — the wheel there only zooms the canvas. Inner list caps are lifted
+   so the column's single scroll owns everything. Gated to the wide layout; <1200 stays a normal
+   single-column page scroll. */
 @media (min-width: 1201px) {
-  .speakers-main-proj .speakers-people { max-height: calc(100vh - 240px); overflow-y: auto; scrollbar-gutter: stable; }
+  .tab-page.single.speakers-layout { overflow: hidden; display: flex; flex-direction: column; }
+  .speakers-toolbar, .voiceprint-workflow, .speakers-analysis { flex: none; }
+  /* Bound the single grid row to the flex height and stretch the columns into it, so each column's
+     overflow-y can actually scroll (an auto row + align-items:start let the column grow to content). */
+  .speakers-main.speakers-main-proj { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .speakers-main-proj > .speakers-proj-rail,
+  .speakers-main-proj > .speakers-people { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  /* Map fills its column (toolbar fixed + stage flexes) — never scrolls, never clips. */
+  .speakers-main-proj > .speakers-map { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .speakers-main-proj > .speakers-map > .voiceprint-map { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+  .speakers-main-proj > .speakers-map .vmap-stage { min-height: 0; }
+  .speakers-analysis[open] .speakers-analysis-body { max-height: 45vh; overflow-y: auto; }
+  /* Lift inner-list scrolls so they don't stack inside the column's single scroll. */
+  .speakers-proj-rail .scope-list,
+  .speakers-people .people-list,
+  .speakers-people .people-nonspeaker-list { max-height: none; overflow: visible; }
 }
 /* Below ~1200 the 3-col collapses to one stacked column (single scroll owner). */
 @media (max-width: 1200px) {
