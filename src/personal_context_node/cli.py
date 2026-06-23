@@ -17,6 +17,7 @@ from personal_context_node.archive import (
 )
 from personal_context_node.archive_adapters import build_archive_adapter
 from personal_context_node.audio_preprocessing import preprocess_imported_audio
+from personal_context_node.codex_agent_batch import import_codex_batch
 from personal_context_node.codex_session_jsonl import parse_codex_session_jsonl
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
@@ -46,6 +47,7 @@ from personal_context_node.pipeline_adapters import build_llm as _domain_build_l
 from personal_context_node.pipeline_adapters import build_vad as _domain_build_vad
 from personal_context_node.process_runner import drain_process_queue, preview_next_process_task, process_once
 from personal_context_node.speaker_review import publish_speaker_review, sync_speaker_review
+from personal_context_node.supcon_agent_session_index import DEFAULT_SUPCON_VAULT, publish_supcon_agent_session_indexes
 from personal_context_node.system_summary import daily_system_summary
 from personal_context_node.tasks import process_status_rows, rerun_task, retry_task
 from personal_context_node.transcription import transcribe_pending_chunks
@@ -1017,6 +1019,75 @@ def agent_import_codex_group(
                 f"turns_imported={result.turns_imported}",
                 f"tool_events_imported={result.tool_events_imported}",
                 f"evidence_refs_created={result.evidence_refs_created}",
+            ]
+        )
+    )
+
+
+@agent_app.command(name="import-codex-batch")
+def agent_import_codex_batch_group(
+    jsonl_paths: list[Path] | None = typer.Option(
+        None,
+        "--jsonl",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Codex session JSONL path. May be repeated.",
+    ),
+    jsonl_dir: Path | None = typer.Option(
+        None,
+        "--jsonl-dir",
+        exists=True,
+        file_okay=False,
+        readable=True,
+        help="Directory containing Codex session JSONL files.",
+    ),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    supcon_vault: Path = typer.Option(
+        DEFAULT_SUPCON_VAULT,
+        "--supcon-vault",
+        help="Supcon Obsidian vault path for Codex work-session index notes.",
+    ),
+    write_index: bool = typer.Option(
+        True,
+        "--index/--no-index",
+        help="Write Supcon Codex 工作会话 index notes for imported session dates.",
+    ),
+) -> None:
+    jsonl_paths = jsonl_paths or []
+    if not jsonl_paths and jsonl_dir is None:
+        raise typer.BadParameter("provide at least one --jsonl or --jsonl-dir")
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    try:
+        result = import_codex_batch(
+            config=config,
+            jsonl_paths=jsonl_paths,
+            jsonl_dirs=[jsonl_dir] if jsonl_dir is not None else [],
+        )
+        index_paths = (
+            publish_supcon_agent_session_indexes(config=config, days=result.index_days, supcon_vault=supcon_vault)
+            if write_index
+            else []
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        " ".join(
+            [
+                f"files_found={result.files_found}",
+                f"sessions_imported={result.sessions_imported}",
+                f"sessions_skipped={result.sessions_skipped}",
+                f"turns_imported={result.turns_imported}",
+                f"tool_events_imported={result.tool_events_imported}",
+                f"evidence_refs_created={result.evidence_refs_created}",
+                f"index_days={','.join(result.index_days)}",
+                f"index_notes_written={len(index_paths)}",
             ]
         )
     )
