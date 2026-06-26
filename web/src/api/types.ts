@@ -351,6 +351,43 @@ export interface ProjectionRequest {
   max_points?: number;
 }
 
+export interface NeighborCorrectionGroup {
+  from_person_id: string | null;
+  from_person_label: string | null;
+  to_person_id: string | null;
+  to_person_label: string | null;
+  count: number;
+  segment_ids: string[];
+}
+
+export interface NeighborCorrectionItem {
+  segment_id: string;
+  from_person_id: string | null;
+  from_person_label: string | null;
+  to_person_id: string | null;
+  to_person_label: string | null;
+  neighbor_count: number;
+  majority_count: number;
+  confidence: number;
+}
+
+export interface NeighborCorrectionPreview {
+  total: number;
+  total_before_cap?: number;
+  changed: number;
+  skipped_manual: number;
+  groups: NeighborCorrectionGroup[];
+  corrections: NeighborCorrectionItem[];
+  params?: {
+    k: number;
+    min_neighbours: number;
+    majority_ratio: number;
+    similarity_floor: number;
+    max_points: number;
+  };
+  applied?: number;
+}
+
 /** A person enriched with enrollment + attribution state (People panel). */
 export interface PersonRow {
   person_id: string;

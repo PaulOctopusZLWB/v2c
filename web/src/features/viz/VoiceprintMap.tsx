@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
-import type { PersonRow, ProjectionPoint, ProjectionRequest } from "../../api/types";
+import type { NeighborCorrectionPreview, PersonRow, ProjectionPoint, ProjectionRequest } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
 import { emotionColor, emotionMeta } from "../../lib/emotionColors";
 import { Select } from "../../components/ui/Select";
@@ -57,6 +57,19 @@ function keyColor(key: string): string {
   return key === UNASSIGNED_KEY ? UNASSIGNED_COLOR : speakerColor(key);
 }
 
+function correctionPersonLabel(label: string | null, id: string | null): string {
+  return label || id || "未识别";
+}
+
+function correctionSummary(preview: NeighborCorrectionPreview): string {
+  const lines = preview.groups.slice(0, 6).map((g) => (
+    `${correctionPersonLabel(g.from_person_label, g.from_person_id)} -> ${correctionPersonLabel(g.to_person_label, g.to_person_id)}: ${g.count}`
+  ));
+  const remaining = preview.groups.length - lines.length;
+  if (remaining > 0) lines.push(`还有 ${remaining} 组`);
+  return lines.join("\n");
+}
+
 interface View {
   scale: number;
   tx: number;
@@ -80,6 +93,9 @@ export function VoiceprintMap({
   onPlaybackError,
   people,
   onLabel,
+  onClearAttributions,
+  onPreviewNeighborCorrection,
+  onApplyNeighborCorrection,
   onChanged,
   sessionExcludedPersonIds
 }: {
@@ -96,6 +112,12 @@ export function VoiceprintMap({
   people?: PersonRow[];
   /** Commit the selected segments to a person; resolve to refetch colours. */
   onLabel?: (personId: string, segmentIds: string[]) => Promise<unknown> | void;
+  /** Clear selected person attributions back to 未识别 without deleting the person. */
+  onClearAttributions?: (segmentIds: string[]) => Promise<{ cleared?: number } | unknown> | void;
+  /** Preview automatic neighbour-based correction before applying it. */
+  onPreviewNeighborCorrection?: (request: ProjectionRequest) => Promise<NeighborCorrectionPreview>;
+  /** Apply automatic neighbour-based correction after user confirmation. */
+  onApplyNeighborCorrection?: (request: ProjectionRequest) => Promise<NeighborCorrectionPreview>;
   /** Notify the parent after a successful label (e.g. to reload the People panel). */
   onChanged?: () => void;
   /** Person ids marked absent/excluded for the currently inspected single session. */
@@ -107,6 +129,9 @@ export function VoiceprintMap({
   const [error, setError] = useState<string | null>(null);
   // Subsampling note from the last result (the scope had more points than max_points).
   const [capped, setCapped] = useState<{ n: number; total: number } | null>(null);
+  const [clearingKey, setClearingKey] = useState<string | null>(null);
+  const [correcting, setCorrecting] = useState(false);
+  const [correctionNote, setCorrectionNote] = useState<string | null>(null);
   // Keep onResult out of the fetch effect's deps (it may change identity each render).
   const onResultRef = useRef(onResult);
   useEffect(() => { onResultRef.current = onResult; }, [onResult]);
@@ -115,6 +140,20 @@ export function VoiceprintMap({
   const reportState = useCallback((state: VoiceprintMapState) => {
     onStateRef.current?.(state);
   }, []);
+
+  const refetchProjection = useCallback(async () => {
+    if (!request) return null;
+    const res = await api.projection(request);
+    const pts = res.points ?? [];
+    const pointCount = res.n ?? pts.length;
+    const total = res.total_in_scope ?? 0;
+    setPoints(pts);
+    setCapped(res.capped ? { n: pointCount, total } : null);
+    onResultRef.current?.({ capped: !!res.capped, n: pointCount, total });
+    if (pts.length === 0) reportState({ status: "empty" });
+    else reportState({ status: "ready", pointCount: pts.length, capped: !!res.capped, total });
+    return res;
+  }, [request, reportState]);
 
   // Colour mode: by person/speaker cluster (default) or by acoustic emotion. In 情绪 mode the
   // per-segment dominant-emotion labels are fetched for the scope and drive both the point
@@ -185,6 +224,7 @@ export function VoiceprintMap({
     setSelectedIds(new Set());
     rectRef.current = null;
     setRect(null);
+    setCorrectionNote(null);
     viewRef.current = { ...IDENTITY };
     if (!request) {
       setPoints(null);
@@ -623,16 +663,63 @@ export function VoiceprintMap({
       await onLabel(labelPersonId, Array.from(selectedIds));
       clearSelection();
       // Refetch the projection so the just-labelled points recolour to the person.
-      if (request) {
-        const res = await api.projection(request);
-        setPoints(res.points ?? []);
-        setCapped(res.capped ? { n: res.n ?? res.points?.length ?? 0, total: res.total_in_scope ?? 0 } : null);
-      }
+      await refetchProjection();
       onChanged?.();
     } finally {
       setLabeling(false);
     }
-  }, [onLabel, labelPersonId, selectedIds, clearSelection, request, onChanged]);
+  }, [onLabel, labelPersonId, selectedIds, clearSelection, refetchProjection, onChanged]);
+
+  const segmentIdsForPersonKey = useCallback((key: string): string[] => {
+    return (points ?? []).filter((p) => clusterKey(p) === key).map((p) => p.segment_id);
+  }, [points]);
+
+  const clearLegendAttributions = useCallback(async (key: string, label: string) => {
+    if (!onClearAttributions) return;
+    const segmentIds = segmentIdsForPersonKey(key);
+    if (segmentIds.length === 0) return;
+    const ok = window.confirm(`取消“${label}”的识别归属？\n将 ${segmentIds.length} 段回到未识别，不会删除人物档案。`);
+    if (!ok) return;
+    setClearingKey(key);
+    setError(null);
+    setCorrectionNote(null);
+    try {
+      await onClearAttributions(segmentIds);
+      if (focusRef.current === key) setFocusKey(null);
+      await refetchProjection();
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取消识别失败");
+    } finally {
+      setClearingKey(null);
+    }
+  }, [onClearAttributions, onChanged, refetchProjection, segmentIdsForPersonKey]);
+
+  const canRunNeighborCorrection = !!request && !!onPreviewNeighborCorrection && !!onApplyNeighborCorrection;
+  const runNeighborCorrection = useCallback(async () => {
+    if (!request || !onPreviewNeighborCorrection || !onApplyNeighborCorrection) return;
+    setCorrecting(true);
+    setError(null);
+    setCorrectionNote(null);
+    try {
+      const preview = await onPreviewNeighborCorrection(request);
+      if (preview.changed === 0) {
+        setCorrectionNote("没有发现可安全纠正的声纹标注。");
+        return;
+      }
+      const summary = correctionSummary(preview) || `将纠正 ${preview.changed} 段`;
+      const ok = window.confirm(`将应用邻域纠偏 ${preview.changed} 段：\n${summary}\n继续？`);
+      if (!ok) return;
+      const result = await onApplyNeighborCorrection(request);
+      setCorrectionNote(`已邻域纠偏 ${result.applied ?? result.changed} 段。`);
+      await refetchProjection();
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "邻域纠偏失败");
+    } finally {
+      setCorrecting(false);
+    }
+  }, [onApplyNeighborCorrection, onChanged, onPreviewNeighborCorrection, refetchProjection, request]);
 
   const n = points?.length ?? 0;
   const showSelectToolbar = canLabel && selectMode;
@@ -689,6 +776,19 @@ export function VoiceprintMap({
               title="框选地图上的点以标注为某人"
             >
               <Icon name="person" /> 框选
+            </button>
+          ) : null}
+          {canRunNeighborCorrection ? (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => void runNeighborCorrection()}
+              disabled={correcting || loading}
+              aria-busy={correcting}
+              title="根据周围近邻预览并统一零星错误识别"
+            >
+              {correcting ? <span className="spinner" aria-hidden /> : <Icon name="viewpoint" />}
+              邻域纠偏
             </button>
           ) : null}
           <button type="button" className="ghost" onClick={resetView} title="重置视图">
@@ -759,6 +859,10 @@ export function VoiceprintMap({
           </div>
         ) : null}
 
+        {correctionNote && !loading ? (
+          <div className="vmap-correction-note" role="status">{correctionNote}</div>
+        ) : null}
+
         {hover && !loading ? (
           <div
             className="vmap-tooltip"
@@ -801,6 +905,12 @@ export function VoiceprintMap({
             {legend.map((c) => {
               const focused = focusKey === c.key;
               const dimmed = focusKey !== null && !focused;
+              const canClearLegend =
+                colorMode === "person" &&
+                c.key !== UNASSIGNED_KEY &&
+                c.key !== SESSION_EXCLUDED_KEY &&
+                !!onClearAttributions;
+              const clearing = clearingKey === c.key;
               const personLegendTitle =
                 colorMode === "person"
                   ? `${c.label}: 全局归属图例,不会自动进入本场总结名单; 点击只是在图上聚焦。`
@@ -808,7 +918,7 @@ export function VoiceprintMap({
                     ? "取消聚焦"
                     : "聚焦此聚类";
               return (
-                <li key={c.key} className="vmap-legend-li" role="listitem">
+                <li key={c.key} className={`vmap-legend-li${canClearLegend ? " has-clear" : ""}`} role="listitem">
                   <button
                     type="button"
                     className={`vmap-legend-item${focused ? " focused" : ""}${dimmed ? " dimmed" : ""}`}
@@ -821,6 +931,19 @@ export function VoiceprintMap({
                     <span className="vmap-legend-label">{c.label}</span>
                     <span className="vmap-legend-count num">{c.count}</span>
                   </button>
+                  {canClearLegend ? (
+                    <button
+                      type="button"
+                      className="vmap-legend-clear"
+                      aria-label={`取消${c.label}的识别`}
+                      title={`取消${c.label}的识别归属`}
+                      disabled={clearingKey !== null}
+                      aria-busy={clearing}
+                      onClick={() => void clearLegendAttributions(c.key, c.label)}
+                    >
+                      {clearing ? <span className="spinner" aria-hidden /> : <Icon name="trash" />}
+                    </button>
+                  ) : null}
                 </li>
               );
             })}

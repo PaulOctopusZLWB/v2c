@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, NeighborCorrectionPreview, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -148,6 +148,12 @@ export const api = {
   people: () => request<{ people: PersonRow[] }>("/api/people"),
   labelSegments: (personId: string, segment_ids: string[]) =>
     request<{ labeled: number }>(`/api/people/${personId}/label-segments`, { method: "POST", body: JSON.stringify({ segment_ids }) }),
+  clearSegmentAttributions: (segment_ids: string[]) =>
+    request<{ cleared: number }>("/api/people/clear-segment-attributions", { method: "POST", body: JSON.stringify({ segment_ids }) }),
+  previewNeighborCorrection: (body: ProjectionRequest) =>
+    request<NeighborCorrectionPreview>("/api/people/neighbor-correction/preview", { method: "POST", body: JSON.stringify(body) }),
+  applyNeighborCorrection: (body: ProjectionRequest) =>
+    request<NeighborCorrectionPreview>("/api/people/neighbor-correction/apply", { method: "POST", body: JSON.stringify(body) }),
   enrollPerson: (personId: string, segment_ids?: string[]) =>
     request<EnrollResult>(`/api/people/${personId}/enroll`, { method: "POST", body: JSON.stringify({ segment_ids }) }),
   suggestPeople: (session_id: string) =>

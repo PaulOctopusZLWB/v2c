@@ -1015,6 +1015,17 @@ export function App() {
                 await api.labelSegments(personId, segmentIds);
                 push(`已标注 ${segmentIds.length} 段`, undefined, "success");
               }}
+              onClearAttributions={async (segmentIds) => {
+                const result = await api.clearSegmentAttributions(segmentIds);
+                push(`已取消识别 ${result.cleared} 段`);
+                return result;
+              }}
+              onPreviewNeighborCorrection={(body) => api.previewNeighborCorrection(body)}
+              onApplyNeighborCorrection={async (body) => {
+                const result = await api.applyNeighborCorrection(body);
+                push(`邻域纠偏 ${result.applied ?? result.changed} 段`);
+                return result;
+              }}
               onChanged={onPeopleChanged}
             />
           </div>

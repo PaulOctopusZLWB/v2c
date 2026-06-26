@@ -121,6 +121,79 @@ describe("VoiceprintMap", () => {
     expect(spkItem.classList.contains("dimmed")).toBe(false);
   });
 
+  it("clears an assigned legend group back to 未识别 after confirmation", async () => {
+    const onClearAttributions = vi.fn().mockResolvedValue({ cleared: 2 });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<VoiceprintMap request={REQ} onClearAttributions={onClearAttributions} />);
+    await screen.findByRole("list", { name: /图例/ });
+
+    await userEvent.click(screen.getByRole("button", { name: /取消李雷的识别/ }));
+
+    await waitFor(() => expect(onClearAttributions).toHaveBeenCalledWith(["seg_1", "seg_2"]));
+  });
+
+  it("previews and applies neighbour correction only after confirmation", async () => {
+    const preview = {
+      total: 4,
+      total_before_cap: 4,
+      changed: 1,
+      skipped_manual: 0,
+      params: { k: 15, min_neighbours: 8, majority_ratio: 0.75, similarity_floor: 0.35, max_points: 4000 },
+      groups: [
+        {
+          from_person_id: "per_b",
+          from_person_label: "Bob",
+          to_person_id: "per_a",
+          to_person_label: "Alice",
+          count: 1,
+          segment_ids: ["seg_2"]
+        }
+      ],
+      corrections: []
+    };
+    const onPreviewNeighborCorrection = vi.fn().mockResolvedValue(preview);
+    const onApplyNeighborCorrection = vi.fn().mockResolvedValue(preview);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <VoiceprintMap
+        request={REQ}
+        onPreviewNeighborCorrection={onPreviewNeighborCorrection}
+        onApplyNeighborCorrection={onApplyNeighborCorrection}
+      />
+    );
+    await screen.findByRole("list", { name: /图例/ });
+
+    await userEvent.click(screen.getByRole("button", { name: /邻域纠偏/ }));
+
+    await waitFor(() => expect(onPreviewNeighborCorrection).toHaveBeenCalledWith(REQ));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("Bob -> Alice: 1"));
+    await waitFor(() => expect(onApplyNeighborCorrection).toHaveBeenCalledWith(REQ));
+  });
+
+  it("reports when neighbour correction preview has no changes", async () => {
+    const onPreviewNeighborCorrection = vi.fn().mockResolvedValue({
+      total: 4,
+      total_before_cap: 4,
+      changed: 0,
+      skipped_manual: 0,
+      params: { k: 15, min_neighbours: 8, majority_ratio: 0.75, similarity_floor: 0.35, max_points: 4000 },
+      groups: [],
+      corrections: []
+    });
+    render(
+      <VoiceprintMap
+        request={REQ}
+        onPreviewNeighborCorrection={onPreviewNeighborCorrection}
+        onApplyNeighborCorrection={vi.fn()}
+      />
+    );
+    await screen.findByRole("list", { name: /图例/ });
+
+    await userEvent.click(screen.getByRole("button", { name: /邻域纠偏/ }));
+
+    expect(await screen.findByText(/没有发现可安全纠正/)).toBeInTheDocument();
+  });
+
   it("renders an error state when the projection request fails", async () => {
     vi.stubGlobal(
       "fetch",

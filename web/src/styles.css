@@ -705,7 +705,12 @@
   line-height: var(--lh-snug);
 }
 .vmap-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s2h); }
-.vmap-legend-li { display: contents; }
+.vmap-legend-li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  max-width: 100%;
+}
 .vmap-legend-item {
   display: inline-flex; align-items: center; gap: var(--s2h);
   background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-pill);
@@ -718,9 +723,40 @@
 .vmap-legend-label { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vmap-legend-count { color: var(--text-dim); font-size: var(--fs-xs); }
 .vmap-legend-item.focused .vmap-legend-count { color: var(--accent); }
+.vmap-legend-clear {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text-dim);
+}
+.vmap-legend-clear:hover:not(:disabled) { color: var(--err); border-color: var(--err); }
+.vmap-legend-clear:disabled { opacity: .55; cursor: progress; }
+.vmap-correction-note {
+  position: absolute;
+  left: var(--s3);
+  bottom: var(--s3);
+  z-index: var(--z-canvas-overlay);
+  max-width: min(420px, calc(100% - var(--s3) * 2));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r1);
+  background: var(--elev);
+  color: var(--text-2);
+  padding: var(--s2) var(--s3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  box-shadow: var(--shadow);
+}
 
 /* 框选 toggle uses the shared .ghost button; mark its on-state like the method toggle */
 .vmap-actions .ghost.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }
+.vmap-actions .ghost[aria-busy="true"] { opacity: .75; }
 
 /* lasso-to-label toolbar: floats over the stage so the projection canvas never resizes. */
 .vmap-select-toolbar {
