@@ -58,8 +58,9 @@ export function Select({
     if (open) place();
   }, [open, place]);
 
-  // Dismiss on outside pointer-down, and on any scroll/resize (a fixed popover would otherwise drift
-  // from its trigger when a scroll container moves).
+  // Dismiss on outside pointer-down, and on unrelated scroll/resize (a fixed popover would otherwise
+  // drift from its trigger when a scroll container moves). Scrolling the portalled menu itself must
+  // not close the menu.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
@@ -67,14 +68,22 @@ export function Select({
       if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       close();
     };
-    const onScrollResize = () => close();
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (
+        target instanceof Node &&
+        (triggerRef.current?.contains(target) || menuRef.current?.contains(target))
+      ) return;
+      close();
+    };
+    const onResize = () => close();
     document.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("scroll", onScrollResize, true);
-    window.addEventListener("resize", onScrollResize);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("scroll", onScrollResize, true);
-      window.removeEventListener("resize", onScrollResize);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
   }, [open, close]);
 

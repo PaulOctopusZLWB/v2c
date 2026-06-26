@@ -1339,13 +1339,13 @@ def mark_noise_segments(
 def global_clusters(*, config: AppConfig, min_size: int = 1) -> list[dict]:
     """List GLOBAL voiceprint clusters (vp_*) across ALL active segments, largest first.
 
-    Each entry carries size, total speech ms, a representative sample (longest segment), and the
+    Each entry carries size, total speech ms, representative samples (longest segments), and the
     cluster's DOMINANT manual person attribution (if any) so the UI can show what is already
     assigned. Unlike the per-day /speakers/clusters, this aggregates cross-file vp_* groups, which
     is what the cluster→person panel assigns against.
 
     Returns ``[{cluster_id, segment_count, total_speech_ms, sample_segment_id, sample_text,
-    person_id, person_label, labeled_count}]``.
+    sample_segments, person_id, person_label, labeled_count}]``.
     """
     conn = connect(config.database_path)
     try:
@@ -1383,7 +1383,32 @@ def global_clusters(*, config: AppConfig, min_size: int = 1) -> list[dict]:
             ) where rn = 1
             """,
         )
+        sample_rows = fetch_all(
+            conn,
+            """
+            select cluster_id, segment_id, text from (
+              select ts.speaker_cluster_id as cluster_id,
+                     ts.segment_id,
+                     ts.text,
+                     row_number() over (
+                       partition by ts.speaker_cluster_id
+                       order by (ts.end_ms - ts.start_ms) desc, ts.segment_id
+                     ) as rn
+              from transcript_segments ts
+              where ts.is_active = 1
+                and ts.speaker_cluster_id like 'vp_%'
+                and coalesce(trim(ts.text), '') != ''
+            ) where rn <= 4
+            order by cluster_id, rn
+            """,
+        )
         dom_by_cluster = {str(r["cluster_id"]): r for r in dom}
+        samples_by_cluster: dict[str, list[dict[str, str]]] = {}
+        for sample in sample_rows:
+            cid = str(sample["cluster_id"])
+            samples_by_cluster.setdefault(cid, []).append(
+                {"segment_id": str(sample["segment_id"]), "text": str(sample["text"])}
+            )
         out: list[dict] = []
         for row in rows:
             cid = str(row["cluster_id"])
@@ -1395,6 +1420,7 @@ def global_clusters(*, config: AppConfig, min_size: int = 1) -> list[dict]:
                     "total_speech_ms": int(row["total_speech_ms"]),
                     "sample_segment_id": row["sample_segment_id"],
                     "sample_text": row["sample_text"],
+                    "sample_segments": samples_by_cluster.get(cid, []),
                     "person_id": (d["person_id"] if d else None),
                     "person_label": (d["person_label"] if d else None),
                     "labeled_count": (int(d["c"]) if d else 0),

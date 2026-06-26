@@ -227,23 +227,22 @@ export function PeoplePanel({
       className="people-panel"
     >
       <p className="people-explainer muted">
-        主路径在「聚类」逐组指认;这里管理名册、清理噪音,并用全局识别补漏剩余片段。
+        主路径在「聚类」逐组指认;这里按需展开名册与补漏工具。
       </p>
-
-      <label className="people-search">
-        <span className="sr-only">搜索人物</span>
-        <input
-          type="search"
-          placeholder="搜索人物"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </label>
 
       {loadError ? <p className="muted" role="alert">{loadError}</p> : null}
 
-      <details className="people-roster" open>
-        <summary>人物 · <span className="num">{speakers.length}</span> 人(点击折叠)</summary>
+      <details className="people-roster">
+        <summary>人物 · <span className="num">{speakers.length}</span> 人</summary>
+        <label className="people-search">
+          <span className="sr-only">搜索人物</span>
+          <input
+            type="search"
+            placeholder="搜索人物"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
         <ul className="people-list" role="list">
         {visiblePeople.map((p) => (
           <li className="person-row" key={p.person_id} role="listitem">
@@ -282,6 +281,12 @@ export function PeoplePanel({
         </ul>
       </details>
 
+      <details className="people-management">
+        <summary>
+          <span>管理工具</span>
+          <span className="muted">新建 / 噪音 / 建议 / 补漏</span>
+        </summary>
+        <div className="people-management-body">
       {/* 非发言人 (噪音/多人/无效): labelable buckets, NOT voiceprint identities — no 登记声纹.
           A one-tap "+ 噪音/多人 类别" seeds the first bucket when none exists yet. */}
       <div className="people-nonspeakers">
@@ -478,6 +483,8 @@ export function PeoplePanel({
           </Button>
         </div>
       </div>
+        </div>
+      </details>
     </InspectorPanel>
   );
 }

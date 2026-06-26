@@ -128,6 +128,11 @@ export interface Settings {
 }
 
 /** One diarization cluster (`spk_NN`) for a day, with its current person mapping + a sample. */
+export interface SpeakerClusterSample {
+  segment_id: string;
+  text: string;
+}
+
 export interface SpeakerCluster {
   speaker_cluster_id: string;
   person_id: string | null;
@@ -136,6 +141,8 @@ export interface SpeakerCluster {
   total_speech_ms: number;
   sample_segment_id: string;
   sample_text: string;
+  /** Global cluster list only: representative segments used as assignment evidence. */
+  sample_segments?: SpeakerClusterSample[];
   /** Global cluster list only: how many of the cluster's segments are manually labeled. */
   labeled_count?: number;
 }

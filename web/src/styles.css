@@ -407,14 +407,16 @@
    on top of the shared .card base (kills the full re-declaration). */
 .voiceprint-map {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--s4);
+  min-height: 0;
   border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
   background:
     radial-gradient(700px 360px at 18% -20%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
     var(--surface);
   border-color: var(--border-strong);
 }
-.vmap-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
+.vmap-toolbar { grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
 
 /* The three map toggles (method / colormode / proj-method) all share the segmented
    pill recipe: pill container, control-h-sm buttons, accent-dim active state. */
@@ -435,6 +437,7 @@
 
 /* the canvas stage: a bordered dark well with an inner glow */
 .vmap-stage {
+  grid-row: 2;
   position: relative;
   isolation: isolate;     /* in-canvas overlays (tooltip/rect/note) stack locally, never leak out */
   contain: paint;
@@ -497,15 +500,21 @@
 /* 框选 toggle uses the shared .ghost button; mark its on-state like the method toggle */
 .vmap-actions .ghost.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }
 
-/* lasso-to-label toolbar: appears under the main toolbar while in select mode */
+/* lasso-to-label toolbar: floats over the stage so the projection canvas never resizes. */
 .vmap-select-toolbar {
+  position: absolute;
+  z-index: var(--z-canvas-overlay);
+  top: var(--s3);
+  left: var(--s3);
+  right: var(--s3);
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--s3);
   padding: var(--s3) var(--s4);
   border: 1px solid var(--border-strong); border-radius: var(--r1);
   background: var(--accent-dim);
-  box-shadow: inset 0 0 0 1px var(--accent-glow);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--accent-glow);
 }
 .vmap-select-count { font-size: var(--fs-sm); color: var(--accent-2); margin-right: auto; }
+.vmap-select-toolbar .ui-select { width: min(220px, 100%); flex: 0 1 220px; }
 .vmap-select-toolbar select { font-size: var(--fs-sm); }
 
 /* the dashed rubber-band rect overlay (canvas-drawn; class kept for any future DOM overlay) */
@@ -529,6 +538,7 @@
 /* ---- People panel ("教一次,处处认得") ---- */
 .people-panel { display: grid; gap: var(--s4); }
 .people-explainer { font-size: var(--fs-sm); line-height: var(--lh-snug); margin: calc(var(--s2) * -1) 0 0; }
+.people-search { display: block; margin: var(--s3) 0; }
 .people-search input { width: 100%; }
 /* Many people: cap the roster height and scroll inside it so the panel stays compact. */
 .people-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
@@ -553,7 +563,8 @@
   border-color: color-mix(in srgb, var(--danger, #f87171) 60%, transparent);
 }
 
-/* .people-add inherits the .toolbar primitive (gap --s3). */
+.people-management-body { display: grid; gap: var(--s4); padding-top: var(--s3); }
+.people-add { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
 .people-add input { flex: 1; min-width: 0; }
 
 .people-suggest { display: grid; gap: var(--s3); border-top: 1px solid var(--border); padding-top: var(--s4); }
@@ -620,10 +631,39 @@
 /* ---- 声纹 tab layout (toolbar · map | people · collapsible analysis/advanced) ---- */
 .speakers-layout { gap: var(--s5); }
 
-.voiceprint-workflow {
-  display: grid;
-  gap: var(--s4);
+.voiceprint-workflow { display: grid; gap: var(--s4); }
+.voiceprint-workflow-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  min-height: calc(var(--control-h-sm) + var(--s3) * 2);
 }
+.voiceprint-workflow-rail .workflow-gate { margin-left: auto; flex: none; }
+.workflow-stepper-compact {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: var(--control-h-sm);
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.workflow-stepper-compact .workflow-step {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--s2);
+  min-height: var(--control-h-sm);
+  padding: var(--s1) var(--s3);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.workflow-stepper-compact .workflow-step-icon .icon { width: 14px; height: 14px; }
+.workflow-stepper-compact .workflow-step-main { display: flex; align-items: center; }
+.workflow-stepper-compact .workflow-step-label { font-size: var(--fs-xs); }
+.workflow-stepper-compact .workflow-step-detail,
+.workflow-stepper-compact .workflow-step-action { display: none; }
 .workflow-head {
   display: flex;
   justify-content: space-between;
@@ -635,20 +675,22 @@
   font-size: var(--fs-sm);
 }
 
-/* Toolbar row: title + inspect-day picker + the compact 提取声纹/情绪 control. */
+/* Toolbar row: title + the compact 提取声纹/匹配 control. */
 .speakers-toolbar {
-  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s5);
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s4);
+  padding: var(--s3) var(--s4);
 }
 .speakers-toolbar-title { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-base); }
 .speakers-toolbar-title .icon { width: 18px; height: 18px; color: var(--accent); flex: none; }
 .speakers-toolbar-title strong { font-size: var(--fs-md); }
-.speakers-day { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
 .speakers-extract { margin-left: auto; min-width: 0; }
 /* The lifted VoiceprintPanel sits as a compact toolbar item, not a full card. */
 .speakers-extract .voiceprint-panel { background: transparent; border: 0; padding: 0; box-shadow: none; }
 .speakers-extract .voiceprint-panel .vp-section + .vp-section { display: none; } /* toolbar shows only coverage/extract */
 .speakers-extract .voiceprint-panel .vp-section { margin: 0; }
-.speakers-extract .voiceprint-panel .section-title { margin: 0 0 var(--s2); }
+.speakers-extract .voiceprint-panel .section-title { display: none; }
+.speakers-extract .vp-coverage { gap: var(--s3); }
+.speakers-extract .vp-coverage-actions { gap: var(--s2); }
 
 /* Main row: the map (hero) beside the labeling/identify controls; stacks on narrow screens. */
 .speakers-main {
@@ -665,6 +707,7 @@
 .speakers-map, .speakers-people, .speakers-proj-rail { min-width: 0; min-height: 0; }
 .speakers-proj-rail { display: grid; gap: var(--s4); align-content: start; }
 .speakers-people { display: grid; gap: var(--s3); align-content: start; }
+.speakers-people > .inspector-panel { min-width: 0; width: 100%; }
 /* Let the hero map breathe with a taller stage. */
 .speakers-map .vmap-stage { min-height: 460px; }
 /* ONE scroll model (kills the nested "三下巴"): the tab fills the viewport and does NOT scroll;
@@ -679,11 +722,11 @@
      overflow-y can actually scroll (an auto row + align-items:start let the column grow to content). */
   .speakers-main.speakers-main-proj { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
   .speakers-main-proj > .speakers-proj-rail,
-  .speakers-main-proj > .speakers-people { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  .speakers-main-proj > .speakers-people { min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
   /* Map fills its column (toolbar fixed + stage flexes) — never scrolls, never clips. */
   .speakers-main-proj > .speakers-map { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-  .speakers-main-proj > .speakers-map > .voiceprint-map { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
-  .speakers-main-proj > .speakers-map .vmap-stage { min-height: 0; }
+  .speakers-main-proj > .speakers-map > .voiceprint-map { flex: 1 1 auto; min-height: 0; }
+  .speakers-main-proj > .speakers-map .vmap-stage { height: auto; min-height: 0; }
   .speakers-analysis[open] .speakers-analysis-body { max-height: 45vh; overflow-y: auto; }
   /* Lift inner-list scrolls so they don't stack inside the column's single scroll. */
   .speakers-proj-rail .scope-list,
@@ -764,19 +807,52 @@
 .people-mode button:hover:not(:disabled) { color: var(--text); }
 .people-mode button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
 /* 声纹聚类 list: one row per global vp_* cluster — chip + size + sample + assign <select>. */
-.cluster-tools { display: flex; align-items: center; gap: var(--s2); }
+.cluster-tools { display: grid; gap: var(--s2); }
+.cluster-actions { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.cluster-filter {
+  display: inline-flex; gap: var(--s1); padding: var(--s1); width: 100%;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-2);
+}
+.cluster-filter button {
+  flex: 1; font-size: var(--fs-sm); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm);
+  border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-2); cursor: pointer;
+}
+.cluster-filter button:hover:not(:disabled) { color: var(--text); }
+.cluster-filter button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
 /* Bound the list to the column (a bare display:grid track is auto-sized to content,
    which let rows overflow far past the panel). Each row stacks: identifiers → sample → assign. */
-.cluster-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); list-style: none; margin: 0; padding: 0; }
-.cluster-row { display: grid; gap: var(--s2); min-width: 0; padding: var(--s3) 0; border-bottom: 1px solid var(--border); }
-.cluster-row-head { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.cluster-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s2); list-style: none; margin: 0; padding: 0; }
+.cluster-row { display: grid; gap: var(--s2); min-width: 0; padding: var(--s2) 0; border-bottom: 1px solid var(--border); }
+.cluster-row-head { display: flex; align-items: center; gap: var(--s2); min-width: 0; flex-wrap: wrap; }
 .cluster-row-head .chip { min-width: 0; overflow: hidden; }
 .cluster-assigned, .cluster-unassigned { margin-left: auto; flex: none; }
 .cluster-unassigned { font-size: var(--fs-xs); }
-/* Sample peek: up to two lines, clamped — readable without blowing out the row width. */
+/* Sample peek: one line; full text stays on title so many clusters remain scannable. */
 .cluster-sample {
   margin: 0; min-width: 0; font-size: var(--fs-sm); line-height: var(--lh-snug);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cluster-samples { min-width: 0; }
+.cluster-samples > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  width: fit-content; max-width: 100%;
+  font-size: var(--fs-xs); color: var(--accent-2);
+}
+.cluster-samples > summary::-webkit-details-marker { display: none; }
+.cluster-samples > summary::before { content: "▸ "; color: var(--text-dim); }
+.cluster-samples[open] > summary::before { content: "▾ "; }
+.cluster-sample-list {
+  list-style: none; margin: var(--s2) 0 0; padding: 0;
+  display: grid; gap: var(--s2); min-width: 0;
+}
+.cluster-sample-row {
+  display: grid; grid-template-columns: var(--control-h-sm) minmax(0, 1fr);
+  align-items: start; gap: var(--s2); min-width: 0;
+}
+.cluster-sample-play { width: var(--control-h-sm); height: var(--control-h-sm); min-height: var(--control-h-sm); padding: 0; }
+.cluster-sample-play.playing { color: var(--accent-2); border-color: var(--accent); background: var(--accent-dim); }
+.cluster-sample-text {
+  min-width: 0; font-size: var(--fs-sm); line-height: var(--lh-snug); color: var(--text-2);
 }
 .cluster-assign { width: 100%; }
 .proj-params { display: grid; gap: var(--s4); }
@@ -1089,11 +1165,26 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 .llm-daypick label { color: var(--text-2); font-size: var(--fs-base); }
 .llm-daypick select { flex: 0 1 320px; }
 
-/* Foldable people roster (collapse when there are many people) */
-.people-roster > summary { cursor: pointer; list-style: none; font-size: var(--fs-sm); color: var(--text-2); padding: var(--s1) 0; user-select: none; }
-.people-roster > summary::-webkit-details-marker { display: none; }
-.people-roster > summary::before { content: "▾ "; color: var(--text-dim); }
-.people-roster:not([open]) > summary::before { content: "▸ "; }
+/* Foldable people roster / management tools: collapsed by default to keep the right rail compact. */
+.people-roster > summary,
+.people-management > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  cursor: pointer; list-style: none; font-size: var(--fs-sm); color: var(--text-2);
+  padding: var(--s2) 0; user-select: none;
+}
+.people-roster > summary > *,
+.people-management > summary > * { min-width: 0; }
+.people-roster > summary::-webkit-details-marker,
+.people-management > summary::-webkit-details-marker { display: none; }
+.people-roster > summary::before,
+.people-management > summary::before {
+  content: "▾"; color: var(--text-dim); width: 12px; flex: none;
+}
+.people-roster:not([open]) > summary::before,
+.people-management:not([open]) > summary::before { content: "▸"; }
+.people-management > summary .muted {
+  margin-left: auto; font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ---- 观点 (per-session viewpoint workspace, slice 4) ---- */
 /* The 观点 tab view toggle (会话观点 / 日报汇总) is a segmented pill (it holds

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -10,6 +10,7 @@ import {
   StatusBadge,
   WorkflowStepper
 } from "../components/ui";
+import { Select } from "../components/ui/Select";
 
 describe("UI primitives", () => {
   it("renders Button variants with icon and busy state", () => {
@@ -87,5 +88,45 @@ describe("UI primitives", () => {
     expect(screen.getByRole("list", { name: "声纹流程" })).toBeInTheDocument();
     expect(screen.getByText("选择范围")).toHaveClass("workflow-step-label");
     expect(screen.getByText("验证").closest(".workflow-step")).toHaveAttribute("data-state", "blocked");
+  });
+
+  it("keeps a portalled Select open when its own menu scrolls", async () => {
+    const options = Array.from({ length: 24 }, (_, i) => ({
+      value: `person-${i}`,
+      label: `人物 ${i}`
+    }));
+    render(
+      <Select
+        ariaLabel="标注为"
+        value=""
+        onChange={vi.fn()}
+        options={options}
+        placeholder="选择人物…"
+      />
+    );
+
+    await userEvent.click(screen.getByRole("combobox", { name: "标注为" }));
+    const listbox = await screen.findByRole("listbox", { name: "标注为" });
+    fireEvent.scroll(listbox);
+
+    expect(screen.getByRole("listbox", { name: "标注为" })).toBeInTheDocument();
+  });
+
+  it("still closes a portalled Select on unrelated window scroll", async () => {
+    render(
+      <Select
+        ariaLabel="标注为"
+        value=""
+        onChange={vi.fn()}
+        options={[{ value: "per_a", label: "韩文巧" }]}
+        placeholder="选择人物…"
+      />
+    );
+
+    await userEvent.click(screen.getByRole("combobox", { name: "标注为" }));
+    expect(await screen.findByRole("listbox", { name: "标注为" })).toBeInTheDocument();
+    fireEvent.scroll(window);
+
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "标注为" })).not.toBeInTheDocument());
   });
 });

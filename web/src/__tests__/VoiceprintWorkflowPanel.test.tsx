@@ -4,8 +4,11 @@ import { VoiceprintWorkflowPanel } from "../features/speakers/VoiceprintWorkflow
 
 describe("VoiceprintWorkflowPanel", () => {
   it("renders the identify-first pipeline steps", () => {
-    render(<VoiceprintWorkflowPanel status={null} />);
-    expect(screen.getByText("声纹主路径")).toBeInTheDocument();
+    const { container } = render(<VoiceprintWorkflowPanel status={null} />);
+    const rail = container.querySelector(".voiceprint-workflow");
+    expect(rail).toHaveClass("voiceprint-workflow-rail");
+    expect(screen.queryByText("声纹主路径")).not.toBeInTheDocument();
+    expect(screen.queryByText(/提取声纹 -> 自动聚类/)).not.toBeInTheDocument();
     expect(screen.getByText("提取声纹")).toBeInTheDocument();
     expect(screen.getByText("自动聚类")).toBeInTheDocument();
     expect(screen.getByText("分配聚类")).toBeInTheDocument();

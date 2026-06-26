@@ -27,16 +27,49 @@ function mockFetch(overrides: Record<string, unknown> = {}) {
 
 const noop = () => {};
 
+async function findSummary(match: RegExp) {
+  return screen.findByText((_, node) =>
+    node?.tagName.toLowerCase() === "summary" && match.test(node.textContent ?? "")
+  );
+}
+
+async function openDetails(match: RegExp) {
+  const summary = await findSummary(match);
+  const details = summary.closest("details") as HTMLDetailsElement;
+  if (!details.open) await userEvent.click(summary);
+  return details;
+}
+
+async function openRoster() {
+  return openDetails(/人物 ·/);
+}
+
+async function openManagement() {
+  return openDetails(/管理工具/);
+}
+
 describe("PeoplePanel", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
+  it("starts with the roster and management tools collapsed", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+
+    expect(await screen.findByRole("complementary", { name: "人物证据" })).toBeInTheDocument();
+    expect(((await findSummary(/人物 ·/)).closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect(((await findSummary(/管理工具/)).closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect((screen.getByRole("searchbox", { name: "搜索人物" }).closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect((screen.getByRole("button", { name: /全局识别/ }).closest("details") as HTMLDetailsElement).open).toBe(false);
+  });
+
   it("renders people with an enrolled badge plus manual + attributed counts", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
+    await openRoster();
     expect(await screen.findByText("韩文巧")).toBeInTheDocument();
     expect(screen.getByText("李雷")).toBeInTheDocument();
     // enrolled person shows the ✓ badge + both its manual (ground-truth) and attributed counts.
@@ -53,6 +86,7 @@ describe("PeoplePanel", () => {
     render(<PeoplePanel sessionId={null} day="2087-05-10" onChanged={noop} push={noop} pushAction={noop} />);
 
     expect(await screen.findByRole("complementary", { name: "人物证据" })).toBeInTheDocument();
+    await openRoster();
     const search = screen.getByPlaceholderText("搜索人物");
     expect(search).toBeInTheDocument();
 
@@ -65,6 +99,7 @@ describe("PeoplePanel", () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
+    await openRoster();
     // 李雷 has manual_count 0 → can't enroll (the 400 the user hit). Button is disabled.
     const leiRow = (await screen.findByText("李雷")).closest(".person-row") as HTMLElement;
     expect(within(leiRow).getByRole("button", { name: /登记声纹/ })).toBeDisabled();
@@ -78,6 +113,7 @@ describe("PeoplePanel", () => {
     const onChanged = vi.fn();
     render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
 
+    await openRoster();
     const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
     await userEvent.click(within(hanRow).getByRole("button", { name: /登记声纹/ }));
 
@@ -101,7 +137,7 @@ describe("PeoplePanel", () => {
     );
     render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
-    await screen.findByText("韩文巧"); // people loaded
+    await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /智能建议/ }));
 
     expect(await screen.findByText(/spk_01/)).toBeInTheDocument();
@@ -129,7 +165,7 @@ describe("PeoplePanel", () => {
     const onChanged = vi.fn();
     render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
 
-    await screen.findByText("韩文巧");
+    await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /智能建议/ }));
     await screen.findByText(/spk_01/);
 
@@ -161,7 +197,7 @@ describe("PeoplePanel", () => {
     // even with a session selected, the default scope is 全部 (cross-session identity).
     render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
 
-    await screen.findByText("韩文巧");
+    await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
 
     await waitFor(() => {
@@ -194,7 +230,7 @@ describe("PeoplePanel", () => {
       />
     );
 
-    await screen.findByText("韩文巧");
+    await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
 
     await waitFor(() => expect(onAutoAttributed).toHaveBeenCalledWith(5));
@@ -209,7 +245,7 @@ describe("PeoplePanel", () => {
     );
     render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
-    await screen.findByText("韩文巧");
+    await openManagement();
     // flip the scope to 本会话, then run.
     await userEvent.click(screen.getByRole("radio", { name: /本会话/ }));
     await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
@@ -228,6 +264,7 @@ describe("PeoplePanel", () => {
     const onChanged = vi.fn();
     render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
 
+    await openRoster();
     const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
     await userEvent.click(within(hanRow).getByRole("button", { name: /删除/ }));
 
@@ -245,6 +282,7 @@ describe("PeoplePanel", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
+    await openRoster();
     const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
     await userEvent.click(within(hanRow).getByRole("button", { name: /删除/ }));
 
@@ -260,6 +298,7 @@ describe("PeoplePanel", () => {
     vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withSelf } }));
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
+    await openRoster();
     const selfRow = (await screen.findByText("我")).closest(".person-row") as HTMLElement;
     expect(within(selfRow).queryByRole("button", { name: /删除/ })).toBeNull();
     // a normal person still has the delete button.
@@ -274,7 +313,7 @@ describe("PeoplePanel", () => {
     );
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
-    await screen.findByText("韩文巧");
+    await openManagement();
     await userEvent.type(screen.getByLabelText("新建人物"), "王芳");
     await userEvent.click(screen.getByRole("button", { name: /新建/ }));
 
@@ -290,7 +329,7 @@ describe("PeoplePanel", () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
-    await screen.findByText("韩文巧");
+    await openManagement();
     expect(screen.getByText(/按声纹补齐/)).toBeInTheDocument();
   });
 
@@ -303,6 +342,8 @@ describe("PeoplePanel", () => {
     vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withNoise } }));
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
+    await openRoster();
+    await openManagement();
     // The non_speaker person lives in the dedicated 非发言人 group, not the normal roster.
     const noiseRow = (await screen.findByText("噪音/多人")).closest(".person-row") as HTMLElement;
     expect(noiseRow.closest(".people-nonspeakers")).toBeTruthy();
@@ -320,7 +361,7 @@ describe("PeoplePanel", () => {
     );
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
-    await screen.findByText("韩文巧");
+    await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /噪音\/多人 类别/ }));
 
     await waitFor(() => {
@@ -341,6 +382,7 @@ describe("PeoplePanel", () => {
     vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withNoise } }));
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
 
+    await openManagement();
     await screen.findByText("噪音/多人");
     expect(screen.queryByRole("button", { name: /\+ 噪音\/多人 类别/ })).toBeNull();
   });

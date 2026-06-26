@@ -550,8 +550,15 @@ describe("App container", () => {
     renderApp();
     await gotoTab("声纹");
 
+    const toolbar = await screen.findByText("声纹身份");
+    const toolbarCard = toolbar.closest(".speakers-toolbar") as HTMLElement;
+    expect(toolbarCard).toBeTruthy();
+    expect(toolbarCard.querySelector(".speakers-day")).not.toBeInTheDocument();
+    expect(toolbarCard.querySelector('input[type="date"]')).not.toBeInTheDocument();
+
     // Scope to the workflow section — these step labels also appear as buttons elsewhere on the tab.
-    const wf = (await screen.findByText("声纹主路径")).closest(".voiceprint-workflow") as HTMLElement;
+    const wf = (await screen.findByLabelText("声纹主路径")).closest(".voiceprint-workflow") as HTMLElement;
+    expect(wf).toHaveClass("voiceprint-workflow-rail");
     expect(within(wf).getByText("提取声纹")).toBeInTheDocument();
     expect(within(wf).getByText("自动聚类")).toBeInTheDocument();
     expect(within(wf).getByText("确认")).toBeInTheDocument();

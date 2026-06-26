@@ -110,6 +110,29 @@ def test_list_clusters_for_day(tmp_path: Path) -> None:
     assert clusters[0]["speaker_cluster_id"] == "spk_01"
 
 
+def test_global_clusters_route_includes_sample_segments(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_diarized_day(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update transcript_segments set speaker_cluster_id = 'vp_001', speaker = 'vp_001' where speaker_cluster_id = 'spk_01'")
+        conn.execute("update transcript_segments set speaker_cluster_id = 'vp_002', speaker = 'vp_002' where speaker_cluster_id = 'spk_02'")
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    response = client.get("/api/speakers/global-clusters")
+
+    assert response.status_code == 200
+    clusters = response.json()["clusters"]
+    vp1 = next(c for c in clusters if c["speaker_cluster_id"] == "vp_001")
+    assert vp1["sample_segments"] == [
+        {"segment_id": "seg_01b", "text": "spk01 longer sample text"},
+        {"segment_id": "seg_01a", "text": "spk01 short"},
+    ]
+
+
 def test_assign_person_bulk_merges_clusters(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_diarized_day(config.database_path)

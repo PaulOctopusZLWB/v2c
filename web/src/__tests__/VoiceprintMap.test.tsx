@@ -227,10 +227,17 @@ describe("VoiceprintMap", () => {
   });
 
   it("entering select mode reveals the 标注 toolbar, disabled until a person + selection exist", async () => {
-    render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()} />);
+    const { container } = render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()} />);
     await screen.findByRole("list", { name: /图例/ });
+    const map = container.querySelector(".voiceprint-map");
+    expect(map).not.toHaveClass("has-select-toolbar");
 
     await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+    expect(map).toHaveClass("has-select-toolbar");
+    const stage = container.querySelector(".vmap-stage");
+    const toolbar = screen.getByRole("group", { name: "标注选中" });
+    expect(toolbar).toBeInTheDocument();
+    expect(stage).toContainElement(toolbar);
     const label = screen.getByRole("button", { name: /^标注$/ });
     expect(label).toBeDisabled();
     expect(screen.getByText(/已选 0 点/)).toBeInTheDocument();

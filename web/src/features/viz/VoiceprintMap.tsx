@@ -602,9 +602,10 @@ export function VoiceprintMap({
   }, [onLabel, labelPersonId, selectedIds, clearSelection, request, onChanged]);
 
   const n = points?.length ?? 0;
+  const showSelectToolbar = canLabel && selectMode;
 
   return (
-    <section className="voiceprint-map card">
+    <section className={`voiceprint-map card${showSelectToolbar ? " has-select-toolbar" : ""}`}>
       <div className="vmap-toolbar">
         <div className="section-title" style={{ margin: 0 }}>
           <Icon name="mic" /> 声纹云图
@@ -663,42 +664,41 @@ export function VoiceprintMap({
         </div>
       </div>
 
-      {canLabel && selectMode ? (
-        <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
-          <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>
-          <Select
-            ariaLabel="标注为"
-            value={labelPersonId}
-            disabled={labeling}
-            placeholder="选择人物…"
-            options={(people ?? []).map((p) => ({
-              value: p.person_id,
-              label: p.person_type === "non_speaker" ? `非发言人 · ${p.display_name}` : p.display_name,
-            }))}
-            onChange={(v) => setLabelPersonId(v)}
-          />
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void commitLabel()}
-            disabled={labeling || selectedIds.size === 0 || !labelPersonId}
-            aria-busy={labeling}
-          >
-            {labeling ? <span className="spinner" aria-hidden /> : <Icon name="accept" />}
-            标注
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            onClick={clearSelection}
-            disabled={labeling || selectedIds.size === 0}
-          >
-            清除选择
-          </button>
-        </div>
-      ) : null}
-
       <div className="vmap-stage" ref={boxRef}>
+        {showSelectToolbar ? (
+          <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
+            <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>
+            <Select
+              ariaLabel="标注为"
+              value={labelPersonId}
+              disabled={labeling}
+              placeholder="选择人物…"
+              options={(people ?? []).map((p) => ({
+                value: p.person_id,
+                label: p.person_type === "non_speaker" ? `非发言人 · ${p.display_name}` : p.display_name,
+              }))}
+              onChange={(v) => setLabelPersonId(v)}
+            />
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void commitLabel()}
+              disabled={labeling || selectedIds.size === 0 || !labelPersonId}
+              aria-busy={labeling}
+            >
+              {labeling ? <span className="spinner" aria-hidden /> : <Icon name="accept" />}
+              标注
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={clearSelection}
+              disabled={labeling || selectedIds.size === 0}
+            >
+              清除选择
+            </button>
+          </div>
+        ) : null}
         <canvas
           ref={canvasRef}
           className="vmap-canvas"

@@ -767,12 +767,10 @@ export function App() {
   }
 
   // 声纹 (speakers): the identity workflow is the hero — extract voiceprints, 框选+标注 on the
-  // map, then 全局识别. Layout: a toolbar (inspect-day + 提取声纹/情绪), a 2-column main row
-  // (map | people), then collapsible 对话分析 (Dynamics/Emotion) + 高级 (legacy cluster merge).
+  // map, then 全局识别. Layout: compact status/action rails above the 3-column work area.
   function renderSpeakers() {
-    // ONE inspected-day source of truth: the date input is fully controlled by
-    // clusterDay (seeded by a day selected in 审核 via selectedDay), and that SAME
-    // derived day drives every panel so they never disagree.
+    // ONE inspected-day source of truth: the left projection scope/day rail drives the same day for
+    // extraction and analytics; do not add a second date picker in the top action rail.
     const inspectDay = clusterDay || selectedDay;
     // 非发言人 (噪音/多人) labels — passed to the analytics charts so noise is filtered out and
     // can't masquerade as a real speaker.
@@ -781,24 +779,12 @@ export function App() {
     );
     return (
       <div className="tab-page single speakers-layout">
-        {/* Toolbar: a short title + the inspect-day picker + the 提取声纹/情绪 control. */}
+        {/* Toolbar: a short title + the compact 提取声纹/匹配 control. */}
         <section className="speakers-toolbar card">
           <div className="speakers-toolbar-title">
             <Icon name="mic" />
-            <div>
-              <strong>声纹身份</strong>
-              <span className="muted"> — 在图上框选标注,再点全局识别</span>
-            </div>
+            <strong>声纹身份</strong>
           </div>
-          <label className="speakers-day">
-            <span className="muted">{t.cluster.day}</span>
-            <input
-              type="date"
-              aria-label={t.cluster.day}
-              value={clusterDay || selectedDay || ""}
-              onChange={(e) => setClusterDay(e.target.value)}
-            />
-          </label>
           <div className="speakers-extract">
             <VoiceprintPanel
               day={inspectDay}

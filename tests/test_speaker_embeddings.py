@@ -1302,6 +1302,41 @@ def test_global_clusters_lists_vp_sorted_with_dominant_person(tmp_path: Path) ->
     assert clusters[1]["person_id"] is None  # vp_002 unassigned
 
 
+def test_global_clusters_returns_multiple_sample_segments(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    rows = [(f"c{i}", "vp_001") for i in range(1, 7)] + [("d1", "vp_002")]
+    _insert_segments_with_speakers(config.database_path, rows)
+
+    conn = connect(config.database_path)
+    try:
+        updates = [
+            ("c1", 0, 900, "短句"),
+            ("c2", 1000, 2500, "这是一条最长的代表样例"),
+            ("c3", 3000, 4200, "第二条语气样例"),
+            ("c4", 4300, 5200, "第三条决策样例"),
+            ("c5", 5300, 5900, "第四条补充样例"),
+            ("c6", 6000, 6400, "第五条不应返回"),
+        ]
+        for segment_id, start_ms, end_ms, text in updates:
+            conn.execute(
+                "update transcript_segments set start_ms = ?, end_ms = ?, text = ? where segment_id = ?",
+                (start_ms, end_ms, text, segment_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    vp1 = next(c for c in global_clusters(config=config) if c["speaker_cluster_id"] == "vp_001")
+
+    assert vp1["sample_text"] == "这是一条最长的代表样例"
+    assert vp1["sample_segments"] == [
+        {"segment_id": "c2", "text": "这是一条最长的代表样例"},
+        {"segment_id": "c3", "text": "第二条语气样例"},
+        {"segment_id": "c1", "text": "短句"},
+        {"segment_id": "c4", "text": "第三条决策样例"},
+    ]
+
+
 def test_assign_cluster_to_person_labels_every_segment(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_person_row(config.database_path, person_id="per_b", name="Bob", ptype="contact")
