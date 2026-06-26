@@ -890,6 +890,24 @@ def test_delete_person_unknown_returns_404(tmp_path: Path) -> None:
     assert client.delete("/api/persons/ghost").status_code == 404
 
 
+def test_clear_segment_attributions_route_returns_segments_to_unidentified(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_labeling_day(config.database_path)
+    _seed_person_with_attribution(config, "per_wrong", "Wrong")
+    client = TestClient(create_app(config=config))
+
+    response = client.post("/api/people/clear-segment-attributions", json={"segment_ids": ["seg_a"]})
+
+    assert response.status_code == 200
+    assert response.json() == {"cleared": 1}
+    conn = connect(config.database_path)
+    try:
+        assert fetch_all(conn, "select segment_id from segment_person_overrides where segment_id = 'seg_a'") == []
+        assert fetch_all(conn, "select person_id from persons where person_id = 'per_wrong'") == [{"person_id": "per_wrong"}]
+    finally:
+        conn.close()
+
+
 def test_merge_people_reassigns_then_deletes_from(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_labeling_day(config.database_path)

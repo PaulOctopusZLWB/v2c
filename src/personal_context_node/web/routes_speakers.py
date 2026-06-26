@@ -12,6 +12,7 @@ from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
     assign_cluster_to_person,
     clear_projection_cache,
+    clear_segment_person_attributions,
     cluster_voiceprints,
     embedding_projection,
     global_clusters,
@@ -76,6 +77,10 @@ class ExtractEmotionsRequest(BaseModel):
 
 
 class LabelSegmentsRequest(BaseModel):
+    segment_ids: list[str]
+
+
+class ClearSegmentAttributionsRequest(BaseModel):
     segment_ids: list[str]
 
 
@@ -619,6 +624,15 @@ def label_segments_route(request: Request, person_id: str, payload: LabelSegment
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"labeled": labeled}
+
+
+@router.post("/people/clear-segment-attributions")
+def clear_segment_attributions_route(request: Request, payload: ClearSegmentAttributionsRequest) -> dict[str, int]:
+    """Clear selected per-segment person overrides so they return to 未识别 on the map."""
+    if not payload.segment_ids:
+        return {"cleared": 0}
+    config: AppConfig = request.app.state.config
+    return clear_segment_person_attributions(config=config, segment_ids=payload.segment_ids)
 
 
 @router.post("/people/{person_id}/enroll")

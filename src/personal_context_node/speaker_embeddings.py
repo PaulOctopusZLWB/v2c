@@ -342,6 +342,37 @@ def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: 
     return len(segment_ids)
 
 
+def clear_segment_person_attributions(*, config: AppConfig, segment_ids: list[str]) -> dict[str, int]:
+    """Clear explicit person attributions for selected segments.
+
+    This is the map legend's "回到未识别" primitive: it deletes only per-segment overrides, leaving
+    person rows, speaker mappings, transcript text, and voiceprint embeddings untouched.
+    """
+    if not segment_ids:
+        return {"cleared": 0}
+
+    cleared = 0
+    unique_ids = list(dict.fromkeys(segment_ids))
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(unique_ids), _SQL_CHUNK):
+            chunk = unique_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            cur = conn.execute(
+                f"delete from segment_person_overrides where segment_id in ({placeholders})",
+                tuple(chunk),
+            )
+            cleared += int(cur.rowcount)
+        conn.commit()
+    finally:
+        conn.close()
+
+    if cleared:
+        clear_projection_cache()
+    return {"cleared": cleared}
+
+
 def enroll_person(*, config: AppConfig, person_id: str, segment_ids: list[str] | None = None) -> dict:
     """Compute and persist a person's voiceprint centroid from their segments.
 

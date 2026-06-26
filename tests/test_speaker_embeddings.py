@@ -9,6 +9,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.segment_emotions import get_emotions, pending_emotion_segment_ids
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
+    clear_segment_person_attributions,
     clear_projection_cache,
     assign_cluster_to_person,
     cluster_voiceprints,
@@ -392,6 +393,36 @@ def _override_rows(database_path: Path) -> dict[str, dict[str, str]]:
     finally:
         conn.close()
     return {str(r["segment_id"]): {"person_id": str(r["person_id"]), "person_label": str(r["person_label"])} for r in rows}
+
+
+def test_clear_segment_person_attributions_removes_only_selected_overrides(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_a", "seg_b", "seg_c"])
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, ?, ?, ?, ?)",
+            ("seg_a", "Alice", "2087-05-10T08:00:00+08:00", "per_a", "manual"),
+        )
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, ?, ?, ?, ?)",
+            ("seg_b", "Bob", "2087-05-10T08:00:00+08:00", "per_b", "voiceprint"),
+        )
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, ?, ?, ?, ?)",
+            ("seg_c", "Bob", "2087-05-10T08:00:00+08:00", "per_b", "voiceprint"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = clear_segment_person_attributions(config=config, segment_ids=["seg_a", "seg_b", "missing"])
+
+    assert result == {"cleared": 2}
+    rows = _override_rows(config.database_path)
+    assert set(rows) == {"seg_c"}
+    assert rows["seg_c"]["person_id"] == "per_b"
 
 
 def _setup_two_clusters(tmp_path: Path) -> AppConfig:
