@@ -9,6 +9,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.segment_emotions import get_emotions, pending_emotion_segment_ids
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
+    apply_neighbor_corrections,
     clear_segment_person_attributions,
     clear_projection_cache,
     assign_cluster_to_person,
@@ -25,6 +26,7 @@ from personal_context_node.speaker_embeddings import (
     label_segments_as_person,
     mark_noise_segments,
     pending_embedding_segment_ids,
+    preview_neighbor_corrections,
     project_embeddings,
     put_embedding,
     put_embeddings_bulk,
@@ -395,6 +397,41 @@ def _override_rows(database_path: Path) -> dict[str, dict[str, str]]:
     return {str(r["segment_id"]): {"person_id": str(r["person_id"]), "person_label": str(r["person_label"])} for r in rows}
 
 
+def _seed_neighbor_correction_fixture(config: AppConfig, *, manual_wrong: bool = False) -> None:
+    _insert_session_with_segments(config.database_path, ["a_1", "a_2", "a_3", "a_wrong", "b_1", "b_2"])
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+    put_embeddings_bulk(
+        config=config,
+        items=[
+            ("a_1", [1.0, 0.0, 0.0]),
+            ("a_2", [0.98, 0.02, 0.0]),
+            ("a_3", [0.96, 0.01, 0.0]),
+            ("a_wrong", [0.97, 0.03, 0.0]),
+            ("b_1", [0.0, 1.0, 0.0]),
+            ("b_2", [0.02, 0.98, 0.0]),
+        ],
+    )
+    now = "2087-05-10T08:00:00+08:00"
+    wrong_source = "manual" if manual_wrong else "voiceprint"
+    rows = [
+        ("a_1", "Alice", "per_a", "manual"),
+        ("a_2", "Alice", "per_a", "manual"),
+        ("a_3", "Alice", "per_a", "manual"),
+        ("a_wrong", "Bob", "per_b", wrong_source),
+        ("b_1", "Bob", "per_b", "manual"),
+        ("b_2", "Bob", "per_b", "manual"),
+    ]
+    conn = connect(config.database_path)
+    try:
+        conn.executemany(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, ?, ?, ?, ?)",
+            [(segment_id, label, now, person_id, source) for segment_id, label, person_id, source in rows],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_clear_segment_person_attributions_removes_only_selected_overrides(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session_with_segments(config.database_path, ["seg_a", "seg_b", "seg_c"])
@@ -423,6 +460,51 @@ def test_clear_segment_person_attributions_removes_only_selected_overrides(tmp_p
     rows = _override_rows(config.database_path)
     assert set(rows) == {"seg_c"}
     assert rows["seg_c"]["person_id"] == "per_b"
+
+
+def test_preview_neighbor_corrections_fixes_isolated_voiceprint_mislabel(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config)
+
+    preview = preview_neighbor_corrections(
+        config=config,
+        session_ids=["ses_test"],
+        k=5,
+        min_neighbours=3,
+        majority_ratio=0.6,
+        similarity_floor=0.3,
+    )
+
+    assert preview["changed"] == 1
+    assert preview["groups"] == [
+        {
+            "from_person_id": "per_b",
+            "from_person_label": "Bob",
+            "to_person_id": "per_a",
+            "to_person_label": "Alice",
+            "count": 1,
+            "segment_ids": ["a_wrong"],
+        }
+    ]
+    assert preview["corrections"][0]["segment_id"] == "a_wrong"
+
+
+def test_apply_neighbor_corrections_preserves_manual_labels(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config, manual_wrong=True)
+
+    result = apply_neighbor_corrections(
+        config=config,
+        session_ids=["ses_test"],
+        k=5,
+        min_neighbours=3,
+        majority_ratio=0.6,
+        similarity_floor=0.3,
+    )
+
+    assert result["changed"] == 0
+    rows = _override_rows(config.database_path)
+    assert rows["a_wrong"]["person_id"] == "per_b"
 
 
 def _setup_two_clusters(tmp_path: Path) -> AppConfig:

@@ -373,6 +373,169 @@ def clear_segment_person_attributions(*, config: AppConfig, segment_ids: list[st
     return {"cleared": cleared}
 
 
+def preview_neighbor_corrections(
+    *,
+    config: AppConfig,
+    session_ids: list[str] | None = None,
+    days: list[str] | None = None,
+    k: int = 15,
+    min_neighbours: int = 8,
+    majority_ratio: float = 0.75,
+    similarity_floor: float = 0.35,
+    max_points: int = 4000,
+) -> dict:
+    """Preview local-neighbour person attribution corrections for the current map scope.
+
+    This is a conservative smoothing pass for "one wrong colour inside a strong cluster". It reads
+    current overrides, votes over nearest in-scope embedding neighbours, and returns a dry-run plan.
+    Manual overrides can vote as neighbours but are never mutation candidates.
+    """
+    params = _neighbor_params(k=k, min_neighbours=min_neighbours, majority_ratio=majority_ratio, similarity_floor=similarity_floor, max_points=max_points)
+    scope_ids, total_before_cap = _correction_scope_segment_ids(
+        config=config,
+        session_ids=session_ids,
+        days=days,
+        max_points=params["max_points"],
+    )
+    if not scope_ids:
+        return _empty_neighbor_preview(total=0, total_before_cap=0, params=params)
+
+    embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+    usable_ids, matrix = _normalized_scope_matrix(scope_ids=scope_ids, embeddings=embeddings)
+    if not usable_ids:
+        raise ValueError("no usable embeddings in correction scope")
+
+    attributions = _segment_override_attributions(config=config, segment_ids=usable_ids)
+    skipped_manual = sum(1 for sid in usable_ids if attributions.get(sid, {}).get("source") == "manual")
+    corrections: list[dict[str, object]] = []
+
+    sims = matrix @ matrix.T
+    np.fill_diagonal(sims, -np.inf)
+    k_eff = min(params["k"], max(0, len(usable_ids) - 1))
+    if k_eff == 0:
+        return _empty_neighbor_preview(total=len(usable_ids), total_before_cap=total_before_cap, params=params, skipped_manual=skipped_manual)
+
+    for row_idx, segment_id in enumerate(usable_ids):
+        current = attributions.get(segment_id, {})
+        if current.get("source") == "manual":
+            continue
+        current_person = current.get("person_id")
+        top_idx = np.argsort(-sims[row_idx])[:k_eff]
+        neighbours: list[tuple[str | None, float]] = []
+        for idx in top_idx:
+            sim = float(sims[row_idx, idx])
+            if not np.isfinite(sim) or sim < params["similarity_floor"]:
+                continue
+            neighbour_attr = attributions.get(usable_ids[int(idx)], {})
+            neighbours.append((neighbour_attr.get("person_id"), sim))
+        if len(neighbours) < params["min_neighbours"]:
+            continue
+
+        vote_people = [person_id for person_id, _sim in neighbours if person_id is not None]
+        if current_person is not None and len(vote_people) < len(neighbours):
+            vote_people.extend([None] * (len(neighbours) - len(vote_people)))
+        if len(vote_people) < params["min_neighbours"]:
+            continue
+
+        counts: dict[str | None, int] = {}
+        for person_id in vote_people:
+            counts[person_id] = counts.get(person_id, 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], "" if item[0] is None else str(item[0])))
+        if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+            continue
+        target_person, winning_count = ranked[0]
+        confidence = winning_count / float(len(vote_people))
+        if confidence < params["majority_ratio"] or target_person == current_person:
+            continue
+
+        target_label = _attribution_label(attributions=attributions, person_id=target_person)
+        corrections.append(
+            {
+                "segment_id": segment_id,
+                "from_person_id": current_person,
+                "from_person_label": current.get("person_label") if current_person is not None else "未识别",
+                "to_person_id": target_person,
+                "to_person_label": target_label,
+                "neighbor_count": len(vote_people),
+                "majority_count": winning_count,
+                "confidence": round(confidence, 4),
+            }
+        )
+
+    return {
+        "total": len(usable_ids),
+        "total_before_cap": total_before_cap,
+        "changed": len(corrections),
+        "skipped_manual": skipped_manual,
+        "groups": _neighbor_correction_groups(corrections),
+        "corrections": corrections,
+        "params": params,
+    }
+
+
+def apply_neighbor_corrections(
+    *,
+    config: AppConfig,
+    session_ids: list[str] | None = None,
+    days: list[str] | None = None,
+    k: int = 15,
+    min_neighbours: int = 8,
+    majority_ratio: float = 0.75,
+    similarity_floor: float = 0.35,
+    max_points: int = 4000,
+) -> dict:
+    """Apply the previewed neighbour corrections as voiceprint-sourced overrides."""
+    preview = preview_neighbor_corrections(
+        config=config,
+        session_ids=session_ids,
+        days=days,
+        k=k,
+        min_neighbours=min_neighbours,
+        majority_ratio=majority_ratio,
+        similarity_floor=similarity_floor,
+        max_points=max_points,
+    )
+    corrections = list(preview.get("corrections", []))
+    if not corrections:
+        preview["applied"] = 0
+        return preview
+
+    now = _now()
+    from personal_context_node.speaker_review import upsert_segment_person_override
+
+    conn = connect(config.database_path)
+    applied = 0
+    try:
+        initialize(conn)
+        for correction in corrections:
+            segment_id = str(correction["segment_id"])
+            to_person_id = correction.get("to_person_id")
+            if to_person_id is None:
+                cur = conn.execute(
+                    "delete from segment_person_overrides where segment_id = ? and source = 'voiceprint'",
+                    (segment_id,),
+                )
+                applied += int(cur.rowcount)
+                continue
+            upsert_segment_person_override(
+                conn,
+                segment_id=segment_id,
+                person_id=str(to_person_id),
+                person_label=str(correction["to_person_label"]),
+                now=now,
+                source="voiceprint",
+            )
+            applied += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    if applied:
+        clear_projection_cache()
+    preview["applied"] = applied
+    return preview
+
+
 def enroll_person(*, config: AppConfig, person_id: str, segment_ids: list[str] | None = None) -> dict:
     """Compute and persist a person's voiceprint centroid from their segments.
 
@@ -717,6 +880,7 @@ def _negative_person_ids_by_segment(*, config: AppConfig, segment_ids: list[str]
     if not segment_ids:
         return {}
     result: dict[str, set[str]] = {}
+
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -737,6 +901,160 @@ def _negative_person_ids_by_segment(*, config: AppConfig, segment_ids: list[str]
     finally:
         conn.close()
     return result
+
+
+def _neighbor_params(*, k: int, min_neighbours: int, majority_ratio: float, similarity_floor: float, max_points: int) -> dict[str, int | float]:
+    if k < 1:
+        raise ValueError("k must be >= 1")
+    if min_neighbours < 1:
+        raise ValueError("min_neighbours must be >= 1")
+    if not (0.0 < majority_ratio <= 1.0):
+        raise ValueError("majority_ratio must be in (0, 1]")
+    if not (-1.0 <= similarity_floor <= 1.0):
+        raise ValueError("similarity_floor must be in [-1, 1]")
+    if max_points < 0:
+        raise ValueError("max_points must be >= 0")
+    return {
+        "k": int(k),
+        "min_neighbours": int(min_neighbours),
+        "majority_ratio": float(majority_ratio),
+        "similarity_floor": float(similarity_floor),
+        "max_points": int(max_points),
+    }
+
+
+def _correction_scope_segment_ids(
+    *,
+    config: AppConfig,
+    session_ids: list[str] | None,
+    days: list[str] | None,
+    max_points: int,
+) -> tuple[list[str], int]:
+    scope_ids: list[str] = []
+    seen: set[str] = set()
+    requested_sessions = list(session_ids or [])
+    requested_days = list(days or [])
+
+    if not requested_sessions and not requested_days:
+        requested = scoped_embedding_segment_ids(config=config)
+        for sid in requested:
+            if sid not in seen:
+                seen.add(sid)
+                scope_ids.append(sid)
+    else:
+        for session_id in requested_sessions:
+            for sid in scoped_embedding_segment_ids(config=config, session_id=session_id):
+                if sid not in seen:
+                    seen.add(sid)
+                    scope_ids.append(sid)
+        for day in requested_days:
+            for sid in scoped_embedding_segment_ids(config=config, day=day):
+                if sid not in seen:
+                    seen.add(sid)
+                    scope_ids.append(sid)
+
+    total_before_cap = len(scope_ids)
+    if max_points > 0 and total_before_cap > max_points:
+        stride = total_before_cap / float(max_points)
+        scope_ids = [scope_ids[int(i * stride)] for i in range(max_points)]
+    return scope_ids, total_before_cap
+
+
+def _normalized_scope_matrix(*, scope_ids: list[str], embeddings: dict[str, np.ndarray]) -> tuple[list[str], np.ndarray]:
+    finite_dims = [
+        int(vector.shape[0])
+        for vector in embeddings.values()
+        if np.all(np.isfinite(vector))
+    ]
+    if not finite_dims:
+        return [], np.zeros((0, 0), dtype=np.float64)
+    dim = max(set(finite_dims), key=finite_dims.count)
+    usable_ids: list[str] = []
+    rows: list[np.ndarray] = []
+    for segment_id in scope_ids:
+        vector = embeddings.get(segment_id)
+        if vector is None or int(vector.shape[0]) != dim or not np.all(np.isfinite(vector)):
+            continue
+        usable_ids.append(segment_id)
+        rows.append(_normalize(vector))
+    if not rows:
+        return [], np.zeros((0, 0), dtype=np.float64)
+    return usable_ids, np.vstack(rows).astype(np.float64)
+
+
+def _segment_override_attributions(*, config: AppConfig, segment_ids: list[str]) -> dict[str, dict[str, str | None]]:
+    result: dict[str, dict[str, str | None]] = {sid: {"person_id": None, "person_label": None, "source": None} for sid in segment_ids}
+    if not segment_ids:
+        return result
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(segment_ids), _SQL_CHUNK):
+            chunk = segment_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = fetch_all(
+                conn,
+                f"select segment_id, person_id, person_label, source from segment_person_overrides where segment_id in ({placeholders})",
+                tuple(chunk),
+            )
+            for row in rows:
+                result[str(row["segment_id"])] = {
+                    "person_id": row["person_id"],
+                    "person_label": row["person_label"],
+                    "source": row["source"],
+                }
+    finally:
+        conn.close()
+    return result
+
+
+def _attribution_label(*, attributions: dict[str, dict[str, str | None]], person_id: str | None) -> str:
+    if person_id is None:
+        return "未识别"
+    for attr in attributions.values():
+        if attr.get("person_id") == person_id and attr.get("person_label"):
+            return str(attr["person_label"])
+    return person_id
+
+
+def _neighbor_correction_groups(corrections: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[tuple[object, object], dict[str, object]] = {}
+    for correction in corrections:
+        key = (correction.get("from_person_id"), correction.get("to_person_id"))
+        entry = grouped.get(key)
+        if entry is None:
+            entry = {
+                "from_person_id": correction.get("from_person_id"),
+                "from_person_label": correction.get("from_person_label"),
+                "to_person_id": correction.get("to_person_id"),
+                "to_person_label": correction.get("to_person_label"),
+                "count": 0,
+                "segment_ids": [],
+            }
+            grouped[key] = entry
+        entry["count"] = int(entry["count"]) + 1
+        cast_ids = entry["segment_ids"]
+        if isinstance(cast_ids, list):
+            cast_ids.append(str(correction["segment_id"]))
+    return list(grouped.values())
+
+
+def _empty_neighbor_preview(
+    *,
+    total: int,
+    total_before_cap: int,
+    params: dict[str, int | float],
+    skipped_manual: int = 0,
+) -> dict[str, object]:
+    return {
+        "total": total,
+        "total_before_cap": total_before_cap,
+        "changed": 0,
+        "skipped_manual": skipped_manual,
+        "groups": [],
+        "corrections": [],
+        "params": params,
+    }
 
 
 def _segment_speakers(*, config: AppConfig, segment_ids: list[str]) -> dict[str, str]:

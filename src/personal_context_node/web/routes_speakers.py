@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from personal_context_node.config import AppConfig
 from personal_context_node.segment_emotions import emotion_distribution, emotion_labels_for_scope
 from personal_context_node.speaker_embeddings import (
+    apply_neighbor_corrections,
     auto_attribute_enrolled,
     assign_cluster_to_person,
     clear_projection_cache,
@@ -20,6 +21,7 @@ from personal_context_node.speaker_embeddings import (
     mark_noise_segments,
     enroll_person,
     label_segments_as_person,
+    preview_neighbor_corrections,
     project_embeddings,
     recluster_by_anchors,
     suggest_people_for_session,
@@ -96,6 +98,16 @@ class AutoAttributeRequest(BaseModel):
     session_id: str | None = None
     day: str | None = None
     threshold: float = 0.5
+
+
+class NeighborCorrectionRequest(BaseModel):
+    session_ids: list[str] = []
+    days: list[str] = []
+    k: int = 15
+    min_neighbours: int = 8
+    majority_ratio: float = 0.75
+    similarity_floor: float = 0.35
+    max_points: int = 4000
 
 
 class MergePeopleRequest(BaseModel):
@@ -633,6 +645,42 @@ def clear_segment_attributions_route(request: Request, payload: ClearSegmentAttr
         return {"cleared": 0}
     config: AppConfig = request.app.state.config
     return clear_segment_person_attributions(config=config, segment_ids=payload.segment_ids)
+
+
+@router.post("/people/neighbor-correction/preview")
+def neighbor_correction_preview_route(request: Request, payload: NeighborCorrectionRequest) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    try:
+        return preview_neighbor_corrections(
+            config=config,
+            session_ids=payload.session_ids,
+            days=payload.days,
+            k=payload.k,
+            min_neighbours=payload.min_neighbours,
+            majority_ratio=payload.majority_ratio,
+            similarity_floor=payload.similarity_floor,
+            max_points=payload.max_points,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/people/neighbor-correction/apply")
+def neighbor_correction_apply_route(request: Request, payload: NeighborCorrectionRequest) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    try:
+        return apply_neighbor_corrections(
+            config=config,
+            session_ids=payload.session_ids,
+            days=payload.days,
+            k=payload.k,
+            min_neighbours=payload.min_neighbours,
+            majority_ratio=payload.majority_ratio,
+            similarity_floor=payload.similarity_floor,
+            max_points=payload.max_points,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/people/{person_id}/enroll")

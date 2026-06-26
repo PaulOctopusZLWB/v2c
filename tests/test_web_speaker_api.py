@@ -963,6 +963,106 @@ def test_merge_people_same_id_returns_400(tmp_path: Path) -> None:
     assert client.post("/api/people/merge", json={"from_id": "per_from", "into_id": "per_from"}).status_code == 400
 
 
+def test_neighbor_correction_preview_and_apply_routes(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_route_fixture(config)
+    client = TestClient(create_app(config=config))
+    payload = {
+        "session_ids": ["ses_test"],
+        "k": 5,
+        "min_neighbours": 3,
+        "majority_ratio": 0.6,
+        "similarity_floor": 0.3,
+    }
+
+    preview = client.post("/api/people/neighbor-correction/preview", json=payload)
+
+    assert preview.status_code == 200
+    assert preview.json()["changed"] == 1
+
+    applied = client.post("/api/people/neighbor-correction/apply", json=payload)
+
+    assert applied.status_code == 200
+    assert applied.json()["changed"] == 1
+    conn = connect(config.database_path)
+    try:
+        row = fetch_all(conn, "select person_id, source from segment_person_overrides where segment_id = 'a_wrong'")
+    finally:
+        conn.close()
+    assert row == [{"person_id": "per_a", "source": "voiceprint"}]
+
+
+def _seed_neighbor_correction_route_fixture(config: AppConfig) -> None:
+    now = "2087-05-10T08:00:00+08:00"
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("aud_corr", "DJI Mic 3", "/source/corr.wav", 1, 1, "/raw/corr.wav", "sha256:corr", 5000, now, now, "imported"),
+        )
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_test", "2087-05-10", now, "2087-05-10T08:00:05+08:00", "derived_from_segments", 6, 3000, "a_1", now, now),
+        )
+        conn.executemany(
+            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, ?, ?, ?)",
+            [
+                ("per_a", "Alice", "contact", 0, now, now),
+                ("per_b", "Bob", "contact", 0, now, now),
+            ],
+        )
+        segments = ["a_1", "a_2", "a_3", "a_wrong", "b_1", "b_2"]
+        for idx, segment_id in enumerate(segments):
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, absolute_start_at, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    segment_id,
+                    "aud_corr",
+                    f"chk_{segment_id}",
+                    "ses_test",
+                    idx * 500,
+                    idx * 500 + 500,
+                    f"2087-05-10T08:00:0{idx}+08:00",
+                    segment_id,
+                    "zh",
+                    "spk_a" if segment_id.startswith("a") else "spk_b",
+                    "spk_a" if segment_id.startswith("a") else "spk_b",
+                    f"ev_{segment_id}",
+                    1.0,
+                    "MockASRAdapter",
+                    "mock-asr",
+                    "test",
+                    1,
+                    now,
+                ),
+            )
+        conn.executemany(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, ?, ?, ?, ?)",
+            [
+                ("a_1", "Alice", now, "per_a", "manual"),
+                ("a_2", "Alice", now, "per_a", "manual"),
+                ("a_3", "Alice", now, "per_a", "manual"),
+                ("a_wrong", "Bob", now, "per_b", "voiceprint"),
+                ("b_1", "Bob", now, "per_b", "manual"),
+                ("b_2", "Bob", now, "per_b", "manual"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    vectors = {
+        "a_1": [1.0, 0.0, 0.0],
+        "a_2": [0.98, 0.02, 0.0],
+        "a_3": [0.96, 0.01, 0.0],
+        "a_wrong": [0.97, 0.03, 0.0],
+        "b_1": [0.0, 1.0, 0.0],
+        "b_2": [0.02, 0.98, 0.0],
+    }
+    for segment_id, vector in vectors.items():
+        put_embedding(config=config, segment_id=segment_id, vector=vector)
+
+
 def _insert_labeling_day(database_path: Path) -> None:
     """Seed one session with three active segments (spk_a x2, spk_b x1) plus an inactive one."""
     conn = connect(database_path)
