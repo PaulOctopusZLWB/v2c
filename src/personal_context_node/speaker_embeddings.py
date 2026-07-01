@@ -1133,6 +1133,9 @@ def extract_pending_embeddings(
                 except Exception:
                     failed += 1
                 else:
+                    if not np.all(np.isfinite(np.asarray(vector, dtype=np.float32))):
+                        failed += 1
+                        continue
                     batch.append((segment_id, vector))
                     if len(batch) >= batch_size:
                         flush()

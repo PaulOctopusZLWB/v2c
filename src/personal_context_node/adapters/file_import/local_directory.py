@@ -6,6 +6,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from personal_context_node.audio_transcode import normalize_to_wav
 from personal_context_node.core.ports.errors import RetryablePortError
 from personal_context_node.core.ports.file_import import (
     ImportedRawAudio,
@@ -34,7 +35,7 @@ class LocalDirectoryFileImportAdapter:
     ) -> None:
         self.device_roots = device_roots
         self.device_label = device_label
-        self.audio_globs = tuple(audio_globs or ("*.wav", "*.WAV"))
+        self.audio_globs = tuple(audio_globs or ("**/*.wav", "**/*.WAV", "**/*.m4a", "**/*.M4A"))
         self.volume_name_patterns = tuple(volume_name_patterns or ())
         self.volume_root = volume_root
 
@@ -94,9 +95,17 @@ class LocalDirectoryFileImportAdapter:
         # Two distinct recordings can share a filename (same day, different cards). Reserve a
         # non-colliding destination atomically (O_EXCL) so a second import — even a concurrent
         # process (scheduled ingest vs. manual run) — never overwrites the first copy.
-        local_raw_path = _reserve_destination_path(target_dir, source.source.source_path.name)
+        local_raw_path = _reserve_destination_path(target_dir, _raw_target_name(source.source.source_path))
         try:
-            shutil.copy2(source.source.source_path, local_raw_path)
+            source_path = source.source.source_path
+            if source_path.suffix.lower() in {".wav", ".wave"}:
+                shutil.copy2(source_path, local_raw_path)
+            else:
+                local_raw_path = normalize_to_wav(
+                    source_path=source_path,
+                    target_path=local_raw_path,
+                    timeout_seconds=3600.0,
+                )
             _repair_wav_file_metadata(local_raw_path, recorded_at)
         except BaseException:
             # A failed copy/repair (source vanished, disk full, malformed WAV) must not strand
@@ -111,6 +120,12 @@ class LocalDirectoryFileImportAdapter:
             duration_ms=_duration_ms(local_raw_path),
             recorded_at=recorded_at,
         )
+
+
+def _raw_target_name(source_path: Path) -> str:
+    if source_path.suffix.lower() in {".wav", ".wave"}:
+        return source_path.name
+    return source_path.with_suffix(".wav").name
 
 
 def _reserve_destination_path(target_dir: Path, source_name: str) -> Path:

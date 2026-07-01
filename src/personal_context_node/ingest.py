@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
+from personal_context_node.audio_transcode import normalize_to_wav
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.file_import import FileImportPort, ImportedRawAudio, SourceAudioFile
 from personal_context_node.storage.sqlite import connect, initialize
@@ -132,7 +133,14 @@ def import_audio_files_in_conn(
             local_dir.mkdir(parents=True, exist_ok=True)
             audio_file_id = f"aud_{uuid4().hex}"
             local_path = _raw_store_path(local_dir=local_dir, source_path=source_path, audio_file_id=audio_file_id)
-            shutil.copy2(source_path, local_path)
+            if source_path.suffix.lower() in {".wav", ".wave"}:
+                shutil.copy2(source_path, local_path)
+            else:
+                local_path = normalize_to_wav(
+                    source_path=source_path,
+                    target_path=local_path,
+                    timeout_seconds=config.command_timeout_seconds,
+                )
             _repair_wav_file_metadata(local_path, recorded_at)
             sha256 = _sha256(local_path)
             mark_raw_evidence_read_only(local_path)
@@ -243,10 +251,11 @@ def _raw_audio_exists(conn: sqlite3.Connection, raw_audio: ImportedRawAudio) -> 
 
 
 def _raw_store_path(*, local_dir: Path, source_path: Path, audio_file_id: str) -> Path:
-    target = local_dir / source_path.name
+    suffix = source_path.suffix.lower()
+    target = local_dir / (source_path.with_suffix(".wav").name if suffix not in {".wav", ".wave"} else source_path.name)
     if not target.exists():
         return target
-    return local_dir / f"{source_path.stem}_{audio_file_id}{source_path.suffix}"
+    return local_dir / f"{source_path.stem}_{audio_file_id}{'.wav' if suffix not in {'.wav', '.wave'} else source_path.suffix}"
 
 
 def mark_raw_evidence_read_only(path: Path) -> None:
@@ -334,12 +343,12 @@ def _recorded_at_from_name_or_none(path: Path) -> str | None:
 
 
 def _iter_audio_paths(*, source_dir: Path, recursive: bool) -> list[Path]:
-    candidates = source_dir.rglob("*.wav") if recursive else source_dir.iterdir()
+    candidates = source_dir.rglob("*") if recursive else source_dir.iterdir()
     return sorted(
         path
         for path in candidates
         if path.is_file()
-        and path.suffix.lower() == ".wav"
+        and path.suffix.lower() in {".wav", ".wave", ".m4a"}
         # Skip recycle-bin / hidden dirs like .Trashes (§34.1) — never rewrite those copies.
         and not _has_hidden_part(path, source_dir)
     )

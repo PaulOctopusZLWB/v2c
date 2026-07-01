@@ -27,6 +27,30 @@ def test_ingest_scan_cli_lists_wav_candidates(tmp_path: Path) -> None:
     assert "TX02_MIC001_20250610_173550_orig.wav" in result.output
 
 
+def test_ingest_scan_cli_lists_m4a_candidates(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    source.mkdir()
+    (source / "TX02_MIC001_20250610_173550_orig.m4a").write_bytes(b"fake-m4a")
+
+    result = CliRunner().invoke(app, ["ingest-scan", "--source-dir", str(source)])
+
+    assert result.exit_code == 0, result.output
+    assert "files_found=1" in result.output
+    assert "TX02_MIC001_20250610_173550_orig.m4a" in result.output
+
+
+def test_ingest_scan_group_cli_lists_m4a_candidates(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    source.mkdir()
+    (source / "TX02_MIC001_20250610_173550_orig.m4a").write_bytes(b"fake-m4a")
+
+    result = CliRunner().invoke(app, ["ingest", "scan", "--source-dir", str(source)])
+
+    assert result.exit_code == 0, result.output
+    assert "files_found=1" in result.output
+    assert "TX02_MIC001_20250610_173550_orig.m4a" in result.output
+
+
 def test_ingest_scan_cli_lists_uppercase_wav_candidates(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     _write_tiny_wav(source / "REC001.WAV")

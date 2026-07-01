@@ -132,6 +132,12 @@ stable_seconds = 10
     assert config.dji_mic_3.stable_seconds == 10
 
 
+def test_device_audio_globs_include_m4a() -> None:
+    config = AppConfig()
+
+    assert config.dji_mic_3.audio_globs == ("**/*.WAV", "**/*.wav", "**/*.M4A", "**/*.m4a")
+
+
 def test_app_config_with_overrides_keeps_explicit_paths(tmp_path: Path) -> None:
     config_path = tmp_path / "local.toml"
     config_path.write_text("[paths]\ndata_dir = 'data'\nobsidian_vault = '/vault'\n", encoding="utf-8")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import wave
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,43 @@ def test_local_directory_file_import_adapter_copies_stable_audio_to_raw_store(tm
     assert imported.sha256.startswith("sha256:")
     assert imported.duration_ms == 1000
     assert imported.recorded_at == "2025-06-11T19:09:10+08:00"
+
+
+def test_copy_to_raw_store_converts_m4a_to_wav_with_transcoder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    called: dict[str, str] = {}
+
+    def fake_normalize_to_wav(*, source_path: Path, target_path: Path, timeout_seconds: float) -> Path:
+        with wave.open(str(target_path), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16_000)
+            wav.writeframes(b"\x00\x00" * 16_000)
+        called["source"] = source_path.name
+        called["target"] = target_path.name
+        return target_path
+
+    monkeypatch.setattr(local_directory_module, "normalize_to_wav", fake_normalize_to_wav)
+
+    device_root = tmp_path / "DJI_MIC"
+    source_audio = device_root / "TX02_MIC001_20250611_190910_orig.m4a"
+    source_audio.parent.mkdir(parents=True)
+    source_audio.write_bytes(b"fake-m4a")
+    device = MountedDevice(device_id="dev", label="DJI Mic 3", root_path=device_root)
+    stable = StableSourceAudioFile(
+        source=SourceAudioFile(
+            device=device,
+            source_path=source_audio,
+            size_bytes=source_audio.stat().st_size,
+            mtime_ns=1,
+        ),
+        stable_checked_at=datetime.now(timezone.utc).isoformat(),
+    )
+    adapter = LocalDirectoryFileImportAdapter(device_roots=[device_root], device_label="DJI Mic 3")
+    imported = adapter.copy_to_raw_store(stable, tmp_path / "raw")
+
+    assert called["source"] == source_audio.name
+    assert called["target"] == "TX02_MIC001_20250611_190910_orig.wav"
+    assert imported.local_raw_path.suffix == ".wav"
 
 
 def test_local_directory_file_import_adapter_discovers_configured_audio_globs_recursively(tmp_path: Path) -> None:

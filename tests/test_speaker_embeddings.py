@@ -403,6 +403,25 @@ def test_extract_continues_past_failed_embed(tmp_path: Path, monkeypatch) -> Non
     assert pending_embedding_segment_ids(config=config) == ["seg_2"]  # the failed one stays pending
 
 
+def test_extract_continues_past_non_finite_embedding(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+    monkeypatch.setattr(
+        transcription, "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+
+    def embed_fn(path: str) -> list[float]:
+        if "seg_2" in path:
+            return [float("nan"), 0.2, 0.3]
+        return [0.1, 0.2, 0.3]
+
+    result = extract_pending_embeddings(config=config, embed_fn=embed_fn)
+    assert result == {"embedded": 2, "skipped_missing_audio": 0, "failed": 1, "total": 3}
+    assert set(get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_3"])) == {"seg_1", "seg_3"}
+    assert pending_embedding_segment_ids(config=config) == ["seg_2"]
+
+
 def test_get_embeddings_chunks_large_input(tmp_path: Path) -> None:
     # >999 ids must not trip SQLite's per-statement bind-variable limit.
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")

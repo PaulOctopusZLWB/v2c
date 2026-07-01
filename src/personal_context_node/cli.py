@@ -165,7 +165,7 @@ def web_cmd(
 
 @app.command()
 def run_first_milestone(
-    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing audio recordings."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -194,7 +194,7 @@ def run_first_milestone(
 
 @app.command(name="run-all")
 def run_all(
-    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing audio recordings."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -302,14 +302,14 @@ def _run_all(
 
 @app.command(name="ingest-scan")
 def ingest_scan(
-    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing audio recordings."),
 ) -> None:
     _ingest_scan(source_dir=source_dir)
 
 
 @ingest_app.command(name="scan")
 def ingest_scan_group(
-    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing audio recordings."),
 ) -> None:
     _ingest_scan(source_dir=source_dir)
 
@@ -323,7 +323,7 @@ def _ingest_scan(*, source_dir: Path) -> None:
 
 @app.command(name="ingest-import")
 def ingest_import(
-    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing audio recordings."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -336,7 +336,7 @@ def ingest_import(
 
 @ingest_app.command(name="import")
 def ingest_import_group(
-    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    source_dir: Path | None = typer.Option(None, exists=True, file_okay=False, help="Directory containing audio recordings."),
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(
@@ -391,7 +391,7 @@ def _import_recordings(*, config: AppConfig, source_dir: Path | None) -> IngestI
 
 @ingest_app.command(name="fix-metadata")
 def ingest_fix_metadata(
-    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing WAV recordings."),
+    source_dir: Path = typer.Option(..., exists=True, file_okay=False, help="Directory containing audio recordings."),
     recursive: bool = typer.Option(False, help="Scan nested subdirectories for WAV files."),
     dry_run: bool = typer.Option(False, help="Report files that need fixing without writing changes."),
 ) -> None:

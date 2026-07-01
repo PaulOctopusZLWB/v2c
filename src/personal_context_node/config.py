@@ -14,7 +14,7 @@ class DeviceDiscoveryConfig(BaseModel):
     volume_root: Path = Path("/Volumes")
     root_path: Path | None = None
     volume_name_patterns: tuple[str, ...] = ("DJI*", "MIC*", "NO NAME")
-    audio_globs: tuple[str, ...] = ("**/*.WAV", "**/*.wav")
+    audio_globs: tuple[str, ...] = ("**/*.WAV", "**/*.wav", "**/*.M4A", "**/*.m4a")
     stable_seconds: int = 10
 
 
