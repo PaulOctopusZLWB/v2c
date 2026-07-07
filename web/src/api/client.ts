@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, ParticipantStatus, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, ParticipantStatus, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -64,6 +64,8 @@ export const api = {
   rejectMemory: (id: string) => request<{ ok: boolean }>(`/api/memory/${id}/reject`, { method: "POST" }),
   deferMemory: (id: string) => request<{ ok: boolean }>(`/api/memory/${id}/defer`, { method: "POST" }),
   restoreMemory: (id: string) => request<{ ok: boolean }>(`/api/memory/${id}/restore`, { method: "POST" }),
+  // 聚类的 AI 猜测(声纹页「采纳 → XX」)。
+  clusterSuggestion: (clusterId: string) => request<ClusterSuggestion>(`/api/clusters/${clusterId}/suggestion`),
   // conversation dynamics for a session: talk-share, turn-taking, timeline
   sessionDynamics: (id: string) => request<SessionDynamics>(`/api/sessions/${id}/dynamics`),
   // global transcript search: substring match across every day, newest utterance first

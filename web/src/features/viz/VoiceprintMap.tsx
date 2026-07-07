@@ -354,10 +354,18 @@ export function VoiceprintMap({
       const color = mode === "emotion" ? emotionColor(key) : mode === "session" ? speakerColor(key) : keyColor(key);
       const isSel = selected.has(p.segment_id);
       ctx.globalAlpha = dim ? 0.08 : isSel ? 0.95 : 0.78;
-      ctx.fillStyle = color;
+      // 设计稿:已识别人物 = 实心彩点;未分配 = 空心描边点(身份配色模式下)。
+      const hollow = mode !== "emotion" && mode !== "session" && !p.person_id;
       ctx.beginPath();
       ctx.arc(px, py, isSel ? r + 1.2 : r, 0, Math.PI * 2);
-      ctx.fill();
+      if (hollow) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
       if (isSel) {
         ctx.globalAlpha = 1;
         ctx.strokeStyle = "rgba(230, 237, 246, 0.95)";

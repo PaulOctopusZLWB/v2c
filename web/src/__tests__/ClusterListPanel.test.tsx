@@ -35,6 +35,8 @@ function mockFetch(clusterList: SpeakerCluster[] = clusters) {
     if (path === "/api/persons") return new Response(JSON.stringify({ persons }), { status: 200 });
     if (path.startsWith("/api/speakers/clusters/") && init?.method === "POST")
       return new Response(JSON.stringify({ cluster_id: "vp_001", person_id: "per_a", labeled: 2062 }), { status: 200 });
+    if (path === "/api/clusters/vp_001/suggestion")
+      return new Response(JSON.stringify({ cluster_id: "vp_001", segment_count: 2062, embedded_count: 1800, suggestion: { person_id: "per_a", person_label: "胡春东", score: 0.71 } }), { status: 200 });
     return new Response("{}", { status: 200 });
   });
 }
@@ -124,5 +126,21 @@ describe("ClusterListPanel", () => {
     vi.stubGlobal("fetch", mockFetch([]));
     render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} />);
     expect(await screen.findByText(/还没有声纹分组/)).toBeInTheDocument();
+  });
+
+  it("shows the AI 猜测 with score and 采纳 assigns the suggested person", async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} />);
+
+    // 未分配聚类 vp_001 拿到建议:AI 猜测:胡春东 (0.71) + 采纳按钮。
+    expect(await screen.findByText(/AI 猜测:胡春东/)).toBeInTheDocument();
+    expect(screen.getByText("(0.71)")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /采纳 → 胡春东/ }));
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
+      expect(calls.some((c) => c.url.startsWith("/api/speakers/clusters/vp_001") && c.init?.method === "POST")).toBe(true);
+    });
   });
 });

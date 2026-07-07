@@ -12,6 +12,7 @@ from personal_context_node.web.routes_dynamics import router as dynamics_router
 from personal_context_node.web.routes_home import router as home_router
 from personal_context_node.web.routes_identity import router as identity_router
 from personal_context_node.web.routes_llm import router as llm_router
+from personal_context_node.web.routes_clusters import router as clusters_router
 from personal_context_node.web.routes_memory import router as memory_router
 from personal_context_node.web.routes_pipeline import events_router, router as pipeline_router
 from personal_context_node.web.routes_settings import router as settings_router
@@ -52,6 +53,7 @@ def create_app(*, config: AppConfig) -> FastAPI:
     app.include_router(audio_router)
     app.include_router(llm_router)
     app.include_router(memory_router)
+    app.include_router(clusters_router)
     app.include_router(devices_router)
     app.include_router(settings_router)
 

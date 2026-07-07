@@ -205,16 +205,26 @@ def review_queue(*, config: AppConfig, limit: int = 100) -> list[dict[str, objec
 
 
 def search_transcripts(*, config: AppConfig, query: str, limit: int = 30) -> list[dict[str, object]]:
-    """Case-insensitive substring search over active segment text, across every day.
+    """Transcript search across every day — FTS5 first, LIKE substring fallback.
 
-    Returns the newest matches first (by absolute wall-clock start), each carrying the day
-    (sessions.date_key) and speaker so the UI can jump straight to the utterance. A blank /
-    whitespace-only query short-circuits to []. LIKE metacharacters in the user query
-    (% _ \\) are escaped so they match literally, not as wildcards.
+    第一版语义检索(设计交接 Phase 6):走 FTS5 倒排索引(CJK 逐字 token,短语匹配
+    保持连续子串语义);SQLite 无 FTS5 时回退到原 LIKE 实现。Returns the newest
+    matches first, each carrying the day + speaker so the UI can jump to the utterance.
+    LIKE metacharacters in the fallback path (% _ \\) are escaped so they match literally.
     """
     needle = query.strip()
     if not needle:
         return []
+    from personal_context_node.transcript_fts import search_fts
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        fts_results = search_fts(conn, query=needle, limit=limit)
+    finally:
+        conn.close()
+    if fts_results is not None:
+        return fts_results
     # Escape \\ first so it doesn't double-escape the % / _ escapes we add next.
     escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"

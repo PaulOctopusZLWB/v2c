@@ -1890,6 +1890,18 @@ button.today-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--
   .pipe-feed { min-height: 240px; }
 }
 
+/* 聚类 AI 猜测行(design Phase 6)。 */
+.cluster-suggestion {
+  display: flex; align-items: center; gap: var(--s3);
+  font-size: var(--fs-sm);
+}
+.cluster-adopt {
+  min-height: auto; padding: 3px 10px; font-size: var(--fs-xs);
+  background: var(--accent); border-color: var(--accent); color: var(--accent-fg);
+  font-weight: var(--fw-semibold); border-radius: var(--radius-sm);
+}
+.cluster-adopt:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-fg); filter: brightness(1.05); }
+
 /* ============================================================
    记忆确认 (design handoff 1e, Phase 5)。
    ============================================================ */

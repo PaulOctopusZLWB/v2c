@@ -519,6 +519,14 @@ export interface MemoryCandidates {
   candidates: MemoryCandidate[];
 }
 
+/** 聚类的 AI 猜测(design Phase 6, GET /api/clusters/{id}/suggestion)。 */
+export interface ClusterSuggestion {
+  cluster_id: string;
+  segment_count: number;
+  embedded_count: number;
+  suggestion: { person_id: string; person_label: string; score: number } | null;
+}
+
 export interface MemoryConfirmReceipt {
   candidate_id: string;
   card_id: string;

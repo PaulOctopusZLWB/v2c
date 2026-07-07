@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
-import type { Person, SpeakerCluster } from "../../api/types";
+import type { ClusterSuggestion, Person, SpeakerCluster } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
@@ -35,6 +35,8 @@ export function ClusterListPanel({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ClusterFilter>("unassigned");
+  // AI 猜测(design Phase 6):未分配聚类的最可能人选,懒取、失败静默。
+  const [suggestions, setSuggestions] = useState<Record<string, ClusterSuggestion["suggestion"]>>({});
   const audio = useSegmentAudio();
 
   const load = useCallback(async () => {
@@ -51,6 +53,26 @@ export function ClusterListPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 为前 8 个未分配聚类懒取 AI 猜测(逐个请求;404/错误静默)。
+  useEffect(() => {
+    let stale = false;
+    const targets = clusters.filter((c) => !c.person_id).slice(0, 8);
+    for (const cluster of targets) {
+      if (suggestions[cluster.speaker_cluster_id] !== undefined) continue;
+      void api
+        .clusterSuggestion(cluster.speaker_cluster_id)
+        .then((res) => {
+          if (!stale) setSuggestions((prev) => ({ ...prev, [cluster.speaker_cluster_id]: res.suggestion ?? null }));
+        })
+        .catch(() => {
+          if (!stale) setSuggestions((prev) => ({ ...prev, [cluster.speaker_cluster_id]: null }));
+        });
+    }
+    return () => { stale = true; };
+    // suggestions 故意不进依赖:每次 clusters 变化只补缺口,不重复请求。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clusters]);
 
   const autoCluster = useAsyncAction(async () => {
     const ok = await confirm({
@@ -199,6 +221,22 @@ export function ClusterListPanel({
                     ))}
                   </ol>
                 </details>
+              ) : null}
+              {!c.person_id && suggestions[c.speaker_cluster_id] ? (
+                <div className="cluster-suggestion">
+                  <span className="dim">
+                    AI 猜测:{suggestions[c.speaker_cluster_id]!.person_label}{" "}
+                    <span className="num">({suggestions[c.speaker_cluster_id]!.score.toFixed(2)})</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="cluster-adopt"
+                    disabled={busyId === c.speaker_cluster_id}
+                    onClick={() => void assign(c, suggestions[c.speaker_cluster_id]!.person_id)}
+                  >
+                    采纳 → {suggestions[c.speaker_cluster_id]!.person_label}
+                  </button>
+                </div>
               ) : null}
               <Select
                 ariaLabel={`分配 ${c.speaker_cluster_id}`}
