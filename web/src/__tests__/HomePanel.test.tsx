@@ -141,7 +141,7 @@ describe("HomePanel (今日)", () => {
 describe("spineStages", () => {
   it("maps import/summary counts to the six-stage spine", () => {
     const stages = spineStages(null, { active: true, done: 1, total: 4, current: "a.wav" });
-    expect(stages[0]).toEqual({ label: "导入", state: "running", pct: 25 });
+    expect(stages[0]).toMatchObject({ label: "导入", state: "running", pct: 25, done: 1, total: 4 });
     expect(stages).toHaveLength(6);
     expect(stages.slice(1).every((s) => s.state === "pending")).toBe(true);
   });

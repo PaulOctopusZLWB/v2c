@@ -1,5 +1,6 @@
 import { Icon } from "../../components/Icon";
 import { reviewStatusZh, timeOfDay } from "../../lib/format";
+import { pipelineStages } from "../../lib/pipelineStages";
 import type { HomeOverview, ImportProgress, StatusSummary } from "../../api/types";
 
 /* 今日(首页,design handoff 1a):标题行 + 三卡行(待审 hero / 人物 / 覆盖)
@@ -39,49 +40,8 @@ function speechDurationZh(ms: number): string {
   return `${Math.floor(mins / 60)} 小时 ${mins % 60} 分`;
 }
 
-type SpineState = "done" | "running" | "pending";
-interface SpineStage {
-  label: string;
-  state: SpineState;
-  pct?: number;
-}
-
-/** 今日横条的 6 阶段(导入/VAD/转写/切分/摘要/发布),由 summary.stage_counts 聚合。
- *  组内 done==total → done;活动阶段或部分完成 → running(带百分比);其余 pending。 */
-export function spineStages(
-  summary: StatusSummary | null,
-  importProgress?: ImportProgress | null
-): SpineStage[] {
-  const groups: Array<{ label: string; types: string[] }> = [
-    { label: "VAD", types: ["vad"] },
-    { label: "转写", types: ["asr"] },
-    { label: "切分", types: ["session_derive"] },
-    { label: "摘要", types: ["summarize_session", "daily_generate"] },
-    { label: "发布", types: ["obsidian_publish", "archive"] }
-  ];
-  const counts = summary?.stage_counts ?? {};
-  const active = summary?.active_stage ?? null;
-
-  const importState: SpineStage = importProgress?.active
-    ? { label: "导入", state: "running", pct: pct(importProgress.done, importProgress.total) }
-    : { label: "导入", state: summary && (summary.total ?? 0) > 0 ? "done" : "pending" };
-
-  return [
-    importState,
-    ...groups.map(({ label, types }) => {
-      let done = 0;
-      let total = 0;
-      for (const t of types) {
-        done += counts[t]?.done ?? 0;
-        total += counts[t]?.total ?? 0;
-      }
-      if (total > 0 && done >= total) return { label, state: "done" as const };
-      if ((active && types.includes(active)) || (total > 0 && done > 0))
-        return { label, state: "running" as const, pct: pct(done, total) };
-      return { label, state: "pending" as const };
-    })
-  ];
-}
+// 六阶段推导移到 lib/pipelineStages(管道页阶段栈复用);这里保留 re-export 供测试与旧引用。
+export { pipelineStages as spineStages } from "../../lib/pipelineStages";
 
 export function HomePanel({
   overview,
@@ -118,7 +78,7 @@ export function HomePanel({
 
   const { review, people, coverage, recent_sessions } = overview;
   const noBacklog = review.pending_sessions === 0;
-  const stages = spineStages(summary, importProgress);
+  const stages = pipelineStages(summary, importProgress);
   const spineLive = running || !!importProgress?.active;
 
   return (

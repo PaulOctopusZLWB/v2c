@@ -1791,6 +1791,106 @@ button.today-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--
 .llm-panel .viewpoint { margin: 0; }
 
 /* ============================================================
+   管道控制室 (design handoff 1b, Phase 4):
+   280px 阶段栈 | 1fr 实时转写流 | 300px 任务栏。
+   ============================================================ */
+.pipeline-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 300px;
+  gap: var(--s5);
+  align-items: stretch;
+  max-width: var(--page-w-canvas);
+  overflow: hidden; /* 中列自己滚 */
+}
+.pipe-stages { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
+.pipe-stage {
+  border: 1px solid transparent; border-radius: var(--r2);
+  padding: var(--s3) var(--s4);
+  color: var(--text-dim);
+  position: relative;
+}
+/* 节点间 1px 竖线。 */
+.pipe-stage + .pipe-stage::before {
+  content: ""; position: absolute; top: -11px; left: 22px; width: 1px; height: 10px;
+  background: var(--border-strong);
+}
+.pipe-stage-head { display: flex; align-items: center; gap: var(--s3); }
+.pipe-stage-mark { width: 8px; text-align: center; flex: none; }
+.pipe-stage-mark.ok { color: var(--ok); }
+.pipe-stage-name { font-size: var(--fs-base); }
+.pipe-stage-count { margin-left: auto; font-size: var(--fs-xs); }
+.pipe-stage.is-done { color: var(--text-2); }
+.pipe-stage.is-done .pipe-stage-count { color: var(--text-dim); }
+/* 运行中节点升级为卡片:accent-dim 底 + 描边 + 外发光 + 3px 进度条。 */
+.pipe-stage.is-running {
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 22px -10px var(--accent-glow);
+  color: var(--accent-2);
+}
+.pipe-stage.is-running .pipe-stage-name { font-weight: var(--fw-semibold); }
+.pipe-stage.is-running .pipe-stage-count { color: var(--accent); }
+.pipe-stage-track { display: block; margin-top: var(--s3); height: 3px; border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
+.pipe-stage-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-pill); transition: width .3s ease; }
+@media (prefers-reduced-motion: reduce) { .pipe-stage-fill { transition: none; } }
+.pipe-auto { margin-top: auto; padding: var(--s3) var(--s4); }
+
+.pipe-feed-col { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; min-height: 0; }
+.pipe-feed-head { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.pipe-live { font-size: var(--fs-sm); color: var(--accent); letter-spacing: .06em; }
+/* 列表底对齐:新段从底部进入,越旧越透明(inline opacity)。 */
+.pipe-feed {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s2h);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: var(--s4) 18px;
+}
+.pipe-feed-empty { margin: auto; text-align: center; }
+.pipe-row {
+  display: grid; grid-template-columns: 64px 84px minmax(0, 1fr);
+  gap: var(--s4); align-items: baseline;
+  padding: var(--s2) 0;
+}
+.pipe-row-time { font-size: var(--fs-xs); color: var(--text-dim); }
+.pipe-row .chip { justify-self: start; overflow: hidden; text-overflow: ellipsis; max-width: 84px; }
+.pipe-row-text { font-size: 13.5px; line-height: 1.6; color: var(--text); }
+/* 正在转写行:accent 底/描边 + 2px 光标闪烁。 */
+.pipe-row.is-live {
+  background: var(--accent-dim);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--r2); padding: var(--s2) var(--s3);
+}
+.pipe-caret {
+  display: inline-block; width: 2px; height: 15px; margin-left: 3px;
+  background: var(--accent); vertical-align: -2px;
+  animation: caretblink .9s step-end infinite;
+}
+@keyframes caretblink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pipe-caret { animation: none; } }
+.pipe-complete {
+  display: flex; align-items: center; gap: 14px;
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--panel); border-radius: 10px; padding: var(--s4) 18px;
+}
+.pipe-complete-copy { flex: 1 1 auto; font-size: var(--fs-base); color: var(--ok); }
+.pipe-complete-copy .warn { color: var(--warn); }
+
+.pipe-tasks { display: flex; flex-direction: column; gap: var(--s5); min-width: 0; overflow-y: auto; }
+/* mono 事件流 tail。 */
+.pipe-tail {
+  border-top: 1px solid var(--border); padding-top: var(--s3);
+  display: flex; flex-direction: column; gap: var(--s1);
+  font-size: var(--fs-xs); color: var(--text-dim);
+}
+.pipe-tail-row.is-failed { color: var(--err); }
+.pipe-tail-row.is-completed { color: var(--ok); }
+
+@media (max-width: 1100px) {
+  .pipeline-layout { grid-template-columns: 1fr; overflow: visible; }
+  .pipe-feed { min-height: 240px; }
+}
+
+/* ============================================================
    AMBIENT BACKGROUND — 全局环境动效层 (design handoff Phase 0).
    Fixed + pointer-transparent at --z-ambient: above the body's
    pure --bg canvas, below every screen. Per-theme inputs live in

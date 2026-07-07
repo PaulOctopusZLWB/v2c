@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
 from personal_context_node.ingest import import_audio_files
+from personal_context_node.pipeline_events import EventCursor, derive_tick_events, fetch_new_segments, max_segment_rowid
 from personal_context_node.tasks import process_status_rows, retry_failed_tasks, retry_task
 
 
@@ -110,6 +111,8 @@ async def events_stream(request: Request) -> StreamingResponse:
 
     async def stream():
         last_signature: str | None = None
+        # 事件游标(每连接一份):新段 rowid / 上个活跃阶段 / 已知失败集 / 是否观察到活动。
+        cursor = EventCursor(segment_rowid=max_segment_rowid(config=config))
         # Emit an immediate compact summary, then poll for changes.
         for _ in range(10_000):
             if await request.is_disconnected():
@@ -159,22 +162,39 @@ async def events_stream(request: Request) -> StreamingResponse:
                 sort_keys=True,
                 default=str,
             )
-            if signature != last_signature:
+            payload = {
+                "status_counts": status_counts,
+                "total": total,
+                "stage_counts": stage_counts,
+                "done_total": done_total,
+                "failed_total": failed_total,
+                "eta_seconds": eta_seconds,
+                "active_stage": active_stage,
+                "current_target": current_target,
+                "import_progress": import_progress,
+                "worker_running": worker_running,
+            }
+            summary_changed = signature != last_signature
+            if summary_changed:
                 last_signature = signature
-                payload = {
-                    "status_counts": status_counts,
-                    "total": total,
-                    "stage_counts": stage_counts,
-                    "done_total": done_total,
-                    "failed_total": failed_total,
-                    "eta_seconds": eta_seconds,
-                    "active_stage": active_stage,
-                    "current_target": current_target,
-                    "import_progress": import_progress,
-                    "worker_running": worker_running,
-                }
                 yield "event: status.summary\n"
                 yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+
+            # 管道控制室的细粒度事件:新段 / 阶段切换 / 新失败 / 进度 / 收尾。
+            new_segments, cursor.segment_rowid = fetch_new_segments(
+                config=config, after_rowid=cursor.segment_rowid or 0
+            )
+            for name, data in derive_tick_events(
+                cursor=cursor,
+                rows=rows,
+                summary=payload,
+                summary_changed=summary_changed,
+                is_failed=_is_failed,
+                new_segments=new_segments,
+            ):
+                yield f"event: {name}\n"
+                yield f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
             # Nothing is in flight and no worker is running: no further change can occur
             # without a new request, so close the stream (the EventSource reconnects later).
             if not worker_running and not any(r["status"] in _ACTIVE_TASK_STATUSES for r in rows):

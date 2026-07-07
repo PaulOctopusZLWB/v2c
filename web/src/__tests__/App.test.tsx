@@ -187,7 +187,7 @@ describe("App container", () => {
     // The TaskList panel is never opened, so the lazy task array stays empty — these must
     // come from the compact summary. The stage breakdown + ETA live on the 管道 tab now.
     await gotoTab("管道");
-    expect(await screen.findByText("1200/1500")).toBeInTheDocument(); // asr stage breakdown
+    expect((await screen.findAllByText("1200/1500")).length).toBeGreaterThan(0); // asr breakdown(Progress + 阶段栈)
     expect(screen.getByText(/剩余约/)).toBeInTheDocument(); // ETA
     expect(await screen.findByText("1700")).toBeInTheDocument(); // RunInspector count == summary total
   });

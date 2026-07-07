@@ -10,6 +10,7 @@ import { Toasts, useToasts } from "./components/Toasts";
 import { DialogHost, useDialog } from "./components/ui/Dialog";
 import { DevicePanel } from "./features/device/DevicePanel";
 import { HomePanel } from "./features/home/HomePanel";
+import { PipelinePanel, readAutoReview } from "./features/pipeline/PipelinePanel";
 import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
 import { ReviewQueue } from "./features/transcript/ReviewQueue";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
@@ -92,7 +93,20 @@ function highlightMatch(text: string, q: string): ReactNode {
 }
 
 export function App() {
-  const { summary, worker_running, import_progress } = usePipelineStatus();
+  // run.completed:success toast「立即审核 ↵」;开了「完成后自动跳转审核」则直接切页。
+  const { summary, worker_running, import_progress } = usePipelineStatus({
+    onRunCompleted: (e) => {
+      if (readAutoReview()) {
+        setTab("review");
+        return;
+      }
+      pushAction(
+        `转写完成 · ${e.done_total}/${e.total} 任务${e.failed_total ? ` · 失败 ${e.failed_total}` : ""}`,
+        "立即审核",
+        () => setTab("review")
+      );
+    }
+  });
   const { tab, setTab } = useTab();
   const themeController = useTheme();
   const { toasts, push, pushAction, dismiss } = useToasts();
@@ -750,28 +764,26 @@ export function App() {
     );
   }
 
-  // 管道 (ingest): device detection + import + the run-control/task surface;
-  // 分阶段进度明细(原全局头部的 Progress)现在住在这里。
+  // 管道 (ingest) — 控制室三栏:阶段栈 | 实时转写流 | 任务栏(运行控制/设备导入/任务列表)。
   function renderIngest() {
     return (
-      <div className="tab-page two-col">
-        <div className="col-main">
-          {total > 0 ? (
-            <section className="card" aria-label="管道进度">
-              <Progress
-                done={done}
-                total={total}
-                label={progressLabel}
-                stages={importing ? undefined : stageBreakdown}
-                etaSeconds={importing ? null : etaSeconds}
-              />
-            </section>
-          ) : null}
-          <div id="panel-device">
-            <DevicePanel sources={sources ?? []} onImport={guard(handleImport)} onRefresh={() => void refreshDevices()} />
-          </div>
-        </div>
-        <div className="col-side">
+      <PipelinePanel
+        summary={summary}
+        importProgress={import_progress}
+        running={pipelineRunning}
+        onGoReview={() => setTab("review")}
+        progress={
+          total > 0 ? (
+            <Progress
+              done={done}
+              total={total}
+              label={progressLabel}
+              stages={importing ? undefined : stageBreakdown}
+              etaSeconds={importing ? null : etaSeconds}
+            />
+          ) : null
+        }
+        runInspector={
           <div id="panel-run">
             <RunInspector
               workerRunning={pipelineRunning}
@@ -781,6 +793,13 @@ export function App() {
               onStop={guard(() => api.stop())}
             />
           </div>
+        }
+        devicePanel={
+          <div id="panel-device">
+            <DevicePanel sources={sources ?? []} onImport={guard(handleImport)} onRefresh={() => void refreshDevices()} />
+          </div>
+        }
+        taskList={
           <TaskList
             tasks={tasks}
             taskCount={summaryTotal}
@@ -792,8 +811,8 @@ export function App() {
             onRetry={guard(async (taskId: string) => { await api.retry(taskId); await api.run(); await refreshTasks(); })}
             onRetryAllFailed={guard(async () => { await api.retryFailed(); await api.run(); await refreshTasks(); })}
           />
-        </div>
-      </div>
+        }
+      />
     );
   }
 

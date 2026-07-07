@@ -47,6 +47,47 @@ export interface TriageSegment {
   suggested_speaker: { person_id: string; person_label: string } | null;
 }
 
+/* ---- /api/events 细粒度事件(design handoff Phase 4,管道控制室) ---- */
+
+/** 新落库的转写段(实时转写流)。 */
+export interface LiveSegment {
+  segment_id: string;
+  session_id: string | null;
+  text: string;
+  speaker: string;
+  start_ms: number;
+  end_ms: number;
+  absolute_start_at: string | null;
+  confidence: number | null;
+}
+
+export interface StageChanged {
+  stage: string;
+  previous: string | null;
+  target: string | null;
+}
+
+export interface TaskFailed {
+  task_id: string;
+  task_type: string;
+  target_id: string;
+  error: string | null;
+}
+
+export interface TaskProgress {
+  task_type: string;
+  target_id: string | null;
+  done_total: number;
+  total: number;
+  eta_seconds: number | null;
+}
+
+export interface RunCompleted {
+  total: number;
+  done_total: number;
+  failed_total: number;
+}
+
 export interface SessionTriage {
   session_id: string;
   thresholds: { high: number; low: number };
