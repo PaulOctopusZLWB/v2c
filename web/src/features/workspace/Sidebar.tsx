@@ -19,7 +19,8 @@ export const SIDEBAR_NAV: SidebarNavItem[] = [
   { id: "ingest", label: "管道", glyph: "▶", key: "2" },
   { id: "review", label: "审核", glyph: "☰", key: "3" },
   { id: "speakers", label: "声纹", glyph: "◉", key: "4" },
-  { id: "llm", label: "总结", glyph: "❖", key: "5" }
+  { id: "memory", label: "记忆", glyph: "❖", key: "5" },
+  { id: "llm", label: "总结", glyph: "≡", key: "6" }
 ];
 
 export function Sidebar({
@@ -28,6 +29,7 @@ export function Sidebar({
   onOpenPalette,
   pipelineRunning,
   reviewPending,
+  memoryPending,
   days,
   onOpenDay
 }: {
@@ -38,6 +40,8 @@ export function Sidebar({
   pipelineRunning: boolean;
   /** 待审会话数;>0 时在审核项右侧显示 warn 胶囊。 */
   reviewPending?: number;
+  /** 待确认记忆数;>0 时在记忆项右侧显示 warn 胶囊。 */
+  memoryPending?: number;
   /** 资料库:最近的日期(最新在前),点击跳到审核页该天。 */
   days: Array<{ day: string; session_count: number }>;
   onOpenDay: (day: string) => void;
@@ -76,6 +80,9 @@ export function Sidebar({
                 {item.id === "ingest" && pipelineRunning ? <span className="breathe-dot" aria-label="运行中" /> : null}
                 {item.id === "review" && reviewPending ? (
                   <span className="sidebar-badge num">{reviewPending}</span>
+                ) : null}
+                {item.id === "memory" && memoryPending ? (
+                  <span className="sidebar-badge num">{memoryPending}</span>
                 ) : null}
                 {item.key ? <kbd className="sidebar-item-key">{item.key}</kbd> : null}
               </span>

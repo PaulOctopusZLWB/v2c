@@ -11,6 +11,7 @@ import { DialogHost, useDialog } from "./components/ui/Dialog";
 import { DevicePanel } from "./features/device/DevicePanel";
 import { HomePanel } from "./features/home/HomePanel";
 import { PipelinePanel, readAutoReview } from "./features/pipeline/PipelinePanel";
+import { MemoryPanel } from "./features/memory/MemoryPanel";
 import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
 import { ReviewQueue } from "./features/transcript/ReviewQueue";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
@@ -43,7 +44,7 @@ import { t } from "./i18n";
 import type { DailyLlmResult, DayStatusRow, Health, HomeOverview, IdentityReview, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
 
 /** 状态条左侧的当前页名(设计稿全局框架)。 */
-const PAGE_TITLES: Record<TabId, string> = { home: "今日", ingest: "管道", review: "审核", speakers: "声纹", llm: "总结", settings: "设置" };
+const PAGE_TITLES: Record<TabId, string> = { home: "今日", ingest: "管道", review: "审核", speakers: "声纹", memory: "记忆", llm: "总结", settings: "设置" };
 
 const DEVICE_POLL_MS = 5000;
 const IN_FLIGHT_STATUSES = ["claimed", "running"];
@@ -751,7 +752,7 @@ export function App() {
         importProgress={import_progress}
         running={pipelineRunning}
         onStartReview={() => setTab("review")}
-        onGoPeople={() => setTab("speakers")}
+        onGoMemory={() => setTab("memory")}
         onGoPipeline={() => setTab("ingest")}
         onOpenSession={(sid, day) => {
           void guard(async () => {
@@ -812,6 +813,17 @@ export function App() {
             onRetryAllFailed={guard(async () => { await api.retryFailed(); await api.run(); await refreshTasks(); })}
           />
         }
+      />
+    );
+  }
+
+  // 记忆 (memory): 确认/拒绝/搁置记忆候选,确认即 Ed25519 签名并写回 vault。
+  function renderMemory() {
+    return (
+      <MemoryPanel
+        push={push}
+        onPlaybackError={(message) => push("音频播放失败", message)}
+        onJumpToSegment={(segmentId, sessionId) => void guard(jumpToSegment)(segmentId, sessionId)}
       />
     );
   }
@@ -1171,6 +1183,8 @@ export function App() {
         return renderReview();
       case "speakers":
         return renderSpeakers();
+      case "memory":
+        return renderMemory();
       case "llm":
         return renderLlm();
       case "settings":
@@ -1187,6 +1201,7 @@ export function App() {
         onOpenPalette={() => setPaletteOpen(true)}
         pipelineRunning={pipelineRunning}
         reviewPending={overview?.review.pending_sessions}
+        memoryPending={overview?.memory?.pending}
         days={days}
         onOpenDay={(day) => {
           void guard(selectDay)(day);

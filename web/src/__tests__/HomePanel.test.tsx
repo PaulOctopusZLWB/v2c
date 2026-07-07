@@ -30,7 +30,8 @@ const overview: HomeOverview = {
       review_status: "accepted"
     }
   ],
-  latest_day: "2087-05-11"
+  latest_day: "2087-05-11",
+  memory: { pending: 8, confirmed: 3 }
 };
 
 const noop = () => {};
@@ -40,7 +41,7 @@ const baseProps = {
   summary: null,
   running: false,
   onStartReview: noop,
-  onGoPeople: noop,
+  onGoMemory: noop,
   onGoPipeline: noop,
   onOpenSession: noop
 };
@@ -55,9 +56,9 @@ describe("HomePanel (今日)", () => {
     expect(within(reviewCard).getByRole("button", { name: /开始审核/ })).toBeInTheDocument();
     expect(within(reviewCard).getByRole("button", { name: /查看队列/ })).toBeInTheDocument();
 
-    const peopleCard = screen.getByRole("button", { name: "人物" });
-    expect(peopleCard.textContent).toMatch(/8/);
-    expect(peopleCard.textContent).toMatch(/已登记 5/);
+    const memoryCard = screen.getByRole("button", { name: "待确认记忆" });
+    expect(memoryCard.textContent).toMatch(/候选/);
+    expect(memoryCard.textContent).toMatch(/签名确认/);
 
     const coverage = screen.getByRole("region", { name: "覆盖" });
     expect(within(coverage).getByText("12")).toBeInTheDocument();
@@ -87,15 +88,15 @@ describe("HomePanel (今日)", () => {
     expect(onOpenSession).toHaveBeenCalledWith("ses_b", "2087-05-11");
   });
 
-  it("开始审核 / 人物卡 / 管道横条 deep-link into their tabs", async () => {
+  it("开始审核 / 记忆卡 / 管道横条 deep-link into their tabs", async () => {
     const onStartReview = vi.fn();
-    const onGoPeople = vi.fn();
+    const onGoMemory = vi.fn();
     const onGoPipeline = vi.fn();
-    render(<HomePanel {...baseProps} onStartReview={onStartReview} onGoPeople={onGoPeople} onGoPipeline={onGoPipeline} />);
+    render(<HomePanel {...baseProps} onStartReview={onStartReview} onGoMemory={onGoMemory} onGoPipeline={onGoPipeline} />);
     await userEvent.click(screen.getByRole("button", { name: /开始审核/ }));
     expect(onStartReview).toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "人物" }));
-    expect(onGoPeople).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "待确认记忆" }));
+    expect(onGoMemory).toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "管道" }));
     expect(onGoPipeline).toHaveBeenCalled();
   });

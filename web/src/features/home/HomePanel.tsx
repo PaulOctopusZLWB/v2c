@@ -15,7 +15,7 @@ interface HomePanelProps {
   importProgress?: ImportProgress | null;
   running: boolean;
   onStartReview: () => void;
-  onGoPeople: () => void;
+  onGoMemory: () => void;
   onGoPipeline: () => void;
   onOpenSession: (sessionId: string, day: string) => void;
 }
@@ -50,7 +50,7 @@ export function HomePanel({
   importProgress,
   running,
   onStartReview,
-  onGoPeople,
+  onGoMemory,
   onGoPipeline,
   onOpenSession
 }: HomePanelProps) {
@@ -124,14 +124,14 @@ export function HomePanel({
           </div>
         </section>
 
-        {/* 人物(Phase 5 起原位换成「待确认记忆」卡)— 整卡可点 → 声纹。 */}
-        <button type="button" className="today-card today-card-people" aria-label="人物" onClick={onGoPeople}>
-          <div className="today-card-label">人物</div>
+        {/* 待确认记忆 — 整卡可点 → 记忆页(设计稿 1a)。 */}
+        <button type="button" className="today-card today-card-memory" aria-label="待确认记忆" onClick={onGoMemory}>
+          <div className="today-card-label">待确认记忆</div>
           <div className="today-num-row">
-            <span className="today-bignum num">{people.total}</span>
-            <span className="today-num-sub">人 · 已登记 {people.enrolled}</span>
+            <span className="today-bignum num">{overview.memory?.pending ?? 0}</span>
+            <span className="today-num-sub">候选 · {people.total} 人已识别</span>
           </div>
-          <div className="today-hint">在声纹页登记与指认 →</div>
+          <div className="today-hint">可在应用内直接签名确认 →</div>
         </button>
 
         {/* 覆盖:天/会话/段 + 声纹/情绪覆盖率两条 3px 进度线。 */}

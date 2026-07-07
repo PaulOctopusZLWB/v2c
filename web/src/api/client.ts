@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, ParticipantStatus, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, ParticipantStatus, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -57,6 +57,13 @@ export const api = {
   session: (id: string) => request<TranscriptSession>(`/api/transcripts/sessions/${id}`),
   // AI 预审:rule-based triage bins for the review page (read-only).
   sessionTriage: (id: string) => request<SessionTriage>(`/api/sessions/${id}/triage`),
+  // 记忆确认闭环:候选列表 + confirm(Ed25519 签名)/reject/defer/restore(z 撤销)。
+  memoryCandidates: () => request<MemoryCandidates>("/api/memory/candidates"),
+  confirmMemory: (id: string, edited_claim?: string) =>
+    request<MemoryConfirmReceipt>(`/api/memory/${id}/confirm`, { method: "POST", body: JSON.stringify({ edited_claim: edited_claim ?? null }) }),
+  rejectMemory: (id: string) => request<{ ok: boolean }>(`/api/memory/${id}/reject`, { method: "POST" }),
+  deferMemory: (id: string) => request<{ ok: boolean }>(`/api/memory/${id}/defer`, { method: "POST" }),
+  restoreMemory: (id: string) => request<{ ok: boolean }>(`/api/memory/${id}/restore`, { method: "POST" }),
   // conversation dynamics for a session: talk-share, turn-taking, timeline
   sessionDynamics: (id: string) => request<SessionDynamics>(`/api/sessions/${id}/dynamics`),
   // global transcript search: substring match across every day, newest utterance first

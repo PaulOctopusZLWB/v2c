@@ -16,9 +16,9 @@ describe("Sidebar", () => {
     render(<Sidebar {...baseProps} active="home" />);
     const tabs = screen.getAllByRole("tab");
     // 可访问名 = 纯标签(字形/快捷键是装饰);顺序:5 主项 + 设置钉底。
-    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["今日", "管道", "审核", "声纹", "总结", "设置"]);
+    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["今日", "管道", "审核", "声纹", "记忆", "总结", "设置"]);
     // 数字快捷键角标 1–5 依次渲染。
-    expect(tabs.slice(0, 5).map((t) => t.querySelector(".sidebar-item-key")?.textContent)).toEqual(["1", "2", "3", "4", "5"]);
+    expect(tabs.slice(0, 6).map((t) => t.querySelector(".sidebar-item-key")?.textContent)).toEqual(["1", "2", "3", "4", "5", "6"]);
   });
 
   it("marks the active item with aria-current and calls onSelect on click", async () => {

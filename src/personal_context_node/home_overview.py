@@ -48,6 +48,14 @@ def home_overview(*, config: AppConfig) -> dict[str, object]:
               (select count(*) from segment_emotions) as emoted
             """,
         )[0]
+        memory = fetch_all(
+            conn,
+            """
+            select
+              (select count(*) from memory_candidates where status = 'pending_review') as pending,
+              (select count(*) from memory_candidates where status = 'confirmed') as confirmed
+            """,
+        )[0]
         # Top 5 most recent sessions, with a per-session review_status computed from the same
         # left join over reviews (no N+1 fetch). pending = active segments with no review row;
         # has_flag = any needs_fix. 'blocked' when no active segments or any needs_fix; else
@@ -124,6 +132,8 @@ def home_overview(*, config: AppConfig) -> dict[str, object]:
         },
         "recent_sessions": recent_sessions,
         "latest_day": latest_rows[0]["day"] if latest_rows else None,
+        # 待确认记忆卡 + 侧栏「记忆」徽标。
+        "memory": {"pending": int(memory["pending"] or 0), "confirmed": int(memory["confirmed"] or 0)},
         "today": {
             "day": today_key,
             "segments": int(today_row["segments"] or 0),

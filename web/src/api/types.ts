@@ -479,6 +479,52 @@ export interface HomeOverview {
   latest_day: string | null;
   /** 今日标题行:今天的段数与语音时长(「已录 n 段 · 时长」)。 */
   today?: { day: string; segments: number; speech_ms: number };
+  /** 待确认记忆卡 + 侧栏「记忆」徽标。 */
+  memory?: { pending: number; confirmed: number };
+}
+
+/* ---- 记忆确认 (design handoff Phase 5, /api/memory/*) ---- */
+
+export interface MemoryEvidence {
+  evidence_id: string;
+  source_type: string;
+  /** transcript_segment 证据的段 id(播放 / 跳到转写);其它来源为 null。 */
+  segment_id: string | null;
+  /** 该段所属会话(跳到转写时打开);其它来源为 null。 */
+  session_id: string | null;
+  quote: string;
+  summary: string | null;
+}
+
+export interface MemoryCandidate {
+  candidate_id: string;
+  day: string | null;
+  claim: string;
+  candidate_claim: string;
+  claim_type: string;
+  confidence: number | null;
+  source_type: string;
+  status: "pending_review" | "confirmed" | "rejected" | "deferred";
+  memory_card_id: string | null;
+  reviewed_at: string | null;
+  evidence: MemoryEvidence[];
+  created_at: string;
+}
+
+export interface MemoryCandidates {
+  /** 本机身份(头部 🔑 Ed25519 · did:key:…)。 */
+  did: string;
+  pending: number;
+  total: number;
+  candidates: MemoryCandidate[];
+}
+
+export interface MemoryConfirmReceipt {
+  candidate_id: string;
+  card_id: string;
+  event_type: string;
+  signature: string;
+  note_path: string | null;
 }
 
 /** One cited claim/viewpoint with the transcript segment ids that back it. Refs are preserved
