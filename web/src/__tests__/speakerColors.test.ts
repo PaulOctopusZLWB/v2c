@@ -6,7 +6,8 @@ describe("speakerColor", () => {
     expect(speakerColor("spk_1")).toBe(speakerColor("spk_1"));
     expect(speakerColor("spk_1")).not.toBe(speakerColor("spk_2"));
   });
-  it("maps the self speaker to a fixed color", () => {
-    expect(speakerColor("self")).toBe("#22d3ee");
+  it("maps the self speaker to the fixed --spk-self green", () => {
+    expect(speakerColor("self")).toBe("#7fd1a8");
+    expect(speakerColor("我")).toBe("#7fd1a8");
   });
 });

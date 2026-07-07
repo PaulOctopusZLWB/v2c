@@ -33,6 +33,24 @@
   --radius-lg: 12px; --r3: var(--radius-lg);
   --radius-pill: 999px;
 
+  /* motion (design handoff): control-state / card-move / entrance + the one easing */
+  --t-fast: 120ms;
+  --t-move: 240ms;
+  --t-enter: 400ms;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+
+  /* glass panels: pair the per-theme --glass-bg with this blur radius */
+  --glass-blur: 14px;
+
+  /* speaker palette — SAME values in both themes; chip text is always --chip-fg
+     so labels stay legible on these mid-bright fills light & dark */
+  --spk-self: #7fd1a8;
+  --spk-1: #5fb8d4;
+  --spk-2: #d4a75f;
+  --spk-3: #b48ce0;
+  --spk-purple: #8b7ae8; /* 紫强调 — second aurora hue / 情绪 progress line */
+  --chip-fg: #04121a;
+
   /* type scale (8 real steps, collapsing the audited ~16 sizes) */
   --fs-xs:  11px;  /* meta / badges / hints */
   --fs-sm:  12px;  /* secondary labels */
@@ -75,6 +93,7 @@
    * and #overlay-root (the portal target). RULE: any floating UI that must cover other
    * content lives in #overlay-root (via <Portal>), so it is never clipped and stacks by token.
    */
+  --z-ambient: -1;        /* AmbientBackground — behind the canvas content, above body bg */
   --z-base: 0;            /* normal flow */
   --z-raised: 10;         /* sticky-ish bits inside a panel */
   --z-canvas-overlay: 20; /* absolute UI INSIDE a canvas/card (vmap tooltip/rect/note) — stays local */
@@ -91,35 +110,43 @@
   color-scheme: light;
 
   /* elevation ladder (page → surface → surface-2 → elev) */
-  --bg:         #eef1f5;   /* page: cool light slate, NOT pure white */
-  --surface:    #f7f9fb;   /* primary panels/rails */
-  --surface-2:  #ffffff;   /* inset wells: inputs, textareas, list rows, canvas backdrop */
-  --elev:       #ffffff;   /* floated cards (separated from page by border+shadow) */
+  --bg:         #eef1f6;   /* page: cool light slate, NOT pure white */
+  --surface:    #f7f9fc;   /* primary panels/rails (设计稿: 侧栏底) */
+  --surface-2:  #fbfcfe;   /* inset wells: inputs, textareas, list rows, canvas backdrop */
+  --elev:       #ffffff;   /* floated cards (设计稿: 卡片) */
   --panel:      var(--surface);   /* back-compat alias for existing markup */
   --panel-2:    var(--surface-2); /* back-compat alias (inputs read this today) */
 
   /* borders */
-  --border:        #d8dee7;  /* hairline divider */
-  --border-strong: #c2ccd8;  /* control outline / interactive edge */
+  --border:        #e2e8f0;  /* hairline divider */
+  --border-strong: #cfd6e0;  /* control outline / interactive edge */
 
   /* text */
-  --text:       #16202c;   /* primary, ~14:1 on --surface */
-  --text-2:     #475160;   /* secondary labels, ~7:1 */
-  --text-dim:   #6a7585;   /* meta/hints — AA at 12px+ on light wells */
+  --text:       #1a212c;   /* primary */
+  --text-2:     #5a6572;   /* secondary labels */
+  --text-dim:   #8c95a5;   /* meta/hints */
   --text-muted: var(--text-2);
 
-  /* accent (indigo→teal); ONLY live/active/focus/progress */
-  --accent:     #1f6feb;
-  --accent-2:   #0e5fd8;   /* hover/pressed accent text */
+  /* accent (深青, AA on white); ONLY live/active/focus/progress */
+  --accent:     #0891b2;
+  --accent-2:   #0e7490;   /* hover/pressed accent text */
   --accent-fg:  #ffffff;   /* text ON a filled accent button */
-  --accent-dim: #dbe8fd;   /* active pill / selected-row fill */
-  --accent-glow: rgba(31, 111, 235, 0.22);
+  --accent-dim: rgba(8, 145, 178, 0.10);   /* active pill / selected-row fill */
+  --accent-glow: rgba(8, 145, 178, 0.18);
 
   /* semantic status */
   --success: #0e8a5f;  --ok: var(--success);
   --warn:    #b5740a;
   --danger:  #c43d3d;  --err: var(--danger);
-  --pending: #6a7585;
+  --pending: #8c95a5;
+
+  /* glass surfaces (全局状态条 / 浮层) — combine with backdrop-filter: blur(var(--glass-blur)) */
+  --glass-bg: rgba(255, 255, 255, 0.8);
+
+  /* ambient background layer inputs */
+  --ambient-grid-line: rgba(8, 145, 178, 0.04);
+  --ambient-aurora-a: rgba(8, 145, 178, 0.08);
+  --ambient-aurora-b: rgba(139, 122, 232, 0.07);
 
   /* elevation shadows */
   --shadow-1: 0 1px 2px rgba(20, 30, 45, 0.06), 0 1px 1px rgba(20, 30, 45, 0.04);
@@ -127,56 +154,64 @@
   --shadow: var(--shadow-1); /* back-compat alias */
 
   /* scrollbar */
-  --scrollbar-thumb: #c2ccd8;
-  --scrollbar-thumb-hover: #a7b4c4;
+  --scrollbar-thumb: #cfd6e0;
+  --scrollbar-thumb-hover: #b4becd;
 }
 
 /* ---- DARK colors (= today's 深空底 palette, refined) ---- */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg:         #0a0e15;
-  --surface:    #0f1622;
-  --surface-2:  #131c2b;   /* inset wells — THE token every textarea/input reads */
-  --elev:       #182233;   /* 浮起卡片 */
+  --bg:         #08090d;
+  --surface:    #10131a;
+  --surface-2:  #0e1015;   /* inset wells — THE token every textarea/input reads */
+  --elev:       #12161d;   /* 浮起卡片 (Dialog/Toast/⌘K) */
   --panel:      var(--surface);
   --panel-2:    var(--surface-2);
 
-  --border:        #1f2c3e;
-  --border-strong: #2b3b52;
+  --border:        #1d222d;
+  --border-strong: #2a3140;
 
-  --text:       #e6edf6;
-  --text-2:     #aab8c9;
-  --text-dim:   #7d8da0;   /* lifted #6b7a8f → AA on --surface-2 at small sizes */
+  --text:       #e8ebf0;
+  --text-2:     #99a3b2;
+  --text-dim:   #626d7d;
   --text-muted: var(--text-2);
 
-  --accent:     #2dd4ee;   /* electric cyan — live/active/focus only */
-  --accent-2:   #7af0ff;
+  --accent:     #35d5ee;   /* electric cyan — live/active/focus only */
+  --accent-2:   #7ae4f5;
   --accent-fg:  #04121a;   /* dark text ON a filled accent button/chip */
-  --accent-dim: #123a44;
-  --accent-glow: rgba(45, 212, 238, 0.18);
+  --accent-dim: rgba(53, 213, 238, 0.10);
+  --accent-glow: rgba(53, 213, 238, 0.18);
 
   --success: #3ddc97;  --ok: var(--success);
-  --warn:    #f4bf4f;
-  --danger:  #f87171;  --err: var(--danger);
-  --pending: #7d8da0;
+  --warn:    #f0bb4e;
+  --danger:  #f57373;  --err: var(--danger);
+  --pending: #626d7d;
+
+  /* glass surfaces (全局状态条 / 浮层) — combine with backdrop-filter: blur(var(--glass-blur)) */
+  --glass-bg: rgba(16, 19, 26, 0.72);
+
+  /* ambient background layer inputs */
+  --ambient-grid-line: rgba(53, 213, 238, 0.035);
+  --ambient-aurora-a: rgba(53, 213, 238, 0.11);
+  --ambient-aurora-b: rgba(139, 122, 232, 0.09);
 
   --shadow-1: 0 1px 0 rgba(255,255,255,.02) inset, 0 4px 12px -8px rgba(0,0,0,.7);
   --shadow-2: 0 1px 0 rgba(255,255,255,.025) inset, 0 8px 24px -12px rgba(0,0,0,.7);
   --shadow: var(--shadow-1);
 
-  --scrollbar-thumb: #2b3b52;
-  --scrollbar-thumb-hover: #3a4d68;
+  --scrollbar-thumb: #2a3140;
+  --scrollbar-thumb-hover: #3a4356;
 }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 html { scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
+/* Atmosphere (grid/aurora/vignette) lives in the <AmbientBackground> layer at --z-ambient,
+   so the body paints the pure page color only. */
 body {
   margin: 0;
-  background:
-    radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--surface) 70%, var(--accent) 6%) 0%, transparent 60%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--sans);
   font-size: var(--fs-base);
@@ -405,9 +440,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .badge.s-published { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 
 /* ---- transcript timeline ---- */
-/* CHIP — filled colored speaker pill; text uses --accent-fg so it stays legible
-   on bright fills in BOTH themes. */
-.chip { font-size: var(--fs-xs); color: var(--accent-fg); border-radius: var(--radius-pill); padding: 2px var(--s3); font-weight: var(--fw-semibold); white-space: nowrap; }
+/* CHIP — filled colored speaker pill; text uses --chip-fg (fixed dark ink) so it stays
+   legible on the mid-bright speaker fills in BOTH themes. */
+.chip { font-size: var(--fs-xs); color: var(--chip-fg); border-radius: var(--radius-pill); padding: 2px var(--s3); font-weight: var(--fw-semibold); white-space: nowrap; }
 .segment-row { background: var(--panel); border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--r2); padding: var(--s4); transition: background .12s, border-color .12s; }
 .segment-row:hover { border-color: var(--border-strong); }
 .segment-row.hl { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 22px -8px var(--accent-glow); background: var(--panel-2); }

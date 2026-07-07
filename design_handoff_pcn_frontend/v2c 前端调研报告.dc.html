@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #0a0e15; }
+    a { color: #2dd4ee; text-decoration: none; }
+    a:hover { color: #7af0ff; text-decoration: underline; }
+  </style>
+</helmet>
+<div style="min-height: 100vh; background: radial-gradient(1100px 500px at 80% -10%, rgba(45,212,238,0.07) 0%, transparent 60%), #0a0e15; color: #e6edf6; font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, ui-sans-serif, system-ui, sans-serif; font-size: 15px; line-height: 1.65; padding: 56px 24px 96px;">
+  <div style="max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px;">
+
+    <header style="display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid #1f2c3e; padding-bottom: 28px;">
+      <div style="display: flex; align-items: center; gap: 10px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; color: #2dd4ee; letter-spacing: 0.1em;">
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #2dd4ee; box-shadow: 0 0 0 4px rgba(45,212,238,0.18);"></span>
+        PCN · WEB 控制台 · 前端设计调研
+      </div>
+      <h1 style="margin: 0; font-size: 30px; font-weight: 700; letter-spacing: 0.01em; line-height: 1.3;">v2c 前端系统性优化调研</h1>
+      <p style="margin: 0; color: #aab8c9; max-width: 640px;">目标:<strong style="color: #e6edf6;">科技感</strong> · <strong style="color: #e6edf6;">AI 原生</strong> · <strong style="color: #e6edf6;">操作流顺畅</strong>。基于对 <span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px;">web/</span> 全部源码(theme.css / styles.css / App.tsx / 32 个 feature 组件)与 README 流程的阅读。</p>
+    </header>
+
+    <section style="display: flex; flex-direction: column; gap: 16px;">
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #7d8da0;">01 · 现状:基础比预期扎实</h2>
+      <p style="margin: 0; color: #aab8c9;">这不是一个需要推倒重来的前端。已有一套自洽的 "Cold Slate" 设计系统,很多优化可以在它之上做加法:</p>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px;">
+        <div style="background: #0f1622; border: 1px solid #1f2c3e; border-radius: 10px; padding: 16px 18px;">
+          <div style="font-weight: 600; color: #3ddc97; font-size: 13px; margin-bottom: 6px;">✓ 完整 token 体系</div>
+          <div style="color: #aab8c9; font-size: 13.5px;">8pt 间距、8 级字阶、z-index 分层图、明暗双主题、等宽数字 — 设计纪律很好。</div>
+        </div>
+        <div style="background: #0f1622; border: 1px solid #1f2c3e; border-radius: 10px; padding: 16px 18px;">
+          <div style="font-weight: 600; color: #3ddc97; font-size: 13px; margin-bottom: 6px;">✓ 单一强调色原则</div>
+          <div style="color: #aab8c9; font-size: 13.5px;">电青色 accent 只用于「活跃/焦点/进行中」,语义状态色独立 — 这是做科技感的正确底子。</div>
+        </div>
+        <div style="background: #0f1622; border: 1px solid #1f2c3e; border-radius: 10px; padding: 16px 18px;">
+          <div style="font-weight: 600; color: #3ddc97; font-size: 13px; margin-bottom: 6px;">✓ 高效交互已起步</div>
+          <div style="color: #aab8c9; font-size: 13.5px;">⌘K 命令面板、j/k/a/r/f 键盘审核、骨架屏、空状态引导、reduced-motion 兜底。</div>
+        </div>
+        <div style="background: #0f1622; border: 1px solid #1f2c3e; border-radius: 10px; padding: 16px 18px;">
+          <div style="font-weight: 600; color: #3ddc97; font-size: 13px; margin-bottom: 6px;">✓ 流水线心智模型</div>
+          <div style="color: #aab8c9; font-size: 13.5px;">设备→导入→转写→审核→观点→发布 六阶段 spine 已存在,是全局叙事的锚点。</div>
+        </div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 16px;">
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #7d8da0;">02 · 差距分析(对照三个目标)</h2>
+
+      <div style="border: 1px solid #1f2c3e; border-radius: 12px; overflow: hidden;">
+        <div style="padding: 14px 20px; background: #0f1622; border-bottom: 1px solid #1f2c3e; display: flex; align-items: baseline; gap: 12px;">
+          <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #2dd4ee;">目标 A</span>
+          <strong style="font-size: 16px;">科技感 — 视觉在,动效缺席</strong>
+        </div>
+        <ul style="margin: 0; padding: 16px 20px 18px 38px; color: #aab8c9; display: flex; flex-direction: column; gap: 8px;">
+          <li>全局动效只有 4 个 keyframes(pulse / slidein / spin / shimmer)+ 0.12s 的通用 transition。<strong style="color: #e6edf6;">没有页面切换过渡、没有数据入场编排、没有微交互反馈</strong>。</li>
+          <li>波形组件 <span style="font-family: Menlo, monospace; font-size: 13px;">.wave</span> 是几根静态 div 条 — 一个音频为核心的产品,<strong style="color: #e6edf6;">最该有生命力的元素是死的</strong>。</li>
+          <li>VoiceprintMap(声纹投影图,3.2 万行里最大的可视化)是全应用最有科技感潜力的画面,目前是普通 canvas 散点,可升级为发光粒子 / 聚类动画 / 平滑缩放。</li>
+          <li>进度条、任务状态是平铺文本+细条,缺少「机器在为我工作」的实时感。</li>
+        </ul>
+      </div>
+
+      <div style="border: 1px solid #1f2c3e; border-radius: 12px; overflow: hidden;">
+        <div style="padding: 14px 20px; background: #0f1622; border-bottom: 1px solid #1f2c3e; display: flex; align-items: baseline; gap: 12px;">
+          <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #2dd4ee;">目标 B</span>
+          <strong style="font-size: 16px;">AI 原生 — AI 在后台,不在界面里</strong>
+        </div>
+        <ul style="margin: 0; padding: 16px 20px 18px 38px; color: #aab8c9; display: flex; flex-direction: column; gap: 8px;">
+          <li><strong style="color: #e6edf6;">无流式呈现</strong>:转写、摘要、观点都是「跑完→整块出现」。AI 原生产品的标志性体验(token 级流式输出、逐段点亮)完全缺失 — 需要后端加 SSE。</li>
+          <li><strong style="color: #e6edf6;">AI 不给建议</strong>:审核是纯人工逐段过;LLM 明明有置信度/情绪/说话人信息,却没有「AI 预审:这 12 段可疑,其余建议一键接受」这类协作式交互。</li>
+          <li><strong style="color: #e6edf6;">确认流断裂</strong>:观点/记忆候选在 UI 里只读,确认要切去 Obsidian 改 checkbox 再跑 CLI — 最核心的价值环节离开了产品。</li>
+          <li>⌘K 面板已是很好的骨架,可进化为自然语言入口(「昨天下午和谁聊了报销?」)— 需要后端检索/LLM 接口。</li>
+        </ul>
+      </div>
+
+      <div style="border: 1px solid #1f2c3e; border-radius: 12px; overflow: hidden;">
+        <div style="padding: 14px 20px; background: #0f1622; border-bottom: 1px solid #1f2c3e; display: flex; align-items: baseline; gap: 12px;">
+          <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #2dd4ee;">目标 C</span>
+          <strong style="font-size: 16px;">操作流顺畅 — 好流程被粗糙节点打断</strong>
+        </div>
+        <ul style="margin: 0; padding: 16px 20px 18px 38px; color: #aab8c9; display: flex; flex-direction: column; gap: 8px;">
+          <li>重命名/删除会话用的是 <span style="font-family: Menlo, monospace; font-size: 13px;">window.prompt / window.confirm</span> — 系统原生弹窗与整体质感严重断裂,是最扎眼的粗糙点。</li>
+          <li>导入→处理→审核 靠轮询刷新 + 手动切 tab;<strong style="color: #e6edf6;">处理完成后没有「去审核」的自动引导</strong>,用户要自己发现状态变了。</li>
+          <li>键盘审核流很好,但缺进度反馈:没有「剩余 x/y」、没有会话审完的完成时刻,长会话审核像走不完的隧道。</li>
+          <li>首次使用只有空状态文案,没有 onboarding 路径把「接设备→导入→等转写→审核」串成一次引导。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 16px;">
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #7d8da0;">03 · 优化路线(按依赖分三层)</h2>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: grid; grid-template-columns: 120px 1fr; gap: 16px; background: #0f1622; border: 1px solid #1f2c3e; border-left: 3px solid #2dd4ee; border-radius: 10px; padding: 18px 20px;">
+          <div>
+            <div style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #2dd4ee;">层 1</div>
+            <div style="font-weight: 700; font-size: 15px;">纯前端</div>
+            <div style="font-size: 12px; color: #7d8da0;">无需后端改动</div>
+          </div>
+          <div style="color: #aab8c9; font-size: 14px;">统一动效系统(入场编排、tab 过渡、微交互、状态变化动画)· 自研 Dialog 替换原生 prompt/confirm · 实时 canvas 波形与播放动画 · 审核进度条 + 完成时刻 · 声纹图视觉升级(发光、缓动缩放)· 管道运行时的「控制室」实时感。</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 120px 1fr; gap: 16px; background: #0f1622; border: 1px solid #1f2c3e; border-left: 3px solid #f4bf4f; border-radius: 10px; padding: 18px 20px;">
+          <div>
+            <div style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #f4bf4f;">层 2</div>
+            <div style="font-weight: 700; font-size: 15px;">流程重构</div>
+            <div style="font-size: 12px; color: #7d8da0;">前端为主,少量 API</div>
+          </div>
+          <div style="color: #aab8c9; font-size: 14px;">导入→审核的自动引导(完成 toast 直达)· AI 预审模式:按置信度排序、可疑段前置、批量建议 · 观点/记忆候选在 UI 内直接确认(替代去 Obsidian 改 checkbox)· 首次使用 onboarding。</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 120px 1fr; gap: 16px; background: #0f1622; border: 1px solid #1f2c3e; border-left: 3px solid #f87171; border-radius: 10px; padding: 18px 20px;">
+          <div>
+            <div style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #f87171;">层 3</div>
+            <div style="font-weight: 700; font-size: 15px;">需后端配合</div>
+            <div style="font-size: 12px; color: #7d8da0;">SSE / 新接口</div>
+          </div>
+          <div style="color: #aab8c9; font-size: 14px;">流式转写与摘要(SSE 推送,前端逐段点亮)· AI 预审接口(段级可疑度)· 自然语言检索进 ⌘K · 记忆确认 API(签名事件直接从 UI 触发)。</div>
+        </div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px; background: rgba(45,212,238,0.05); border: 1px solid rgba(45,212,238,0.25); border-radius: 12px; padding: 20px 24px;">
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #2dd4ee;">04 · 建议的切入点</h2>
+      <p style="margin: 0; color: #aab8c9;">性价比最高的第一步是 <strong style="color: #e6edf6;">层 1 的「动效系统 + 控制室实时感」</strong> 加上 <strong style="color: #e6edf6;">层 2 的「AI 预审审核流」</strong>:前者直接兑现「科技感」,后者同时兑现「AI 原生」和「操作流顺畅」,且都能先用高保真原型验证,再落回 React 代码。下方回答几个问题,我就开始出设计稿。</p>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

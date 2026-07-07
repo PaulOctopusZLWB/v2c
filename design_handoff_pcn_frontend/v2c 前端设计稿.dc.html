@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    body { margin: 0; background: #060708; }
+    a { color: #35d5ee; text-decoration: none; }
+    a:hover { color: #7af0ff; }
+    @keyframes breathe { 0%,100% { opacity: 1; box-shadow: 0 0 0 4px rgba(53,213,238,0.18); } 50% { opacity: 0.45; box-shadow: 0 0 0 7px rgba(53,213,238,0.06); } }
+    @keyframes glowpulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    @keyframes caret { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    @keyframes drift { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+    @keyframes auroraA { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(70px,-50px) scale(1.18); } }
+    @keyframes auroraB { 0%,100% { transform: translate(0,0) scale(1.12); } 50% { transform: translate(-80px,40px) scale(0.94); } }
+    @keyframes floatup { 0% { transform: translateY(0); opacity: 0; } 12% { opacity: 0.55; } 82% { opacity: 0.55; } 100% { transform: translateY(-160px); opacity: 0; } }
+  </style>
+</helmet>
+
+<section style="padding: 48px 56px 0; font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif; color: #e8ebf0; display: flex; flex-direction: column; gap: 56px;">
+
+  <header style="max-width: 900px; display: flex; flex-direction: column; gap: 8px;">
+    <div style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; color: #35d5ee; letter-spacing: 0.12em;">PCN · 前端重设计 · 第 2 轮</div>
+    <h1 style="margin: 0; font-size: 26px; font-weight: 700;">动态背景 + 明亮模式</h1>
+    <p style="margin: 0; color: #99a3b2; font-size: 14px; line-height: 1.7;">在第 1 轮(<a href="#1a">1a</a>–<a href="#1f">1f</a>)方向上补两块:全局动态背景(极光辉光 + 网格 + 上浮微粒,克制但持续)与明亮模式配色映射。</p>
+  </header>
+
+  <!-- ══════════════ 2a 动态背景 ══════════════ -->
+  <div id="2a" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">2a</span>
+      <strong style="font-size: 16px;">动态背景(暗色)</strong>
+      <span style="color: #626d7d; font-size: 13px;">三层:极光辉光(24s/30s 漂移)· 48px 发丝网格 · 上浮微粒。界面面板半透明 + 背景模糊,浮于其上</span>
+    </div>
+    <div data-screen-label="2a 动态背景" style="position: relative; width: 1440px; height: 560px; background: #07080c; border: 1px solid #1d222d; border-radius: 12px; overflow: hidden; box-shadow: 0 24px 64px -32px rgba(0,0,0,0.8);">
+      <!-- grid layer -->
+      <div style="position: absolute; inset: 0; background-image: linear-gradient(rgba(53,213,238,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(53,213,238,0.035) 1px, transparent 1px); background-size: 48px 48px;"></div>
+      <!-- aurora layer -->
+      <div style="position: absolute; left: 10%; top: -30%; width: 720px; height: 720px; border-radius: 50%; background: radial-gradient(circle, rgba(53,213,238,0.11), transparent 65%); animation: auroraA 24s ease-in-out infinite;"></div>
+      <div style="position: absolute; right: 5%; bottom: -45%; width: 820px; height: 820px; border-radius: 50%; background: radial-gradient(circle, rgba(139,122,232,0.09), transparent 65%); animation: auroraB 30s ease-in-out infinite;"></div>
+      <div style="position: absolute; left: 55%; top: 10%; width: 400px; height: 400px; border-radius: 50%; background: radial-gradient(circle, rgba(53,213,238,0.06), transparent 65%); animation: auroraB 20s ease-in-out 4s infinite;"></div>
+      <!-- vignette so edges stay near-black -->
+      <div style="position: absolute; inset: 0; background: radial-gradient(1100px 500px at 50% 45%, transparent 40%, rgba(7,8,12,0.9) 100%);"></div>
+      <!-- particles -->
+      <div style="position: absolute; left: 12%; bottom: 20%; width: 2px; height: 2px; border-radius: 50%; background: #35d5ee; animation: floatup 9s linear infinite;"></div>
+      <div style="position: absolute; left: 24%; bottom: 10%; width: 2px; height: 2px; border-radius: 50%; background: #35d5ee; animation: floatup 12s linear 2s infinite;"></div>
+      <div style="position: absolute; left: 38%; bottom: 26%; width: 3px; height: 3px; border-radius: 50%; background: #8b7ae8; animation: floatup 14s linear 1s infinite;"></div>
+      <div style="position: absolute; left: 51%; bottom: 14%; width: 2px; height: 2px; border-radius: 50%; background: #35d5ee; animation: floatup 10s linear 5s infinite;"></div>
+      <div style="position: absolute; left: 63%; bottom: 22%; width: 2px; height: 2px; border-radius: 50%; background: #35d5ee; animation: floatup 13s linear 3s infinite;"></div>
+      <div style="position: absolute; left: 74%; bottom: 8%; width: 3px; height: 3px; border-radius: 50%; background: #8b7ae8; animation: floatup 11s linear 6s infinite;"></div>
+      <div style="position: absolute; left: 86%; bottom: 18%; width: 2px; height: 2px; border-radius: 50%; background: #35d5ee; animation: floatup 15s linear 4s infinite;"></div>
+      <!-- translucent surface demo -->
+      <div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; background: rgba(16,19,26,0.72); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(53,213,238,0.2); border-radius: 12px; padding: 22px 26px; display: flex; flex-direction: column; gap: 12px; font-family: 'PingFang SC', system-ui, sans-serif;">
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #7ae4f5;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #35d5ee; animation: breathe 2s ease-in-out infinite;"></span>面板浮层示例 · rgba(16,19,26,.72) + blur 14px</div>
+        <div style="font-size: 15px; color: #e8ebf0; line-height: 1.7;">所有工作面板半透明浮于背景之上;背景动效透出但不干扰阅读。滚动区域内侧(如转写列表)恢复不透明底,保证长文本对比度。</div>
+        <div style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">prefers-reduced-motion: 全部层降级为静态渐变</div>
+      </div>
+      <div style="position: absolute; left: 20px; bottom: 16px; font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">layer 1 grid 48px · layer 2 aurora ×3 (20–30s) · layer 3 particles ×7 (9–15s)</div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 2b 明亮模式 · 今日 ══════════════ -->
+  <div id="2b" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px;  padding: 2px 10px;">2b</span>
+      <strong style="font-size: 16px;">明亮模式 · 今日(对照 <a href="#1a">1a</a>)</strong>
+      <span style="color: #626d7d; font-size: 13px;">冷调纸白 + 深青强调 #0891b2;动态背景换为浅色极光,微粒更淡</span>
+    </div>
+    <div data-screen-label="2b 明亮模式今日" style="width: 1440px; height: 880px; background: #eef1f6; border: 1px solid #d5dce6; border-radius: 12px; overflow: hidden; display: grid; grid-template-columns: 216px 1fr; box-shadow: 0 24px 64px -40px rgba(30,45,70,0.5); font-family: 'PingFang SC', system-ui, sans-serif; color: #1a212c;">
+
+      <aside style="background: #f7f9fc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; padding: 16px 10px;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 4px 10px 18px;">
+          <span style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #0891b2, #0e6a80); display: inline-flex; align-items: center; justify-content: center; font-family: Menlo, monospace; font-size: 11px; font-weight: 700; color: #ffffff;">P</span>
+          <span style="font-size: 13px; font-weight: 600;">个人上下文节点</span>
+        </div>
+        <div style="margin: 0 10px 14px; display: flex; align-items: center; gap: 8px; background: #ffffff; border: 1px solid #dbe2ec; border-radius: 7px; padding: 6px 10px; color: #8c95a5; font-size: 12px;">
+          <span>搜索或跳转…</span>
+          <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; border: 1px solid #cfd6e0; border-radius: 4px; padding: 1px 5px; color: #5a6572;">⌘K</span>
+        </div>
+        <nav style="display: flex; flex-direction: column; gap: 2px;">
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; background: rgba(8,145,178,0.09); color: #0e7490; font-size: 13px; font-weight: 600;">◆ 今日<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; color: #0891b2;">1</span></div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; color: #5a6572; font-size: 13px;">▶ 管道<span style="margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: #0891b2; animation: breathe 2s ease-in-out infinite;"></span></div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; color: #5a6572; font-size: 13px;">☰ 审核<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; background: #ffffff; border: 1px solid #dbe2ec; border-radius: 999px; padding: 0 7px; color: #b5740a;">12</span></div>
+          <div style="padding: 7px 10px; color: #5a6572; font-size: 13px;">◉ 声纹</div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; color: #5a6572; font-size: 13px;">❖ 记忆<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; background: #ffffff; border: 1px solid #dbe2ec; border-radius: 999px; padding: 0 7px; color: #b5740a;">8</span></div>
+        </nav>
+        <div style="margin-top: 18px; padding: 0 10px; font-size: 11px; letter-spacing: 0.08em; color: #8c95a5;">资料库</div>
+        <nav style="display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; color: #5a6572;">
+          <div style="padding: 6px 10px; display: flex; justify-content: space-between;"><span>07-07 周二</span><span style="font-family: Menlo, monospace; font-size: 11px; color: #0891b2;">live</span></div>
+          <div style="padding: 6px 10px; display: flex; justify-content: space-between;"><span>07-06 周一</span><span style="font-family: Menlo, monospace; font-size: 11px; color: #8c95a5;">5</span></div>
+          <div style="padding: 6px 10px; color: #8c95a5; font-size: 12px;">全部日期 →</div>
+        </nav>
+        <div style="margin-top: auto; display: flex; flex-direction: column; gap: 2px;">
+          <div style="padding: 7px 10px; color: #5a6572; font-size: 13px;">⚙ 设置</div>
+          <div style="margin: 8px 10px 0; border-top: 1px solid #e2e8f0; padding-top: 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: #8c95a5;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #0e8a5f;"></span>本地节点 · 127.0.0.1:8765
+          </div>
+        </div>
+      </aside>
+
+      <div style="display: flex; flex-direction: column; min-width: 0; position: relative;">
+        <!-- light dynamic bg -->
+        <div style="position: absolute; inset: 0; overflow: hidden; pointer-events: none;">
+          <div style="position: absolute; inset: 0; background-image: linear-gradient(rgba(8,145,178,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(8,145,178,0.04) 1px, transparent 1px); background-size: 48px 48px;"></div>
+          <div style="position: absolute; left: 15%; top: -35%; width: 700px; height: 700px; border-radius: 50%; background: radial-gradient(circle, rgba(8,145,178,0.08), transparent 65%); animation: auroraA 24s ease-in-out infinite;"></div>
+          <div style="position: absolute; right: -10%; bottom: -40%; width: 760px; height: 760px; border-radius: 50%; background: radial-gradient(circle, rgba(139,122,232,0.07), transparent 65%); animation: auroraB 30s ease-in-out infinite;"></div>
+          <div style="position: absolute; inset: 0; background: radial-gradient(1000px 480px at 50% 45%, transparent 40%, rgba(238,241,246,0.9) 100%);"></div>
+        </div>
+
+        <div style="position: relative; height: 46px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 16px; padding: 0 22px; background: rgba(247,249,252,0.75); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+          <span style="font-size: 13px; color: #5a6572;">今日</span>
+          <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 8px; background: rgba(8,145,178,0.07); border: 1px solid rgba(8,145,178,0.28); border-radius: 999px; padding: 4px 12px; font-size: 12px; color: #0e7490;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #0891b2; animation: breathe 2s ease-in-out infinite;"></span>
+            转写中 · TX01_155539 <span style="font-family: Menlo, monospace;">62%</span> · 剩约 4 分
+          </span>
+          <span style="font-family: Menlo, monospace; font-size: 11px; color: #8c95a5; border: 1px solid #dbe2ec; border-radius: 6px; padding: 3px 8px;">☀</span>
+        </div>
+
+        <div style="position: relative; flex: 1; padding: 30px 34px; display: flex; flex-direction: column; gap: 24px; overflow: hidden;">
+          <div style="display: flex; align-items: baseline; gap: 14px;">
+            <h2 style="margin: 0; font-size: 21px; font-weight: 650;">7 月 7 日 周二</h2>
+            <span style="color: #8c95a5; font-size: 13px;">已录 3 段 · 2 小时 41 分</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 14px;">
+            <div style="background: linear-gradient(180deg, rgba(8,145,178,0.05), rgba(8,145,178,0.01)), #ffffff; border: 1px solid rgba(8,145,178,0.3); border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 2px 10px -4px rgba(30,45,70,0.12);">
+              <div style="font-size: 12px; color: #0e7490; letter-spacing: 0.06em;">待审</div>
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-family: ui-monospace, Menlo, monospace; font-size: 40px; font-weight: 700; line-height: 1;">12</span>
+                <span style="color: #5a6572; font-size: 13px;">会话 · 1,847 段</span>
+              </div>
+              <div style="color: #8c95a5; font-size: 12.5px;">AI 预审已完成:<span style="color: #0e8a5f;">86% 高置信</span>,预计人工 15 分钟</div>
+              <div style="display: flex; gap: 10px; margin-top: 4px;">
+                <span style="background: #0891b2; color: #ffffff; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 16px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px -2px rgba(8,145,178,0.5);">开始审核 <span style="font-family: Menlo, monospace; font-size: 10px; background: rgba(255,255,255,0.22); border-radius: 4px; padding: 1px 5px;">↵</span></span>
+                <span style="border: 1px solid #cfd6e0; background: #ffffff; color: #5a6572; font-size: 13px; border-radius: 7px; padding: 7px 14px;">查看队列</span>
+              </div>
+            </div>
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 4px -2px rgba(30,45,70,0.1);">
+              <div style="font-size: 12px; color: #8c95a5; letter-spacing: 0.06em;">待确认记忆</div>
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-family: ui-monospace, Menlo, monospace; font-size: 40px; font-weight: 700; line-height: 1;">8</span>
+                <span style="color: #5a6572; font-size: 13px;">候选</span>
+              </div>
+              <div style="color: #8c95a5; font-size: 12.5px;">昨日观点 3 条 · 可在应用内直接签名确认</div>
+              <div style="margin-top: 4px;"><span style="border: 1px solid #cfd6e0; background: #ffffff; color: #5a6572; font-size: 13px; border-radius: 7px; padding: 7px 14px;">去确认</span></div>
+            </div>
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 4px -2px rgba(30,45,70,0.1);">
+              <div style="font-size: 12px; color: #8c95a5; letter-spacing: 0.06em;">覆盖</div>
+              <div style="display: flex; gap: 18px;">
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">31</div><div style="font-size: 11px; color: #8c95a5;">天</div></div>
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">142</div><div style="font-size: 11px; color: #8c95a5;">会话</div></div>
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">18.4k</div><div style="font-size: 11px; color: #8c95a5;">段</div></div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #8c95a5;">
+                <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 28px;">声纹</span><span style="flex: 1; height: 3px; background: #e2e8f0; border-radius: 99px; overflow: hidden;"><span style="display: block; width: 92%; height: 100%; background: #0891b2;"></span></span><span style="font-family: Menlo, monospace;">92%</span></div>
+                <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 28px;">情绪</span><span style="flex: 1; height: 3px; background: #e2e8f0; border-radius: 99px; overflow: hidden;"><span style="display: block; width: 78%; height: 100%; background: #8b7ae8;"></span></span><span style="font-family: Menlo, monospace;">78%</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.8); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 22px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 12px; color: #8c95a5; letter-spacing: 0.06em;">管道</span>
+              <span style="font-size: 12px; color: #0e7490;">TX01_MIC001_155539.wav 处理中</span>
+              <span style="margin-left: auto; font-size: 12px; color: #8c95a5;">在管道页查看实时转写 →</span>
+            </div>
+            <div style="display: flex; align-items: center;">
+              <div style="font-size: 12.5px; color: #0e8a5f;">✓ 导入</div>
+              <div style="flex: 1; height: 1px; background: linear-gradient(90deg, #0e8a5f, #0891b2); margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: #0e8a5f;">✓ VAD</div>
+              <div style="flex: 1; height: 1px; background: linear-gradient(90deg, #0e8a5f, #0891b2); margin: 0 12px;"></div>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #0891b2; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #0891b2; animation: breathe 2s ease-in-out infinite;"></span>转写 <span style="font-family: Menlo, monospace;">62%</span></div>
+              <div style="flex: 1; height: 1px; background: #dbe2ec; margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: #8c95a5;">切分</div>
+              <div style="flex: 1; height: 1px; background: #dbe2ec; margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: #8c95a5;">摘要</div>
+              <div style="flex: 1; height: 1px; background: #dbe2ec; margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: #8c95a5;">发布</div>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 12px; color: #8c95a5; letter-spacing: 0.06em;">最近会话</div>
+            <div style="display: flex; flex-direction: column; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #ffffff;">
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid #eef1f6; background: #fbfcfe;">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: #5a6572;">14:02–15:31</span>
+                <span style="font-size: 13px;">周会 · 项目排期讨论</span>
+                <span style="font-size: 12px; color: #8c95a5;">张三 · 李四 · 我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #b5740a;">待审 214</span>
+                <span style="font-size: 12px; color: #8c95a5; text-align: right;">↵ 打开</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid #eef1f6;">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: #5a6572;">11:20–11:47</span>
+                <span style="font-size: 13px;">电话 · 供应商报价</span>
+                <span style="font-size: 12px; color: #8c95a5;">王五 · 我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #0e8a5f;">已审</span>
+                <span></span>
+              </div>
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px;">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: #5a6572;">09:05–09:22</span>
+                <span style="font-size: 13px;">晨间独白 · 今日计划</span>
+                <span style="font-size: 12px; color: #8c95a5;">我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #0e8a5f;">已审</span>
+                <span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 2c 明暗 token 映射 ══════════════ -->
+  <div id="2c" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">2c</span>
+      <strong style="font-size: 16px;">明暗 Token 映射</strong>
+      <span style="color: #626d7d; font-size: 13px;">直接对应现有 theme.css 的 data-theme 双主题结构,可平移落地</span>
+    </div>
+    <div data-screen-label="2c token映射" style="width: 1440px; background: #0b0d12; border: 1px solid #1d222d; border-radius: 12px; padding: 32px 40px; display: grid; grid-template-columns: 220px 1fr 1fr; gap: 0; font-size: 13px;">
+      <div style="color: #626d7d; font-family: Menlo, monospace; font-size: 11px; display: flex; flex-direction: column; gap: 0;">
+        <div style="padding: 10px 0; border-bottom: 1px solid #1d222d; color: #99a3b2;">token</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f;">--bg</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f;">--surface / panel</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f;">--elev 浮层</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f;">--border</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f;">--text / --text-2</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f;">--accent</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f;">--ok / --warn / --err</div>
+        <div style="padding: 10px 0;">背景动效</div>
+      </div>
+      <div style="background: #08090d; border: 1px solid #1d222d; border-radius: 10px 0 0 10px; padding: 0 20px; color: #99a3b2;">
+        <div style="padding: 10px 0; border-bottom: 1px solid #1d222d; color: #e8ebf0; font-weight: 600;">暗色(默认)</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #08090d; border: 1px solid #2a3140; vertical-align: -2px; margin-right: 8px;"></span>#08090D</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #10131a; border: 1px solid #2a3140; vertical-align: -2px; margin-right: 8px;"></span>#10131A</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #12161d; border: 1px solid #2a3140; vertical-align: -2px; margin-right: 8px;"></span>#12161D + blur</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #1d222d; vertical-align: -2px; margin-right: 8px;"></span>#1D222D / #2A3140</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f; font-family: Menlo, monospace; font-size: 12px;"><span style="color: #e8ebf0;">#E8EBF0</span> / <span style="color: #99a3b2;">#99A3B2</span></div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f; font-family: Menlo, monospace; font-size: 12px; color: #35d5ee;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #35d5ee; vertical-align: -2px; margin-right: 8px; box-shadow: 0 0 8px rgba(53,213,238,0.6);"></span>#35D5EE 电青</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #16191f; font-family: Menlo, monospace; font-size: 12px;"><span style="color: #3ddc97;">#3DDC97</span> <span style="color: #f0bb4e;">#F0BB4E</span> <span style="color: #f57373;">#F57373</span></div>
+        <div style="padding: 10px 0; font-size: 12px;">极光 11% / 网格 3.5% / 微粒青紫</div>
+      </div>
+      <div style="background: #f2f4f8; border: 1px solid #d5dce6; border-left: 0; border-radius: 0 10px 10px 0; padding: 0 20px; color: #5a6572;">
+        <div style="padding: 10px 0; border-bottom: 1px solid #e2e8f0; color: #1a212c; font-weight: 600;">明亮</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e7ebf2; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #eef1f6; border: 1px solid #cfd6e0; vertical-align: -2px; margin-right: 8px;"></span>#EEF1F6</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e7ebf2; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #f7f9fc; border: 1px solid #cfd6e0; vertical-align: -2px; margin-right: 8px;"></span>#F7F9FC</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e7ebf2; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #ffffff; border: 1px solid #cfd6e0; vertical-align: -2px; margin-right: 8px;"></span>#FFFFFF + blur</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e7ebf2; font-family: Menlo, monospace; font-size: 12px;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #e2e8f0; vertical-align: -2px; margin-right: 8px;"></span>#E2E8F0 / #CFD6E0</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e7ebf2; font-family: Menlo, monospace; font-size: 12px;"><span style="color: #1a212c;">#1A212C</span> / <span style="color: #5a6572;">#5A6572</span></div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e7ebf2; font-family: Menlo, monospace; font-size: 12px; color: #0891b2;"><span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #0891b2; vertical-align: -2px; margin-right: 8px;"></span>#0891B2 深青(AA 对比)</div>
+        <div style="padding: 10px 0; border-bottom: 1px solid #e7ebf2; font-family: Menlo, monospace; font-size: 12px;"><span style="color: #0e8a5f;">#0E8A5F</span> <span style="color: #b5740a;">#B5740A</span> <span style="color: #c43d3d;">#C43D3D</span></div>
+        <div style="padding: 10px 0; font-size: 12px;">极光 8% / 网格 4% / 微粒隐藏(避免脏感)</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="border-bottom: 1px solid #1d222d; margin: 8px 0 0;"></div>
+</section>
+
+<section style="padding: 48px 56px 120px; font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif; color: #e8ebf0; display: flex; flex-direction: column; gap: 56px;">
+
+  <header style="max-width: 900px; display: flex; flex-direction: column; gap: 8px;">
+    <div style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; color: #35d5ee; letter-spacing: 0.12em;">PCN · 前端重设计 · 第 1 轮</div>
+    <h1 style="margin: 0; font-size: 26px; font-weight: 700;">精密控制室 — 6 屏设计稿</h1>
+    <p style="margin: 0; color: #99a3b2; font-size: 14px; line-height: 1.7;">Linear 式克制:近黑底、发丝边框、等宽数据、单一电青强调。环境动效(呼吸光/流式光标)已内嵌。信息架构改为左侧主导航 + 全局状态条,流式体验按 SSE 到位后设计。</p>
+  </header>
+
+  <!-- ══════════════ 1a 全局框架 + 今日首页 ══════════════ -->
+  <div id="1a" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">1a</span>
+      <strong style="font-size: 16px;">全局框架 + 今日</strong>
+      <span style="color: #626d7d; font-size: 13px;">新 IA:左侧主导航替代顶部 tab · 顶部全局状态条 · 首页以「今日 + 待办」为中心</span>
+    </div>
+    <div data-screen-label="1a 今日首页" style="width: 1440px; height: 880px; background: #0b0d12; border: 1px solid #1d222d; border-radius: 12px; overflow: hidden; display: grid; grid-template-columns: 216px 1fr; box-shadow: 0 24px 64px -32px rgba(0,0,0,0.8);">
+
+      <!-- sidebar -->
+      <aside style="background: #0a0c10; border-right: 1px solid #1d222d; display: flex; flex-direction: column; padding: 16px 10px;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 4px 10px 18px;">
+          <span style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #35d5ee, #1a7f96); display: inline-flex; align-items: center; justify-content: center; font-family: Menlo, monospace; font-size: 11px; font-weight: 700; color: #04121a;">P</span>
+          <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.02em;">个人上下文节点</span>
+        </div>
+        <div style="margin: 0 10px 14px; display: flex; align-items: center; gap: 8px; background: #10131a; border: 1px solid #1d222d; border-radius: 7px; padding: 6px 10px; color: #626d7d; font-size: 12px;">
+          <span>搜索或跳转…</span>
+          <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; border: 1px solid #2a3140; border-radius: 4px; padding: 1px 5px; color: #99a3b2;">⌘K</span>
+        </div>
+        <nav style="display: flex; flex-direction: column; gap: 2px;">
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; background: rgba(53,213,238,0.1); color: #7ae4f5; font-size: 13px; font-weight: 600;">◆ 今日<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; color: #35d5ee;">1</span></div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px;">▶ 管道<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #35d5ee; animation: breathe 2s ease-in-out infinite;"></span><span style="font-family: Menlo, monospace; font-size: 10px; color: #626d7d;">2</span></span></div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px;">☰ 审核<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px;"><span style="font-family: Menlo, monospace; font-size: 11px; background: #141821; border: 1px solid #2a3140; border-radius: 999px; padding: 0 7px; color: #f0bb4e;">12</span><span style="font-family: Menlo, monospace; font-size: 10px; color: #626d7d;">3</span></span></div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px;">◉ 声纹<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; color: #626d7d;">4</span></div>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px;">❖ 记忆<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px;"><span style="font-family: Menlo, monospace; font-size: 11px; background: #141821; border: 1px solid #2a3140; border-radius: 999px; padding: 0 7px; color: #f0bb4e;">8</span><span style="font-family: Menlo, monospace; font-size: 10px; color: #626d7d;">5</span></span></div>
+        </nav>
+        <div style="margin-top: 18px; padding: 0 10px; font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">资料库</div>
+        <nav style="display: flex; flex-direction: column; gap: 2px; margin-top: 6px;">
+          <div style="padding: 6px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px; display: flex; justify-content: space-between;"><span>07-07 周二</span><span style="font-family: Menlo, monospace; font-size: 11px; color: #35d5ee;">live</span></div>
+          <div style="padding: 6px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px; display: flex; justify-content: space-between;"><span>07-06 周一</span><span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">5</span></div>
+          <div style="padding: 6px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px; display: flex; justify-content: space-between;"><span>07-05 周日</span><span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">3</span></div>
+          <div style="padding: 6px 10px; color: #626d7d; font-size: 12px;">全部日期 →</div>
+        </nav>
+        <div style="margin-top: auto; display: flex; flex-direction: column; gap: 2px;">
+          <div style="padding: 7px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px;">⚙ 设置</div>
+          <div style="margin: 8px 10px 0; border-top: 1px solid #1d222d; padding-top: 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: #626d7d;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #3ddc97;"></span>本地节点 · 127.0.0.1:8765
+          </div>
+        </div>
+      </aside>
+
+      <!-- main -->
+      <div style="display: flex; flex-direction: column; min-width: 0;">
+        <!-- global status bar -->
+        <div style="height: 46px; border-bottom: 1px solid #1d222d; display: flex; align-items: center; gap: 16px; padding: 0 22px; background: rgba(10,12,16,0.7);">
+          <span style="font-size: 13px; color: #99a3b2;">今日</span>
+          <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 8px; background: rgba(53,213,238,0.08); border: 1px solid rgba(53,213,238,0.25); border-radius: 999px; padding: 4px 12px; font-size: 12px; color: #7ae4f5;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #35d5ee; animation: breathe 2s ease-in-out infinite;"></span>
+            转写中 · TX01_155539 <span style="font-family: Menlo, monospace;">62%</span> · 剩约 4 分
+          </span>
+          <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d; border: 1px solid #1d222d; border-radius: 6px; padding: 3px 8px;">☾</span>
+        </div>
+
+        <div style="flex: 1; padding: 30px 34px; display: flex; flex-direction: column; gap: 24px; overflow: hidden;">
+          <div style="display: flex; align-items: baseline; gap: 14px;">
+            <h2 style="margin: 0; font-size: 21px; font-weight: 650;">7 月 7 日 周二</h2>
+            <span style="color: #626d7d; font-size: 13px;">已录 3 段 · 2 小时 41 分</span>
+          </div>
+
+          <!-- primary action row -->
+          <div style="display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 14px;">
+            <div style="background: linear-gradient(180deg, rgba(53,213,238,0.07), rgba(53,213,238,0.02)), #10131a; border: 1px solid rgba(53,213,238,0.28); border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; position: relative; overflow: hidden;">
+              <div style="position: absolute; inset: -40px auto auto -40px; width: 180px; height: 180px; border-radius: 50%; background: radial-gradient(circle, rgba(53,213,238,0.12), transparent 70%); animation: glowpulse 4s ease-in-out infinite;"></div>
+              <div style="font-size: 12px; color: #7ae4f5; letter-spacing: 0.06em;">待审</div>
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-family: ui-monospace, Menlo, monospace; font-size: 40px; font-weight: 700; line-height: 1;">12</span>
+                <span style="color: #99a3b2; font-size: 13px;">会话 · 1,847 段</span>
+              </div>
+              <div style="color: #626d7d; font-size: 12.5px;">AI 预审已完成:<span style="color: #3ddc97;">86% 高置信</span>,预计人工 15 分钟</div>
+              <div style="display: flex; gap: 10px; margin-top: 4px;">
+                <span style="background: #35d5ee; color: #04121a; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 16px; display: inline-flex; align-items: center; gap: 8px;">开始审核 <span style="font-family: Menlo, monospace; font-size: 10px; background: rgba(4,18,26,0.25); border-radius: 4px; padding: 1px 5px;">↵</span></span>
+                <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 7px 14px;">查看队列</span>
+              </div>
+            </div>
+            <div style="background: #10131a; border: 1px solid #1d222d; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-size: 12px; color: #626d7d; letter-spacing: 0.06em;">待确认记忆</div>
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-family: ui-monospace, Menlo, monospace; font-size: 40px; font-weight: 700; line-height: 1;">8</span>
+                <span style="color: #99a3b2; font-size: 13px;">候选</span>
+              </div>
+              <div style="color: #626d7d; font-size: 12.5px;">昨日观点 3 条 · 现在可在应用内直接签名确认</div>
+              <div style="margin-top: 4px;"><span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 7px 14px;">去确认</span></div>
+            </div>
+            <div style="background: #10131a; border: 1px solid #1d222d; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="font-size: 12px; color: #626d7d; letter-spacing: 0.06em;">覆盖</div>
+              <div style="display: flex; gap: 18px;">
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">31</div><div style="font-size: 11px; color: #626d7d;">天</div></div>
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">142</div><div style="font-size: 11px; color: #626d7d;">会话</div></div>
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">18.4k</div><div style="font-size: 11px; color: #626d7d;">段</div></div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #626d7d;">
+                <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 28px;">声纹</span><span style="flex: 1; height: 3px; background: #1d222d; border-radius: 99px; overflow: hidden;"><span style="display: block; width: 92%; height: 100%; background: #35d5ee;"></span></span><span style="font-family: Menlo, monospace;">92%</span></div>
+                <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 28px;">情绪</span><span style="flex: 1; height: 3px; background: #1d222d; border-radius: 99px; overflow: hidden;"><span style="display: block; width: 78%; height: 100%; background: #8b7ae8;"></span></span><span style="font-family: Menlo, monospace;">78%</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- live pipeline strip -->
+          <div style="background: #0d0f15; border: 1px solid #1d222d; border-radius: 12px; padding: 16px 22px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 12px; color: #626d7d; letter-spacing: 0.06em;">管道</span>
+              <span style="font-size: 12px; color: #7ae4f5;">TX01_MIC001_155539.wav 处理中</span>
+              <span style="margin-left: auto; font-size: 12px; color: #626d7d;">在管道页查看实时转写 →</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0;">
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #3ddc97;">✓ 导入</div>
+              <div style="flex: 1; height: 1px; background: linear-gradient(90deg, #3ddc97, #35d5ee); margin: 0 12px;"></div>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #3ddc97;">✓ VAD</div>
+              <div style="flex: 1; height: 1px; background: linear-gradient(90deg, #3ddc97, #35d5ee); margin: 0 12px;"></div>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #35d5ee; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #35d5ee; animation: breathe 2s ease-in-out infinite;"></span>转写 <span style="font-family: Menlo, monospace;">62%</span></div>
+              <div style="flex: 1; height: 1px; background: #1d222d; margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: #626d7d;">切分</div>
+              <div style="flex: 1; height: 1px; background: #1d222d; margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: #626d7d;">摘要</div>
+              <div style="flex: 1; height: 1px; background: #1d222d; margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: #626d7d;">发布</div>
+            </div>
+          </div>
+
+          <!-- recent sessions -->
+          <div style="display: flex; flex-direction: column; gap: 8px; min-height: 0;">
+            <div style="font-size: 12px; color: #626d7d; letter-spacing: 0.06em;">最近会话</div>
+            <div style="display: flex; flex-direction: column; border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid #16191f; background: #0e1015;">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: #99a3b2;">14:02–15:31</span>
+                <span style="font-size: 13px; color: #e8ebf0;">周会 · 项目排期讨论</span>
+                <span style="font-size: 12px; color: #626d7d;">张三 · 李四 · 我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #f0bb4e;">待审 214</span>
+                <span style="font-size: 12px; color: #626d7d; text-align: right;">↵ 打开</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid #16191f;">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: #99a3b2;">11:20–11:47</span>
+                <span style="font-size: 13px; color: #e8ebf0;">电话 · 供应商报价</span>
+                <span style="font-size: 12px; color: #626d7d;">王五 · 我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #3ddc97;">已审</span>
+                <span style="font-size: 12px; color: #626d7d; text-align: right;"></span>
+              </div>
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px;">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: #99a3b2;">09:05–09:22</span>
+                <span style="font-size: 13px; color: #e8ebf0;">晨间独白 · 今日计划</span>
+                <span style="font-size: 12px; color: #626d7d;">我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #3ddc97;">已审</span>
+                <span style="font-size: 12px; color: #626d7d; text-align: right;"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 1b 管道控制室 ══════════════ -->
+  <div id="1b" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">1b</span>
+      <strong style="font-size: 16px;">管道控制室(流式)</strong>
+      <span style="color: #626d7d; font-size: 13px;">SSE 到位后的体验:左侧阶段栈,中央实时转写逐段点亮,右侧任务与失败重试</span>
+    </div>
+    <div data-screen-label="1b 管道控制室" style="width: 1440px; height: 880px; background: #0b0d12; border: 1px solid #1d222d; border-radius: 12px; overflow: hidden; display: grid; grid-template-columns: 216px 1fr; box-shadow: 0 24px 64px -32px rgba(0,0,0,0.8);">
+      <aside style="background: #0a0c10; border-right: 1px solid #1d222d; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 4px 10px 18px;">
+          <span style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #35d5ee, #1a7f96); display: inline-flex; align-items: center; justify-content: center; font-family: Menlo, monospace; font-size: 11px; font-weight: 700; color: #04121a;">P</span>
+          <span style="font-size: 13px; font-weight: 600;">个人上下文节点</span>
+        </div>
+        <div style="padding: 7px 10px; border-radius: 7px; color: #99a3b2; font-size: 13px;">◆ 今日</div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; background: rgba(53,213,238,0.1); color: #7ae4f5; font-size: 13px; font-weight: 600;">▶ 管道<span style="margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: #35d5ee; animation: breathe 2s ease-in-out infinite;"></span></div>
+        <div style="display: flex; align-items: center; padding: 7px 10px; color: #99a3b2; font-size: 13px;">☰ 审核<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; background: #141821; border: 1px solid #2a3140; border-radius: 999px; padding: 0 7px; color: #f0bb4e;">12</span></div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">◉ 声纹</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">❖ 记忆</div>
+        <div style="margin-top: auto; padding: 7px 10px; color: #99a3b2; font-size: 13px;">⚙ 设置</div>
+      </aside>
+
+      <div style="display: flex; flex-direction: column; min-width: 0;">
+        <div style="height: 46px; border-bottom: 1px solid #1d222d; display: flex; align-items: center; gap: 14px; padding: 0 22px;">
+          <span style="font-size: 13px; color: #99a3b2;">管道</span>
+          <span style="font-family: Menlo, monospace; font-size: 12px; color: #626d7d;">TX01_MIC001_20260707_155539.wav</span>
+          <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: #7ae4f5;">
+            总进度 <span style="width: 140px; height: 4px; background: #1d222d; border-radius: 99px; overflow: hidden; display: inline-block;"><span style="display: block; width: 58%; height: 100%; background: linear-gradient(90deg, rgba(53,213,238,0.4), #35d5ee); box-shadow: 0 0 10px rgba(53,213,238,0.5);"></span></span>
+            <span style="font-family: Menlo, monospace;">58%</span><span style="color: #626d7d;">· 剩约 4 分 12 秒</span>
+          </span>
+          <span style="border: 1px solid #2a3140; border-radius: 7px; padding: 5px 12px; font-size: 12px; color: #f57373;">停止</span>
+        </div>
+
+        <div style="flex: 1; display: grid; grid-template-columns: 280px 1fr 280px; min-height: 0;">
+          <!-- stage stack -->
+          <div style="border-right: 1px solid #1d222d; padding: 20px 16px; display: flex; flex-direction: column; gap: 4px;">
+            <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d; padding: 0 6px 10px;">阶段</div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: #3ddc97; font-size: 13px;">✓ 导入<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">3 文件 · 8s</span></div>
+            <div style="width: 1px; height: 10px; background: #2a3140; margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: #3ddc97; font-size: 13px;">✓ VAD 切分<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">241 段 · 42s</span></div>
+            <div style="width: 1px; height: 10px; background: #2a3140; margin-left: 22px;"></div>
+            <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: rgba(53,213,238,0.06); border: 1px solid rgba(53,213,238,0.3); box-shadow: 0 0 24px -8px rgba(53,213,238,0.3);">
+              <div style="display: flex; align-items: center; gap: 10px; color: #35d5ee; font-size: 13px; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #35d5ee; animation: breathe 1.8s ease-in-out infinite;"></span>ASR 转写<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px;">149/241</span></div>
+              <div style="height: 3px; background: rgba(53,213,238,0.15); border-radius: 99px; overflow: hidden;"><div style="width: 62%; height: 100%; background: #35d5ee;"></div></div>
+              <div style="font-family: Menlo, monospace; font-size: 11px; color: #7ae4f5;">SenseVoiceSmall · zh · 4.2 段/秒</div>
+            </div>
+            <div style="width: 1px; height: 10px; background: #1d222d; margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: #626d7d; font-size: 13px;">○ 会话切分<span style="margin-left: auto; font-size: 11px;">排队</span></div>
+            <div style="width: 1px; height: 10px; background: #1d222d; margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: #626d7d; font-size: 13px;">○ 摘要与观点<span style="margin-left: auto; font-size: 11px;">排队</span></div>
+            <div style="width: 1px; height: 10px; background: #1d222d; margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: #626d7d; font-size: 13px;">○ 发布 Obsidian<span style="margin-left: auto; font-size: 11px;">排队</span></div>
+            <div style="margin-top: auto; background: #0e1015; border: 1px solid #1d222d; border-radius: 8px; padding: 12px; font-size: 11px; color: #626d7d; line-height: 1.6;">完成后自动跳转审核 <span style="float: right; width: 26px; height: 15px; border-radius: 99px; background: rgba(53,213,238,0.3); position: relative; display: inline-block;"><span style="position: absolute; right: 2px; top: 2px; width: 11px; height: 11px; border-radius: 50%; background: #35d5ee;"></span></span></div>
+          </div>
+
+          <!-- live transcript -->
+          <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; min-width: 0; background: radial-gradient(600px 300px at 50% 110%, rgba(53,213,238,0.05), transparent 70%);">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">实时转写<span style="font-family: Menlo, monospace; color: #35d5ee;">LIVE</span><span style="margin-left: auto; font-family: Menlo, monospace; color: #626d7d;">自动滚动 ✓</span></div>
+            <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; overflow: hidden;">
+              <div style="display: grid; grid-template-columns: 64px 84px 1fr; gap: 12px; padding: 9px 12px; border-radius: 8px; opacity: 0.4;">
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">15:58:41</span>
+                <span style="font-size: 11px; color: #04121a; background: #5fb8d4; border-radius: 99px; padding: 1px 8px; height: fit-content; text-align: center;">说话人 B</span>
+                <span style="font-size: 13.5px; color: #99a3b2; line-height: 1.6;">那这个交付时间上,能不能再往前压一周?</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 64px 84px 1fr; gap: 12px; padding: 9px 12px; border-radius: 8px; opacity: 0.6;">
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">15:58:52</span>
+                <span style="font-size: 11px; color: #04121a; background: #7fd1a8; border-radius: 99px; padding: 1px 8px; height: fit-content; text-align: center;">我</span>
+                <span style="font-size: 13.5px; color: #99a3b2; line-height: 1.6;">压一周的话测试就只剩三天,风险主要在联调这块。</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 64px 84px 1fr; gap: 12px; padding: 9px 12px; border-radius: 8px; opacity: 0.8;">
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">15:59:07</span>
+                <span style="font-size: 11px; color: #04121a; background: #5fb8d4; border-radius: 99px; padding: 1px 8px; height: fit-content; text-align: center;">说话人 B</span>
+                <span style="font-size: 13.5px; color: #c6ccd6; line-height: 1.6;">明白,那我们先按原计划,把联调提前到下周三开始。</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 64px 84px 1fr; gap: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(53,213,238,0.05); border: 1px solid rgba(53,213,238,0.3); box-shadow: 0 0 28px -10px rgba(53,213,238,0.4);">
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: #7ae4f5;">15:59:21</span>
+                <span style="font-size: 11px; color: #04121a; background: #7fd1a8; border-radius: 99px; padding: 1px 8px; height: fit-content; text-align: center;">我</span>
+                <span style="font-size: 13.5px; color: #e8ebf0; line-height: 1.6;">好,那我今天下班前把排期更新发群里,顺便把测试用例<span style="display: inline-block; width: 2px; height: 15px; background: #35d5ee; vertical-align: -2px; margin-left: 2px; animation: caret 0.9s step-end infinite;"></span></span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px; padding: 6px 12px; font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">
+                <span style="display: inline-flex; gap: 2px; align-items: flex-end; height: 14px;"><span style="width: 2px; height: 6px; background: #35d5ee; animation: drift 0.8s ease-in-out infinite;"></span><span style="width: 2px; height: 12px; background: #35d5ee; animation: drift 0.8s ease-in-out 0.15s infinite;"></span><span style="width: 2px; height: 8px; background: #35d5ee; animation: drift 0.8s ease-in-out 0.3s infinite;"></span><span style="width: 2px; height: 11px; background: #35d5ee; animation: drift 0.8s ease-in-out 0.45s infinite;"></span></span>
+                正在转写 segment_0150 · 已用 03:12
+              </div>
+            </div>
+          </div>
+
+          <!-- task rail -->
+          <div style="border-left: 1px solid #1d222d; padding: 20px 16px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">任务 <span style="float: right; color: #99a3b2;">仅看失败 ○</span></div>
+            <div style="background: #0e1015; border: 1px solid #1d222d; border-left: 2px solid #f57373; border-radius: 8px; padding: 12px;">
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #f57373; font-weight: 600;">asr · task_a1f3 失败</div>
+              <div style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d; margin: 6px 0;">timed out after 3600s · 重试 1/3</div>
+              <span style="display: inline-block; border: 1px solid rgba(245,115,115,0.4); color: #f57373; font-size: 12px; border-radius: 6px; padding: 4px 12px;">重试</span>
+            </div>
+            <div style="background: #0e1015; border: 1px solid #1d222d; border-radius: 8px; padding: 12px; font-size: 12px; color: #99a3b2;">
+              <div style="display: flex; justify-content: space-between;"><span>asr · task_a1f2</span><span style="color: #35d5ee;">运行中</span></div>
+            </div>
+            <div style="background: #0e1015; border: 1px solid #1d222d; border-radius: 8px; padding: 12px; font-size: 12px; color: #626d7d;">
+              <div style="display: flex; justify-content: space-between;"><span>session_derive · 排队</span><span style="font-family: Menlo, monospace;">×3</span></div>
+            </div>
+            <div style="margin-top: auto; font-size: 11px; color: #626d7d; line-height: 1.7; border-top: 1px solid #1d222d; padding-top: 12px;">事件流<br><span style="font-family: Menlo, monospace; color: #99a3b2;">15:59:21 seg_0149 ok · 1.9s<br>15:59:19 seg_0148 ok · 2.1s<br>15:59:17 seg_0147 ok · 1.7s</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 1c AI 预审审核流 ══════════════ -->
+  <div id="1c" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">1c</span>
+      <strong style="font-size: 16px;">AI 预审审核流</strong>
+      <span style="color: #626d7d; font-size: 13px;">可疑段前置、高置信批量接受、进度可见、键盘与鼠标并重</span>
+    </div>
+    <div data-screen-label="1c AI 预审审核" style="width: 1440px; height: 880px; background: #0b0d12; border: 1px solid #1d222d; border-radius: 12px; overflow: hidden; display: grid; grid-template-columns: 216px 1fr; box-shadow: 0 24px 64px -32px rgba(0,0,0,0.8);">
+      <aside style="background: #0a0c10; border-right: 1px solid #1d222d; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 4px 10px 18px;">
+          <span style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #35d5ee, #1a7f96); display: inline-flex; align-items: center; justify-content: center; font-family: Menlo, monospace; font-size: 11px; font-weight: 700; color: #04121a;">P</span>
+          <span style="font-size: 13px; font-weight: 600;">个人上下文节点</span>
+        </div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">◆ 今日</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">▶ 管道</div>
+        <div style="display: flex; align-items: center; padding: 7px 10px; border-radius: 7px; background: rgba(53,213,238,0.1); color: #7ae4f5; font-size: 13px; font-weight: 600;">☰ 审核<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; background: rgba(53,213,238,0.15); border-radius: 999px; padding: 0 7px;">12</span></div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">◉ 声纹</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">❖ 记忆</div>
+        <div style="margin-top: 16px; padding: 0 10px 6px; font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">审核队列</div>
+        <div style="padding: 7px 10px; border-radius: 7px; background: #141821; border: 1px solid #2a3140; font-size: 12.5px; color: #e8ebf0;">周会 · 项目排期<div style="font-family: Menlo, monospace; font-size: 10px; color: #f0bb4e; margin-top: 2px;">88 待审 · 21 可疑</div></div>
+        <div style="padding: 7px 10px; font-size: 12.5px; color: #99a3b2;">午餐 · 闲聊<div style="font-family: Menlo, monospace; font-size: 10px; color: #626d7d; margin-top: 2px;">64 待审 · 3 可疑</div></div>
+        <div style="padding: 7px 10px; font-size: 12.5px; color: #99a3b2;">电话 · 供应商<div style="font-family: Menlo, monospace; font-size: 10px; color: #626d7d; margin-top: 2px;">42 待审 · 7 可疑</div></div>
+        <div style="margin-top: auto; padding: 7px 10px; color: #99a3b2; font-size: 13px;">⚙ 设置</div>
+      </aside>
+
+      <div style="display: flex; flex-direction: column; min-width: 0;">
+        <div style="height: 46px; border-bottom: 1px solid #1d222d; display: flex; align-items: center; gap: 14px; padding: 0 22px;">
+          <span style="font-size: 13px; color: #e8ebf0; font-weight: 600;">周会 · 项目排期讨论</span>
+          <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">14:02–15:31 · 216 段 · 3 人</span>
+          <div style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #99a3b2;">
+            已审 <span style="font-family: Menlo, monospace; color: #e8ebf0;">128/216</span>
+            <span style="width: 160px; height: 4px; background: #1d222d; border-radius: 99px; overflow: hidden;"><span style="display: block; width: 59%; height: 100%; background: linear-gradient(90deg, rgba(53,213,238,0.4), #35d5ee);"></span></span>
+            <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">约剩 6 分</span>
+          </div>
+        </div>
+
+        <!-- AI triage banner -->
+        <div style="margin: 18px 24px 0; background: linear-gradient(180deg, rgba(53,213,238,0.07), rgba(53,213,238,0.02)), #10131a; border: 1px solid rgba(53,213,238,0.28); border-radius: 10px; padding: 14px 18px; display: flex; align-items: center; gap: 18px;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #35d5ee; animation: breathe 2.4s ease-in-out infinite; flex: none;"></span>
+          <div style="flex: 1; font-size: 13px; color: #c6ccd6; line-height: 1.6;">
+            <strong style="color: #e8ebf0;">AI 预审完成。</strong>剩余 88 段中:<span style="color: #3ddc97; font-family: Menlo, monospace;">67</span> 段高置信(≥0.92)建议直接接受;<span style="color: #f0bb4e; font-family: Menlo, monospace;">21</span> 段可疑已按风险排到最前 — 置信度低 ×9 · 说话人存疑 ×7 · 疑似幻听 ×5。
+          </div>
+          <span style="background: #35d5ee; color: #04121a; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 14px; white-space: nowrap;">接受 67 段高置信 <span style="font-family: Menlo, monospace; font-size: 10px; background: rgba(4,18,26,0.25); border-radius: 4px; padding: 1px 5px;">⇧A</span></span>
+          <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 7px 14px; white-space: nowrap;">仅看可疑</span>
+        </div>
+
+        <!-- turn list -->
+        <div style="flex: 1; padding: 16px 24px; display: flex; flex-direction: column; gap: 10px; overflow: hidden;">
+          <!-- focused suspicious turn -->
+          <div style="background: #10131a; border: 1px solid #35d5ee; border-left: 3px solid #35d5ee; border-radius: 10px; padding: 14px 18px; box-shadow: 0 0 28px -12px rgba(53,213,238,0.5); display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #04121a; background: #d4a75f; border-radius: 99px; padding: 1px 9px; font-weight: 600;">说话人 C?</span>
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">14:23:07 · 6.2s</span>
+              <span style="font-size: 11px; color: #f0bb4e; border: 1px solid rgba(240,187,78,0.35); border-radius: 99px; padding: 1px 9px;">置信 0.41</span>
+              <span style="font-size: 11px; color: #f0bb4e; border: 1px solid rgba(240,187,78,0.35); border-radius: 99px; padding: 1px 9px;">说话人存疑 → 可能是 李四</span>
+              <span style="margin-left: auto; display: inline-flex; gap: 2px; align-items: flex-end; height: 16px;"><span style="width: 2px; height: 5px; background: #35d5ee;"></span><span style="width: 2px; height: 12px; background: #35d5ee;"></span><span style="width: 2px; height: 8px; background: #35d5ee;"></span><span style="width: 2px; height: 14px; background: #35d5ee;"></span><span style="width: 2px; height: 6px; background: #35d5ee;"></span><span style="width: 2px; height: 10px; background: #35d5ee;"></span></span>
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: #7ae4f5;">▶ space</span>
+            </div>
+            <div style="font-size: 14.5px; line-height: 1.7; color: #e8ebf0;">那个接口的<mark style="background: rgba(240,187,78,0.18); color: #f0bb4e; border-radius: 3px; padding: 0 2px;">鉴全</mark>方案,是不是还得再过一遍安全评审?</div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="background: rgba(61,220,151,0.12); border: 1px solid rgba(61,220,151,0.35); color: #3ddc97; font-size: 12.5px; border-radius: 6px; padding: 5px 12px;">接受 <span style="font-family: Menlo, monospace; font-size: 10px;">a</span></span>
+              <span style="background: rgba(53,213,238,0.08); border: 1px solid rgba(53,213,238,0.3); color: #7ae4f5; font-size: 12.5px; border-radius: 6px; padding: 5px 12px;">采纳 AI 修正「鉴权」 <span style="font-family: Menlo, monospace; font-size: 10px;">e</span></span>
+              <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 12.5px; border-radius: 6px; padding: 5px 12px;">改说话人为 李四 <span style="font-family: Menlo, monospace; font-size: 10px;">s</span></span>
+              <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 12.5px; border-radius: 6px; padding: 5px 12px;">拒绝 <span style="font-family: Menlo, monospace; font-size: 10px;">r</span></span>
+              <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 12.5px; border-radius: 6px; padding: 5px 12px;">存疑 <span style="font-family: Menlo, monospace; font-size: 10px;">f</span></span>
+            </div>
+          </div>
+
+          <div style="background: #0e1015; border: 1px solid #1d222d; border-left: 3px solid rgba(240,187,78,0.5); border-radius: 10px; padding: 12px 18px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #04121a; background: #5fb8d4; border-radius: 99px; padding: 1px 9px; font-weight: 600;">张三</span>
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">14:24:12 · 2.1s</span>
+              <span style="font-size: 11px; color: #f0bb4e; border: 1px solid rgba(240,187,78,0.35); border-radius: 99px; padding: 1px 9px;">疑似幻听 · 与上下文断裂</span>
+            </div>
+            <div style="font-size: 14px; line-height: 1.7; color: #c6ccd6;">嗯嗯对对对就是那个星期八的版本。</div>
+          </div>
+
+          <div style="background: #0e1015; border: 1px solid #1d222d; border-left: 3px solid rgba(240,187,78,0.5); border-radius: 10px; padding: 12px 18px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 11px; color: #04121a; background: #7fd1a8; border-radius: 99px; padding: 1px 9px; font-weight: 600;">我</span>
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">14:25:40 · 4.8s</span>
+              <span style="font-size: 11px; color: #f0bb4e; border: 1px solid rgba(240,187,78,0.35); border-radius: 99px; padding: 1px 9px;">置信 0.58</span>
+            </div>
+            <div style="font-size: 14px; line-height: 1.7; color: #c6ccd6;">这块预算我记得上次说的是四十万,你再帮我确认一下口径。</div>
+          </div>
+
+          <!-- collapsed high-confidence group -->
+          <div style="border: 1px dashed #2a3140; border-radius: 10px; padding: 12px 18px; display: flex; align-items: center; gap: 12px; color: #626d7d; font-size: 13px;">
+            <span style="color: #3ddc97;">✓</span> 其余 <span style="font-family: Menlo, monospace; color: #99a3b2;">67</span> 段高置信(≥0.92)已折叠 — 批量接受后仍可随时展开复核
+            <span style="margin-left: auto; font-size: 12px; color: #99a3b2;">展开 ▾</span>
+          </div>
+        </div>
+
+        <!-- footer: keyboard + progress -->
+        <div style="border-top: 1px solid #1d222d; padding: 10px 24px; display: flex; align-items: center; gap: 14px; font-family: Menlo, monospace; font-size: 11px; color: #626d7d; background: #0a0c10;">
+          <span><b style="color: #99a3b2;">j/k</b> 移动</span><span><b style="color: #99a3b2;">a</b> 接受</span><span><b style="color: #99a3b2;">e</b> 采纳修正</span><span><b style="color: #99a3b2;">s</b> 改说话人</span><span><b style="color: #99a3b2;">r</b> 拒绝</span><span><b style="color: #99a3b2;">f</b> 存疑</span><span><b style="color: #99a3b2;">space</b> 播放</span><span><b style="color: #99a3b2;">?</b> 全部快捷键</span>
+          <span style="margin-left: auto; color: #7ae4f5;">审完本场解锁「接受整场」🎉</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 1d 声纹星图 ══════════════ -->
+  <div id="1d" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">1d</span>
+      <strong style="font-size: 16px;">声纹星图</strong>
+      <span style="color: #626d7d; font-size: 13px;">投影图为主角:发光聚类、悬浮样本卡、右侧「未分配 → 指派」主路径</span>
+    </div>
+    <div data-screen-label="1d 声纹星图" style="width: 1440px; height: 880px; background: #0b0d12; border: 1px solid #1d222d; border-radius: 12px; overflow: hidden; display: grid; grid-template-columns: 216px 1fr 320px; box-shadow: 0 24px 64px -32px rgba(0,0,0,0.8);">
+      <aside style="background: #0a0c10; border-right: 1px solid #1d222d; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 4px 10px 18px;">
+          <span style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #35d5ee, #1a7f96); display: inline-flex; align-items: center; justify-content: center; font-family: Menlo, monospace; font-size: 11px; font-weight: 700; color: #04121a;">P</span>
+          <span style="font-size: 13px; font-weight: 600;">个人上下文节点</span>
+        </div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">◆ 今日</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">▶ 管道</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">☰ 审核</div>
+        <div style="padding: 7px 10px; border-radius: 7px; background: rgba(53,213,238,0.1); color: #7ae4f5; font-size: 13px; font-weight: 600;">◉ 声纹</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">❖ 记忆</div>
+        <div style="margin-top: 20px; padding: 0 10px 8px; font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">投影</div>
+        <div style="margin: 0 6px; display: flex; background: #10131a; border: 1px solid #1d222d; border-radius: 999px; padding: 2px; font-size: 11.5px;">
+          <span style="flex: 1; text-align: center; padding: 4px 0; border-radius: 999px; background: rgba(53,213,238,0.15); color: #7ae4f5; font-weight: 600;">UMAP</span>
+          <span style="flex: 1; text-align: center; padding: 4px 0; color: #626d7d;">PCA</span>
+        </div>
+        <div style="margin: 10px 6px 0; display: flex; background: #10131a; border: 1px solid #1d222d; border-radius: 999px; padding: 2px; font-size: 11.5px;">
+          <span style="flex: 1; text-align: center; padding: 4px 0; border-radius: 999px; background: rgba(53,213,238,0.15); color: #7ae4f5; font-weight: 600;">按人</span>
+          <span style="flex: 1; text-align: center; padding: 4px 0; color: #626d7d;">按情绪</span>
+          <span style="flex: 1; text-align: center; padding: 4px 0; color: #626d7d;">按天</span>
+        </div>
+        <div style="margin: 16px 10px 0; font-size: 11px; color: #626d7d; line-height: 1.9;">
+          <span style="color: #7fd1a8;">●</span> 我 · 812<br>
+          <span style="color: #5fb8d4;">●</span> 张三 · 341<br>
+          <span style="color: #d4a75f;">●</span> 李四 · 189<br>
+          <span style="color: #b48ce0;">●</span> 王五 · 96<br>
+          <span style="color: #626d7d;">○</span> 未分配 · 143
+        </div>
+        <div style="margin-top: auto; padding: 7px 10px; color: #99a3b2; font-size: 13px;">⚙ 设置</div>
+      </aside>
+
+      <!-- star map -->
+      <div style="position: relative; background: radial-gradient(800px 500px at 45% 40%, #0d1017, #08090d); overflow: hidden;">
+        <div style="position: absolute; top: 14px; left: 20px; display: flex; align-items: center; gap: 12px; font-size: 12px; color: #626d7d; z-index: 2;">
+          <span style="font-family: Menlo, monospace;">1,581 段 · 2026-07 全月</span>
+          <span style="border: 1px solid #2a3140; border-radius: 6px; padding: 3px 10px; color: #99a3b2;">框选 <span style="font-family: Menlo, monospace; font-size: 10px;">⇧拖拽</span></span>
+        </div>
+        <!-- cluster: 我 (green, center-left) -->
+        <div style="position: absolute; left: 24%; top: 44%; width: 190px; height: 150px; border-radius: 50%; background: radial-gradient(closest-side, rgba(127,209,168,0.12), transparent); animation: glowpulse 5s ease-in-out infinite;"></div>
+        <div style="position: absolute; left: 29%; top: 51%; width: 9px; height: 9px; border-radius: 50%; background: #7fd1a8; box-shadow: 0 0 12px rgba(127,209,168,0.8);"></div>
+        <div style="position: absolute; left: 31%; top: 48%; width: 7px; height: 7px; border-radius: 50%; background: #7fd1a8; box-shadow: 0 0 10px rgba(127,209,168,0.7);"></div>
+        <div style="position: absolute; left: 27%; top: 55%; width: 6px; height: 6px; border-radius: 50%; background: #7fd1a8; box-shadow: 0 0 8px rgba(127,209,168,0.6);"></div>
+        <div style="position: absolute; left: 33%; top: 53%; width: 8px; height: 8px; border-radius: 50%; background: #7fd1a8; box-shadow: 0 0 10px rgba(127,209,168,0.7);"></div>
+        <div style="position: absolute; left: 30%; top: 57%; width: 5px; height: 5px; border-radius: 50%; background: #7fd1a8; opacity: 0.8;"></div>
+        <div style="position: absolute; left: 25%; top: 50%; width: 5px; height: 5px; border-radius: 50%; background: #7fd1a8; opacity: 0.7;"></div>
+        <!-- cluster: 张三 (blue, top-right) -->
+        <div style="position: absolute; left: 55%; top: 20%; width: 160px; height: 130px; border-radius: 50%; background: radial-gradient(closest-side, rgba(95,184,212,0.12), transparent); animation: glowpulse 6s ease-in-out 1s infinite;"></div>
+        <div style="position: absolute; left: 60%; top: 27%; width: 8px; height: 8px; border-radius: 50%; background: #5fb8d4; box-shadow: 0 0 12px rgba(95,184,212,0.8);"></div>
+        <div style="position: absolute; left: 62%; top: 24%; width: 6px; height: 6px; border-radius: 50%; background: #5fb8d4; box-shadow: 0 0 8px rgba(95,184,212,0.6);"></div>
+        <div style="position: absolute; left: 58%; top: 30%; width: 6px; height: 6px; border-radius: 50%; background: #5fb8d4; opacity: 0.85;"></div>
+        <div style="position: absolute; left: 64%; top: 28%; width: 5px; height: 5px; border-radius: 50%; background: #5fb8d4; opacity: 0.7;"></div>
+        <!-- cluster: 李四 (amber, right) -->
+        <div style="position: absolute; left: 68%; top: 55%; width: 140px; height: 120px; border-radius: 50%; background: radial-gradient(closest-side, rgba(212,167,95,0.12), transparent); animation: glowpulse 5.5s ease-in-out 0.5s infinite;"></div>
+        <div style="position: absolute; left: 72%; top: 61%; width: 8px; height: 8px; border-radius: 50%; background: #d4a75f; box-shadow: 0 0 12px rgba(212,167,95,0.8);"></div>
+        <div style="position: absolute; left: 74%; top: 58%; width: 6px; height: 6px; border-radius: 50%; background: #d4a75f; opacity: 0.85;"></div>
+        <div style="position: absolute; left: 70%; top: 64%; width: 5px; height: 5px; border-radius: 50%; background: #d4a75f; opacity: 0.7;"></div>
+        <!-- cluster: 王五 (purple, bottom-left) -->
+        <div style="position: absolute; left: 36%; top: 72%; width: 8px; height: 8px; border-radius: 50%; background: #b48ce0; box-shadow: 0 0 12px rgba(180,140,224,0.8);"></div>
+        <div style="position: absolute; left: 38%; top: 75%; width: 5px; height: 5px; border-radius: 50%; background: #b48ce0; opacity: 0.7;"></div>
+        <!-- unassigned cluster (hollow, selected w/ ring) -->
+        <div style="position: absolute; left: 47%; top: 38%; width: 120px; height: 100px; border: 1px dashed rgba(53,213,238,0.5); border-radius: 50%; background: rgba(53,213,238,0.04); animation: glowpulse 3s ease-in-out infinite;"></div>
+        <div style="position: absolute; left: 50%; top: 42%; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid #9aa3b2; background: transparent;"></div>
+        <div style="position: absolute; left: 52.5%; top: 45%; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid #9aa3b2; background: transparent;"></div>
+        <div style="position: absolute; left: 49%; top: 47%; width: 5px; height: 5px; border-radius: 50%; border: 1.5px solid #9aa3b2; background: transparent;"></div>
+        <div style="position: absolute; left: 53%; top: 40.5%; width: 5px; height: 5px; border-radius: 50%; border: 1.5px solid #9aa3b2; background: transparent;"></div>
+        <!-- hover tooltip card -->
+        <div style="position: absolute; left: 54%; top: 47%; background: #12161d; border: 1px solid #2a3140; border-radius: 9px; padding: 12px 14px; width: 240px; box-shadow: 0 12px 32px -8px rgba(0,0,0,0.7); z-index: 3;">
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #e8ebf0;"><span style="width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid #9aa3b2;"></span>聚类 cl_07 · 未分配 · 38 段</div>
+          <div style="display: flex; gap: 2px; align-items: flex-end; height: 18px; margin: 10px 0;"><span style="width: 3px; height: 7px; background: #35d5ee;"></span><span style="width: 3px; height: 14px; background: #35d5ee;"></span><span style="width: 3px; height: 10px; background: #35d5ee;"></span><span style="width: 3px; height: 16px; background: #35d5ee;"></span><span style="width: 3px; height: 8px; background: #35d5ee;"></span><span style="width: 3px; height: 12px; background: #35d5ee;"></span><span style="width: 3px; height: 6px; background: #35d5ee;"></span><span style="width: 3px; height: 13px; background: #35d5ee;"></span></div>
+          <div style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">▶ 播放样本 · 07-05 14:22 「那个方案我觉得…」</div>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <span style="background: #35d5ee; color: #04121a; font-size: 12px; font-weight: 600; border-radius: 6px; padding: 4px 12px;">指派为…</span>
+            <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 12px; border-radius: 6px; padding: 4px 12px;">新建人物</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- people rail -->
+      <div style="border-left: 1px solid #1d222d; background: #0a0c10; padding: 20px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">待处理聚类 <span style="font-family: Menlo, monospace; color: #f0bb4e;">4</span></div>
+        <div style="background: rgba(53,213,238,0.05); border: 1px solid rgba(53,213,238,0.35); border-radius: 9px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; font-size: 12.5px; color: #e8ebf0;"><span>cl_07 · 38 段</span><span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; color: #7ae4f5;">选中</span></div>
+          <div style="font-size: 11.5px; color: #626d7d;">AI 猜测:<span style="color: #d4a75f;">李四 (0.71)</span> — 音色接近,场景重合</div>
+          <div style="display: flex; gap: 6px;">
+            <span style="background: rgba(212,167,95,0.14); border: 1px solid rgba(212,167,95,0.4); color: #d4a75f; font-size: 11.5px; border-radius: 6px; padding: 3px 10px;">采纳 → 李四</span>
+            <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 11.5px; border-radius: 6px; padding: 3px 10px;">听后再定</span>
+          </div>
+        </div>
+        <div style="background: #0e1015; border: 1px solid #1d222d; border-radius: 9px; padding: 12px 14px; font-size: 12.5px; color: #99a3b2;">cl_09 · 22 段<div style="font-size: 11.5px; color: #626d7d; margin-top: 4px;">AI 猜测:新人物?聚类紧密</div></div>
+        <div style="background: #0e1015; border: 1px solid #1d222d; border-radius: 9px; padding: 12px 14px; font-size: 12.5px; color: #99a3b2;">cl_11 · 9 段<div style="font-size: 11.5px; color: #626d7d; margin-top: 4px;">样本过短,建议忽略</div></div>
+        <div style="margin-top: 14px; font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">人物</div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12.5px;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; background: #0e1015; border: 1px solid #1d222d;"><span style="color: #7fd1a8;">●</span> 我 <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: #3ddc97;">已登记</span></div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; background: #0e1015; border: 1px solid #1d222d;"><span style="color: #5fb8d4;">●</span> 张三 <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: #3ddc97;">已登记</span></div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; background: #0e1015; border: 1px solid #1d222d;"><span style="color: #d4a75f;">●</span> 李四 <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">未登记</span></div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; background: #0e1015; border: 1px solid #1d222d;"><span style="color: #b48ce0;">●</span> 王五 <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">未登记</span></div>
+        </div>
+        <div style="margin-top: auto; border: 1px dashed #2a3140; border-radius: 8px; padding: 10px; text-align: center; font-size: 12px; color: #626d7d;">+ 新建人物</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 1e 记忆确认 ══════════════ -->
+  <div id="1e" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">1e</span>
+      <strong style="font-size: 16px;">观点 / 记忆确认(UI 内闭环)</strong>
+      <span style="color: #626d7d; font-size: 13px;">替代「去 Obsidian 改 checkbox」:证据回链、就地编辑、本地签名可视化</span>
+    </div>
+    <div data-screen-label="1e 记忆确认" style="width: 1440px; height: 880px; background: #0b0d12; border: 1px solid #1d222d; border-radius: 12px; overflow: hidden; display: grid; grid-template-columns: 216px 1fr; box-shadow: 0 24px 64px -32px rgba(0,0,0,0.8);">
+      <aside style="background: #0a0c10; border-right: 1px solid #1d222d; padding: 16px 10px; display: flex; flex-direction: column; gap: 2px;">
+        <div style="display: flex; align-items: center; gap: 9px; padding: 4px 10px 18px;">
+          <span style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #35d5ee, #1a7f96); display: inline-flex; align-items: center; justify-content: center; font-family: Menlo, monospace; font-size: 11px; font-weight: 700; color: #04121a;">P</span>
+          <span style="font-size: 13px; font-weight: 600;">个人上下文节点</span>
+        </div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">◆ 今日</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">▶ 管道</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">☰ 审核</div>
+        <div style="padding: 7px 10px; color: #99a3b2; font-size: 13px;">◉ 声纹</div>
+        <div style="display: flex; align-items: center; padding: 7px 10px; border-radius: 7px; background: rgba(53,213,238,0.1); color: #7ae4f5; font-size: 13px; font-weight: 600;">❖ 记忆<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; background: rgba(53,213,238,0.15); border-radius: 999px; padding: 0 7px;">8</span></div>
+        <div style="margin-top: 16px; padding: 0 10px 6px; font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">视图</div>
+        <div style="padding: 6px 10px; border-radius: 7px; background: #141821; border: 1px solid #2a3140; font-size: 12.5px; color: #e8ebf0;">待确认 · 8</div>
+        <div style="padding: 6px 10px; font-size: 12.5px; color: #99a3b2;">已确认 · 214</div>
+        <div style="padding: 6px 10px; font-size: 12.5px; color: #99a3b2;">已拒绝 · 37</div>
+        <div style="padding: 6px 10px; font-size: 12.5px; color: #99a3b2;">观点(只读)· 56</div>
+        <div style="margin-top: auto; padding: 7px 10px; color: #99a3b2; font-size: 13px;">⚙ 设置</div>
+      </aside>
+
+      <div style="display: flex; flex-direction: column; min-width: 0;">
+        <div style="height: 46px; border-bottom: 1px solid #1d222d; display: flex; align-items: center; gap: 14px; padding: 0 22px;">
+          <span style="font-size: 13px; color: #e8ebf0; font-weight: 600;">待确认记忆</span>
+          <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">8 候选 · 来自 07-06 与 07-05</span>
+          <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; color: #3ddc97; border: 1px solid rgba(61,220,151,0.3); border-radius: 999px; padding: 3px 12px;">🔑 本地签名 Ed25519 · did:key:z6Mk…9fQ2</span>
+          <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 12px; border-radius: 7px; padding: 5px 12px;">同步回 Obsidian ✓</span>
+        </div>
+
+        <div style="flex: 1; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; overflow: hidden;">
+          <!-- focused candidate -->
+          <div style="background: #10131a; border: 1px solid #35d5ee; border-radius: 10px; padding: 16px 20px; box-shadow: 0 0 28px -12px rgba(53,213,238,0.5); display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 11px;">
+              <span style="color: #7ae4f5; border: 1px solid rgba(53,213,238,0.35); border-radius: 99px; padding: 1px 9px;">偏好</span>
+              <span style="font-family: Menlo, monospace; color: #626d7d;">来自 07-06 周会 · 置信 0.88</span>
+              <span style="margin-left: auto; font-family: Menlo, monospace; color: #626d7d;">mc_0712</span>
+            </div>
+            <div style="font-size: 15.5px; line-height: 1.7; color: #e8ebf0;">李四负责的供应商对接,<strong style="color: #7ae4f5;">首选联系时间是工作日上午</strong>;下午他通常在产线,微信回复慢。</div>
+            <div style="background: #0d0f15; border: 1px solid #1d222d; border-radius: 8px; padding: 10px 14px; font-size: 12.5px; color: #99a3b2; display: flex; align-items: center; gap: 10px;">
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">证据</span>
+              <span style="flex: 1;">「你上午找我肯定在,下午我基本泡在产线上」— 李四 · 07-06 14:31</span>
+              <span style="color: #7ae4f5; font-size: 12px;">▶ 播放</span>
+              <span style="color: #7ae4f5; font-size: 12px;">跳到转写 →</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="background: #3ddc97; color: #04121a; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 6px 16px;">确认并签名 <span style="font-family: Menlo, monospace; font-size: 10px; background: rgba(4,18,26,0.2); border-radius: 4px; padding: 1px 5px;">a</span></span>
+              <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 6px 14px;">编辑后确认 <span style="font-family: Menlo, monospace; font-size: 10px;">e</span></span>
+              <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 6px 14px;">拒绝 <span style="font-family: Menlo, monospace; font-size: 10px;">r</span></span>
+              <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 6px 14px;">搁置 <span style="font-family: Menlo, monospace; font-size: 10px;">d</span></span>
+              <span style="margin-left: auto; font-size: 11.5px; color: #626d7d;">不进记忆 ○</span>
+            </div>
+          </div>
+
+          <div style="background: #0e1015; border: 1px solid #1d222d; border-radius: 10px; padding: 14px 20px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 11px;">
+              <span style="color: #d4a75f; border: 1px solid rgba(212,167,95,0.35); border-radius: 99px; padding: 1px 9px;">事实</span>
+              <span style="font-family: Menlo, monospace; color: #626d7d;">来自 07-06 电话 · 置信 0.94</span>
+            </div>
+            <div style="font-size: 14px; line-height: 1.7; color: #c6ccd6;">供应商 B 的新报价为 ¥38.5 万,含运费,有效期至 7 月 20 日。</div>
+          </div>
+
+          <div style="background: #0e1015; border: 1px solid #1d222d; border-radius: 10px; padding: 14px 20px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 11px;">
+              <span style="color: #b48ce0; border: 1px solid rgba(180,140,224,0.35); border-radius: 99px; padding: 1px 9px;">承诺</span>
+              <span style="font-family: Menlo, monospace; color: #626d7d;">来自 07-05 周会 · 置信 0.79</span>
+            </div>
+            <div style="font-size: 14px; line-height: 1.7; color: #c6ccd6;">我答应张三在周五前给出测试环境的账号权限清单。</div>
+          </div>
+
+          <!-- just-signed feedback -->
+          <div style="background: rgba(61,220,151,0.05); border: 1px solid rgba(61,220,151,0.3); border-radius: 10px; padding: 12px 20px; display: flex; align-items: center; gap: 12px;">
+            <span style="color: #3ddc97; font-size: 15px;">✓</span>
+            <div style="flex: 1; font-size: 12.5px; color: #99a3b2;">已确认「王五偏好用飞书文档共享资料」— 已签名为事件 <span style="font-family: Menlo, monospace; font-size: 11px; color: #3ddc97;">memory_card.created · sig 8f3a…c21d</span>,已写回 Obsidian 40_Confirmed_Memory/</div>
+            <span style="font-size: 12px; color: #99a3b2;">撤销 <span style="font-family: Menlo, monospace; font-size: 10px;">z</span></span>
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid #1d222d; padding: 10px 24px; display: flex; align-items: center; gap: 14px; font-family: Menlo, monospace; font-size: 11px; color: #626d7d; background: #0a0c10;">
+          <span><b style="color: #99a3b2;">j/k</b> 移动</span><span><b style="color: #99a3b2;">a</b> 确认签名</span><span><b style="color: #99a3b2;">e</b> 编辑</span><span><b style="color: #99a3b2;">r</b> 拒绝</span><span><b style="color: #99a3b2;">d</b> 搁置</span><span><b style="color: #99a3b2;">z</b> 撤销</span>
+          <span style="margin-left: auto;">剩 <b style="color: #7ae4f5;">7</b> / 8</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ 1f 基础组件 ══════════════ -->
+  <div id="1f" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(53,213,238,0.12); color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 999px; padding: 2px 10px;">1f</span>
+      <strong style="font-size: 16px;">基础组件质感</strong>
+      <span style="color: #626d7d; font-size: 13px;">自研 Dialog 取代 window.prompt/confirm · Toast · ⌘K 面板 · 控件族</span>
+    </div>
+    <div data-screen-label="1f 基础组件" style="width: 1440px; background: #0b0d12; border: 1px solid #1d222d; border-radius: 12px; padding: 36px 40px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; box-shadow: 0 24px 64px -32px rgba(0,0,0,0.8);">
+
+      <!-- confirm dialog -->
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">DIALOG · 危险确认(替代 window.confirm)</div>
+        <div style="background: #12161d; border: 1px solid #2a3140; border-radius: 12px; padding: 22px; box-shadow: 0 24px 48px -16px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 10px;">
+          <div style="font-size: 15px; font-weight: 650;">删除会话「周会 · 项目排期」?</div>
+          <div style="font-size: 13px; color: #99a3b2; line-height: 1.6;">将移除 216 段转写与审核记录。原始音频不受影响。此操作<strong style="color: #f57373;">不可撤销</strong>。</div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
+            <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 7px 14px;">取消 <span style="font-family: Menlo, monospace; font-size: 10px;">esc</span></span>
+            <span style="background: #f57373; color: #1a0808; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 14px;">删除 <span style="font-family: Menlo, monospace; font-size: 10px;">⌘↵</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- rename dialog -->
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">DIALOG · 重命名(替代 window.prompt)</div>
+        <div style="background: #12161d; border: 1px solid #2a3140; border-radius: 12px; padding: 22px; box-shadow: 0 24px 48px -16px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 15px; font-weight: 650;">重命名会话</div>
+          <div style="background: #0b0d12; border: 1px solid #35d5ee; border-radius: 7px; padding: 8px 12px; font-size: 13.5px; color: #e8ebf0; box-shadow: 0 0 0 3px rgba(53,213,238,0.12);">周会 · 项目排期讨论<span style="display: inline-block; width: 1.5px; height: 14px; background: #35d5ee; vertical-align: -2px; margin-left: 1px; animation: caret 0.9s step-end infinite;"></span></div>
+          <div style="font-size: 11.5px; color: #626d7d;">AI 建议:「排期与联调计划对齐会」 <span style="color: #7ae4f5;">采用 ⇥</span></div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 13px; border-radius: 7px; padding: 7px 14px;">取消</span>
+            <span style="background: #35d5ee; color: #04121a; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 14px;">保存 ↵</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- toasts -->
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">TOAST · 成功引导 / 失败重试</div>
+        <div style="background: #12161d; border: 1px solid rgba(61,220,151,0.35); border-left-width: 3px; border-radius: 10px; padding: 14px 16px; box-shadow: 0 12px 32px -12px rgba(0,0,0,0.7); display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 13px; font-weight: 600; color: #3ddc97;">转写完成 · 周会 (216 段)</div>
+          <div style="font-size: 12px; color: #99a3b2;">AI 预审同步完成,21 段需人工。</div>
+          <div><span style="background: rgba(61,220,151,0.12); border: 1px solid rgba(61,220,151,0.4); color: #3ddc97; font-size: 12px; border-radius: 6px; padding: 4px 12px;">立即审核 ↵</span></div>
+        </div>
+        <div style="background: #12161d; border: 1px solid rgba(245,115,115,0.4); border-left-width: 3px; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 13px; font-weight: 600; color: #f57373;">ASR 任务失败 · task_a1f3</div>
+          <div style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">timed out after 3600s</div>
+          <div style="display: flex; gap: 8px;"><span style="border: 1px solid rgba(245,115,115,0.4); color: #f57373; font-size: 12px; border-radius: 6px; padding: 4px 12px;">重试</span><span style="border: 1px solid #2a3140; color: #99a3b2; font-size: 12px; border-radius: 6px; padding: 4px 12px;">查看日志</span></div>
+        </div>
+      </div>
+
+      <!-- command palette -->
+      <div style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">⌘K · 命令 + 自然语言检索(层 3 后端就绪后)</div>
+        <div style="background: #12161d; border: 1px solid #2a3140; border-radius: 14px; box-shadow: 0 32px 64px -16px rgba(0,0,0,0.85); overflow: hidden;">
+          <div style="padding: 14px 18px; border-bottom: 1px solid #1d222d; font-size: 14.5px; color: #e8ebf0;">昨天下午和谁聊了报销<span style="display: inline-block; width: 1.5px; height: 15px; background: #35d5ee; vertical-align: -2px; margin-left: 1px; animation: caret 0.9s step-end infinite;"></span></div>
+          <div style="padding: 8px;">
+            <div style="padding: 6px 12px 4px; font-size: 10.5px; letter-spacing: 0.08em; color: #626d7d;">语义检索</div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px; background: rgba(53,213,238,0.08);">
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: #7ae4f5;">07-06 16:41</span>
+              <span style="flex: 1; font-size: 13px; color: #e8ebf0;">和 <b style="color: #7ae4f5;">王五</b> 提到「这次差旅的<b style="color: #7ae4f5;">报销</b>周期要按新流程走」</span>
+              <span style="font-family: Menlo, monospace; font-size: 10px; color: #626d7d;">↵ 跳转</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px;">
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">07-06 14:18</span>
+              <span style="flex: 1; font-size: 13px; color: #99a3b2;">周会中 张三 问「上季度报销口径」</span>
+            </div>
+            <div style="padding: 8px 12px 4px; font-size: 10.5px; letter-spacing: 0.08em; color: #626d7d;">命令</div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px;">
+              <span style="flex: 1; font-size: 13px; color: #99a3b2;">▶ 开始处理今日导入</span>
+              <span style="font-family: Menlo, monospace; font-size: 10px; color: #626d7d;">⌘⇧R</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- controls family -->
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 11px; letter-spacing: 0.08em; color: #626d7d;">控件族</div>
+        <div style="background: #0e1015; border: 1px solid #1d222d; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <span style="background: #35d5ee; color: #04121a; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 16px;">主操作</span>
+            <span style="border: 1px solid #2a3140; color: #e8ebf0; font-size: 13px; border-radius: 7px; padding: 7px 14px;">次级</span>
+            <span style="color: #99a3b2; font-size: 13px; padding: 7px 10px;">幽灵</span>
+            <span style="background: rgba(245,115,115,0.1); border: 1px solid rgba(245,115,115,0.4); color: #f57373; font-size: 13px; border-radius: 7px; padding: 7px 14px;">危险</span>
+          </div>
+          <div style="display: flex; background: #10131a; border: 1px solid #1d222d; border-radius: 999px; padding: 2px; font-size: 12px; width: fit-content;">
+            <span style="padding: 5px 16px; border-radius: 999px; background: rgba(53,213,238,0.15); color: #7ae4f5; font-weight: 600;">一次性</span>
+            <span style="padding: 5px 16px; color: #626d7d;">声纹分离</span>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px;">
+            <span style="color: #3ddc97; border: 1px solid rgba(61,220,151,0.35); border-radius: 99px; padding: 2px 10px;">已审</span>
+            <span style="color: #f0bb4e; border: 1px solid rgba(240,187,78,0.35); border-radius: 99px; padding: 2px 10px;">待审</span>
+            <span style="color: #f57373; border: 1px solid rgba(245,115,115,0.35); border-radius: 99px; padding: 2px 10px;">失败</span>
+            <span style="color: #7ae4f5; background: rgba(53,213,238,0.1); border: 1px solid rgba(53,213,238,0.35); border-radius: 99px; padding: 2px 10px;"><span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #35d5ee; animation: breathe 2s ease-in-out infinite; vertical-align: 1px;"></span> 运行中</span>
+          </div>
+          <div style="font-family: Menlo, monospace; font-size: 11px; color: #626d7d;">数字一律等宽:<span style="color: #e8ebf0;">1,847</span> 段 · <span style="color: #e8ebf0;">62%</span> · <span style="color: #e8ebf0;">03:12</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</section>
+</x-dc>
+</body>
+</html>

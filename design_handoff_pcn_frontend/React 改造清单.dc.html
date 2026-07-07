@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #08090d; }
+    a { color: #35d5ee; text-decoration: none; }
+    a:hover { color: #7af0ff; text-decoration: underline; }
+  </style>
+</helmet>
+<div style="min-height: 100vh; background: radial-gradient(1100px 500px at 80% -10%, rgba(53,213,238,0.06) 0%, transparent 60%), #08090d; color: #e8ebf0; font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif; font-size: 14.5px; line-height: 1.7; padding: 56px 24px 120px;">
+  <div style="max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px;">
+
+    <header style="display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #1d222d; padding-bottom: 28px;">
+      <div style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; color: #35d5ee; letter-spacing: 0.12em;">PCN · v2c · REACT 改造清单 · 基于设计稿 1a–1f / 2a–2c</div>
+      <h1 style="margin: 0; font-size: 28px; font-weight: 700;">前端重构落地清单</h1>
+      <p style="margin: 0; color: #99a3b2; max-width: 700px;">按 6 个阶段固化,每项对应仓库真实文件。规模标注:<span style="font-family: Menlo, monospace; color: #3ddc97;">S</span>&lt;半天 · <span style="font-family: Menlo, monospace; color: #f0bb4e;">M</span> 1–2 天 · <span style="font-family: Menlo, monospace; color: #f57373;">L</span> 3 天+。标 <span style="font-family: Menlo, monospace; font-size: 12px; background: rgba(245,115,115,0.12); color: #f57373; border-radius: 4px; padding: 0 6px;">后端</span> 的需要 Python 侧配合。</p>
+    </header>
+
+    <!-- Phase 0 -->
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 12px;"><span style="font-family: Menlo, monospace; font-size: 12px; color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 6px; padding: 2px 8px;">Phase 0</span> Token 与主题基建 <span style="font-size: 12px; color: #626d7d; font-weight: 400;">— 一切视觉改动的前提,先合入</span></h2>
+      <div style="border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>替换双主题色板为设计稿 <b>2c</b> 的值:暗 <span style="font-family: Menlo, monospace; font-size: 12px;">#08090D/#10131A/#12161D/#1D222D/#35D5EE</span>,亮 <span style="font-family: Menlo, monospace; font-size: 12px;">#EEF1F6/#F7F9FC/#FFF/#E2E8F0/#0891B2</span>。保留全部 back-compat 别名(--panel/--ok/--s1…),零 churn。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">web/src/theme.css<br>(:root / [data-theme] 两个色块)</div>
+          <span style="font-family: Menlo, monospace; color: #3ddc97;">S</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>新增玻璃面板与动效 token:<span style="font-family: Menlo, monospace; font-size: 12px;">--glass-bg</span>(暗 rgba(16,19,26,.72) / 亮 rgba(255,255,255,.8))、<span style="font-family: Menlo, monospace; font-size: 12px;">--glass-blur: 14px</span>、动效时长阶梯 <span style="font-family: Menlo, monospace; font-size: 12px;">--t-fast: 120ms / --t-move: 240ms / --t-enter: 400ms</span> 与统一缓动 <span style="font-family: Menlo, monospace; font-size: 12px;">--ease: cubic-bezier(.2,.8,.2,1)</span>。全站 transition 改引 token。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">web/src/theme.css</div>
+          <span style="font-family: Menlo, monospace; color: #3ddc97;">S</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px;">
+          <div>新增 <span style="font-family: Menlo, monospace; font-size: 12px;">&lt;AmbientBackground /&gt;</span>(设计稿 <b>2a</b>):纯 CSS 三层 — 48px 网格、3 组极光 radial(20–30s auroraA/B 漂移)、7 个上浮微粒(亮色主题隐藏微粒)。挂在 App 根部一次,<span style="font-family: Menlo, monospace; font-size: 12px;">pointer-events: none; position: fixed; z-index: var(--z-base)</span>;<span style="font-family: Menlo, monospace; font-size: 12px;">prefers-reduced-motion</span> 降级为静态渐变。工作面板改用玻璃底浮于其上;长文本滚动区(turn-list 等)内部保持不透明底。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">新 web/src/components/AmbientBackground.tsx<br>web/src/App.tsx(挂载)<br>web/src/styles.css(.panel 玻璃化)</div>
+          <span style="font-family: Menlo, monospace; color: #f0bb4e;">M</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Phase 1 -->
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 12px;"><span style="font-family: Menlo, monospace; font-size: 12px; color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 6px; padding: 2px 8px;">Phase 1</span> 全局框架 / IA<span style="font-size: 12px; color: #626d7d; font-weight: 400;">— 设计稿 1a:左侧主导航 + 全局状态条</span></h2>
+      <div style="border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>新 <span style="font-family: Menlo, monospace; font-size: 12px;">&lt;Sidebar /&gt;</span> 替代顶部 tab 条:主导航(今日/管道/审核/声纹/记忆/设置,含待办数徽标与运行呼吸点)、⌘K 搜索入口、资料库日期区(吸收现 WorkspaceNav 的日期列表)、底部节点状态。数字键 1–5 直达(挂进现有 useHotkeys)。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">新 features/workspace/Sidebar.tsx<br>删 Tabs.tsx 顶栏用法<br>useTab.ts 扩展 tab 枚举<br>useHotkeys.ts</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>新 <span style="font-family: Menlo, monospace; font-size: 12px;">&lt;GlobalStatusBar /&gt;</span>:46px 顶条,常驻显示当前管道状态胶囊(运行中文件 + 进度% + 剩余时间),点击跳管道页。数据源自现有 usePipelineStatus 轮询(Phase 4 切 SSE 后自动实时)。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">新 components/GlobalStatusBar.tsx<br>hooks/usePipelineStatus.ts</div>
+          <span style="font-family: Menlo, monospace; color: #f0bb4e;">M</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px;">
+          <div>首页改版为「今日」(设计稿 1a):待审大卡(含 AI 预审摘要 + 开始审核 ↵)、待确认记忆卡、覆盖卡、管道横条、最近会话表格。复用 home_overview 接口,新增字段:今日录音时长、AI 预审统计(Phase 3 后端就绪前先隐藏该行)。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">features/home/HomePanel.tsx 重写<br><span style="background: rgba(245,115,115,0.12); color: #f57373; border-radius: 4px; padding: 0 6px;">后端</span> home_overview.py 扩展字段</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Phase 2 -->
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 12px;"><span style="font-family: Menlo, monospace; font-size: 12px; color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 6px; padding: 2px 8px;">Phase 2</span> 基础组件质感 <span style="font-size: 12px; color: #626d7d; font-weight: 400;">— 设计稿 1f,收益/成本比最高</span></h2>
+      <div style="border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>新 <span style="font-family: Menlo, monospace; font-size: 12px;">&lt;Dialog /&gt;</span>(portal 到 #overlay-root,focus-trap,esc 取消 / ⌘↵ 确认,危险态红色主按钮)。替换全部 <span style="font-family: Menlo, monospace; font-size: 12px; color: #f57373;">window.prompt / window.confirm</span>:会话重命名(带 AI 建议名,⇥ 采用)、会话删除确认。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">新 components/ui/Dialog.tsx<br>WorkspaceNav.tsx(2 处调用点)</div>
+          <span style="font-family: Menlo, monospace; color: #f0bb4e;">M</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>Toast 升级:新增 success 变体 + 主操作按钮(「转写完成 → 立即审核 ↵」直达跳转),错误 toast 保留重试 + 新增「查看日志」。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">components/Toasts.tsx</div>
+          <span style="font-family: Menlo, monospace; color: #3ddc97;">S</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px;">
+          <div>⌘K 面板重皮肤(玻璃底 + 分组样式对齐 1f);为「语义检索」预留结果组(接口就绪前隐藏,见 Phase 6)。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">features/command/CommandPalette.tsx<br>styles.css(.cmdk-*)</div>
+          <span style="font-family: Menlo, monospace; color: #3ddc97;">S</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Phase 3 -->
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 12px;"><span style="font-family: Menlo, monospace; font-size: 12px; color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 6px; padding: 2px 8px;">Phase 3</span> AI 预审审核流 <span style="font-size: 12px; color: #626d7d; font-weight: 400;">— 设计稿 1c,核心价值项</span></h2>
+      <div style="border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div><span style="background: rgba(245,115,115,0.12); color: #f57373; border-radius: 4px; padding: 0 6px; font-family: Menlo, monospace; font-size: 12px;">后端</span> 段级预审(triage)数据。第一版纯规则、零新模型:置信度(ASR 已产出)阈值分箱 ≥0.92 高置信 / &lt;0.65 可疑;说话人存疑 = 声纹匹配分处于两人之间;疑似幻听 = 超短重复段或与上下文 embedding 距离过大。产出 <span style="font-family: Menlo, monospace; font-size: 12px;">GET /api/sessions/{id}/triage</span> → 每段 {bin, reasons[], suggested_text?, suggested_speaker?}。第二版接 LLM 复核可疑段。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">src/…/web/ 新路由<br>llm_processing.py / segment_emotions.py 产出复用</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>审核面板重排(1c):顶部 AI 预审横幅(统计 + 「接受 n 段高置信 ⇧A」+ 仅看可疑);可疑 turn 前置,原因用 warn 胶囊标注,ASR 疑误词高亮 + 「采纳 AI 修正 e」;高置信组折叠(可展开复核);标题栏进度 已审 x/y + 预计剩余;新快捷键 <span style="font-family: Menlo, monospace; font-size: 12px;">e</span> 采纳修正、<span style="font-family: Menlo, monospace; font-size: 12px;">s</span> 改说话人、<span style="font-family: Menlo, monospace; font-size: 12px;">⇧A</span> 批量接受。审完整场出完成态(解锁「接受整场」)。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">features/transcript/TranscriptReviewPanel.tsx<br>TurnBlock.tsx / ReviewQueue.tsx<br>useHotkeys.ts / ShortcutSheet.tsx</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px;">
+          <div>侧栏审核队列按「待审 + 可疑数」展示(替代纯日期入口),队列间 <span style="font-family: Menlo, monospace; font-size: 12px;">n/p</span> 切换。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">Sidebar.tsx / WorkspaceNav.tsx</div>
+          <span style="font-family: Menlo, monospace; color: #f0bb4e;">M</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Phase 4 -->
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 12px;"><span style="font-family: Menlo, monospace; font-size: 12px; color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 6px; padding: 2px 8px;">Phase 4</span> 管道控制室 + SSE <span style="font-size: 12px; color: #626d7d; font-weight: 400;">— 设计稿 1b,「科技感」主战场</span></h2>
+      <div style="border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div><span style="background: rgba(245,115,115,0.12); color: #f57373; border-radius: 4px; padding: 0 6px; font-family: Menlo, monospace; font-size: 12px;">后端</span> SSE 事件流 <span style="font-family: Menlo, monospace; font-size: 12px;">GET /api/events</span>:worker 推进时发 <span style="font-family: Menlo, monospace; font-size: 12px;">task.progress / segment.transcribed(含文本+说话人+时间戳) / stage.changed / task.failed / run.completed</span>。process_runner 在段完成回调处发事件即可,不改流水线结构;客户端断线自动降回现有轮询。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">src/…/web/(SSE 路由)<br>process_runner.py / pipeline.py 回调<br>web/src/api/events.ts 改 EventSource</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>新「管道」页(1b):左阶段栈(复用 stages.ts,运行级发光态 + 每阶段计数/耗时/速率)、中央实时转写流(新段 slidein + 尾行流式光标,自动滚动可关)、右任务栏(复用 TaskList 的失败/重试)+ 事件流 tail。顶部总进度 + 预计剩余 + 停止。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">新 features/pipeline/PipelinePage.tsx<br>components/PipelineRail.tsx 吸收<br>components/Progress.tsx / TaskList.tsx</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px;">
+          <div>「完成后自动跳转审核」开关(默认开):run.completed → success toast 直达 + 可选自动切页。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">PipelinePage.tsx / Toasts.tsx / App.tsx</div>
+          <span style="font-family: Menlo, monospace; color: #3ddc97;">S</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Phase 5 -->
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 12px;"><span style="font-family: Menlo, monospace; font-size: 12px; color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 6px; padding: 2px 8px;">Phase 5</span> 记忆确认闭环 <span style="font-size: 12px; color: #626d7d; font-weight: 400;">— 设计稿 1e,砍掉「切去 Obsidian」的断流</span></h2>
+      <div style="border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div><span style="background: rgba(245,115,115,0.12); color: #f57373; border-radius: 4px; padding: 0 6px; font-family: Menlo, monospace; font-size: 12px;">后端</span> 记忆确认 API:<span style="font-family: Menlo, monospace; font-size: 12px;">GET /api/memory/candidates</span>、<span style="font-family: Menlo, monospace; font-size: 12px;">POST /api/memory/{id}/confirm|reject|defer</span>(confirm 支持 edited_text)。复用 obsidian_review 的确认语义:Ed25519 签名 memory_card.created 事件 + 写回 40_Confirmed_Memory/,Obsidian 勾选流保留为兼容路径(sync-review 跳过已由 UI 确认项)。撤销 = grace 窗口内软删。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">obsidian_review.py 抽公共层<br>identity_keys.py / memory_verify.py<br>src/…/web/ 新路由</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px;">
+          <div>新「记忆」页(1e):候选卡(类型胶囊/置信/证据引文 + 播放 + 跳转写)、确认并签名(a)/编辑(e)/拒绝(r)/搁置(d)/撤销(z),签名成功回执(sig 摘要 + 写回路径),顶栏本地密钥标识。观点保持只读视图。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">新 features/memory/MemoryPage.tsx<br>features/viewpoint/* 吸收改造</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Phase 6 -->
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 12px;"><span style="font-family: Menlo, monospace; font-size: 12px; color: #35d5ee; border: 1px solid rgba(53,213,238,0.3); border-radius: 6px; padding: 2px 8px;">Phase 6</span> 声纹星图 + 语义检索 <span style="font-size: 12px; color: #626d7d; font-weight: 400;">— 设计稿 1d + 1f ⌘K</span></h2>
+      <div style="border: 1px solid #1d222d; border-radius: 10px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div>VoiceprintMap 渲染升级:点发光(canvas shadowBlur 或离屏叠加)、聚类光晕呼吸、投影切换时点位插值动画(rAF 300ms)、未分配聚类虚线圈选中态。保留现有交互(框选/悬浮/指派)。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">features/viz/VoiceprintMap.tsx</div>
+          <span style="font-family: Menlo, monospace; color: #f57373;">L</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px; border-bottom: 1px solid #16191f;">
+          <div><span style="background: rgba(245,115,115,0.12); color: #f57373; border-radius: 4px; padding: 0 6px; font-family: Menlo, monospace; font-size: 12px;">后端</span> 聚类 AI 猜测:未分配聚类质心 vs 已登记声纹库最近邻 + 相似分,<span style="font-family: Menlo, monospace; font-size: 12px;">GET /api/clusters/{id}/suggestion</span>。右栏「采纳 → 某人」一键指派。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">campplus embed 复用<br>ClusterListPanel.tsx</div>
+          <span style="font-family: Menlo, monospace; color: #f0bb4e;">M</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 260px 40px; gap: 16px; padding: 13px 18px;">
+          <div><span style="background: rgba(245,115,115,0.12); color: #f57373; border-radius: 4px; padding: 0 6px; font-family: Menlo, monospace; font-size: 12px;">后端</span> ⌘K 语义检索:第一版 SQLite FTS5 全文检索(转写+摘要)即可上线;第二版换 embedding 相似检索。前端 CommandPalette 已支持 extraItems 异步注入,只接结果。</div>
+          <div style="font-family: Menlo, monospace; font-size: 11.5px; color: #626d7d; word-break: break-all;">src/…/web/ 新路由(FTS)<br>CommandPalette.tsx(已就绪)</div>
+          <span style="font-family: Menlo, monospace; color: #f0bb4e;">M</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ordering + tests -->
+    <section style="display: flex; flex-direction: column; gap: 12px; background: rgba(53,213,238,0.04); border: 1px solid rgba(53,213,238,0.22); border-radius: 12px; padding: 22px 26px;">
+      <h2 style="margin: 0; font-size: 14px; font-weight: 700; color: #7ae4f5;">合入顺序与护栏</h2>
+      <ul style="margin: 0; padding-left: 20px; color: #aab8c9; display: flex; flex-direction: column; gap: 8px;">
+        <li><b style="color: #e8ebf0;">顺序:</b>0 → 2 → 1 → 3 → 4 → 5 → 6。Phase 0+2 一周内可见质感跃升;Phase 1 动 IA 单独成 PR;3/4/5 各自「后端先行、前端跟上」拆两个 PR。</li>
+        <li><b style="color: #e8ebf0;">测试:</b>每阶段同步更新 web/src/__tests__(现 47 个用例,Tabs/WorkspaceNav/Toasts/TranscriptReviewPanel 受影响最大);Dialog 替换 prompt/confirm 后删除对应 window mock。e2e control-panel.spec.ts 补「侧栏导航 + 完成跳转」路径。</li>
+        <li><b style="color: #e8ebf0;">性能:</b>极光层只用 transform/opacity(GPU 合成);SSE 转写流虚拟化到最近 200 段;VoiceprintMap 动画统一走单个 rAF。</li>
+        <li><b style="color: #e8ebf0;">可达性:</b>沿用现有单一 focus-ring 体系;所有新快捷键进 ShortcutSheet;reduced-motion 关掉极光/微粒/流式光标闪烁。</li>
+      </ul>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

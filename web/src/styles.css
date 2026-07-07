@@ -1568,3 +1568,85 @@ button.home-card:hover .home-card-go { color: var(--accent); }
    so the styling intent is explicit (no silent reliance on .card alone). */
 .llm-panel { display: grid; gap: var(--s4); }
 .llm-panel .viewpoint { margin: 0; }
+
+/* ============================================================
+   AMBIENT BACKGROUND — 全局环境动效层 (design handoff Phase 0).
+   Fixed + pointer-transparent at --z-ambient: above the body's
+   pure --bg canvas, below every screen. Per-theme inputs live in
+   theme.css (--ambient-grid-line / --ambient-aurora-a/-b).
+   ============================================================ */
+.ambient {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: var(--z-ambient);
+  overflow: hidden;
+}
+
+/* layer 1 — 48px hairline grid (two crossed 1px gradients) */
+.ambient-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(to right, var(--ambient-grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--ambient-grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* layer 2 — three 400–820px aurora blobs, 20–30s transform/opacity drift */
+.ambient-aurora {
+  position: absolute;
+  border-radius: 50%;
+  will-change: transform, opacity;
+}
+.ambient-aurora--a {
+  width: 820px; height: 820px; top: -260px; left: -220px;
+  background: radial-gradient(circle closest-side, var(--ambient-aurora-a), transparent 72%);
+  animation: auroraA 26s ease-in-out infinite alternate;
+}
+.ambient-aurora--b {
+  width: 640px; height: 640px; top: 18%; right: -220px;
+  background: radial-gradient(circle closest-side, var(--ambient-aurora-b), transparent 72%);
+  animation: auroraB 30s ease-in-out infinite alternate;
+}
+.ambient-aurora--c {
+  width: 400px; height: 400px; bottom: -150px; left: 32%;
+  background: radial-gradient(circle closest-side, var(--ambient-aurora-a), transparent 72%);
+  animation: auroraB 20s ease-in-out infinite alternate;
+}
+@keyframes auroraA {
+  from { transform: translate3d(0, 0, 0) scale(1); opacity: .85; }
+  to   { transform: translate3d(90px, 60px, 0) scale(1.12); opacity: 1; }
+}
+@keyframes auroraB {
+  from { transform: translate3d(0, 0, 0) scale(1.06); opacity: 1; }
+  to   { transform: translate3d(-70px, -50px, 0) scale(.94); opacity: .8; }
+}
+
+/* layer 3 — ~7 accent particles floating up; per-particle --dur/--delay set inline */
+.ambient-particle {
+  position: absolute; bottom: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  animation: floatup var(--dur, 12s) linear infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes floatup {
+  0%   { transform: translateY(0); opacity: 0; }
+  12%  { opacity: .45; }
+  85%  { opacity: .22; }
+  100% { transform: translateY(-104vh); opacity: 0; }
+}
+/* 亮色主题隐藏微粒 (missing data-theme = light fallback, so match "not dark") */
+:root:not([data-theme="dark"]) .ambient-particles { display: none; }
+
+/* layer 4 — vignette cap: edges return to the pure page color */
+.ambient-vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(120% 90% at 50% 32%, transparent 55%, var(--bg) 96%);
+}
+
+/* reduced motion → everything degrades to a static gradient wash */
+@media (prefers-reduced-motion: reduce) {
+  .ambient-aurora { animation: none; }
+  .ambient-particles { display: none; }
+}

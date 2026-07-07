@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    :root[data-theme="dark"] { --bg: #08090d; --side: #0a0c10; --surface: #10131a; --well: #0e1015; --card: #12161d; --border: #1d222d; --border2: #2a3140; --hair: #16191f; --text: #e8ebf0; --t2: #99a3b2; --dim: #626d7d; --acc: #35d5ee; --accT: #7ae4f5; --accFg: #04121a; --accDim: rgba(53,213,238,0.1); --accBrd: rgba(53,213,238,0.3); --glow: rgba(53,213,238,0.18); --ok: #3ddc97; --okBrd: rgba(61,220,151,0.35); --warn: #f0bb4e; --warnBrd: rgba(240,187,78,0.35); --err: #f57373; --errBrd: rgba(245,115,115,0.4); --grid: rgba(53,213,238,0.035); --aur1: rgba(53,213,238,0.11); --aur2: rgba(139,122,232,0.09); --vig: rgba(7,8,12,0.92); --glass: rgba(16,19,26,0.72); --pOp: 1; }
+    :root[data-theme="light"] { --bg: #eef1f6; --side: #f7f9fc; --surface: #ffffff; --well: #fbfcfe; --card: #ffffff; --border: #e2e8f0; --border2: #cfd6e0; --hair: #eef1f6; --text: #1a212c; --t2: #5a6572; --dim: #8c95a5; --acc: #0891b2; --accT: #0e7490; --accFg: #ffffff; --accDim: rgba(8,145,178,0.09); --accBrd: rgba(8,145,178,0.3); --glow: rgba(8,145,178,0.18); --ok: #0e8a5f; --okBrd: rgba(14,138,95,0.35); --warn: #b5740a; --warnBrd: rgba(181,116,10,0.35); --err: #c43d3d; --errBrd: rgba(196,61,61,0.4); --grid: rgba(8,145,178,0.04); --aur1: rgba(8,145,178,0.08); --aur2: rgba(139,122,232,0.07); --vig: rgba(238,241,246,0.92); --glass: rgba(255,255,255,0.8); --pOp: 0; }
+    body { margin: 0; background: var(--bg); }
+    a { color: var(--acc); text-decoration: none; }
+    a:hover { color: var(--accT); }
+    @keyframes breathe { 0%,100% { opacity: 1; box-shadow: 0 0 0 4px var(--glow); } 50% { opacity: 0.45; box-shadow: 0 0 0 7px transparent; } }
+    @keyframes glowpulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    @keyframes caret { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    @keyframes auroraA { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(70px,-50px) scale(1.18); } }
+    @keyframes auroraB { 0%,100% { transform: translate(0,0) scale(1.12); } 50% { transform: translate(-80px,40px) scale(0.94); } }
+    @keyframes floatup { 0% { transform: translateY(0); opacity: 0; } 12% { opacity: 0.55; } 82% { opacity: 0.55; } 100% { transform: translateY(-180px); opacity: 0; } }
+    @keyframes slidein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+  <script>document.documentElement.dataset.theme = "dark";</script>
+</helmet>
+
+<div style="height: 100vh; position: relative; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif; font-size: 13px;">
+
+  <!-- ambient background -->
+  <div style="position: absolute; inset: 0; pointer-events: none; display: {{ ambientDisplay }};">
+    <div style="position: absolute; inset: 0; background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 48px 48px;"></div>
+    <div style="position: absolute; left: 15%; top: -30%; width: 720px; height: 720px; border-radius: 50%; background: radial-gradient(circle, var(--aur1), transparent 65%); animation: auroraA 24s ease-in-out infinite;"></div>
+    <div style="position: absolute; right: -5%; bottom: -40%; width: 820px; height: 820px; border-radius: 50%; background: radial-gradient(circle, var(--aur2), transparent 65%); animation: auroraB 30s ease-in-out infinite;"></div>
+    <div style="position: absolute; left: 55%; top: 5%; width: 400px; height: 400px; border-radius: 50%; background: radial-gradient(circle, var(--aur1), transparent 65%); animation: auroraB 20s ease-in-out 4s infinite;"></div>
+    <div style="position: absolute; inset: 0; background: radial-gradient(1200px 600px at 50% 45%, transparent 40%, var(--vig) 100%);"></div>
+    <div style="position: absolute; left: 18%; bottom: 15%; width: 2px; height: 2px; border-radius: 50%; background: var(--acc); opacity: var(--pOp); animation: floatup 9s linear infinite;"></div>
+    <div style="position: absolute; left: 42%; bottom: 8%; width: 3px; height: 3px; border-radius: 50%; background: #8b7ae8; opacity: var(--pOp); animation: floatup 13s linear 2s infinite;"></div>
+    <div style="position: absolute; left: 66%; bottom: 18%; width: 2px; height: 2px; border-radius: 50%; background: var(--acc); opacity: var(--pOp); animation: floatup 11s linear 5s infinite;"></div>
+    <div style="position: absolute; left: 84%; bottom: 10%; width: 2px; height: 2px; border-radius: 50%; background: var(--acc); opacity: var(--pOp); animation: floatup 15s linear 3s infinite;"></div>
+  </div>
+
+  <div style="position: relative; height: 100%; display: grid; grid-template-columns: 216px 1fr;">
+
+    <!-- ══ sidebar ══ -->
+    <aside style="background: var(--side); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px 10px; min-height: 0;">
+      <div style="display: flex; align-items: center; gap: 9px; padding: 4px 10px 16px;">
+        <span style="width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--acc), #1a7f96); display: inline-flex; align-items: center; justify-content: center; font-family: Menlo, monospace; font-size: 11px; font-weight: 700; color: #04121a;">P</span>
+        <span style="font-size: 13px; font-weight: 600;">个人上下文节点</span>
+      </div>
+      <div onClick="{{ openPalette }}" style="margin: 0 10px 14px; display: flex; align-items: center; gap: 8px; background: var(--well); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; color: var(--dim); font-size: 12px; cursor: pointer;" style-hover="border-color: var(--accBrd);">
+        <span>搜索或跳转…</span>
+        <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; border: 1px solid var(--border2); border-radius: 4px; padding: 1px 5px; color: var(--t2);">⌘K</span>
+      </div>
+      <nav style="display: flex; flex-direction: column; gap: 2px;">
+        <sc-for list="{{ navItems }}" as="it" hint-placeholder-count="5">
+          <div onClick="{{ it.go }}" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; font-size: 13px; cursor: pointer; background: {{ it.bg }}; color: {{ it.fg }}; font-weight: {{ it.fw }};">
+            <span>{{ it.icon }} {{ it.label }}</span>
+            <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px;">
+              <sc-if value="{{ it.live }}" hint-placeholder-val="{{ false }}"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--acc); animation: breathe 2s ease-in-out infinite;"></span></sc-if>
+              <sc-if value="{{ it.badge }}" hint-placeholder-val="{{ false }}"><span style="font-family: Menlo, monospace; font-size: 11px; background: var(--well); border: 1px solid var(--border2); border-radius: 999px; padding: 0 7px; color: var(--warn);">{{ it.badge }}</span></sc-if>
+              <span style="font-family: Menlo, monospace; font-size: 10px; color: var(--dim);">{{ it.num }}</span>
+            </span>
+          </div>
+        </sc-for>
+      </nav>
+      <div style="margin-top: 18px; padding: 0 10px; font-size: 11px; letter-spacing: 0.08em; color: var(--dim);">资料库</div>
+      <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; color: var(--t2);">
+        <div style="padding: 6px 10px; display: flex; justify-content: space-between;"><span>07-07 周二</span><span style="font-family: Menlo, monospace; font-size: 11px; color: var(--acc);">live</span></div>
+        <div style="padding: 6px 10px; display: flex; justify-content: space-between;"><span>07-06 周一</span><span style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">5</span></div>
+        <div style="padding: 6px 10px; display: flex; justify-content: space-between;"><span>07-05 周日</span><span style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">3</span></div>
+      </div>
+      <div style="margin-top: auto;">
+        <div style="margin: 8px 10px 0; border-top: 1px solid var(--border); padding-top: 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dim);">
+          <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok);"></span>本地节点 · 127.0.0.1:8765
+        </div>
+      </div>
+    </aside>
+
+    <!-- ══ main ══ -->
+    <div style="display: flex; flex-direction: column; min-width: 0; min-height: 0;">
+      <!-- global status bar -->
+      <div style="height: 46px; flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; padding: 0 22px; background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+        <span style="font-size: 13px; color: var(--t2);">{{ viewTitle }}</span>
+        <span onClick="{{ goPipe }}" style="margin-left: auto; display: inline-flex; align-items: center; gap: 8px; background: var(--accDim); border: 1px solid var(--accBrd); border-radius: 999px; padding: 4px 12px; font-size: 12px; color: var(--accT); cursor: pointer;">
+          <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--acc); animation: breathe 2s ease-in-out infinite;"></span>
+          {{ statusChip }}
+        </span>
+        <span onClick="{{ toggleTheme }}" title="切换主题 (t)" style="font-family: Menlo, monospace; font-size: 12px; color: var(--t2); border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px; cursor: pointer;" style-hover="border-color: var(--accBrd); color: var(--accT);">{{ themeIcon }}</span>
+      </div>
+
+      <!-- ════════ 今日 ════════ -->
+      <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+        <div data-screen-label="今日" style="flex: 1; padding: 28px 34px; display: flex; flex-direction: column; gap: 22px; overflow: auto; min-height: 0;">
+          <div style="display: flex; align-items: baseline; gap: 14px;">
+            <h2 style="margin: 0; font-size: 21px; font-weight: 650;">7 月 7 日 周二</h2>
+            <span style="color: var(--dim); font-size: 13px;">已录 3 段 · 2 小时 41 分</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 14px;">
+            <div style="background: var(--card); border: 1px solid var(--accBrd); border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-size: 12px; color: var(--accT); letter-spacing: 0.06em;">待审</div>
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-family: ui-monospace, Menlo, monospace; font-size: 40px; font-weight: 700; line-height: 1;">12</span>
+                <span style="color: var(--t2); font-size: 13px;">会话 · 1,847 段</span>
+              </div>
+              <div style="color: var(--dim); font-size: 12.5px;">AI 预审已完成:<span style="color: var(--ok);">86% 高置信</span>,预计人工 15 分钟</div>
+              <div style="display: flex; gap: 10px; margin-top: 4px;">
+                <span onClick="{{ goReview }}" style="background: var(--acc); color: var(--accFg); font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 16px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer;">开始审核 <span style="font-family: Menlo, monospace; font-size: 10px; opacity: 0.7;">↵</span></span>
+                <span onClick="{{ goReview }}" style="border: 1px solid var(--border2); color: var(--t2); font-size: 13px; border-radius: 7px; padding: 7px 14px; cursor: pointer;">查看队列</span>
+              </div>
+            </div>
+            <div onClick="{{ goMem }}" style="background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; cursor: pointer;" style-hover="border-color: var(--accBrd);">
+              <div style="font-size: 12px; color: var(--dim); letter-spacing: 0.06em;">待确认记忆</div>
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-family: ui-monospace, Menlo, monospace; font-size: 40px; font-weight: 700; line-height: 1;">{{ memPending }}</span>
+                <span style="color: var(--t2); font-size: 13px;">候选</span>
+              </div>
+              <div style="color: var(--dim); font-size: 12.5px;">可在应用内直接签名确认 →</div>
+            </div>
+            <div style="background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="font-size: 12px; color: var(--dim); letter-spacing: 0.06em;">覆盖</div>
+              <div style="display: flex; gap: 18px;">
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">31</div><div style="font-size: 11px; color: var(--dim);">天</div></div>
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">142</div><div style="font-size: 11px; color: var(--dim);">会话</div></div>
+                <div><div style="font-family: Menlo, monospace; font-size: 20px; font-weight: 600;">18.4k</div><div style="font-size: 11px; color: var(--dim);">段</div></div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: var(--dim);">
+                <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 28px;">声纹</span><span style="flex: 1; height: 3px; background: var(--border); border-radius: 99px; overflow: hidden;"><span style="display: block; width: 92%; height: 100%; background: var(--acc);"></span></span><span style="font-family: Menlo, monospace;">92%</span></div>
+                <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 28px;">情绪</span><span style="flex: 1; height: 3px; background: var(--border); border-radius: 99px; overflow: hidden;"><span style="display: block; width: 78%; height: 100%; background: #8b7ae8;"></span></span><span style="font-family: Menlo, monospace;">78%</span></div>
+              </div>
+            </div>
+          </div>
+          <div onClick="{{ goPipe }}" style="background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--border); border-radius: 12px; padding: 16px 22px; display: flex; flex-direction: column; gap: 12px; cursor: pointer;" style-hover="border-color: var(--accBrd);">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 12px; color: var(--dim); letter-spacing: 0.06em;">管道</span>
+              <span style="font-size: 12px; color: var(--accT);">TX01_MIC001_155539.wav 处理中</span>
+              <span style="margin-left: auto; font-size: 12px; color: var(--dim);">查看实时转写 →</span>
+            </div>
+            <div style="display: flex; align-items: center;">
+              <div style="font-size: 12.5px; color: var(--ok);">✓ 导入</div>
+              <div style="flex: 1; height: 1px; background: var(--ok); opacity: 0.5; margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: var(--ok);">✓ VAD</div>
+              <div style="flex: 1; height: 1px; background: var(--ok); opacity: 0.5; margin: 0 12px;"></div>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--acc); font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--acc); animation: breathe 2s ease-in-out infinite;"></span>转写 <span style="font-family: Menlo, monospace;">{{ pctTxt }}</span></div>
+              <div style="flex: 1; height: 1px; background: var(--border2); margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: var(--dim);">切分</div>
+              <div style="flex: 1; height: 1px; background: var(--border2); margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: var(--dim);">摘要</div>
+              <div style="flex: 1; height: 1px; background: var(--border2); margin: 0 12px;"></div>
+              <div style="font-size: 12.5px; color: var(--dim);">发布</div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 12px; color: var(--dim); letter-spacing: 0.06em;">最近会话</div>
+            <div style="display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface);">
+              <div onClick="{{ goReview }}" style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--hair); cursor: pointer;" style-hover="background: var(--well);">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: var(--t2);">14:02–15:31</span>
+                <span style="font-size: 13px;">{{ sessionName }}</span>
+                <span style="font-size: 12px; color: var(--dim);">张三 · 李四 · 我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--warn);">待审 {{ pendingLeft }}</span>
+                <span style="font-size: 12px; color: var(--dim); text-align: right;">↵ 打开</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--hair);">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: var(--t2);">11:20–11:47</span>
+                <span style="font-size: 13px;">电话 · 供应商报价</span>
+                <span style="font-size: 12px; color: var(--dim);">王五 · 我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--ok);">已审</span>
+                <span></span>
+              </div>
+              <div style="display: grid; grid-template-columns: 120px 1fr 130px 90px 80px; align-items: center; gap: 14px; padding: 11px 18px;">
+                <span style="font-family: Menlo, monospace; font-size: 12px; color: var(--t2);">09:05–09:22</span>
+                <span style="font-size: 13px;">晨间独白 · 今日计划</span>
+                <span style="font-size: 12px; color: var(--dim);">我</span>
+                <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--ok);">已审</span>
+                <span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ════════ 管道 ════════ -->
+      <sc-if value="{{ isPipe }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="管道" style="flex: 1; display: grid; grid-template-columns: 280px 1fr 270px; min-height: 0;">
+          <div style="border-right: 1px solid var(--border); padding: 20px 16px; display: flex; flex-direction: column; gap: 4px; overflow: auto;">
+            <div style="font-size: 11px; letter-spacing: 0.08em; color: var(--dim); padding: 0 6px 10px;">阶段</div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: var(--ok); font-size: 13px;">✓ 导入<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">3 文件 · 8s</span></div>
+            <div style="width: 1px; height: 10px; background: var(--border2); margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: var(--ok); font-size: 13px;">✓ VAD 切分<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">241 段 · 42s</span></div>
+            <div style="width: 1px; height: 10px; background: var(--border2); margin-left: 22px;"></div>
+            <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: var(--accDim); border: 1px solid var(--accBrd);">
+              <div style="display: flex; align-items: center; gap: 10px; color: var(--acc); font-size: 13px; font-weight: 600;"><sc-if value="{{ running }}" hint-placeholder-val="{{ true }}"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--acc); animation: breathe 1.8s ease-in-out infinite;"></span></sc-if><sc-if value="{{ done }}" hint-placeholder-val="{{ false }}"><span>✓</span></sc-if>ASR 转写<span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px;">{{ segCountTxt }}</span></div>
+              <div style="height: 3px; background: var(--border); border-radius: 99px; overflow: hidden;"><div style="width: {{ pctTxt }}; height: 100%; background: var(--acc); transition: width 0.3s;"></div></div>
+              <div style="font-family: Menlo, monospace; font-size: 11px; color: var(--accT);">SenseVoiceSmall · zh · 4.2 段/秒</div>
+            </div>
+            <div style="width: 1px; height: 10px; background: var(--border); margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: {{ deriveColor }}; font-size: 13px;">{{ deriveIcon }} 会话切分<span style="margin-left: auto; font-size: 11px;">{{ deriveState }}</span></div>
+            <div style="width: 1px; height: 10px; background: var(--border); margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: var(--dim); font-size: 13px;">○ 摘要与观点<span style="margin-left: auto; font-size: 11px;">排队</span></div>
+            <div style="width: 1px; height: 10px; background: var(--border); margin-left: 22px;"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: var(--dim); font-size: 13px;">○ 发布 Obsidian<span style="margin-left: auto; font-size: 11px;">排队</span></div>
+            <div style="margin-top: auto; background: var(--well); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 11px; color: var(--dim); line-height: 1.6;">完成后自动跳转审核 · 开</div>
+          </div>
+
+          <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0;">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: 0.08em; color: var(--dim);">实时转写<span style="font-family: Menlo, monospace; color: var(--acc);">LIVE</span>
+              <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--accT); letter-spacing: normal;">总进度 <span style="width: 140px; height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; display: inline-block;"><span style="display: block; width: {{ pctTxt }}; height: 100%; background: var(--acc); transition: width 0.3s;"></span></span><span style="font-family: Menlo, monospace;">{{ pctTxt }}</span></span>
+              <span onClick="{{ restartSim }}" style="border: 1px solid var(--border2); border-radius: 6px; padding: 3px 10px; font-size: 11px; color: var(--t2); cursor: pointer; letter-spacing: normal;">重新演示</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; overflow: hidden;">
+              <sc-for list="{{ segs }}" as="s" hint-placeholder-count="3">
+                <div style="display: grid; grid-template-columns: 64px 84px 1fr; gap: 12px; padding: 9px 12px; border-radius: 8px; opacity: {{ s.op }}; animation: slidein 0.25s ease-out;">
+                  <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">{{ s.time }}</span>
+                  <span style="font-size: 11px; color: #04121a; background: {{ s.color }}; border-radius: 99px; padding: 1px 8px; height: fit-content; text-align: center;">{{ s.sp }}</span>
+                  <span style="font-size: 13.5px; color: var(--t2); line-height: 1.6;">{{ s.text }}</span>
+                </div>
+              </sc-for>
+              <sc-if value="{{ running }}" hint-placeholder-val="{{ true }}">
+                <div style="display: grid; grid-template-columns: 64px 84px 1fr; gap: 12px; padding: 10px 12px; border-radius: 8px; background: var(--accDim); border: 1px solid var(--accBrd);">
+                  <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--accT);">{{ curTime }}</span>
+                  <span style="font-size: 11px; color: #04121a; background: {{ curColor }}; border-radius: 99px; padding: 1px 8px; height: fit-content; text-align: center;">{{ curSp }}</span>
+                  <span style="font-size: 13.5px; color: var(--text); line-height: 1.6;">{{ typingText }}<span style="display: inline-block; width: 2px; height: 15px; background: var(--acc); vertical-align: -2px; margin-left: 2px; animation: caret 0.9s step-end infinite;"></span></span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ done }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--okBrd); font-size: 13px; color: var(--ok);">✓ 转写完成 · 241 段 · AI 预审同步完成 <span onClick="{{ goReview }}" style="margin-left: auto; border: 1px solid var(--okBrd); border-radius: 6px; padding: 4px 12px; cursor: pointer;">立即审核 ↵</span></div>
+              </sc-if>
+            </div>
+          </div>
+
+          <div style="border-left: 1px solid var(--border); padding: 20px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto;">
+            <div style="font-size: 11px; letter-spacing: 0.08em; color: var(--dim);">任务</div>
+            <div style="background: var(--well); border: 1px solid var(--border); border-left: 2px solid var(--err); border-radius: 8px; padding: 12px;">
+              <div style="font-size: 12.5px; color: var(--err); font-weight: 600;">asr · task_a1f3 失败</div>
+              <div style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim); margin: 6px 0;">timed out · 重试 1/3</div>
+              <span style="display: inline-block; border: 1px solid var(--errBrd); color: var(--err); font-size: 12px; border-radius: 6px; padding: 4px 12px; cursor: pointer;">重试</span>
+            </div>
+            <div style="background: var(--well); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 12px; color: var(--t2);">
+              <div style="display: flex; justify-content: space-between;"><span>asr · task_a1f2</span><span style="color: var(--acc);">运行中</span></div>
+            </div>
+            <div style="background: var(--well); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 12px; color: var(--dim);">
+              <div style="display: flex; justify-content: space-between;"><span>session_derive · 排队</span><span style="font-family: Menlo, monospace;">×3</span></div>
+            </div>
+            <div style="margin-top: auto; font-size: 11px; color: var(--dim); line-height: 1.7; border-top: 1px solid var(--border); padding-top: 12px;">事件流<br><span style="font-family: Menlo, monospace; color: var(--t2);">{{ evtTail }}</span></div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ════════ 审核 ════════ -->
+      <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="审核" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+          <div style="flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; padding: 10px 22px;">
+            <span style="font-size: 13px; font-weight: 600;">{{ sessionName }}</span>
+            <span onClick="{{ openRename }}" title="重命名" style="color: var(--dim); cursor: pointer; font-size: 12px;" style-hover="color: var(--accT);">✎</span>
+            <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">14:02–15:31 · 216 段 · 3 人</span>
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--t2);">
+              已审 <span style="font-family: Menlo, monospace; color: var(--text);">{{ reviewedTxt }}</span>
+              <span style="width: 160px; height: 4px; background: var(--border); border-radius: 99px; overflow: hidden;"><span style="display: block; width: {{ progPctTxt }}; height: 100%; background: var(--acc); transition: width 0.4s;"></span></span>
+            </div>
+          </div>
+
+          <div style="margin: 16px 24px 0; flex: none; background: var(--card); border: 1px solid var(--accBrd); border-radius: 10px; padding: 13px 18px; display: flex; align-items: center; gap: 16px;">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--acc); animation: breathe 2.4s ease-in-out infinite; flex: none;"></span>
+            <div style="flex: 1; font-size: 12.5px; color: var(--t2); line-height: 1.6;">
+              <strong style="color: var(--text);">AI 预审完成。</strong>剩余段中 <span style="color: var(--ok); font-family: Menlo, monospace;">67</span> 段高置信建议直接接受;<span style="color: var(--warn); font-family: Menlo, monospace;">{{ suspLeft }}</span> 段可疑已前置。
+            </div>
+            <sc-if value="{{ notBatched }}" hint-placeholder-val="{{ true }}">
+              <span onClick="{{ batchAccept }}" style="background: var(--acc); color: var(--accFg); font-size: 12.5px; font-weight: 600; border-radius: 7px; padding: 6px 14px; white-space: nowrap; cursor: pointer;">接受 67 段高置信 <span style="font-family: Menlo, monospace; font-size: 10px; opacity: 0.7;">⇧A</span></span>
+            </sc-if>
+            <sc-if value="{{ batched }}" hint-placeholder-val="{{ false }}">
+              <span style="color: var(--ok); font-size: 12.5px; white-space: nowrap;">✓ 已接受 67 段</span>
+            </sc-if>
+          </div>
+
+          <div style="flex: 1; padding: 12px 24px 8px; display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0;">
+            <sc-for list="{{ turns }}" as="t" hint-placeholder-count="4">
+              <div onClick="{{ t.focus }}" style="background: {{ t.cbg }}; border: 1px solid {{ t.brd }}; border-left: 3px solid {{ t.brdL }}; border-radius: 10px; padding: 12px 18px; display: flex; flex-direction: column; gap: 9px; cursor: pointer; box-shadow: {{ t.sh }};">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                  <span style="font-size: 11px; color: #04121a; background: {{ t.color }}; border-radius: 99px; padding: 1px 9px; font-weight: 600;">{{ t.speaker }}</span>
+                  <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">{{ t.time }} · {{ t.dur }}</span>
+                  <sc-for list="{{ t.reasons }}" as="r" hint-placeholder-count="1">
+                    <span style="font-size: 11px; color: var(--warn); border: 1px solid var(--warnBrd); border-radius: 99px; padding: 1px 9px;">{{ r }}</span>
+                  </sc-for>
+                  <sc-if value="{{ t.tag }}" hint-placeholder-val="{{ false }}">
+                    <span style="margin-left: auto; font-size: 11.5px; color: {{ t.tagColor }}; font-weight: 600;">{{ t.tag }}</span>
+                  </sc-if>
+                </div>
+                <div style="font-size: 14px; line-height: 1.7; color: var(--text);">{{ t.text }}</div>
+                <sc-if value="{{ t.focused }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <span onClick="{{ t.accept }}" style="background: var(--card); border: 1px solid var(--okBrd); color: var(--ok); font-size: 12.5px; border-radius: 6px; padding: 5px 12px; cursor: pointer;">接受 <span style="font-family: Menlo, monospace; font-size: 10px;">a</span></span>
+                    <sc-if value="{{ t.fix }}" hint-placeholder-val="{{ false }}">
+                      <span onClick="{{ t.acceptFix }}" style="background: var(--accDim); border: 1px solid var(--accBrd); color: var(--accT); font-size: 12.5px; border-radius: 6px; padding: 5px 12px; cursor: pointer;">{{ t.fix }} <span style="font-family: Menlo, monospace; font-size: 10px;">e</span></span>
+                    </sc-if>
+                    <span onClick="{{ t.reject }}" style="border: 1px solid var(--border2); color: var(--t2); font-size: 12.5px; border-radius: 6px; padding: 5px 12px; cursor: pointer;">拒绝 <span style="font-family: Menlo, monospace; font-size: 10px;">r</span></span>
+                    <span onClick="{{ t.flag }}" style="border: 1px solid var(--border2); color: var(--t2); font-size: 12.5px; border-radius: 6px; padding: 5px 12px; cursor: pointer;">存疑 <span style="font-family: Menlo, monospace; font-size: 10px;">f</span></span>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+            <sc-if value="{{ allDone }}" hint-placeholder-val="{{ false }}">
+              <div style="border: 1px solid var(--okBrd); background: var(--card); border-radius: 10px; padding: 16px 20px; display: flex; align-items: center; gap: 14px;">
+                <span style="font-size: 18px; color: var(--ok);">✓</span>
+                <div style="flex: 1; font-size: 13.5px; color: var(--text);">本场审核完成 — 21 段可疑全部处理,67 段高置信已批量接受。</div>
+                <span onClick="{{ acceptAll }}" style="background: var(--ok); color: #04121a; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 16px; cursor: pointer;">接受整场并归档</span>
+              </div>
+            </sc-if>
+            <div style="border: 1px dashed var(--border2); border-radius: 10px; padding: 12px 18px; display: flex; align-items: center; gap: 12px; color: var(--dim); font-size: 13px;">
+              <span style="color: var(--ok);">✓</span> 其余 67 段高置信(≥0.92)已折叠
+              <span style="margin-left: auto; font-size: 12px; color: var(--t2);">展开 ▾</span>
+            </div>
+          </div>
+
+          <div style="flex: none; border-top: 1px solid var(--border); padding: 9px 24px; display: flex; align-items: center; gap: 14px; font-family: Menlo, monospace; font-size: 11px; color: var(--dim); background: var(--side);">
+            <span><b style="color: var(--t2);">j/k</b> 移动</span><span><b style="color: var(--t2);">a</b> 接受</span><span><b style="color: var(--t2);">e</b> 采纳修正</span><span><b style="color: var(--t2);">r</b> 拒绝</span><span><b style="color: var(--t2);">f</b> 存疑</span><span><b style="color: var(--t2);">⇧A</b> 批量接受</span><span><b style="color: var(--t2);">t</b> 主题</span>
+            <span style="margin-left: auto; color: var(--accT);">剩 {{ suspLeft }} 段可疑</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ════════ 声纹 ════════ -->
+      <sc-if value="{{ isVoice }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="声纹" style="flex: 1; display: grid; grid-template-columns: 1fr 300px; min-height: 0;">
+          <div style="position: relative; overflow: hidden;">
+            <div style="position: absolute; top: 14px; left: 20px; display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--dim); z-index: 2;">
+              <span style="font-family: Menlo, monospace;">1,581 段 · 2026-07 全月</span>
+              <span style="display: inline-flex; background: var(--well); border: 1px solid var(--border); border-radius: 999px; padding: 2px; font-size: 11px;"><span style="padding: 3px 12px; border-radius: 999px; background: var(--accDim); color: var(--accT); font-weight: 600;">UMAP</span><span style="padding: 3px 12px; color: var(--dim);">PCA</span></span>
+            </div>
+            <!-- static person clusters -->
+            <div style="position: absolute; left: 20%; top: 42%; width: 190px; height: 150px; border-radius: 50%; background: radial-gradient(closest-side, rgba(127,209,168,0.13), transparent); animation: glowpulse 5s ease-in-out infinite;"></div>
+            <div style="position: absolute; left: 25%; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: #7fd1a8; box-shadow: 0 0 12px rgba(127,209,168,0.8);"></div>
+            <div style="position: absolute; left: 27%; top: 47%; width: 7px; height: 7px; border-radius: 50%; background: #7fd1a8;"></div>
+            <div style="position: absolute; left: 23%; top: 54%; width: 6px; height: 6px; border-radius: 50%; background: #7fd1a8;"></div>
+            <div style="position: absolute; left: 29%; top: 52%; width: 8px; height: 8px; border-radius: 50%; background: #7fd1a8;"></div>
+            <div style="position: absolute; left: 55%; top: 18%; width: 160px; height: 130px; border-radius: 50%; background: radial-gradient(closest-side, rgba(95,184,212,0.13), transparent); animation: glowpulse 6s ease-in-out 1s infinite;"></div>
+            <div style="position: absolute; left: 60%; top: 25%; width: 8px; height: 8px; border-radius: 50%; background: #5fb8d4; box-shadow: 0 0 12px rgba(95,184,212,0.8);"></div>
+            <div style="position: absolute; left: 62%; top: 22%; width: 6px; height: 6px; border-radius: 50%; background: #5fb8d4;"></div>
+            <div style="position: absolute; left: 58%; top: 28%; width: 6px; height: 6px; border-radius: 50%; background: #5fb8d4;"></div>
+            <div style="position: absolute; left: 70%; top: 60%; width: 8px; height: 8px; border-radius: 50%; background: #d4a75f; box-shadow: 0 0 12px rgba(212,167,95,0.8);"></div>
+            <div style="position: absolute; left: 72%; top: 57%; width: 6px; height: 6px; border-radius: 50%; background: #d4a75f;"></div>
+            <div style="position: absolute; left: 34%; top: 72%; width: 8px; height: 8px; border-radius: 50%; background: #b48ce0; box-shadow: 0 0 12px rgba(180,140,224,0.8);"></div>
+            <!-- unassigned dots (dynamic) -->
+            <sc-for list="{{ unDots }}" as="d" hint-placeholder-count="4">
+              <div onClick="{{ d.pick }}" style="position: absolute; left: {{ d.x }}%; top: {{ d.y }}%; width: {{ d.s }}px; height: {{ d.s }}px; border-radius: 50%; border: {{ d.brd }}; background: {{ d.bg }}; box-shadow: {{ d.sh }}; cursor: pointer;"></div>
+            </sc-for>
+            <sc-if value="{{ selRing }}" hint-placeholder-val="{{ true }}">
+              <div style="position: absolute; left: {{ selRing.x }}%; top: {{ selRing.y }}%; width: {{ selRing.w }}px; height: {{ selRing.h }}px; border: 1px dashed var(--accBrd); border-radius: 50%; background: var(--accDim); animation: glowpulse 3s ease-in-out infinite; pointer-events: none;"></div>
+            </sc-if>
+            <sc-if value="{{ tooltip }}" hint-placeholder-val="{{ false }}">
+              <div style="position: absolute; left: {{ tooltip.x }}%; top: {{ tooltip.y }}%; background: var(--card); border: 1px solid var(--border2); border-radius: 9px; padding: 12px 14px; width: 250px; box-shadow: 0 12px 32px -8px rgba(0,0,0,0.5); z-index: 3;">
+                <div style="font-size: 12px; color: var(--text);">{{ tooltip.title }}</div>
+                <div style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim); margin: 8px 0;">▶ 播放样本 · {{ tooltip.sample }}</div>
+                <div style="font-size: 11.5px; color: var(--dim); margin-bottom: 10px;">AI 猜测:<span style="color: var(--warn);">{{ tooltip.guess }}</span></div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <span onClick="{{ tooltip.adopt }}" style="background: var(--acc); color: var(--accFg); font-size: 12px; font-weight: 600; border-radius: 6px; padding: 4px 12px; cursor: pointer;">{{ tooltip.adoptLabel }}</span>
+                  <span style="border: 1px solid var(--border2); color: var(--t2); font-size: 12px; border-radius: 6px; padding: 4px 12px; cursor: pointer;">新建人物</span>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+          <div style="border-left: 1px solid var(--border); background: var(--side); padding: 20px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto;">
+            <div style="font-size: 11px; letter-spacing: 0.08em; color: var(--dim);">待处理聚类 <span style="font-family: Menlo, monospace; color: var(--warn);">{{ pendClusters }}</span></div>
+            <sc-for list="{{ clusterCards }}" as="c" hint-placeholder-count="3">
+              <div onClick="{{ c.pick }}" style="background: {{ c.bg }}; border: 1px solid {{ c.brd }}; border-radius: 9px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; cursor: pointer;">
+                <div style="display: flex; align-items: center; font-size: 12.5px; color: var(--text);"><span>{{ c.name }} · {{ c.count }} 段</span><span style="margin-left: auto; font-family: Menlo, monospace; font-size: 10px; color: {{ c.stateColor }};">{{ c.state }}</span></div>
+                <div style="font-size: 11.5px; color: var(--dim);">{{ c.note }}</div>
+              </div>
+            </sc-for>
+            <div style="margin-top: 14px; font-size: 11px; letter-spacing: 0.08em; color: var(--dim);">人物</div>
+            <sc-for list="{{ people }}" as="p" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; background: var(--well); border: 1px solid var(--border); font-size: 12.5px;"><span style="color: {{ p.color }};">●</span> {{ p.name }} <span style="margin-left: auto; font-family: Menlo, monospace; font-size: 11px; color: {{ p.enColor }};">{{ p.enrolled }}</span></div>
+            </sc-for>
+            <div style="margin-top: auto; border: 1px dashed var(--border2); border-radius: 8px; padding: 10px; text-align: center; font-size: 12px; color: var(--dim); cursor: pointer;">+ 新建人物</div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ════════ 记忆 ════════ -->
+      <sc-if value="{{ isMem }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="记忆" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+          <div style="flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; padding: 10px 22px;">
+            <span style="font-size: 13px; font-weight: 600;">待确认记忆</span>
+            <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">{{ memPending }} 候选 · 来自 07-06 与 07-05</span>
+            <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ok); border: 1px solid var(--okBrd); border-radius: 999px; padding: 3px 12px;">🔑 Ed25519 · did:key:z6Mk…9fQ2</span>
+          </div>
+          <div style="flex: 1; padding: 18px 24px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0;">
+            <sc-for list="{{ mems }}" as="m" hint-placeholder-count="3">
+              <div onClick="{{ m.focus }}" style="background: {{ m.cbg }}; border: 1px solid {{ m.brd }}; border-radius: 10px; padding: 14px 20px; display: flex; flex-direction: column; gap: 10px; cursor: pointer; box-shadow: {{ m.sh }};">
+                <div style="display: flex; align-items: center; gap: 10px; font-size: 11px;">
+                  <span style="color: {{ m.tagColor }}; border: 1px solid {{ m.tagBrd }}; border-radius: 99px; padding: 1px 9px;">{{ m.kind }}</span>
+                  <span style="font-family: Menlo, monospace; color: var(--dim);">{{ m.src }} · 置信 {{ m.conf }}</span>
+                  <sc-if value="{{ m.state }}" hint-placeholder-val="{{ false }}"><span style="margin-left: auto; font-size: 11.5px; color: {{ m.stateColor }}; font-weight: 600;">{{ m.state }}</span></sc-if>
+                </div>
+                <div style="font-size: 14.5px; line-height: 1.7; color: var(--text);">{{ m.text }}</div>
+                <div style="background: var(--well); border: 1px solid var(--border); border-radius: 8px; padding: 9px 14px; font-size: 12px; color: var(--t2); display: flex; align-items: center; gap: 10px;">
+                  <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--dim);">证据</span>
+                  <span style="flex: 1;">{{ m.evidence }}</span>
+                  <span style="color: var(--accT); font-size: 12px;">▶ 播放</span>
+                </div>
+                <sc-if value="{{ m.sig }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-family: Menlo, monospace; font-size: 11px; color: var(--ok);">✓ memory_card.created · sig {{ m.sig }} · 已写回 40_Confirmed_Memory/</div>
+                </sc-if>
+                <sc-if value="{{ m.showBtns }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span onClick="{{ m.confirm }}" style="background: var(--ok); color: #04121a; font-size: 12.5px; font-weight: 600; border-radius: 7px; padding: 6px 14px; cursor: pointer;">确认并签名 <span style="font-family: Menlo, monospace; font-size: 10px; opacity: 0.7;">a</span></span>
+                    <span onClick="{{ m.reject }}" style="border: 1px solid var(--border2); color: var(--t2); font-size: 12.5px; border-radius: 7px; padding: 6px 12px; cursor: pointer;">拒绝 <span style="font-family: Menlo, monospace; font-size: 10px;">r</span></span>
+                    <span onClick="{{ m.defer }}" style="border: 1px solid var(--border2); color: var(--t2); font-size: 12.5px; border-radius: 7px; padding: 6px 12px; cursor: pointer;">搁置 <span style="font-family: Menlo, monospace; font-size: 10px;">d</span></span>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="flex: none; border-top: 1px solid var(--border); padding: 9px 24px; display: flex; align-items: center; gap: 14px; font-family: Menlo, monospace; font-size: 11px; color: var(--dim); background: var(--side);">
+            <span><b style="color: var(--t2);">j/k</b> 移动</span><span><b style="color: var(--t2);">a</b> 确认签名</span><span><b style="color: var(--t2);">r</b> 拒绝</span><span><b style="color: var(--t2);">d</b> 搁置</span><span><b style="color: var(--t2);">z</b> 撤销</span>
+            <span style="margin-left: auto;">剩 <b style="color: var(--accT);">{{ memPending }}</b> / 3</span>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- ⌘K palette -->
+  <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closePalette }}" style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh;">
+      <div onClick="{{ stop }}" style="width: 640px; background: var(--card); border: 1px solid var(--border2); border-radius: 14px; box-shadow: 0 32px 64px -16px rgba(0,0,0,0.6); overflow: hidden; animation: slidein 0.15s ease-out;">
+        <input autoFocus="{{ true }}" value="{{ q }}" onChange="{{ onQ }}" placeholder="搜索标签页、操作,或直接提问…" style="width: 100%; box-sizing: border-box; padding: 14px 18px; border: 0; border-bottom: 1px solid var(--border); font-size: 14.5px; color: var(--text); background: transparent; outline: none; font-family: inherit;" />
+        <div style="padding: 8px; max-height: 340px; overflow: auto;">
+          <sc-if value="{{ showSemantic }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 6px 12px 4px; font-size: 10.5px; letter-spacing: 0.08em; color: var(--dim);">语义检索</div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px;">
+              <span style="font-family: Menlo, monospace; font-size: 11px; color: var(--accT);">07-06 16:41</span>
+              <span style="flex: 1; font-size: 13px; color: var(--text);">和 <b style="color: var(--accT);">王五</b> 提到「差旅报销周期按新流程走」</span>
+              <span style="font-family: Menlo, monospace; font-size: 10px; color: var(--dim);">↵ 跳转</span>
+            </div>
+          </sc-if>
+          <div style="padding: 6px 12px 4px; font-size: 10.5px; letter-spacing: 0.08em; color: var(--dim);">命令</div>
+          <sc-for list="{{ palItems }}" as="c" hint-placeholder-count="4">
+            <div onClick="{{ c.run }}" style="display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px; background: {{ c.bg }}; cursor: pointer;">
+              <span style="flex: 1; font-size: 13px; color: var(--text);">{{ c.t }}</span>
+              <span style="font-family: Menlo, monospace; font-size: 10px; color: var(--dim);">{{ c.hint }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- rename dialog -->
+  <sc-if value="{{ renameOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeRename }}" style="position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; display: flex; justify-content: center; align-items: center;">
+      <div onClick="{{ stop }}" style="width: 440px; background: var(--card); border: 1px solid var(--border2); border-radius: 12px; padding: 22px; box-shadow: 0 24px 48px -16px rgba(0,0,0,0.6); display: flex; flex-direction: column; gap: 12px; animation: slidein 0.15s ease-out;">
+        <div style="font-size: 15px; font-weight: 650;">重命名会话</div>
+        <input autoFocus="{{ true }}" value="{{ renameVal }}" onChange="{{ onRenameVal }}" style="background: var(--well); border: 1px solid var(--acc); border-radius: 7px; padding: 8px 12px; font-size: 13.5px; color: var(--text); outline: none; box-shadow: 0 0 0 3px var(--glow); font-family: inherit;" />
+        <div style="font-size: 11.5px; color: var(--dim);">AI 建议:「排期与联调计划对齐会」 <span onClick="{{ adoptSuggest }}" style="color: var(--accT); cursor: pointer;">采用 ⇥</span></div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <span onClick="{{ closeRename }}" style="border: 1px solid var(--border2); color: var(--t2); font-size: 13px; border-radius: 7px; padding: 7px 14px; cursor: pointer;">取消 <span style="font-family: Menlo, monospace; font-size: 10px;">esc</span></span>
+          <span onClick="{{ saveRename }}" style="background: var(--acc); color: var(--accFg); font-size: 13px; font-weight: 600; border-radius: 7px; padding: 7px 14px; cursor: pointer;">保存 ↵</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- toast -->
+  <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+    <div style="position: fixed; right: 20px; bottom: 20px; z-index: 900; width: 340px; background: var(--card); border: 1px solid var(--okBrd); border-left-width: 3px; border-radius: 10px; padding: 14px 16px; box-shadow: 0 12px 32px -12px rgba(0,0,0,0.6); display: flex; flex-direction: column; gap: 8px; animation: slidein 0.2s ease-out;">
+      <div style="font-size: 13px; font-weight: 600; color: var(--ok);">{{ toast.title }}</div>
+      <div style="font-size: 12px; color: var(--t2);">{{ toast.body }}</div>
+      <div style="display: flex; gap: 8px;">
+        <span onClick="{{ toastGo }}" style="background: var(--card); border: 1px solid var(--okBrd); color: var(--ok); font-size: 12px; border-radius: 6px; padding: 4px 12px; cursor: pointer;">立即审核 ↵</span>
+        <span onClick="{{ closeToast }}" style="border: 1px solid var(--border2); color: var(--dim); font-size: 12px; border-radius: 6px; padding: 4px 12px; cursor: pointer;">关闭 esc</span>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;ambient&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;环境动效&quot;}, &quot;simSpeed&quot;: {&quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 1, &quot;min&quot;: 0.5, &quot;max&quot;: 3, &quot;step&quot;: 0.5, &quot;unit&quot;: &quot;x&quot;, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;演示&quot;}}">
+const TYPE_QUEUE = [
+  { sp: "我", color: "#7fd1a8", time: "15:59:21", text: "好,那我今天下班前把排期更新发群里,顺便把测试用例也补齐。" },
+  { sp: "说话人 B", color: "#5fb8d4", time: "15:59:40", text: "可以,记得抄送一下产品那边,他们要跟一下验收标准。" },
+  { sp: "我", color: "#7fd1a8", time: "15:59:52", text: "另外供应商的合同我明天上午再过一遍细节,特别是违约条款。" },
+  { sp: "说话人 B", color: "#5fb8d4", time: "16:00:10", text: "行,那今天就先到这,辛苦。" }
+];
+
+const INIT_SEGS = [
+  { sp: "说话人 B", color: "#5fb8d4", time: "15:58:41", text: "那这个交付时间上,能不能再往前压一周?" },
+  { sp: "我", color: "#7fd1a8", time: "15:58:52", text: "压一周的话测试就只剩三天,风险主要在联调这块。" },
+  { sp: "说话人 B", color: "#5fb8d4", time: "15:59:07", text: "明白,那我们先按原计划,把联调提前到下周三开始。" }
+];
+
+const TURNS0 = [
+  { id: 1, speaker: "说话人 C?", color: "#d4a75f", time: "14:23:07", dur: "6.2s", reasons: ["置信 0.41", "说话人存疑 → 可能是 李四"], text: "那个接口的鉴全方案,是不是还得再过一遍安全评审?", fix: "采纳 AI 修正「鉴权」" },
+  { id: 2, speaker: "张三", color: "#5fb8d4", time: "14:24:12", dur: "2.1s", reasons: ["疑似幻听 · 与上下文断裂"], text: "嗯嗯对对对就是那个星期八的版本。" },
+  { id: 3, speaker: "我", color: "#7fd1a8", time: "14:25:40", dur: "4.8s", reasons: ["置信 0.58"], text: "这块预算我记得上次说的是四十万,你再帮我确认一下口径。" },
+  { id: 4, speaker: "李四", color: "#d4a75f", time: "14:26:03", dur: "3.5s", reasons: ["说话人存疑"], text: "口径按含税走,我下午发你上次的表。" },
+  { id: 5, speaker: "我", color: "#7fd1a8", time: "14:27:18", dur: "5.1s", reasons: ["置信 0.61"], text: "行,那测试环境的账号权限清单我周五前给张三。" }
+];
+
+const MEMS0 = [
+  { id: 1, kind: "偏好", tagColor: "var(--accT)", tagBrd: "var(--accBrd)", src: "来自 07-06 周会", conf: "0.88", text: "李四负责的供应商对接,首选联系时间是工作日上午;下午他通常在产线,微信回复慢。", evidence: "「你上午找我肯定在,下午我基本泡在产线上」— 李四 · 07-06 14:31" },
+  { id: 2, kind: "事实", tagColor: "var(--warn)", tagBrd: "var(--warnBrd)", src: "来自 07-06 电话", conf: "0.94", text: "供应商 B 的新报价为 ¥38.5 万,含运费,有效期至 7 月 20 日。", evidence: "「三十八万五,把运费都含进去了,这价留到二十号」— 王五 · 07-06 11:32" },
+  { id: 3, kind: "承诺", tagColor: "#b48ce0", tagBrd: "rgba(180,140,224,0.35)", src: "来自 07-05 周会", conf: "0.79", text: "我答应张三在周五前给出测试环境的账号权限清单。", evidence: "「那你周五前给我账号权限的清单」— 张三 · 07-05 15:02" }
+];
+
+const CLUSTERS0 = [
+  { id: "cl_07", count: 38, guess: "李四 (0.71)", guessPerson: "李四", guessColor: "#d4a75f", note: "AI 猜测:李四 (0.71) — 音色接近,场景重合", dots: [{ x: 50, y: 42, s: 7 }, { x: 52.5, y: 45, s: 6 }, { x: 49, y: 47, s: 5 }, { x: 53, y: 40.5, s: 5 }], ring: { x: 47, y: 36, w: 130, h: 110 }, tip: { x: 56, y: 44 }, sample: "07-05 14:22 「那个方案我觉得…」" },
+  { id: "cl_09", count: 22, guess: "新人物?(聚类紧密)", guessPerson: "新人物", guessColor: "#8b7ae8", note: "AI 猜测:新人物?聚类紧密", dots: [{ x: 42, y: 24, s: 6 }, { x: 44, y: 27, s: 5 }, { x: 40.5, y: 27.5, s: 5 }], ring: { x: 38, y: 19, w: 110, h: 95 }, tip: { x: 47, y: 25 }, sample: "07-03 10:08 「这个数据我回头…」" },
+  { id: "cl_11", count: 9, guess: "样本过短,建议忽略", guessPerson: null, guessColor: "var(--dim)", note: "样本过短,建议忽略", dots: [{ x: 62, y: 78, s: 5 }, { x: 64, y: 80, s: 5 }], ring: { x: 59.5, y: 74, w: 90, h: 75 }, tip: { x: 66, y: 76 }, sample: "07-02 18:44 (1.2s)" }
+];
+
+class Component extends DCLogic {
+  state = {
+    view: "home", theme: "dark",
+    paletteOpen: false, q: "",
+    renameOpen: false, renameVal: "周会 · 项目排期讨论", sessionName: "周会 · 项目排期讨论",
+    turns: TURNS0.map((t) => Object.assign({}, t, { status: "pending" })),
+    focusIdx: 0, batchAccepted: false, sessionAccepted: false,
+    pct: 62, segs: INIT_SEGS.slice(), queueIdx: 0, typedLen: 0, done: false,
+    toast: null,
+    mems: MEMS0.map((m) => Object.assign({}, m, { status: "pending", sig: null })),
+    memFocus: 0, lastMem: null,
+    clusters: CLUSTERS0.map((c) => Object.assign({}, c, { assigned: null })),
+    sel: "cl_07"
+  };
+
+  componentDidMount() {
+    document.documentElement.dataset.theme = this.state.theme;
+    this.onKey = this.onKey.bind(this);
+    window.addEventListener("keydown", this.onKey);
+    const speed = this.props.simSpeed ?? 1;
+    this.timer = setInterval(() => this.tick(), Math.max(40, 110 / speed));
+  }
+  componentWillUnmount() {
+    window.removeEventListener("keydown", this.onKey);
+    clearInterval(this.timer);
+  }
+
+  tick() {
+    const s = this.state;
+    if (s.done || s.queueIdx >= TYPE_QUEUE.length) return;
+    if (s.view !== "pipeline" && s.view !== "home") return;
+    const cur = TYPE_QUEUE[s.queueIdx];
+    if (s.typedLen < cur.text.length) {
+      this.setState({ typedLen: s.typedLen + 1, pct: Math.min(99, s.pct + 0.06) });
+    } else {
+      const segs = s.segs.concat([cur]).slice(-5);
+      const nextIdx = s.queueIdx + 1;
+      if (nextIdx >= TYPE_QUEUE.length) {
+        this.setState({
+          segs, queueIdx: nextIdx, typedLen: 0, pct: 100, done: true,
+          toast: { title: "转写完成 · 周会 (241 段)", body: "AI 预审同步完成,21 段需人工。" }
+        });
+      } else {
+        this.setState({ segs, queueIdx: nextIdx, typedLen: 0, pct: Math.min(99, s.pct + 6) });
+      }
+    }
+  }
+
+  setView(v) { this.setState({ view: v, paletteOpen: false }); }
+  toggleTheme() {
+    const theme = this.state.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = theme;
+    this.setState({ theme });
+  }
+
+  decide(status) {
+    const s = this.state;
+    const turns = s.turns.slice();
+    if (!turns[s.focusIdx] || turns[s.focusIdx].status !== "pending") return;
+    turns[s.focusIdx] = Object.assign({}, turns[s.focusIdx], { status });
+    let next = s.focusIdx;
+    for (let i = s.focusIdx + 1; i < turns.length; i++) { if (turns[i].status === "pending") { next = i; break; } }
+    if (next === s.focusIdx) { for (let i = 0; i < turns.length; i++) { if (turns[i].status === "pending") { next = i; break; } } }
+    this.setState({ turns, focusIdx: next });
+  }
+  decideAt(i, status) { this.setState({ focusIdx: i }, () => this.decide(status)); }
+
+  memDecide(status) {
+    const s = this.state;
+    const mems = s.mems.slice();
+    const i = s.memFocus;
+    if (!mems[i] || mems[i].status !== "pending") return;
+    const sig = status === "confirmed" ? (Math.random().toString(16).slice(2, 6) + "…" + Math.random().toString(16).slice(2, 6)) : null;
+    mems[i] = Object.assign({}, mems[i], { status, sig });
+    let next = i;
+    for (let k = 0; k < mems.length; k++) { if (mems[k].status === "pending") { next = k; break; } }
+    this.setState({ mems, memFocus: next, lastMem: i });
+  }
+  memUndo() {
+    const s = this.state;
+    if (s.lastMem === null) return;
+    const mems = s.mems.slice();
+    mems[s.lastMem] = Object.assign({}, mems[s.lastMem], { status: "pending", sig: null });
+    this.setState({ mems, memFocus: s.lastMem, lastMem: null });
+  }
+
+  assign(clusterId) {
+    const clusters = this.state.clusters.map((c) =>
+      c.id === clusterId && c.guessPerson ? Object.assign({}, c, { assigned: c.guessPerson }) : c
+    );
+    this.setState({ clusters, sel: null });
+  }
+
+  onKey(e) {
+    const s = this.state;
+    const tag = (e.target && e.target.tagName) || "";
+    const typing = tag === "INPUT" || tag === "TEXTAREA";
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); this.setState({ paletteOpen: !s.paletteOpen, q: "" }); return; }
+    if (e.key === "Escape") { this.setState({ paletteOpen: false, renameOpen: false, toast: null }); return; }
+    if (s.renameOpen) { if (e.key === "Enter") this.saveRename(); return; }
+    if (s.paletteOpen) { if (e.key === "Enter") { this.setState({ paletteOpen: false }); } return; }
+    if (typing) return;
+    const k = e.key;
+    if (k === "1") return this.setView("home");
+    if (k === "2") return this.setView("pipeline");
+    if (k === "3") return this.setView("review");
+    if (k === "4") return this.setView("voice");
+    if (k === "5") return this.setView("memory");
+    if (k === "t") return this.toggleTheme();
+    if (k === "Enter" && s.toast) { this.setState({ toast: null }); return this.setView("review"); }
+    if (s.view === "home" && k === "Enter") return this.setView("review");
+    if (s.view === "review") {
+      if (k === "j") this.setState({ focusIdx: Math.min(s.focusIdx + 1, s.turns.length - 1) });
+      if (k === "k") this.setState({ focusIdx: Math.max(s.focusIdx - 1, 0) });
+      if (k === "a") this.decide("accepted");
+      if (k === "A") this.setState({ batchAccepted: true });
+      if (k === "e") this.decide("accepted");
+      if (k === "r") this.decide("rejected");
+      if (k === "f") this.decide("flagged");
+    }
+    if (s.view === "memory") {
+      if (k === "j") this.setState({ memFocus: Math.min(s.memFocus + 1, s.mems.length - 1) });
+      if (k === "k") this.setState({ memFocus: Math.max(s.memFocus - 1, 0) });
+      if (k === "a") this.memDecide("confirmed");
+      if (k === "r") this.memDecide("rejected");
+      if (k === "d") this.memDecide("deferred");
+      if (k === "z") this.memUndo();
+    }
+  }
+
+  saveRename() { this.setState({ sessionName: this.state.renameVal, renameOpen: false }); }
+
+  renderVals() {
+    const s = this.state;
+    const V = s.view;
+    const titles = { home: "今日", pipeline: "管道", review: "审核", voice: "声纹", memory: "记忆" };
+
+    const navDefs = [
+      { icon: "◆", label: "今日", num: "1", view: "home" },
+      { icon: "▶", label: "管道", num: "2", view: "pipeline", live: !s.done },
+      { icon: "☰", label: "审核", num: "3", view: "review", badge: "12" },
+      { icon: "◉", label: "声纹", num: "4", view: "voice" },
+      { icon: "❖", label: "记忆", num: "5", view: "memory", badge: String(s.mems.filter((m) => m.status === "pending").length) }
+    ];
+    const navItems = navDefs.map((d) => ({
+      ...d,
+      badge: d.badge === "0" ? null : d.badge,
+      live: !!d.live,
+      bg: V === d.view ? "var(--accDim)" : "transparent",
+      fg: V === d.view ? "var(--accT)" : "var(--t2)",
+      fw: V === d.view ? "600" : "400",
+      go: () => this.setView(d.view)
+    }));
+
+    // pipeline
+    const pctTxt = Math.round(s.pct) + "%";
+    const cur = TYPE_QUEUE[Math.min(s.queueIdx, TYPE_QUEUE.length - 1)];
+    const segsDone = 149 + s.queueIdx * 20 + Math.floor(s.typedLen / 3);
+    const segs = s.segs.map((x, i) => ({ ...x, op: String(0.35 + (0.65 * (i + 1)) / s.segs.length) }));
+
+    // review
+    const decided = s.turns.filter((t) => t.status !== "pending").length;
+    const reviewed = 128 + decided * 4 + (s.batchAccepted ? 67 : 0);
+    const suspLeft = s.turns.filter((t) => t.status === "pending").length;
+    const allDone = suspLeft === 0 && s.batchAccepted;
+    const turns = s.turns.map((t, i) => {
+      const focused = i === s.focusIdx;
+      const st = t.status;
+      const tagMap = { accepted: ["✓ 已接受", "var(--ok)"], rejected: ["✕ 已拒绝", "var(--err)"], flagged: ["◐ 存疑", "var(--warn)"] };
+      return {
+        ...t,
+        focused,
+        reasons: st === "pending" ? t.reasons : [],
+        fix: st === "pending" ? t.fix : null,
+        tag: tagMap[st] ? tagMap[st][0] : null,
+        tagColor: tagMap[st] ? tagMap[st][1] : "var(--dim)",
+        cbg: focused ? "var(--surface)" : "var(--well)",
+        brd: focused ? "var(--acc)" : "var(--border)",
+        brdL: st === "accepted" ? "var(--ok)" : st === "rejected" ? "var(--err)" : st === "flagged" ? "var(--warn)" : "var(--warnBrd)",
+        sh: focused ? "0 0 28px -12px var(--glow)" : "none",
+        focus: () => this.setState({ focusIdx: i }),
+        accept: (e) => { e.stopPropagation(); this.decideAt(i, "accepted"); },
+        acceptFix: (e) => { e.stopPropagation(); this.decideAt(i, "accepted"); },
+        reject: (e) => { e.stopPropagation(); this.decideAt(i, "rejected"); },
+        flag: (e) => { e.stopPropagation(); this.decideAt(i, "flagged"); }
+      };
+    });
+
+    // memory
+    const memPendingN = s.mems.filter((m) => m.status === "pending").length;
+    const mems = s.mems.map((m, i) => {
+      const focused = i === s.memFocus && m.status === "pending";
+      const stMap = { confirmed: ["✓ 已确认", "var(--ok)"], rejected: ["✕ 已拒绝", "var(--err)"], deferred: ["⏸ 已搁置", "var(--dim)"] };
+      return {
+        ...m,
+        state: stMap[m.status] ? stMap[m.status][0] : null,
+        stateColor: stMap[m.status] ? stMap[m.status][1] : "var(--dim)",
+        showBtns: m.status === "pending",
+        cbg: focused ? "var(--surface)" : "var(--well)",
+        brd: focused ? "var(--acc)" : m.status === "confirmed" ? "var(--okBrd)" : "var(--border)",
+        sh: focused ? "0 0 28px -12px var(--glow)" : "none",
+        focus: () => this.setState({ memFocus: i }),
+        confirm: (e) => { e.stopPropagation(); this.setState({ memFocus: i }, () => this.memDecide("confirmed")); },
+        reject: (e) => { e.stopPropagation(); this.setState({ memFocus: i }, () => this.memDecide("rejected")); },
+        defer: (e) => { e.stopPropagation(); this.setState({ memFocus: i }, () => this.memDecide("deferred")); }
+      };
+    });
+
+    // voice
+    const selC = s.clusters.find((c) => c.id === s.sel && !c.assigned) || null;
+    const personColors = { "李四": "#d4a75f", "张三": "#5fb8d4", "王五": "#b48ce0", "新人物": "#8b7ae8" };
+    const unDots = [];
+    s.clusters.forEach((c) => {
+      c.dots.forEach((d, di) => {
+        const col = c.assigned ? personColors[c.assigned] : null;
+        unDots.push({
+          x: String(d.x), y: String(d.y), s: String(d.s),
+          brd: col ? "0" : "1.5px solid var(--t2)",
+          bg: col || "transparent",
+          sh: col ? "0 0 12px " + col : "none",
+          pick: () => this.setState({ sel: c.id }),
+          key: c.id + di
+        });
+      });
+    });
+    const clusterCards = s.clusters.map((c) => ({
+      name: c.id, count: String(c.count),
+      note: c.assigned ? "已指派 → " + c.assigned : c.note,
+      state: c.assigned ? "✓ 已指派" : c.id === s.sel ? "选中" : "",
+      stateColor: c.assigned ? "var(--ok)" : "var(--accT)",
+      bg: c.id === s.sel && !c.assigned ? "var(--accDim)" : "var(--well)",
+      brd: c.id === s.sel && !c.assigned ? "var(--accBrd)" : "var(--border)",
+      pick: () => this.setState({ sel: c.id })
+    }));
+    const people = [
+      { name: "我", color: "#7fd1a8", enrolled: "已登记", enColor: "var(--ok)" },
+      { name: "张三", color: "#5fb8d4", enrolled: "已登记", enColor: "var(--ok)" },
+      { name: "李四", color: "#d4a75f", enrolled: s.clusters[0].assigned === "李四" ? "已登记" : "未登记", enColor: s.clusters[0].assigned === "李四" ? "var(--ok)" : "var(--dim)" },
+      { name: "王五", color: "#b48ce0", enrolled: "未登记", enColor: "var(--dim)" }
+    ];
+
+    // palette
+    const cmds = [
+      { t: "跳转 · 今日", hint: "1", v: "home" },
+      { t: "跳转 · 管道", hint: "2", v: "pipeline" },
+      { t: "跳转 · 审核", hint: "3", v: "review" },
+      { t: "跳转 · 声纹", hint: "4", v: "voice" },
+      { t: "跳转 · 记忆", hint: "5", v: "memory" },
+      { t: "操作 · 切换明暗主题", hint: "T", run: () => { this.toggleTheme(); this.setState({ paletteOpen: false }); } }
+    ];
+    const q = s.q.trim().toLowerCase();
+    const palItems = cmds
+      .filter((c) => !q || c.t.toLowerCase().includes(q))
+      .map((c, i) => ({
+        ...c, bg: i === 0 ? "var(--accDim)" : "transparent",
+        run: c.run || (() => this.setView(c.v))
+      }));
+
+    return {
+      ambientDisplay: (this.props.ambient ?? true) ? "block" : "none",
+      isHome: V === "home", isPipe: V === "pipeline", isReview: V === "review", isVoice: V === "voice", isMem: V === "memory",
+      viewTitle: titles[V],
+      themeIcon: s.theme === "dark" ? "☾ 暗" : "☀ 亮",
+      statusChip: s.done ? "管道空闲 · 上次运行 " + pctTxt : "转写中 · TX01_155539 " + pctTxt,
+      toggleTheme: () => this.toggleTheme(),
+      goPipe: () => this.setView("pipeline"),
+      goReview: () => this.setState({ toast: null }, () => this.setView("review")),
+      goMem: () => this.setView("memory"),
+      navItems,
+      sessionName: s.sessionName,
+      pendingLeft: String(214 - decided * 4 - (s.batchAccepted ? 67 : 0)),
+      // pipeline
+      pctTxt, running: !s.done, done: s.done,
+      segCountTxt: s.done ? "241/241" : segsDone + "/241",
+      deriveColor: s.done ? "var(--acc)" : "var(--dim)",
+      deriveIcon: s.done ? "●" : "○",
+      deriveState: s.done ? "运行中" : "排队",
+      segs,
+      curTime: cur.time, curSp: cur.sp, curColor: cur.color,
+      typingText: cur.text.slice(0, s.typedLen),
+      evtTail: "15:59:21 seg_0149 ok · 1.9s\n15:59:19 seg_0148 ok · 2.1s",
+      restartSim: () => this.setState({ pct: 62, segs: INIT_SEGS.slice(), queueIdx: 0, typedLen: 0, done: false, toast: null }),
+      // review
+      turns, suspLeft: String(suspLeft),
+      reviewedTxt: reviewed + "/216",
+      progPctTxt: Math.round((reviewed / 216) * 100) + "%",
+      notBatched: !s.batchAccepted, batched: s.batchAccepted,
+      batchAccept: () => this.setState({ batchAccepted: true }),
+      allDone,
+      acceptAll: () => this.setView("home"),
+      openRename: () => this.setState({ renameOpen: true, renameVal: s.sessionName }),
+      // memory
+      mems, memPending: String(memPendingN),
+      // voice
+      unDots, clusterCards, people,
+      pendClusters: String(s.clusters.filter((c) => !c.assigned).length),
+      selRing: selC ? { x: String(selC.ring.x), y: String(selC.ring.y), w: String(selC.ring.w), h: String(selC.ring.h) } : null,
+      tooltip: selC ? {
+        x: String(selC.tip.x), y: String(selC.tip.y),
+        title: "聚类 " + selC.id + " · 未分配 · " + selC.count + " 段",
+        sample: selC.sample, guess: selC.guess,
+        adoptLabel: selC.guessPerson ? "采纳 → " + selC.guessPerson : "忽略此聚类",
+        adopt: (e) => { e.stopPropagation(); if (selC.guessPerson) this.assign(selC.id); else this.setState({ sel: null }); }
+      } : null,
+      // palette
+      paletteOpen: s.paletteOpen, q: s.q,
+      onQ: (e) => this.setState({ q: e.target.value }),
+      openPalette: () => this.setState({ paletteOpen: true, q: "" }),
+      closePalette: () => this.setState({ paletteOpen: false }),
+      showSemantic: q.length > 0,
+      palItems,
+      stop: (e) => e.stopPropagation(),
+      // rename
+      renameOpen: s.renameOpen, renameVal: s.renameVal,
+      onRenameVal: (e) => this.setState({ renameVal: e.target.value }),
+      closeRename: () => this.setState({ renameOpen: false }),
+      saveRename: () => this.saveRename(),
+      adoptSuggest: () => this.setState({ renameVal: "排期与联调计划对齐会" }),
+      // toast
+      toast: s.toast,
+      toastGo: () => this.setState({ toast: null }, () => this.setView("review")),
+      closeToast: () => this.setState({ toast: null })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
+import { AmbientBackground } from "./components/AmbientBackground";
 import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -637,6 +638,7 @@ export function App() {
   if (bootstrapError && !bootstrapped) {
     return (
       <main className="workbench">
+        <AmbientBackground />
         <header className="workbench-header">
           <h1>{t.app.title}</h1>
         </header>
@@ -1064,6 +1066,7 @@ export function App() {
 
   return (
     <main className="workbench tabbed">
+      <AmbientBackground />
       <header className="workbench-header">
         <div className="header-status">
           <h1>{t.app.title}</h1>
