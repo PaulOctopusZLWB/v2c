@@ -28,7 +28,7 @@ export function VoiceprintPanel({
   onCreatePerson?: (name: string) => Promise<unknown> | void;
   onPlaybackError?: (message: string) => void;
   /** Toast sink (title + optional message) — used for the auto-match outcome / hints. */
-  push?: (title: string, message?: string) => void;
+  push?: (title: string, message?: string, variant?: "success" | "error") => void;
   /** Called after a successful auto-match so the parent can refresh people + recolor the map. */
   onMatched?: () => void;
 }) {
@@ -67,7 +67,7 @@ export function VoiceprintPanel({
   async function runAutoMatch() {
     try {
       const res = await api.autoAttribute(matchScope);
-      push?.(`已自动匹配 ${res.assigned}/${res.total} 段到已有人物(未定 ${res.unassigned})`);
+      push?.(`已自动匹配 ${res.assigned}/${res.total} 段到已有人物(未定 ${res.unassigned})`, undefined, "success");
       onMatched?.();
     } catch (err) {
       // The backend 400s when nobody is labeled/enrolled yet — that's not an error, just a nudge.

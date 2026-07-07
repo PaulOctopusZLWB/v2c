@@ -7,6 +7,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { TaskList } from "./components/TaskList";
 import { Icon } from "./components/Icon";
 import { Toasts, useToasts } from "./components/Toasts";
+import { DialogHost, useDialog } from "./components/ui/Dialog";
 import { DevicePanel } from "./features/device/DevicePanel";
 import { HomePanel } from "./features/home/HomePanel";
 import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
@@ -92,6 +93,9 @@ export function App() {
   const { tab, setTab } = useTab();
   const themeController = useTheme();
   const { toasts, push, pushAction, dismiss } = useToasts();
+  // 自研 Dialog(替代 window.prompt/confirm):App 持有唯一的 useDialog(),把
+  // confirm/promptText 注入面板;<DialogHost> 渲染在两个布局分支里。
+  const { request: dialogRequest, confirm, promptText, settle: settleDialog } = useDialog();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [days, setDays] = useState<Array<{ day: string; session_count: number }>>([]);
@@ -146,7 +150,31 @@ export function App() {
   // collapsed <details> (display:none) and never re-measures on expand — so mount them only
   // once the section is open, when the container has its real (full) width.
   const [analysisOpen, setAnalysisOpen] = useState(false);
-  useHotkeys({ "mod+k": (e) => { e.preventDefault(); setPaletteOpen((v) => !v); } });
+  useHotkeys({
+    // Dialog 打开时不开 ⌘K(模态优先,防止面板叠开并抢焦点)。
+    "mod+k": (e) => {
+      if (dialogRequest) return;
+      e.preventDefault();
+      setPaletteOpen((v) => !v);
+    },
+    // Enter 执行最新可操作 toast 的主操作(如「立即审核 ↵」)。对话框/⌘K 打开时让位
+    // (它们各自处理键盘);输入框聚焦时 useHotkeys 自动旁路。
+    enter: (e) => {
+      if (dialogRequest || paletteOpen) return;
+      const actionable = [...toasts].reverse().find((toast) => toast.onAction);
+      if (!actionable) return;
+      e.preventDefault();
+      actionable.onAction?.();
+    },
+    // Esc 只关最上层:Dialog(自行捕获处理)> ⌘K > 最新 toast。消费时标记
+    // preventDefault,useHotkeys 会跳过已消费的键(其它监听者不再重复响应)。
+    escape: (e) => {
+      if (dialogRequest) return;
+      if (paletteOpen) { e.preventDefault(); setPaletteOpen(false); return; }
+      const last = toasts[toasts.length - 1];
+      if (last) { e.preventDefault(); dismiss(last.id); }
+    }
+  });
   // Global transcript search, driven from the palette: the typed query + its async results.
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -500,7 +528,7 @@ export function App() {
     if (!session) return;
     const res = await api.autoAttribute({ session_id: session.session_id });
     setLastAutoAttributeCount(res.assigned);
-    push("已按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`);
+    push("已按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`, "success");
     onPeopleChanged();
     await reloadSession();
   }
@@ -519,7 +547,7 @@ export function App() {
       const res = await api.autoAttribute({ session_id: session.session_id });
       setLastAutoAttributeCount(res.assigned);
       if (res.assigned > 0) {
-        push("已自动按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`);
+        push("已自动按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`, "success");
         onPeopleChanged();
         await reloadSession();
       }
@@ -592,21 +620,21 @@ export function App() {
     ...(Object.keys(TAB_LABELS) as TabId[]).map((id) => ({
       id: `tab-${id}`,
       title: `前往「${TAB_LABELS[id]}」`,
-      group: "导航",
+      group: "命令",
       keywords: `${id} ${TAB_LABELS[id]} tab`,
       run: () => setTab(id)
     })),
     {
       id: "action-toggle-theme",
       title: "切换明暗主题",
-      group: "操作",
+      group: "命令",
       keywords: "theme dark light 主题 明暗",
       run: () => themeController.toggle()
     },
     ...days.map(({ day }) => ({
       id: `day-${day}`,
       title: `打开 ${day}`,
-      group: "日期",
+      group: "命令",
       keywords: `day ${day} 审核`,
       run: () => {
         void guard(selectDay)(day);
@@ -616,20 +644,25 @@ export function App() {
     {
       id: "action-refresh-days",
       title: "刷新日期列表",
-      group: "操作",
+      group: "命令",
       keywords: "refresh days reload",
       run: () => void refreshDays().catch(() => undefined)
     }
   ];
 
-  // Async transcript-search hits rendered as palette items: a snippet (matched substring bolded)
-  // titled with `{day} · {speaker}`, that jumps to the utterance when chosen.
+  // Async transcript-search hits rendered as palette items(设计稿「语义检索」分组):
+  // mono 时间戳/说话人 chip + 命中片段(匹配子串加粗),右侧「↵ 跳转」,选中跳到该话语。
   const searchItems: Command[] = searchResults.map((r) => ({
     id: `search-${r.segment_id}`,
     title: r.text,
-    node: highlightMatch(r.text, searchQuery.trim()),
-    hint: `${r.day} · ${r.speaker}`,
-    group: "转写搜索",
+    node: (
+      <>
+        <span className="cmdk-time num">{r.day} · {r.speaker}</span>
+        {highlightMatch(r.text, searchQuery.trim())}
+      </>
+    ),
+    hint: "↵ 跳转",
+    group: "语义检索",
     run: () => void guard(jumpToSegment)(r.segment_id, r.session_id)
   }));
 
@@ -653,6 +686,7 @@ export function App() {
           </div>
         </section>
         <Toasts toasts={toasts} onDismiss={dismiss} />
+        <DialogHost request={dialogRequest} onSettle={settleDialog} />
       </main>
     );
   }
@@ -761,6 +795,8 @@ export function App() {
               onSelectSession={(id) => void guard(selectSession)(id)}
               onRenameSession={(id, name) => guard(handleRenameSession)(id, name)}
               onDeleteSession={(id) => guard(handleDeleteSession)(id)}
+              confirm={confirm}
+              promptText={promptText}
             />
           )}
         </aside>
@@ -884,7 +920,7 @@ export function App() {
               sessionExcludedPersonIds={sessionExcludedPersonIds}
               onLabel={async (personId, segmentIds) => {
                 await api.labelSegments(personId, segmentIds);
-                push(`已标注 ${segmentIds.length} 段`);
+                push(`已标注 ${segmentIds.length} 段`, undefined, "success");
               }}
               onChanged={onPeopleChanged}
             />
@@ -917,7 +953,7 @@ export function App() {
               </button>
             </div>
             {rightTab === "clusters" ? (
-              <ClusterListPanel onChanged={onPeopleChanged} push={push} />
+              <ClusterListPanel onChanged={onPeopleChanged} push={push} confirm={confirm} />
             ) : rightTab === "identity" ? (
               <IdentityReviewPanel
                 sessionId={selectedSessionId}
@@ -938,6 +974,7 @@ export function App() {
                 onAutoAttributed={setLastAutoAttributeCount}
                 push={push}
                 pushAction={pushAction}
+                confirm={confirm}
               />
             )}
           </div>
@@ -997,6 +1034,7 @@ export function App() {
             initialDay={selectedDay}
             initialSessionId={selectedSessionId}
             onPlaybackError={(message) => push("音频播放失败", message)}
+            confirm={confirm}
           />
         </div>
       );
@@ -1102,6 +1140,7 @@ export function App() {
         }}
       />
       <Toasts toasts={toasts} onDismiss={dismiss} />
+      <DialogHost request={dialogRequest} onSettle={settleDialog} />
     </main>
   );
 }

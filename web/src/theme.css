@@ -31,6 +31,7 @@
   --radius-sm: 6px;  --r1: var(--radius-sm);
   --radius-md: 8px;  --r2: var(--radius-md);
   --radius-lg: 12px; --r3: var(--radius-lg);
+  --radius-btn: 7px; /* 设计稿:按钮 7px(控件 6 / 卡片 8–12 之间) */
   --radius-pill: 999px;
 
   /* motion (design handoff): control-state / card-move / entrance + the one easing */
@@ -60,6 +61,9 @@
   --fs-xl:  20px;  /* donut-center / insight numbers */
   --fs-2xl: 28px;  /* secondary big stats */
   --fs-3xl: 40px;  /* home headline numeral */
+  /* design-handoff additions: 卡片标题 15 / 页标题 21 */
+  --fs-card-title: 15px;
+  --fs-page-title: 21px;
 
   /* line-heights (CJK-tuned) */
   --lh-tight:   1.2;
@@ -230,7 +234,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: .01em; }
 
 /* ---- motion: only meaningful state ---- */
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
-@keyframes slidein { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@keyframes slidein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 .live { color: var(--accent); }
 .live-dot {
@@ -246,7 +250,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: .01em; }
 button {
   font-family: inherit; font-size: var(--fs-base); font-weight: var(--fw-medium); color: var(--text);
   background: linear-gradient(180deg, var(--elev), var(--panel-2));
-  border: 1px solid var(--border-strong); border-radius: var(--r1);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-btn);
   min-height: var(--control-h); padding: 0 var(--control-pad-x);
   cursor: pointer; transition: border-color .12s, background .12s, color .12s, box-shadow .12s;
   display: inline-flex; align-items: center; gap: var(--s2h); white-space: nowrap;
@@ -268,6 +272,16 @@ button:disabled { opacity: .45; cursor: default; }
 button[aria-busy="true"], .pending { opacity: .75; cursor: progress; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 button.primary:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 0 18px -6px var(--accent-glow); color: var(--accent-fg); filter: brightness(1.05); }
+/* Destructive confirm (Dialog 危险按钮): err 填充 + 深色文字,hover 不变色只提亮。 */
+button.danger { background: var(--err); border-color: var(--err); color: #1a0808; font-weight: var(--fw-semibold); }
+button.danger:hover:not(:disabled) { border-color: var(--err); color: #1a0808; filter: brightness(1.06); box-shadow: 0 0 18px -6px color-mix(in srgb, var(--err) 40%, transparent); }
+/* 按钮/行内的 mono 快捷键角标(esc / ⌘↵ / ↵ / ⇥)。 */
+.key-hint {
+  font-family: var(--mono); font-size: 10px; font-weight: var(--fw-normal);
+  color: inherit; opacity: .75;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 4px; padding: 0 4px; margin-left: 2px;
+}
 button.ghost { min-height: var(--control-h-sm); background: transparent; border-color: var(--border); color: var(--text-2); padding: 0 var(--control-pad-x-sm); }
 button.ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 button.icon-btn { min-height: var(--control-h-sm); padding: var(--s2h); border-radius: var(--r1); }
@@ -520,9 +534,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   .workflow-step-action { grid-column: 1 / -1; justify-content: flex-start; }
 }
 
-/* ---- toast (errors) ---- */
+/* ---- toast (success / error 两形态,设计稿 1f) ---- */
 .toasts { position: fixed; right: var(--s5); bottom: var(--s5); display: flex; flex-direction: column; gap: var(--s3); z-index: var(--z-toast); }
-.toast { background: var(--elev); border: 1px solid var(--err); border-left-width: 3px; border-radius: var(--r2); padding: var(--s4); box-shadow: var(--shadow); max-width: 360px; font-size: var(--fs-sm); animation: slidein .18s ease-out; }
-.toast .t-title { color: var(--err); font-weight: var(--fw-semibold); }
+.toast { background: var(--elev); border: 1px solid var(--border-strong); border-left-width: 3px; border-radius: 10px; padding: var(--s4) var(--s5); box-shadow: 0 12px 32px -12px rgba(0, 0, 0, .6); max-width: 360px; font-size: var(--fs-sm); animation: slidein .2s ease-out; }
+.toast .t-title { font-weight: var(--fw-semibold); }
+.toast--error { border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+.toast--error .t-title { color: var(--err); }
+.toast--success { border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.toast--success .t-title { color: var(--ok); }
 .toast .toast-action { margin-top: var(--s3); font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--accent-2); border-color: var(--accent); background: var(--accent-dim); }
-.toast .toast-action:hover:not(:disabled) { color: var(--accent-fg); box-shadow: 0 0 14px -6px var(--accent-glow); }
+.toast--success .toast-action { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.toast .toast-action:hover:not(:disabled) { box-shadow: 0 0 14px -6px var(--accent-glow); }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }

@@ -19,11 +19,14 @@ const POLL_MS = 2000;
 export function ViewpointWorkspace({
   initialDay,
   initialSessionId,
-  onPlaybackError
+  onPlaybackError,
+  confirm
 }: {
   initialDay?: string | null;
   initialSessionId?: string | null;
   onPlaybackError?: (message: string) => void;
+  // App 的危险确认对话框,透传给 ResultEditor 的「重新生成」守卫。
+  confirm?: import("../../components/ui/Dialog").ConfirmFn;
 } = {}) {
   const [day, setDay] = useState<string>(initialDay ?? "");
   const [sessionId, setSessionId] = useState<string>("");
@@ -124,7 +127,7 @@ export function ViewpointWorkspace({
           </div>
           <div className="vp-right">
             <PromptEditor sessionId={vp.session_id} prompt={vp.prompt} onChanged={refetch} />
-            <ResultEditor vp={vp} onChanged={refetch} onGenerate={() => void generate()} />
+            <ResultEditor vp={vp} onChanged={refetch} onGenerate={() => void generate()} confirm={confirm} />
           </div>
         </div>
       ) : loading ? (

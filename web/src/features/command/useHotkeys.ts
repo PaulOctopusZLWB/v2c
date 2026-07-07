@@ -65,6 +65,11 @@ export function useHotkeys(
   useEffect(() => {
     if (!enabled) return;
     function onKeyDown(e: KeyboardEvent) {
+      // An upper layer (⌘K 面板、Dialog、帮助面板)已消费的键不再触发全局热键 —
+      // 消费方约定调用 preventDefault(),这里统一跳过,避免一次 Esc 关两层。
+      if (e.defaultPrevented) return;
+      // 输入法组合中的按键(以及 Safari 提交组合时的 keyCode 229)属于 IME,不拦截。
+      if (e.isComposing || e.keyCode === 229) return;
       const combo = eventToCombo(e);
       const handler = bindingsRef.current[combo];
       if (!handler) return;

@@ -5,6 +5,7 @@ import { speakerColor } from "../../lib/speakerColors";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { Icon } from "../../components/Icon";
 import { Button, InspectorPanel, StatusBadge } from "../../components/ui";
+import type { ConfirmFn } from "../../components/ui/Dialog";
 
 /**
  * 人物 — the supervised-identity surface. The voiceprint (not the diarizer's unreliable spk_NN)
@@ -25,14 +26,17 @@ export function PeoplePanel({
   onChanged,
   push,
   pushAction,
-  onAutoAttributed
+  onAutoAttributed,
+  confirm
 }: {
   sessionId?: string | null;
   day?: string | null;
   onChanged: () => void;
-  push: (title: string, message?: string) => void;
+  push: (title: string, message?: string, variant?: "success" | "error") => void;
   pushAction: (message: string, actionLabel: string, onAction: () => void) => void;
   onAutoAttributed?: (count: number) => void;
+  // App 的危险确认对话框(替代 window.confirm)。
+  confirm: ConfirmFn;
 }) {
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -77,7 +81,7 @@ export function PeoplePanel({
   const createNonSpeaker = useAsyncAction(async () => {
     try {
       await api.createPerson("噪音/多人", "non_speaker");
-      push("已创建「噪音/多人」类别");
+      push("已创建「噪音/多人」类别", undefined, "success");
       await refresh();
     } catch (err) {
       push("创建失败", err instanceof Error ? err.message : undefined);
@@ -109,10 +113,15 @@ export function PeoplePanel({
   // Delete an accidental duplicate person: confirm, cascade-delete on the backend, then reload
   // the roster + recolor the map. Never offered for 本人 (is_self) — the button is hidden for them.
   const remove = useAsyncAction(async (p: PersonRow) => {
-    if (!window.confirm(`删除人物「${p.display_name}」?其声纹与归属将被清除。`)) return;
+    const ok = await confirm({
+      title: `删除人物「${p.display_name}」?`,
+      body: <>其声纹与全部归属将被<strong>清除</strong>,此操作不可撤销。</>,
+      confirmLabel: "删除"
+    });
+    if (!ok) return;
     try {
       await api.deletePerson(p.person_id);
-      push(`已删除人物「${p.display_name}」`);
+      push(`已删除人物「${p.display_name}」`, undefined, "success");
       await refresh();
     } catch (err) {
       push("删除失败", err instanceof Error ? err.message : undefined);
@@ -122,7 +131,7 @@ export function PeoplePanel({
   const enroll = useAsyncAction(async (personId: string) => {
     try {
       const res = await api.enrollPerson(personId);
-      push(`已登记 ${res.n_segments} 段声纹`);
+      push(`已登记 ${res.n_segments} 段声纹`, undefined, "success");
       await refresh();
     } catch (err) {
       // Defensive: enroll 400s when the person has 0 manual labels (the button is normally
@@ -153,7 +162,7 @@ export function PeoplePanel({
         return;
       }
       const res = await api.labelSegments(s.person_id, ids);
-      push(`已将 ${s.speaker} 标注为 ${s.person_label}`, `${res.labeled} 段`);
+      push(`已将 ${s.speaker} 标注为 ${s.person_label}`, `${res.labeled} 段`, "success");
       // Drop the adopted suggestion so the row can't be double-applied.
       setSuggestions((cur) => (cur ?? []).filter((x) => x.speaker !== s.speaker));
       await refresh();

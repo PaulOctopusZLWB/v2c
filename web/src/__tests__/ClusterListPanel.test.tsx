@@ -40,6 +40,7 @@ function mockFetch(clusterList: SpeakerCluster[] = clusters) {
 }
 
 const noop = () => {};
+const confirmYes = async () => true;
 
 describe("ClusterListPanel", () => {
   afterEach(() => {
@@ -49,7 +50,7 @@ describe("ClusterListPanel", () => {
 
   it("lists global clusters largest-first with sample, size and an assigned badge", async () => {
     vi.stubGlobal("fetch", mockFetch());
-    render(<ClusterListPanel onChanged={noop} push={noop} />);
+    render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} />);
 
     expect(await screen.findByText("vp_001")).toBeInTheDocument();
     expect(screen.getByText("2062 段")).toBeInTheDocument();
@@ -64,7 +65,7 @@ describe("ClusterListPanel", () => {
 
   it("defaults to the actionable unassigned queue and can switch back to all clusters", async () => {
     vi.stubGlobal("fetch", mockFetch());
-    render(<ClusterListPanel onChanged={noop} push={noop} />);
+    render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} />);
 
     expect(await screen.findByText("vp_001")).toBeInTheDocument();
     expect(screen.queryByText("vp_002")).not.toBeInTheDocument();
@@ -79,7 +80,7 @@ describe("ClusterListPanel", () => {
   it("shows playable sample evidence for a cluster before assigning it", async () => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
-    render(<ClusterListPanel onChanged={noop} push={noop} />);
+    render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} />);
 
     await screen.findByText("vp_001");
     expect(document.querySelector(".cluster-sample")).toHaveTextContent("加班公司开会");
@@ -103,7 +104,7 @@ describe("ClusterListPanel", () => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn();
-    render(<ClusterListPanel onChanged={onChanged} push={noop} />);
+    render(<ClusterListPanel onChanged={onChanged} push={noop} confirm={confirmYes} />);
 
     // Open the portalled Select and pick the person.
     const trigger = await screen.findByRole("combobox", { name: "分配 vp_001" });
@@ -121,7 +122,7 @@ describe("ClusterListPanel", () => {
 
   it("shows an empty state when there are no clusters", async () => {
     vi.stubGlobal("fetch", mockFetch([]));
-    render(<ClusterListPanel onChanged={noop} push={noop} />);
+    render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} />);
     expect(await screen.findByText(/还没有声纹分组/)).toBeInTheDocument();
   });
 });

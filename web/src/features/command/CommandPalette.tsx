@@ -71,7 +71,8 @@ export function CommandPalette({
     const q = query.trim();
     const local = commands.filter((c) => fuzzyMatch(q, `${c.title} ${c.keywords ?? ""} ${c.group ?? ""}`));
     // extraItems are server-filtered async search hits — never run the local fuzzy gate on them.
-    return [...local, ...extraItems];
+    // 设计稿:「语义检索」组排在「命令」之前,且 Enter 默认执行首个检索命中(↵ 跳转)。
+    return [...extraItems, ...local];
   }, [commands, extraItems, query]);
 
   function changeQuery(next: string) {
@@ -145,7 +146,7 @@ export function CommandPalette({
           type="text"
           role="textbox"
           aria-label="搜索命令"
-          placeholder="搜索标签页、日期、操作…"
+          placeholder="搜索标签页、操作,或直接提问…"
           value={query}
           onChange={(e) => changeQuery(e.target.value)}
           onKeyDown={onKeyDown}

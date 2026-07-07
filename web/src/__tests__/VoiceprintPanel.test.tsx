@@ -138,7 +138,7 @@ describe("VoiceprintPanel", () => {
       expect(JSON.parse(String(auto[0][1]?.body)).session_id).toBe("ses_1");
 
       expect(onMatched).toHaveBeenCalled();
-      expect(push).toHaveBeenCalledWith(expect.stringMatching(/已自动匹配\s*5\s*\/\s*6.*未定\s*1/));
+      expect(push).toHaveBeenCalledWith(expect.stringMatching(/已自动匹配\s*5\s*\/\s*6.*未定\s*1/), undefined, "success");
     } finally {
       vi.useRealTimers();
     }

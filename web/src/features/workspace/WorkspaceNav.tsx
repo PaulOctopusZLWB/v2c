@@ -4,6 +4,7 @@ import { t } from "../../i18n";
 import { dayLabel, reviewStatusZh, sessionListLabel } from "../../lib/format";
 import type { DayStatusRow, ReviewStatus } from "../../api/types";
 import { Icon } from "../../components/Icon";
+import type { ConfirmFn, PromptFn } from "../../components/ui/Dialog";
 
 type SessionRow = { session_id: string; started_at: string; segment_count: number; review_status: string; name?: string | null };
 
@@ -16,7 +17,9 @@ export function WorkspaceNav({
   onSelectDay,
   onSelectSession,
   onRenameSession,
-  onDeleteSession
+  onDeleteSession,
+  confirm,
+  promptText
 }: {
   days: Array<{ day: string; session_count: number }>;
   dayStatus?: DayStatusRow[];
@@ -29,6 +32,9 @@ export function WorkspaceNav({
   // Owned by App (it holds the data refresh): rename/delete a session, then App re-fetches.
   onRenameSession?: (sessionId: string, name: string) => Promise<void> | void;
   onDeleteSession?: (sessionId: string) => Promise<void> | void;
+  // App 的 Dialog API(替代 window.prompt/confirm)。
+  confirm: ConfirmFn;
+  promptText: PromptFn;
 }) {
   const statusByDay = new Map((dayStatus ?? []).map((d) => [d.day, d.status]));
   // Days are owned by App (the top-level coordinator) so import/run refreshes flow here;
@@ -95,8 +101,10 @@ export function WorkspaceNav({
                   aria-label={`重命名「${sessionListLabel(s)}」`}
                   title="重命名"
                   onClick={() => {
-                    const next = window.prompt("会话名称", s.name ?? "");
-                    if (next !== null) void onRenameSession(s.session_id, next.trim());
+                    void (async () => {
+                      const next = await promptText({ title: "重命名会话", initial: s.name ?? "", placeholder: "会话名称" });
+                      if (next !== null) void onRenameSession(s.session_id, next.trim());
+                    })();
                   }}
                 >
                   ✎
@@ -109,9 +117,14 @@ export function WorkspaceNav({
                   aria-label={`删除「${sessionListLabel(s)}」`}
                   title="删除"
                   onClick={() => {
-                    if (window.confirm(`删除会话「${sessionListLabel(s)}」？此操作不可撤销。`)) {
-                      void onDeleteSession(s.session_id);
-                    }
+                    void (async () => {
+                      const ok = await confirm({
+                        title: `删除会话「${sessionListLabel(s)}」?`,
+                        body: <>该会话及其全部转写段将被移除,此操作<strong>不可撤销</strong>。</>,
+                        confirmLabel: "删除"
+                      });
+                      if (ok) void onDeleteSession(s.session_id);
+                    })();
                   }}
                 >
                   🗑

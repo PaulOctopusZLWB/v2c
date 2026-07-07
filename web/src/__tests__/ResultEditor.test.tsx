@@ -73,21 +73,20 @@ describe("ResultEditor", () => {
     expect(onGenerate).toHaveBeenCalled();
   });
 
-  it("重新生成 confirms first when an edit exists, only then generates", async () => {
+  it("重新生成 confirms first (via the Dialog prop) when an edit exists, only then generates", async () => {
     const onGenerate = vi.fn();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const confirm = vi.fn(async () => false);
     const { rerender } = render(
-      <ResultEditor vp={state({ edited: content, status: "edited" })} onChanged={vi.fn()} onGenerate={onGenerate} />
+      <ResultEditor vp={state({ edited: content, status: "edited" })} onChanged={vi.fn()} onGenerate={onGenerate} confirm={confirm} />
     );
     await userEvent.click(screen.getByRole("button", { name: /重新生成/ }));
-    expect(confirm).toHaveBeenCalled();
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: "重新生成" })));
     expect(onGenerate).not.toHaveBeenCalled(); // user declined
 
-    confirm.mockReturnValue(true);
-    rerender(<ResultEditor vp={state({ edited: content, status: "edited" })} onChanged={vi.fn()} onGenerate={onGenerate} />);
+    confirm.mockImplementation(async () => true);
+    rerender(<ResultEditor vp={state({ edited: content, status: "edited" })} onChanged={vi.fn()} onGenerate={onGenerate} confirm={confirm} />);
     await userEvent.click(screen.getByRole("button", { name: /重新生成/ }));
-    expect(onGenerate).toHaveBeenCalled();
-    confirm.mockRestore();
+    await waitFor(() => expect(onGenerate).toHaveBeenCalled());
   });
 
   it("editing the headline + blur calls editViewpoint with the full doc, evidence_refs preserved", async () => {

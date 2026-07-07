@@ -5,6 +5,8 @@ export interface Toast {
   id: number;
   title: string;
   message?: string;
+  /** success = ok 左边框 + ok 标题(完成/撤销类);error(默认)= err 样式。 */
+  variant?: "success" | "error";
   /** Optional action affordance (e.g. 撤销). Both must be present to render the button. */
   actionLabel?: string;
   onAction?: () => void;
@@ -24,9 +26,9 @@ export function useToasts() {
   }, []);
 
   const push = useCallback(
-    (title: string, message?: string) => {
+    (title: string, message?: string, variant: Toast["variant"] = "error") => {
       const id = ++seq.current;
-      setToasts((list) => [...list, { id, title, message }]);
+      setToasts((list) => [...list, { id, title, message, variant }]);
       setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
       return id;
     },
@@ -35,6 +37,8 @@ export function useToasts() {
 
   // An actionable toast: the message + a button (actionLabel) that runs onAction then
   // dismisses. It also auto-dismisses after `ms` (the action is then lost, not run).
+  // These are completion/undo affordances, so they render as the success variant;
+  // the newest one is also the target of the global Enter shortcut (bound in App).
   const pushAction = useCallback(
     (message: string, actionLabel: string, onAction: () => void, ms = ACTION_DISMISS_MS) => {
       const id = ++seq.current;
@@ -42,7 +46,7 @@ export function useToasts() {
         onAction();
         dismiss(id);
       };
-      setToasts((list) => [...list, { id, title: message, actionLabel, onAction: wrapped }]);
+      setToasts((list) => [...list, { id, title: message, variant: "success", actionLabel, onAction: wrapped }]);
       setTimeout(() => dismiss(id), ms);
       return id;
     },
@@ -61,12 +65,12 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
     <Portal>
     <div className="toasts">
       {toasts.map((toast) => (
-        <div className="toast" key={toast.id} role="alert">
+        <div className={`toast toast--${toast.variant ?? "error"}`} key={toast.id} role="alert">
           <div className="t-title">{toast.title}</div>
           {toast.message ? <div className="dim">{toast.message}</div> : null}
           {toast.actionLabel && toast.onAction ? (
             <button className="toast-action" type="button" onClick={toast.onAction}>
-              {toast.actionLabel}
+              {toast.actionLabel} <kbd className="key-hint">↵</kbd>
             </button>
           ) : null}
           <button className="icon-btn ghost" type="button" aria-label="关闭通知" onClick={() => onDismiss(toast.id)}>

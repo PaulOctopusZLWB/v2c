@@ -26,6 +26,7 @@ function mockFetch(overrides: Record<string, unknown> = {}) {
 }
 
 const noop = () => {};
+const confirmYes = async () => true;
 
 async function findSummary(match: RegExp) {
   return screen.findByText((_, node) =>
@@ -56,7 +57,7 @@ describe("PeoplePanel", () => {
 
   it("starts with the roster and management tools collapsed", async () => {
     vi.stubGlobal("fetch", mockFetch());
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     expect(await screen.findByRole("complementary", { name: "人物证据" })).toBeInTheDocument();
     expect(((await findSummary(/人物 ·/)).closest("details") as HTMLDetailsElement).open).toBe(false);
@@ -67,7 +68,7 @@ describe("PeoplePanel", () => {
 
   it("renders people with an enrolled badge plus manual + attributed counts", async () => {
     vi.stubGlobal("fetch", mockFetch());
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openRoster();
     expect(await screen.findByText("韩文巧")).toBeInTheDocument();
@@ -83,7 +84,7 @@ describe("PeoplePanel", () => {
 
   it("renders as an inspector with searchable people", async () => {
     vi.stubGlobal("fetch", mockFetch());
-    render(<PeoplePanel sessionId={null} day="2087-05-10" onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day="2087-05-10" onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     expect(await screen.findByRole("complementary", { name: "人物证据" })).toBeInTheDocument();
     await openRoster();
@@ -97,7 +98,7 @@ describe("PeoplePanel", () => {
 
   it("disables 登记声纹 for a person with no manual labels, enables it when labelled", async () => {
     vi.stubGlobal("fetch", mockFetch());
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openRoster();
     // 李雷 has manual_count 0 → can't enroll (the 400 the user hit). Button is disabled.
@@ -111,7 +112,7 @@ describe("PeoplePanel", () => {
   it("clicking 登记声纹 calls enrollPerson for a labelled person", async () => {
     vi.stubGlobal("fetch", mockFetch({ "/api/people/per_a/enroll": { person_id: "per_a", n_segments: 8, dim: 192 } }));
     const onChanged = vi.fn();
-    render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openRoster();
     const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
@@ -135,7 +136,7 @@ describe("PeoplePanel", () => {
         }
       })
     );
-    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /智能建议/ }));
@@ -163,7 +164,7 @@ describe("PeoplePanel", () => {
       })
     );
     const onChanged = vi.fn();
-    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /智能建议/ }));
@@ -195,7 +196,7 @@ describe("PeoplePanel", () => {
     );
     const onChanged = vi.fn();
     // even with a session selected, the default scope is 全部 (cross-session identity).
-    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
@@ -227,6 +228,7 @@ describe("PeoplePanel", () => {
         push={noop}
         pushAction={noop}
         onAutoAttributed={onAutoAttributed}
+        confirm={confirmYes}
       />
     );
 
@@ -243,7 +245,7 @@ describe("PeoplePanel", () => {
         "/api/people/auto-attribute": { assigned: 5, unassigned: 1, total: 6, per_person: { per_a: 5 }, threshold: 0.6 }
       })
     );
-    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     // flip the scope to 本会话, then run.
@@ -258,17 +260,17 @@ describe("PeoplePanel", () => {
     });
   });
 
-  it("删除 a person (confirm stubbed) calls deletePerson then reloads + onChanged", async () => {
+  it("删除 a person (dialog confirmed) calls deletePerson then reloads + onChanged", async () => {
     vi.stubGlobal("fetch", mockFetch({ "/api/persons/per_a": { deleted: true } }));
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirmSpy = vi.fn(async () => true);
     const onChanged = vi.fn();
-    render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={onChanged} push={noop} pushAction={noop} confirm={confirmSpy} />);
 
     await openRoster();
     const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
     await userEvent.click(within(hanRow).getByRole("button", { name: /删除/ }));
 
-    expect(confirmSpy).toHaveBeenCalled();
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
     await waitFor(() => {
       const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
       const del = calls.find((c) => c.url === "/api/persons/per_a" && c.init?.method === "DELETE");
@@ -277,15 +279,16 @@ describe("PeoplePanel", () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
-  it("does not delete when the confirm is dismissed", async () => {
+  it("does not delete when the dialog is declined", async () => {
     vi.stubGlobal("fetch", mockFetch({ "/api/persons/per_a": { deleted: true } }));
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    const confirmNo = vi.fn(async () => false);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmNo} />);
 
     await openRoster();
     const hanRow = (await screen.findByText("韩文巧")).closest(".person-row") as HTMLElement;
     await userEvent.click(within(hanRow).getByRole("button", { name: /删除/ }));
 
+    await waitFor(() => expect(confirmNo).toHaveBeenCalled());
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
     expect(calls.find((c) => c.url === "/api/persons/per_a" && c.init?.method === "DELETE")).toBeUndefined();
   });
@@ -296,7 +299,7 @@ describe("PeoplePanel", () => {
       ...people
     ];
     vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withSelf } }));
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openRoster();
     const selfRow = (await screen.findByText("我")).closest(".person-row") as HTMLElement;
@@ -311,7 +314,7 @@ describe("PeoplePanel", () => {
       "fetch",
       mockFetch({ "/api/persons": { person_id: "per_c", display_name: "王芳", person_type: "other", is_self: 0 } })
     );
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     await userEvent.type(screen.getByLabelText("新建人物"), "王芳");
@@ -327,7 +330,7 @@ describe("PeoplePanel", () => {
 
   it("the 全局识别 control carries a one-line '按声纹补齐' helper", async () => {
     vi.stubGlobal("fetch", mockFetch());
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     expect(screen.getByText(/按声纹补齐/)).toBeInTheDocument();
@@ -340,7 +343,7 @@ describe("PeoplePanel", () => {
       { person_id: "per_noise", display_name: "噪音/多人", person_type: "non_speaker", is_self: 0, enrolled: false, attributed_count: 7, manual_count: 2 }
     ];
     vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withNoise } }));
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openRoster();
     await openManagement();
@@ -359,7 +362,7 @@ describe("PeoplePanel", () => {
       "fetch",
       mockFetch({ "/api/persons": { person_id: "per_noise", display_name: "噪音/多人", person_type: "non_speaker", is_self: 0 } })
     );
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     await userEvent.click(screen.getByRole("button", { name: /噪音\/多人 类别/ }));
@@ -380,7 +383,7 @@ describe("PeoplePanel", () => {
       { person_id: "per_noise", display_name: "噪音/多人", person_type: "non_speaker", is_self: 0, enrolled: false, attributed_count: 0, manual_count: 0 }
     ];
     vi.stubGlobal("fetch", mockFetch({ "/api/people": { people: withNoise } }));
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} />);
+    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     await openManagement();
     await screen.findByText("噪音/多人");

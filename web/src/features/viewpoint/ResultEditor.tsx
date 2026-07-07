@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import type { ViewpointContent, ViewpointState } from "../../api/types";
 import { Icon } from "../../components/Icon";
+import type { ConfirmFn } from "../../components/ui/Dialog";
 
 const STATUS_ZH: Record<ViewpointState["status"], string> = {
   draft: "草稿",
@@ -24,11 +25,14 @@ function clone(c: ViewpointContent): ViewpointContent {
 export function ResultEditor({
   vp,
   onChanged,
-  onGenerate
+  onGenerate,
+  confirm
 }: {
   vp: ViewpointState;
   onChanged: () => void;
   onGenerate: () => void;
+  // App 的危险确认对话框;缺省(孤立单测)时跳过守卫直接执行。
+  confirm?: ConfirmFn;
 }) {
   // A local, editable copy of the effective doc. Re-seeded whenever the server's effective doc
   // changes identity (a regenerate / revert), but NOT on every keystroke (so typing isn't lost).
@@ -59,8 +63,15 @@ export function ResultEditor({
     }
   };
 
-  const regenerate = () => {
-    if (vp.edited && !window.confirm("重新生成会丢弃你对结果的修改,确定?")) return;
+  const regenerate = async () => {
+    if (vp.edited && confirm) {
+      const ok = await confirm({
+        title: "重新生成本场总结?",
+        body: <>重新生成会<strong>丢弃你对结果的全部修改</strong>。</>,
+        confirmLabel: "重新生成"
+      });
+      if (!ok) return;
+    }
     onGenerate();
   };
 
@@ -99,7 +110,7 @@ export function ResultEditor({
           <span className={`status s-${vp.status}`}>{STATUS_ZH[vp.status]}</span>
           {vp.published_at ? <span className="dim num">{vp.published_at}</span> : null}
         </div>
-        <button type="button" className="primary" disabled={busy || vp.generating || identityBlocked} onClick={regenerate}>
+        <button type="button" className="primary" disabled={busy || vp.generating || identityBlocked} onClick={() => void regenerate()}>
           {vp.generating ? <span className="spinner" aria-hidden /> : <Icon name="refresh" />} 重新生成
         </button>
       </div>

@@ -21,8 +21,23 @@ describe("Toasts", () => {
         onDismiss={vi.fn()}
       />
     );
-    await userEvent.click(screen.getByRole("button", { name: "撤销" }));
+    await userEvent.click(screen.getByRole("button", { name: /撤销/ }));
     expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("styles by variant: success gets toast--success, default is toast--error", () => {
+    render(
+      <Toasts
+        toasts={[
+          { id: 1, title: "转写完成", variant: "success" },
+          { id: 2, title: "ASR 任务失败" }
+        ]}
+        onDismiss={vi.fn()}
+      />
+    );
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts[0]).toHaveClass("toast--success");
+    expect(alerts[1]).toHaveClass("toast--error");
   });
 });
 
@@ -39,6 +54,7 @@ describe("useToasts.pushAction", () => {
     });
     expect(result.current.toasts).toHaveLength(1);
     expect(result.current.toasts[0].actionLabel).toBe("撤销");
+    expect(result.current.toasts[0].variant).toBe("success"); // 完成/撤销类 = success 形态
 
     // The store wraps onAction so firing it (what the rendered button's onClick does) both
     // runs the user callback AND dismisses the toast.

@@ -123,7 +123,13 @@ export function TranscriptReviewPanel({
     // `?` reaches us as shift+/ or shift+? depending on the browser/layout; bind both.
     "shift+/": () => setHelpOpen((v) => !v),
     "shift+?": () => setHelpOpen((v) => !v),
-    escape: () => setHelpOpen(false)
+    // 仅在帮助面板真的打开时消费 Esc(preventDefault),否则让给上层
+    // (App 的 Esc 关 toast);useHotkeys 会跳过已消费的键。
+    escape: (e) => {
+      if (!helpOpen) return;
+      e.preventDefault();
+      setHelpOpen(false);
+    }
   });
 
   return (

@@ -449,7 +449,7 @@ describe("App container", () => {
 
     // Once the API resolves, the Undo toast appears.
     releaseBatch!();
-    expect(await screen.findByRole("button", { name: "撤销" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /撤销/ })).toBeInTheDocument();
   });
 
   it("undo restores a batch-accepted turn back to pending (clearReview) and refetches", async () => {
@@ -477,7 +477,7 @@ describe("App container", () => {
     expect(await screen.findByText("1/1 已接受")).toBeInTheDocument();
 
     // Undo: the segment was pending before, so undo CLEARS the review (back to pending).
-    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
+    await userEvent.click(await screen.findByRole("button", { name: /撤销/ }));
     await waitFor(() => expect(calls).toContain("/api/transcripts/segments/clear-review"));
     expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
   });
@@ -510,7 +510,7 @@ describe("App container", () => {
 
     // The search is debounced (~200ms); waitFor polls until it fires and the hit renders.
     await waitFor(() => expect(searchSpy).toHaveBeenCalledWith("数据", 30));
-    expect(await screen.findByText("转写搜索")).toBeInTheDocument();
+    expect(await screen.findByText("语义检索")).toBeInTheDocument();
     // The snippet bolds the matched substring, so the text is split across nodes — match the
     // <strong> on "数据" and assert the hint (day · speaker) renders alongside.
     expect(screen.getByText("数据", { selector: "strong" })).toBeInTheDocument();

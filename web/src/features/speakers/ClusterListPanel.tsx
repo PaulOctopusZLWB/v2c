@@ -7,6 +7,7 @@ import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 import { InspectorPanel, StatusBadge } from "../../components/ui";
 import { Select } from "../../components/ui/Select";
+import type { ConfirmFn } from "../../components/ui/Dialog";
 
 type ClusterFilter = "unassigned" | "all";
 
@@ -22,9 +23,12 @@ type ClusterFilter = "unassigned" | "all";
 export function ClusterListPanel({
   onChanged,
   push,
+  confirm,
 }: {
   onChanged: () => void;
-  push: (title: string, message?: string) => void;
+  push: (title: string, message?: string, variant?: "success" | "error") => void;
+  // App 的危险确认对话框(替代 window.confirm)。
+  confirm: ConfirmFn;
 }) {
   const [clusters, setClusters] = useState<SpeakerCluster[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
@@ -49,10 +53,15 @@ export function ClusterListPanel({
   }, [load]);
 
   const autoCluster = useAsyncAction(async () => {
-    if (!window.confirm("自动聚类会按声纹重新分组(覆盖现有 vp_ 分组)。已手动标注的归属会保留。继续?")) return;
+    const ok = await confirm({
+      title: "重新自动聚类?",
+      body: <>将按声纹重新分组,<strong>覆盖现有 vp_ 分组</strong>;已手动标注的归属会保留。</>,
+      confirmLabel: "继续聚类"
+    });
+    if (!ok) return;
     try {
       const res = await api.autoCluster({});
-      push("已自动聚类", `分出 ${res.clusters} 组 · 归组 ${res.assigned} 段 · 未归 ${res.unassigned}`);
+      push("已自动聚类", `分出 ${res.clusters} 组 · 归组 ${res.assigned} 段 · 未归 ${res.unassigned}`, "success");
       await load();
       onChanged();
     } catch (err) {
@@ -66,7 +75,7 @@ export function ClusterListPanel({
     try {
       const res = await api.assignCluster(cluster.speaker_cluster_id, personId);
       const label = persons.find((p) => p.person_id === personId)?.display_name ?? personId;
-      push(`已将 ${cluster.speaker_cluster_id} 归属至 ${label}`, `${res.labeled} 段`);
+      push(`已将 ${cluster.speaker_cluster_id} 归属至 ${label}`, `${res.labeled} 段`, "success");
       // Optimistic: reflect the new person on the row immediately.
       setClusters((prev) =>
         prev.map((c) =>
