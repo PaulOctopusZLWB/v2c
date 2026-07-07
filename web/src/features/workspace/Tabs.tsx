@@ -3,9 +3,9 @@ import type { TabId } from "./useTab";
 const TABS: { id: TabId; label: string }[] = [
   { id: "home", label: "首页" },
   { id: "ingest", label: "录入" },
-  { id: "review", label: "审核" },
-  { id: "speakers", label: "声纹" },
-  { id: "llm", label: "观点" },
+  { id: "speakers", label: "身份" },
+  { id: "review", label: "转写审核" },
+  { id: "llm", label: "总结" },
   { id: "settings", label: "设置" }
 ];
 

@@ -28,6 +28,8 @@ function sessionKey(p: ProjectionPoint): string {
  *  gate's remaining work is visible spatially — assigned points keep their person colour. */
 const UNASSIGNED_KEY = "__未识别__";
 const UNASSIGNED_COLOR = "#8b93a7";
+const SESSION_EXCLUDED_KEY = "__本场已排除__";
+const SESSION_EXCLUDED_COLOR = "#e16f76";
 
 /** The stable cluster key for a point: the labelled person, else the shared 未识别 bucket. */
 function clusterKey(p: ProjectionPoint): string {
@@ -39,8 +41,19 @@ function clusterLabel(p: ProjectionPoint): string {
   return p.person_id ? p.person_label ?? p.person_id : "未识别";
 }
 
+function reviewKey(p: ProjectionPoint, sessionExcludedPersonIds: ReadonlySet<string>): string {
+  if (p.person_id && sessionExcludedPersonIds.has(p.person_id)) return SESSION_EXCLUDED_KEY;
+  return clusterKey(p);
+}
+
+function reviewLabel(p: ProjectionPoint, sessionExcludedPersonIds: ReadonlySet<string>): string {
+  if (p.person_id && sessionExcludedPersonIds.has(p.person_id)) return "本场已排除";
+  return clusterLabel(p);
+}
+
 /** Colour for a person/cluster key — fixed grey for the 未识别 bucket, generated hue otherwise. */
 function keyColor(key: string): string {
+  if (key === SESSION_EXCLUDED_KEY) return SESSION_EXCLUDED_COLOR;
   return key === UNASSIGNED_KEY ? UNASSIGNED_COLOR : speakerColor(key);
 }
 
@@ -67,7 +80,8 @@ export function VoiceprintMap({
   onPlaybackError,
   people,
   onLabel,
-  onChanged
+  onChanged,
+  sessionExcludedPersonIds
 }: {
   /** The multi-scope, tunable projection to fetch + render. `null` → the pick/empty state.
    *  The parent rebuilds this only on 投射 / scope / method change, so dragging a slider in
@@ -84,6 +98,8 @@ export function VoiceprintMap({
   onLabel?: (personId: string, segmentIds: string[]) => Promise<unknown> | void;
   /** Notify the parent after a successful label (e.g. to reload the People panel). */
   onChanged?: () => void;
+  /** Person ids marked absent/excluded for the currently inspected single session. */
+  sessionExcludedPersonIds?: string[];
 }) {
   const audio = useSegmentAudio();
   const [points, setPoints] = useState<ProjectionPoint[] | null>(null);
@@ -109,6 +125,9 @@ export function VoiceprintMap({
   const [emotionLabels, setEmotionLabels] = useState<Record<string, string>>({});
   const emotionLabelsRef = useRef<Record<string, string>>({});
   useEffect(() => { emotionLabelsRef.current = emotionLabels; }, [emotionLabels]);
+  const excludedPersonIdSet = useMemo(() => new Set(sessionExcludedPersonIds ?? []), [sessionExcludedPersonIds]);
+  const excludedPersonIdSetRef = useRef<ReadonlySet<string>>(excludedPersonIdSet);
+  useEffect(() => { excludedPersonIdSetRef.current = excludedPersonIdSet; }, [excludedPersonIdSet]);
 
   // Lasso-to-label is only offered when the parent wires both people + onLabel.
   const canLabel = !!people && !!onLabel;
@@ -237,8 +256,8 @@ export function VoiceprintMap({
         ? (emotionLabels[p.segment_id] ?? DEFAULT_EMOTION)
         : colorMode === "session"
           ? sessionKey(p)
-          : clusterKey(p),
-    [colorMode, emotionLabels]
+          : reviewKey(p, excludedPersonIdSet),
+    [colorMode, emotionLabels, excludedPersonIdSet]
   );
 
   // --- legend: distinct cluster keys (人物) / emotion classes (情绪) / session ids (会话) ---
@@ -266,13 +285,13 @@ export function VoiceprintMap({
     }
     const by = new Map<string, { key: string; label: string; color: string; emoji: string; count: number }>();
     for (const p of points ?? []) {
-      const key = clusterKey(p);
-      const entry = by.get(key) ?? { key, label: clusterLabel(p), color: keyColor(key), emoji: "", count: 0 };
+      const key = reviewKey(p, excludedPersonIdSet);
+      const entry = by.get(key) ?? { key, label: reviewLabel(p, excludedPersonIdSet), color: keyColor(key), emoji: "", count: 0 };
       entry.count += 1;
       by.set(key, entry);
     }
     return Array.from(by.values()).sort((a, b) => b.count - a.count);
-  }, [points, colorMode, emotionLabels]);
+  }, [points, colorMode, emotionLabels, excludedPersonIdSet]);
 
   // --- canvas drawing ---
   const draw = useCallback(() => {
@@ -325,11 +344,12 @@ export function VoiceprintMap({
     const selected = selectedIdsRef.current;
     const mode = colorModeRef.current;
     const emoLabels = emotionLabelsRef.current;
+    const excluded = excludedPersonIdSetRef.current;
     const r = 3.4;
     for (const p of pts) {
       const { px, py } = project(p);
       // The "key" governs both colour and focus; emotion class in 情绪, session id in 会话.
-      const key = mode === "emotion" ? (emoLabels[p.segment_id] ?? DEFAULT_EMOTION) : mode === "session" ? sessionKey(p) : clusterKey(p);
+      const key = mode === "emotion" ? (emoLabels[p.segment_id] ?? DEFAULT_EMOTION) : mode === "session" ? sessionKey(p) : reviewKey(p, excluded);
       const dim = focus !== null && key !== focus;
       const color = mode === "emotion" ? emotionColor(key) : mode === "session" ? speakerColor(key) : keyColor(key);
       const isSel = selected.has(p.segment_id);
@@ -567,6 +587,11 @@ export function VoiceprintMap({
 
   const toggleFocus = (key: string) => setFocusKey((cur) => (cur === key ? null : key));
 
+  useEffect(() => {
+    setFocusKey(null);
+    setHover(null);
+  }, [excludedPersonIdSet]);
+
   // Switching colour mode changes what the legend keys mean, so any active focus is cleared.
   const switchColorMode = (mode: ColorMode) => {
     setColorMode((cur) => {
@@ -741,12 +766,12 @@ export function VoiceprintMap({
                       ? emotionColor(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION)
                       : colorMode === "session"
                         ? speakerColor(sessionKey(hover.point))
-                        : keyColor(clusterKey(hover.point))
+                        : keyColor(reviewKey(hover.point, excludedPersonIdSet))
                 }}
               />
               {colorMode === "emotion"
-                ? `${emotionMeta(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION).emoji} ${clusterLabel(hover.point)}`
-                : clusterLabel(hover.point)}
+                ? `${emotionMeta(emotionLabels[hover.point.segment_id] ?? DEFAULT_EMOTION).emoji} ${reviewLabel(hover.point, excludedPersonIdSet)}`
+                : reviewLabel(hover.point, excludedPersonIdSet)}
             </div>
             {colorMode === "session" && hover.point.session_id ? (
               <div className="vmap-tip-meta muted">{sessionKey(hover.point)}</div>
@@ -757,28 +782,42 @@ export function VoiceprintMap({
       </div>
 
       {legend.length > 0 ? (
-        <ul className="vmap-legend" role="list" aria-label="图例 — 按聚类聚焦">
-          {legend.map((c) => {
-            const focused = focusKey === c.key;
-            const dimmed = focusKey !== null && !focused;
-            return (
-              <li key={c.key} className="vmap-legend-li" role="listitem">
-                <button
-                  type="button"
-                  className={`vmap-legend-item${focused ? " focused" : ""}${dimmed ? " dimmed" : ""}`}
-                  aria-pressed={focused}
-                  onClick={() => toggleFocus(c.key)}
-                  title={focused ? "取消聚焦" : "聚焦此聚类"}
-                >
-                  <span className="vmap-swatch" style={{ background: c.color }} />
-                  {c.emoji ? <span className="vmap-legend-emoji" aria-hidden>{c.emoji}</span> : null}
-                  <span className="vmap-legend-label">{c.label}</span>
-                  <span className="vmap-legend-count num">{c.count}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {colorMode === "person" ? (
+            <p className="vmap-legend-note">
+              图例是当前投射范围的全局归属,不是本场参与人; 修本场名单用「会话身份」,修错色/错人用「候选簇」或框选。
+              {excludedPersonIdSet.size ? ` 已把 ${excludedPersonIdSet.size} 个本场未出现的人折叠为「本场已排除」。` : ""}
+            </p>
+          ) : null}
+          <ul className="vmap-legend" role="list" aria-label="图例 — 按聚类聚焦">
+            {legend.map((c) => {
+              const focused = focusKey === c.key;
+              const dimmed = focusKey !== null && !focused;
+              const personLegendTitle =
+                colorMode === "person"
+                  ? `${c.label}: 全局归属图例,不会自动进入本场总结名单; 点击只是在图上聚焦。`
+                  : focused
+                    ? "取消聚焦"
+                    : "聚焦此聚类";
+              return (
+                <li key={c.key} className="vmap-legend-li" role="listitem">
+                  <button
+                    type="button"
+                    className={`vmap-legend-item${focused ? " focused" : ""}${dimmed ? " dimmed" : ""}`}
+                    aria-pressed={focused}
+                    onClick={() => toggleFocus(c.key)}
+                    title={personLegendTitle}
+                  >
+                    <span className="vmap-swatch" style={{ background: c.color }} />
+                    {c.emoji ? <span className="vmap-legend-emoji" aria-hidden>{c.emoji}</span> : null}
+                    <span className="vmap-legend-label">{c.label}</span>
+                    <span className="vmap-legend-count num">{c.count}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       ) : null}
     </section>
   );

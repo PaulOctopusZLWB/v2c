@@ -340,7 +340,7 @@ def test_process_once_session_summary_uses_injected_llm_adapter(tmp_path: Path) 
     finally:
         conn.close()
     assert "模拟 LLM session headline" in summaries[0]["content_json"]
-    assert summaries[0]["prompt_version"] == "llm_port.session_summary.v1"
+    assert summaries[0]["prompt_version"] == "llm_port.session_summary.v2"
 
 
 def _write_voice_wav(path: Path, seconds: float = 0.7, sample_rate: int = 16_000) -> None:

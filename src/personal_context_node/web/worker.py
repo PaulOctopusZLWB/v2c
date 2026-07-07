@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from personal_context_node.config import AppConfig
 from personal_context_node.ingest import import_audio_files
 from personal_context_node.pipeline_adapters import build_pipeline_adapters
 from personal_context_node.process_runner import DrainResult, drain_process_queue
+
+
+logger = logging.getLogger(__name__)
 
 
 def _close_adapters(adapters) -> None:
@@ -282,6 +286,8 @@ class PipelineWorker:
                 import_audio_files(
                     config=_settings.effective_config(self._config), source_dir=Path(source_dir), progress=_cb,
                 )
+            except Exception:
+                logger.exception("import failed; continuing to drain any already queued tasks")
             finally:
                 # Mark import phase inactive (even on error) before draining; the SSE
                 # bar reads active=False as "import done, now transcribing".

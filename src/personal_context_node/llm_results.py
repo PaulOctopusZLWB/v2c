@@ -17,7 +17,13 @@ def _latest_summary(config: AppConfig, *, summary_type: str, target_id: str) -> 
             select content_json, model_name, updated_at
             from summaries
             where summary_type = ? and target_id = ?
-            order by updated_at desc
+            order by
+              case
+                when summary_type = 'session' and prompt_version = 'llm_port.session_summary.v2' then 0
+                when summary_type = 'session' and prompt_version = 'llm_port.session_summary.v1' then 1
+                else 2
+              end,
+              updated_at desc
             limit 1
             """,
             (summary_type, target_id),

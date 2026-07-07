@@ -24,7 +24,7 @@ async function gotoTab(label: string) {
  *  review queue to the by-day browser (WorkspaceNav) so day/session buttons render. Both toggles
  *  are role="tab" — the workspace tab strip and the nav rail. */
 async function useDayBrowser() {
-  await gotoTab("审核");
+  await gotoTab("转写审核");
   await userEvent.click(await screen.findByRole("tab", { name: "按天浏览" }));
 }
 
@@ -112,6 +112,40 @@ describe("App container", () => {
       })
     );
     expect(await screen.findAllByText("运行中")).not.toHaveLength(0);
+  });
+
+  it("does not show the live progress bar for idle pending tasks", async () => {
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { succeeded: 162, pending: 3 },
+          total: 165,
+          done_total: 162,
+          failed_total: 0,
+          active_stage: null,
+          current_target: null,
+          import_progress: null,
+          worker_running: false
+        })
+      })
+    );
+
+    expect(await screen.findByText("空闲")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
   it("shows per-stage breakdown, ETA, and task count from the summary without opening the task list", async () => {
@@ -521,17 +555,17 @@ describe("App container", () => {
 
     renderApp();
     await screen.findByRole("heading", { level: 1 }); // bootstrap settled
-    await gotoTab("观点");
+    await gotoTab("总结");
 
     // Default view is the editable per-session workspace: its day picker is present.
-    expect(await screen.findByLabelText("观点日期")).toBeInTheDocument();
-    expect(screen.getByLabelText("观点会话")).toBeInTheDocument();
+    expect(await screen.findByLabelText("总结日期")).toBeInTheDocument();
+    expect(screen.getByLabelText("总结会话")).toBeInTheDocument();
 
     // Toggling to 日报汇总 swaps in the legacy read-only daily rollup (its own day <select>).
     await userEvent.click(screen.getByRole("tab", { name: "日报汇总" }));
-    expect(await screen.findByLabelText("观点日期")).not.toBe(null);
+    expect(await screen.findByLabelText("总结日期")).not.toBe(null);
     // The workspace's session picker is gone in daily mode.
-    expect(screen.queryByLabelText("观点会话")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("总结会话")).not.toBeInTheDocument();
   });
 
   it("renders the voiceprint workflow path on the 声纹 tab", async () => {
@@ -548,9 +582,9 @@ describe("App container", () => {
     });
 
     renderApp();
-    await gotoTab("声纹");
+    await gotoTab("身份");
 
-    const toolbar = await screen.findByText("声纹身份");
+    const toolbar = await screen.findByText("身份审核");
     const toolbarCard = toolbar.closest(".speakers-toolbar") as HTMLElement;
     expect(toolbarCard).toBeTruthy();
     expect(toolbarCard.querySelector(".speakers-day")).not.toBeInTheDocument();
@@ -573,6 +607,7 @@ describe("App container", () => {
       if (url === "/api/transcripts/days/2087-05-10/sessions") return new Response(JSON.stringify({ day: "2087-05-10", sessions: [{ session_id: "ses_1", started_at: "", segment_count: 1, review_status: "pending_review" }] }), { status: 200 });
       if (url === "/api/llm/days/2087-05-10") return new Response(JSON.stringify({ day: "2087-05-10", context: null, memory_candidates: [] }), { status: 200 });
       if (url === "/api/transcripts/sessions/ses_1") return new Response(JSON.stringify({ session_id: "ses_1", review_status: "pending_review", segments: [{ segment_id: "seg_1", text: "你好", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2026-06-13T09:33:00+08:00", absolute_end_at: "2026-06-13T09:33:01+08:00", review_status: "pending_review", note: null }] }), { status: 200 });
+      if (url.includes("/identity-review")) return new Response(JSON.stringify({ session_id: "ses_1", can_summarize: true, participants: [], candidates: [], new_person_candidates: [], negative_feedback_count: 0 }), { status: 200 });
       if (url.includes("/embeddings/status")) return new Response(JSON.stringify({ embedded: 0, total: 0, pending: 0 }), { status: 200 });
       if (url.includes("/segments")) return new Response(JSON.stringify({ segments: [] }), { status: 200 });
       if (url.includes("/speaker-clusters")) return new Response(JSON.stringify({ clusters: [] }), { status: 200 });
@@ -591,7 +626,7 @@ describe("App container", () => {
 
     // Switch to 声纹: the transcript panel unmounts (only the active tab renders), and the
     // VoiceprintPanel shows. The session stays selected (it's App-level state).
-    await gotoTab("声纹");
+    await gotoTab("身份");
     expect(await screen.findByText("声纹覆盖")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).not.toBeInTheDocument();
     // The 对话分析 section is secondary — collapsed by default (not open).
@@ -601,7 +636,7 @@ describe("App container", () => {
 
     // Switch back to 审核: the transcript reappears with the same session still selected — no
     // need to re-pick the day/session.
-    await gotoTab("审核");
+    await gotoTab("转写审核");
     expect(await screen.findByText("你好")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).toBeInTheDocument();
   });

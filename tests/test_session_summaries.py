@@ -187,9 +187,9 @@ def test_summarize_session_persists_schema_and_renders_note(tmp_path: Path) -> N
     assert summaries[0]["summary_type"] == "session"
     assert summaries[0]["target_type"] == "session"
     assert summaries[0]["target_id"] == "ses_test"
-    assert summaries[0]["prompt_version"] == "llm_port.session_summary.v1"
+    assert summaries[0]["prompt_version"] == "llm_port.session_summary.v2"
     content = json.loads(str(summaries[0]["content_json"]))
-    assert content["schema_version"] == "session_summary.v1"
+    assert content["schema_version"] == "session_summary.v2"
     assert content["session_id"] == "ses_test"
     assert "决定继续接入真实 ASR" in content["summary"]
     assert content["decisions"] == [

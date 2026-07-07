@@ -429,20 +429,25 @@ def suggest_people_for_session(*, config: AppConfig, session_id: str) -> dict:
     scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id)
     embeddings = get_embeddings(config=config, segment_ids=scope_ids)
     speakers = _segment_speakers(config=config, segment_ids=scope_ids)
+    negative = _negative_person_ids_by_segment(config=config, segment_ids=scope_ids)
 
-    per_speaker_vectors: dict[str, list[np.ndarray]] = {}
+    per_speaker_vectors: dict[str, list[tuple[str, np.ndarray]]] = {}
     for segment_id in scope_ids:
         vector = embeddings.get(segment_id)
         speaker = speakers.get(segment_id)
         if vector is None or speaker is None or int(vector.shape[0]) != centroid_dim:
             continue
-        per_speaker_vectors.setdefault(speaker, []).append(_normalize(vector))
+        per_speaker_vectors.setdefault(speaker, []).append((segment_id, _normalize(vector)))
 
     suggestions = []
-    for speaker, vectors in per_speaker_vectors.items():
-        cluster_mean = _normalize(np.mean(vectors, axis=0))
+    for speaker, segment_vectors in per_speaker_vectors.items():
+        disallowed = set().union(*(negative.get(segment_id, set()) for segment_id, _ in segment_vectors))
+        allowed_indices = [index for index, person_id in enumerate(person_ids) if person_id not in disallowed]
+        if not allowed_indices:
+            continue
+        cluster_mean = _normalize(np.mean([vector for _, vector in segment_vectors], axis=0))
         sims = centroid_matrix @ cluster_mean
-        best = int(np.argmax(sims))
+        best = allowed_indices[int(np.argmax(sims[allowed_indices]))]
         best_sim = float(sims[best])
         if not np.isfinite(best_sim):
             continue
@@ -541,6 +546,7 @@ def auto_attribute_enrolled(
 
     scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id, day=day)
     embeddings = get_embeddings(config=config, segment_ids=scope_ids)
+    negative = _negative_person_ids_by_segment(config=config, segment_ids=scope_ids)
 
     # Manually-labelled in-scope segments: ground truth, never overwritten.
     manual_segment_ids = _manual_override_segment_ids(config=config, segment_ids=scope_ids)
@@ -593,6 +599,8 @@ def auto_attribute_enrolled(
             # The winner's best single cosine must clear the floor (far-away isolated points stay out).
             best_single = float(top_sims[top_people == best_person].max())
             if confidence < threshold or best_single < _KNN_COSINE_FLOOR:
+                continue
+            if best_person in negative.get(candidate_ids[row], set()):
                 continue
             writes.append((candidate_ids[row], best_person))
             assigned += 1
@@ -660,6 +668,32 @@ def _manual_override_segment_ids(*, config: AppConfig, segment_ids: list[str]) -
             )
             for row in rows:
                 result.add(str(row["segment_id"]))
+    finally:
+        conn.close()
+    return result
+
+
+def _negative_person_ids_by_segment(*, config: AppConfig, segment_ids: list[str]) -> dict[str, set[str]]:
+    if not segment_ids:
+        return {}
+    result: dict[str, set[str]] = {}
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(segment_ids), _SQL_CHUNK):
+            chunk = segment_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = fetch_all(
+                conn,
+                f"""
+                select segment_id, person_id
+                from segment_identity_negative_feedback
+                where segment_id in ({placeholders})
+                """,
+                tuple(chunk),
+            )
+            for row in rows:
+                result.setdefault(str(row["segment_id"]), set()).add(str(row["person_id"]))
     finally:
         conn.close()
     return result

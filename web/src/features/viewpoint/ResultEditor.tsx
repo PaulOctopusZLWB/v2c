@@ -36,6 +36,7 @@ export function ResultEditor({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [published, setPublished] = useState<string | null>(vp.note_path);
+  const identityBlocked = vp.identity_review ? !vp.identity_review.can_summarize : false;
 
   useEffect(() => {
     setDoc(vp.effective ? clone(vp.effective) : null);
@@ -94,16 +95,17 @@ export function ResultEditor({
     <section className="vp-result card">
       <div className="vp-result-head">
         <div className="section-title" style={{ margin: 0 }}>
-          <Icon name="viewpoint" /> 观点结果
+          <Icon name="viewpoint" /> 总结结果
           <span className={`status s-${vp.status}`}>{STATUS_ZH[vp.status]}</span>
           {vp.published_at ? <span className="dim num">{vp.published_at}</span> : null}
         </div>
-        <button type="button" className="primary" disabled={busy || vp.generating} onClick={regenerate}>
+        <button type="button" className="primary" disabled={busy || vp.generating || identityBlocked} onClick={regenerate}>
           {vp.generating ? <span className="spinner" aria-hidden /> : <Icon name="refresh" />} 重新生成
         </button>
       </div>
 
       <div className="vp-result-body">
+        {identityBlocked ? <p className="vp-error">请先在「身份」确认本场参与人；允许未知说话人存在，但不允许名单外人名进入总结。</p> : null}
         {vp.generating ? (
           <div className="vp-generating" role="status">
             <span className="spinner" aria-hidden /> 生成中…
@@ -112,7 +114,7 @@ export function ResultEditor({
           <div className="empty">
             <Icon name="inbox" className="empty-icon" />
             <h3>尚未生成</h3>
-            <p>点击「重新生成」生成本会话的观点。</p>
+            <p>点击「重新生成」生成本会话的总结。</p>
           </div>
         ) : (
           <ResultFields doc={doc} setDoc={setDoc} busy={busy} onCommit={commit} />

@@ -18,9 +18,11 @@ const POLL_MS = 2000;
  */
 export function ViewpointWorkspace({
   initialDay,
+  initialSessionId,
   onPlaybackError
 }: {
   initialDay?: string | null;
+  initialSessionId?: string | null;
   onPlaybackError?: (message: string) => void;
 } = {}) {
   const [day, setDay] = useState<string>(initialDay ?? "");
@@ -69,13 +71,21 @@ export function ViewpointWorkspace({
     await loadViewpoint(sessionId);
   };
 
+  useEffect(() => {
+    if (initialDay && initialDay !== day) setDay(initialDay);
+  }, [initialDay]);
+
+  useEffect(() => {
+    if (initialSessionId && initialSessionId !== sessionId) void pickSession(initialSessionId);
+  }, [initialSessionId]);
+
   return (
     <div className="vp-page">
       <div className="vp-picker card">
         <label className="vp-pick">
           <span>日期</span>
           <select
-            aria-label="观点日期"
+            aria-label="总结日期"
             value={day}
             disabled={days.length === 0}
             onChange={(e) => { setDay(e.target.value); void pickSession(""); }}
@@ -89,7 +99,7 @@ export function ViewpointWorkspace({
         <label className="vp-pick">
           <span>会话</span>
           <select
-            aria-label="观点会话"
+            aria-label="总结会话"
             value={sessionId}
             disabled={!day || sessionsLoading || sessions.length === 0}
             onChange={(e) => void pickSession(e.target.value)}
@@ -123,7 +133,7 @@ export function ViewpointWorkspace({
         <EmptyState
           icon="inbox"
           title="选择一个会话开始"
-          description="选好日期与会话后,可逐段编辑转写、生成并保存观点。"
+          description="选好日期与会话后,可逐段编辑转写、生成并保存总结。"
         />
       )}
     </div>

@@ -44,7 +44,7 @@ class SummarySpeakerAnalysis(BaseModel):
 class SessionSummarySchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["session_summary.v1"] = "session_summary.v1"
+    schema_version: Literal["session_summary.v1", "session_summary.v2"] = "session_summary.v1"
     session_id: str
     headline: str
     summary: str

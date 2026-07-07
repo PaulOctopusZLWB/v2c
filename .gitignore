@@ -30,3 +30,6 @@ web/shot*.mjs
 
 # Machine-specific runtime config (absolute paths) — keep local
 config/local.toml
+
+# Personal scratch dir at repo root — never commit
+tmp/

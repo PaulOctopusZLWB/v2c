@@ -58,7 +58,7 @@ describe("ViewpointWorkspace", () => {
     renderWithQuery(<ViewpointWorkspace />);
 
     expect(await screen.findByRole("heading", { name: "选择一个会话开始" })).toBeInTheDocument();
-    expect(screen.getByText("选好日期与会话后,可逐段编辑转写、生成并保存观点。")).toBeInTheDocument();
+    expect(screen.getByText("选好日期与会话后,可逐段编辑转写、生成并保存总结。")).toBeInTheDocument();
   });
 
   it("picks a session and loads its viewpoint into the 2-pane workspace", async () => {
@@ -93,10 +93,10 @@ describe("ViewpointWorkspace", () => {
 
       // Under fake timers, findBy*'s internal polling can't advance — query synchronously after
       // flushing microtasks (the day select exists once api.days resolved).
-      const daySel = screen.getByLabelText("观点日期");
+      const daySel = screen.getByLabelText("总结日期");
       await act(async () => { fireSelect(daySel, "2087-05-10"); await vi.advanceTimersByTimeAsync(0); });
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      const sessSel = screen.getByLabelText("观点会话");
+      const sessSel = screen.getByLabelText("总结会话");
       await act(async () => { fireSelect(sessSel, "ses_1"); await vi.advanceTimersByTimeAsync(0); });
 
       // Initial viewpoint load returned generating:true -> polling starts.

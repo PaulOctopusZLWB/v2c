@@ -29,10 +29,21 @@ def publish_session_notes(*, config: AppConfig, day: str, source_run_id: str | N
               sm.content_json as summary_json
             from sessions s
             left join summaries sm
-              on sm.summary_type = 'session'
-             and sm.target_type = 'session'
-             and sm.target_id = s.session_id
-             and sm.prompt_version = 'llm_port.session_summary.v1'
+              on sm.summary_id = (
+                select sm2.summary_id
+                from summaries sm2
+                where sm2.summary_type = 'session'
+                  and sm2.target_type = 'session'
+                  and sm2.target_id = s.session_id
+                order by
+                  case
+                    when sm2.prompt_version = 'llm_port.session_summary.v2' then 0
+                    when sm2.prompt_version = 'llm_port.session_summary.v1' then 1
+                    else 2
+                  end,
+                  sm2.updated_at desc
+                limit 1
+              )
             where s.date_key = ?
             order by s.started_at
             """,
@@ -122,7 +133,7 @@ def _session_note_text(
     # Per §29.7 the note carries only the session_summary managed block and a user
     # block. The full transcript is intentionally NOT embedded; it stays queryable on
     # demand via `pcn session-transcript`. ``summary`` is the already-parsed EFFECTIVE
-    # session_summary.v1 doc (edited ?? generated), or None when nothing was generated.
+    # session_summary.v1/v2 doc (edited ?? generated), or None when nothing was generated.
     session_id = str(session["session_id"])
     title = summary["headline"] if summary else f"Session {session_id}"
     managed_lines = _summary_lines(session, summary)

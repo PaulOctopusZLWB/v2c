@@ -8,19 +8,19 @@ describe("Tabs", () => {
     render(<Tabs active="review" onSelect={vi.fn()} />);
     const tabs = screen.getAllByRole("tab");
     expect(tabs).toHaveLength(6);
-    expect(tabs.map((t) => t.textContent)).toEqual(["首页", "录入", "审核", "声纹", "观点", "设置"]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["首页", "录入", "身份", "转写审核", "总结", "设置"]);
   });
 
   it("marks the active tab with aria-current", () => {
     render(<Tabs active="review" onSelect={vi.fn()} />);
-    expect(screen.getByRole("tab", { name: "审核" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("tab", { name: "声纹" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("tab", { name: "转写审核" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("tab", { name: "身份" })).not.toHaveAttribute("aria-current");
   });
 
   it("calls onSelect with the tab id when clicked", async () => {
     const onSelect = vi.fn();
     render(<Tabs active="review" onSelect={onSelect} />);
-    await userEvent.click(screen.getByRole("tab", { name: "声纹" }));
+    await userEvent.click(screen.getByRole("tab", { name: "身份" }));
     expect(onSelect).toHaveBeenCalledWith("speakers");
   });
 });

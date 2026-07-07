@@ -20,6 +20,7 @@ from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.codex_session_jsonl import parse_codex_session_jsonl
 from personal_context_node.config import AppConfig
 from personal_context_node.daily_reports import get_daily_report_status
+from personal_context_node.db_backup import backup_sqlite_database
 from personal_context_node.doctor import run_doctor
 from personal_context_node.jobs import job_status_rows, record_job_run
 from personal_context_node.init_health import check_health, initialize_workspace
@@ -111,6 +112,30 @@ def health_cmd(
                 f"status={result.status}",
                 f"database={result.database}",
                 f"obsidian_vault={result.obsidian_vault}",
+            ]
+        )
+    )
+
+
+@app.command(name="db-backup")
+def db_backup_cmd(
+    config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
+    data_dir: Path | None = typer.Option(None, help="Local data directory."),
+    obsidian_vault: Path | None = typer.Option(
+        None,
+        help="Dedicated PersonalContext Obsidian vault path.",
+    ),
+    timestamp: str | None = typer.Option(None, help="Optional backup timestamp suffix."),
+) -> None:
+    config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    result = backup_sqlite_database(config=config, timestamp=timestamp)
+    typer.echo(
+        " ".join(
+            [
+                f"backup_path={result.backup_path}",
+                f"manifest_path={result.manifest_path}",
+                f"source_sha256={result.source_sha256}",
+                f"backup_sha256={result.backup_sha256}",
             ]
         )
     )

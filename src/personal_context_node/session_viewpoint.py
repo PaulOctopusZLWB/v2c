@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from personal_context_node import llm_results
 from personal_context_node.config import AppConfig
+from personal_context_node.identity_review import identity_review_for_session
 from personal_context_node.storage.sqlite import connect, initialize
 from personal_context_node.summary_schemas import validate_session_summary
 from personal_context_node.transcript_review import reviewed_segments_for_session
@@ -72,6 +73,7 @@ def viewpoint_state(*, config: AppConfig, session_id: str) -> dict:
     note_path = sidecar["note_path"] if sidecar is not None else None
 
     effective = edited if edited is not None else generated
+    identity_review = identity_review_for_session(config=config, session_id=session_id)
 
     stale = bool(
         has_generated
@@ -92,6 +94,11 @@ def viewpoint_state(*, config: AppConfig, session_id: str) -> dict:
         "note_path": note_path,
         "prompt": effective_session_prompt(config=config, session_id=session_id),
         "generating": _is_generating(config=config, session_id=session_id),
+        "identity_review": {
+            "can_summarize": identity_review["can_summarize"],
+            "participants": identity_review["participants"],
+            "negative_feedback_count": identity_review["negative_feedback_count"],
+        },
     }
 
 

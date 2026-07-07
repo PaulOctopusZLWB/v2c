@@ -9,6 +9,7 @@ from uuid import uuid4
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.llm import LLMPort, SessionSummary
 from personal_context_node.evidence_refs import persist_segment_evidence_refs
+from personal_context_node.identity_review import safe_llm_segments
 from personal_context_node.session_viewpoint import (
     effective_session_prompt,
     record_summary_regenerated,
@@ -18,7 +19,7 @@ from personal_context_node.summary_schemas import validate_session_summary
 from personal_context_node.transcript_review import accepted_segments_clause
 
 
-PROMPT_VERSION = "llm_port.session_summary.v1"
+PROMPT_VERSION = "llm_port.session_summary.v2"
 
 
 @dataclass(frozen=True)
@@ -30,22 +31,40 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        gate = accepted_segments_clause("transcript_segments") if config.require_accepted_transcripts else ""
+        gate = accepted_segments_clause("ts") if config.require_accepted_transcripts else ""
         segments = fetch_all(
             conn,
             f"""
-            select segment_id, speaker, start_ms, end_ms, text, evidence_id
-            from transcript_segments
-            where session_id = ? and is_active = 1
+            select
+              ts.segment_id,
+              ts.speaker,
+              coalesce(ts.speaker_cluster_id, ts.speaker) as speaker_cluster_id,
+              ts.start_ms,
+              ts.end_ms,
+              ts.text,
+              ts.evidence_id,
+              coalesce(o.person_id, m.person_id) as person_id,
+              coalesce(o.person_label, m.person_label) as person_label
+            from transcript_segments ts
+            left join segment_person_overrides o on o.segment_id = ts.segment_id
+            left join speaker_mappings m
+              on m.speaker_cluster_id = coalesce(ts.speaker_cluster_id, ts.speaker)
+              or m.speaker = coalesce(ts.speaker_cluster_id, ts.speaker)
+            where ts.session_id = ? and ts.is_active = 1
               {gate}
-            order by start_ms, segment_id
+            order by coalesce(ts.absolute_start_at, ''), ts.start_ms, ts.segment_id
             """,
             (session_id,),
         )
         if not segments:
             return SessionSummaryResult(summaries_created=0)
-        llm_segments = [_llm_segment(row, include_speaker=config.send_speaker_labels) for row in segments]
-        prompt = str(effective_session_prompt(config=config, session_id=session_id)["effective"])
+        llm_segments, identity_prompt = safe_llm_segments(
+            config=config,
+            session_id=session_id,
+            segments=segments,
+            include_speaker=config.send_speaker_labels,
+        )
+        prompt = f"{effective_session_prompt(config=config, session_id=session_id)['effective']}\n\n{identity_prompt}"
         # Do NO DB write before the (slow, possibly multi-minute) LLM call. Holding the WAL write
         # lock across generate_session_summary would block every other writer — manual viewpoint
         # edit/publish, the segment-text PATCH, even concurrent pipeline steps — until busy_timeout
@@ -75,10 +94,10 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
 
 def _persist_session_summary(conn: sqlite3.Connection, summary: SessionSummary) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    # §37.4 session_summary.v1 is a closed schema; validate before persisting.
+    # §37.4 session_summary.v1/v2 are closed schemas; validate before persisting.
     content = validate_session_summary(
         {
-            "schema_version": "session_summary.v1",
+            "schema_version": "session_summary.v2",
             **asdict(summary),
         }
     )

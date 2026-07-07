@@ -383,7 +383,9 @@ def test_summarize_session_passes_effective_prompt_to_llm(tmp_path: Path) -> Non
 
     summarize_session(config=config, session_id="ses_test", llm=RecordingLLM())
 
-    assert captured["prompt"] == "本会话专属模板。"
+    assert str(captured["prompt"]).startswith("本会话专属模板。")
+    assert "本场确认出现的人物" in str(captured["prompt"])
+    assert "不得输出任何未确认人物姓名" in str(captured["prompt"])
 
 
 # --- viewpoint_state surfaces prompt block + generating -------------------

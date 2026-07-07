@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.errors import TerminalPortError
 from personal_context_node.core.ports.asr import ASRResult, ASRSegment
 from personal_context_node.sessions import derive_sessions_for_day
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
@@ -34,6 +37,7 @@ def _seed_audio_file(
     audio_file_id: str = "aud_diar",
     local_raw_path: str = "/local/diar.wav",
     recorded_at: str = "2026-06-14T09:00:00+08:00",
+    duration_ms: int = 60_000,
 ) -> None:
     conn = connect(database_path)
     try:
@@ -51,7 +55,7 @@ def _seed_audio_file(
                 "/source/diar.wav",
                 local_raw_path,
                 "sha256:diar",
-                60_000,
+                duration_ms,
                 recorded_at,
                 "2026-06-14T09:10:00+08:00",
                 "imported",
@@ -170,6 +174,28 @@ def test_diarized_rerun_is_idempotent_no_duplicate_active_segments(tmp_path: Pat
     # Re-run safe: only one active segment set (3 rows); the first run's rows were deactivated.
     assert len(active) == 3
     assert len(inactive) == 3
+
+
+def test_diarized_empty_audio_fails_terminally_without_calling_asr(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_audio_file(database_path=config.database_path, duration_ms=0)
+
+    class ExplodingASR:
+        model_name = "should-not-run"
+        model_version = "test"
+
+        def transcribe(self, audio_path: Path) -> ASRResult:
+            raise AssertionError("ASR should not be called for 0ms audio")
+
+    with pytest.raises(TerminalPortError, match="empty audio file"):
+        transcribe_audio_file_diarized(config=config, asr=ExplodingASR(), audio_file_id="aud_diar")
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id from transcript_segments where audio_file_id = 'aud_diar'")
+    finally:
+        conn.close()
+    assert rows == []
 
 
 def test_diarized_multi_session_keeps_session_ids_stable_across_rerun(tmp_path: Path) -> None:

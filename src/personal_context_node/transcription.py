@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from personal_context_node.audio_preprocessing import _read_wav_metadata
 from personal_context_node.config import AppConfig
+from personal_context_node.core.ports.errors import TerminalPortError
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
@@ -131,12 +132,14 @@ def transcribe_audio_file_diarized(*, config: AppConfig, asr: ASRPort, audio_fil
         _ensure_transcript_columns(conn)
         rows = fetch_all(
             conn,
-            "select audio_file_id, local_raw_path, recorded_at from audio_files where audio_file_id = ?",
+            "select audio_file_id, local_raw_path, recorded_at, duration_ms from audio_files where audio_file_id = ?",
             (audio_file_id,),
         )
         if not rows:
             return TranscriptionResult(chunks_transcribed=0, segments_created=0)
         audio = rows[0]
+        if int(audio["duration_ms"] or 0) <= 0:
+            raise TerminalPortError(f"empty audio file has no frames: {audio_file_id}")
         recorded_at = str(audio["recorded_at"])
         # Whole-file scope: this runs once per file (segments are already in absolute
         # source-file time), so retire ALL of this file's active segments before reinsert

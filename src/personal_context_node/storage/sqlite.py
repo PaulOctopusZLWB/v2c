@@ -350,6 +350,38 @@ create table if not exists segment_person_overrides (
   source text not null default 'manual'
 );
 
+create table if not exists session_participants (
+  session_id text not null references sessions(session_id),
+  person_id text not null references persons(person_id),
+  status text not null check(status in ('present', 'absent', 'uncertain')),
+  source text not null default 'manual',
+  note text,
+  updated_at text not null,
+  primary key(session_id, person_id)
+);
+
+create index if not exists idx_session_participants_session
+on session_participants(session_id);
+
+create index if not exists idx_session_participants_person
+on session_participants(person_id);
+
+create table if not exists segment_identity_negative_feedback (
+  segment_id text not null references transcript_segments(segment_id),
+  person_id text not null references persons(person_id),
+  session_id text,
+  source text not null default 'manual',
+  note text,
+  updated_at text not null,
+  primary key(segment_id, person_id)
+);
+
+create index if not exists idx_segment_identity_negative_session
+on segment_identity_negative_feedback(session_id);
+
+create index if not exists idx_segment_identity_negative_person
+on segment_identity_negative_feedback(person_id);
+
 create table if not exists segment_embeddings (
   segment_id text primary key references transcript_segments(segment_id),
   model text not null,

@@ -32,7 +32,17 @@ function toggle(list: string[], v: string): string[] {
  * checkbox (adds the session id to `session_ids`). Day- vs session-level selection are
  * independent — both supported. Compact + scrollable.
  */
-export function ScopeSelector({ value, onChange }: { value: Scope; onChange: (v: Scope) => void }) {
+export function ScopeSelector({
+  value,
+  onChange,
+  activeSessionId,
+  onInspectSession
+}: {
+  value: Scope;
+  onChange: (v: Scope) => void;
+  activeSessionId?: string | null;
+  onInspectSession?: (sessionId: string, day: string) => void;
+}) {
   const daysQuery = useDaysQuery();
   const days = daysQuery.data?.days ?? [];
   const loading = daysQuery.isLoading;
@@ -59,9 +69,31 @@ export function ScopeSelector({ value, onChange }: { value: Scope; onChange: (v:
     });
   };
 
-  const toggleDay = (day: string) => onChange({ ...value, days: toggle(value.days, day) });
-  const toggleSession = (sid: string) =>
+  const inspectOnlySessionForDay = (day: string, sessionCount: number) => {
+    if (!onInspectSession || sessionCount !== 1) return;
+    const cached = sessionsByDay[day];
+    if (cached?.[0]) {
+      onInspectSession(cached[0].session_id, day);
+      return;
+    }
+    api
+      .sessionsForDay(day)
+      .then((r) => {
+        const sessions = r.sessions ?? [];
+        setSessionsByDay((m) => ({ ...m, [day]: sessions }));
+        if (sessions[0]) onInspectSession(sessions[0].session_id, day);
+      })
+      .catch(() => setSessionsByDay((m) => ({ ...m, [day]: [] })));
+  };
+  const toggleDay = (day: string, sessionCount: number) => {
+    const nextDays = toggle(value.days, day);
+    onChange({ ...value, days: nextDays });
+    if (nextDays.includes(day)) inspectOnlySessionForDay(day, sessionCount);
+  };
+  const toggleSession = (sid: string, day: string) => {
     onChange({ ...value, session_ids: toggle(value.session_ids, sid) });
+    onInspectSession?.(sid, day);
+  };
   const clear = () => onChange({ session_ids: [], days: [] });
 
   const total = value.days.length + value.session_ids.length;
@@ -77,7 +109,7 @@ export function ScopeSelector({ value, onChange }: { value: Scope; onChange: (v:
         </button>
       </div>
 
-      <p className="scope-hint muted">勾选日期或会话(可跨多天/多会话对比),再点「投射」。</p>
+      <p className="scope-hint muted">勾选日期或会话用于投射；点「审核身份」会把右侧闸机切到该会话。</p>
 
       {loading ? (
         <Skeleton label="正在载入日期" rows={4} />
@@ -97,7 +129,7 @@ export function ScopeSelector({ value, onChange }: { value: Scope; onChange: (v:
                       type="checkbox"
                       aria-label={dayLabel(d.day)}
                       checked={dayChecked}
-                      onChange={() => toggleDay(d.day)}
+                      onChange={() => toggleDay(d.day, d.session_count)}
                     />
                     <span className="scope-day-label">{dayLabel(d.day)}</span>
                     <span className="scope-day-count num">{d.session_count}</span>
@@ -126,19 +158,28 @@ export function ScopeSelector({ value, onChange }: { value: Scope; onChange: (v:
                       sessions.map((s) => {
                         const tod = timeOfDay(s.started_at) || "会话";
                         const checked = value.session_ids.includes(s.session_id);
+                        const active = activeSessionId === s.session_id;
                         return (
-                          <li key={s.session_id} className="scope-session">
+                          <li key={s.session_id} className={`scope-session${active ? " active" : ""}`}>
                             <label className="scope-check">
                               <input
                                 type="checkbox"
-                                aria-label={`${tod} ${s.name ?? ""}`.trim()}
+                                aria-label={`投射 ${tod} ${s.name ?? ""}`.trim()}
                                 checked={checked}
-                                onChange={() => toggleSession(s.session_id)}
+                                onChange={() => toggleSession(s.session_id, d.day)}
                               />
                               <span className="scope-session-time num">{tod}</span>
                               {s.name ? <span className="scope-session-name">{s.name}</span> : null}
                               <span className="scope-session-count num">{s.segment_count}段</span>
                             </label>
+                            <button
+                              type="button"
+                              className="scope-session-inspect"
+                              aria-current={active ? "true" : undefined}
+                              onClick={() => onInspectSession?.(s.session_id, d.day)}
+                            >
+                              {active ? "正在审核" : "审核身份"}
+                            </button>
                           </li>
                         );
                       })

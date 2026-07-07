@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import { Progress } from "./components/Progress";
 import { RunInspector } from "./components/RunInspector";
@@ -14,6 +14,7 @@ import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPan
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
 import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
 import { ClusterListPanel } from "./features/speakers/ClusterListPanel";
+import { IdentityReviewPanel } from "./features/speakers/IdentityReviewPanel";
 import type { IdentificationStatus } from "./features/speakers/voiceprintWorkflow";
 import { PeoplePanel } from "./features/people/PeoplePanel";
 import { VoiceprintMap, type VoiceprintMapState } from "./features/viz/VoiceprintMap";
@@ -36,10 +37,10 @@ import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
 import { dayLabel, taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, DayStatusRow, Health, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, IdentityReview, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
 
 const DEVICE_POLL_MS = 5000;
-const ACTIVE_STATUSES = ["pending", "claimed", "running"];
+const IN_FLIGHT_STATUSES = ["claimed", "running"];
 
 /** Per-task_type done/total breakdown for the Progress bar, from the compact SSE summary
  *  (so the always-visible header shows it without fetching the full task list). */
@@ -126,8 +127,9 @@ export function App() {
   const [lastAutoAttributeCount, setLastAutoAttributeCount] = useState<number | null>(null);
   // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
   const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
-  // Right column of the 声纹 tab: 聚类 (cluster→person, the primary path) vs 人物 (roster/noise).
-  const [rightTab, setRightTab] = useState<"clusters" | "people">("clusters");
+  // Right column of the 身份 tab: 会话身份 (gate) → 候选簇 (cluster→person) → 人物库.
+  const [rightTab, setRightTab] = useState<"identity" | "clusters" | "people">("identity");
+  const [identityReview, setIdentityReview] = useState<IdentityReview | null>(null);
   // Identification progress for the 声纹 gate row + stepper.
   const [idStatus, setIdStatus] = useState<IdentificationStatus | null>(null);
   const [llm, setLlm] = useState<DailyLlmResult | null>(null);
@@ -150,6 +152,29 @@ export function App() {
   // Mirror bootstrap state into a ref so the mount-time poll interval reads the latest value
   // (its closure captures the initial state).
   const bootstrappedRef = useRef(false);
+  const sessionExcludedPersonIds = useMemo(() => {
+    const isCurrentSingleSessionProjection =
+      !!selectedSessionId &&
+      identityReview?.session_id === selectedSessionId &&
+      appliedRequest?.session_ids?.length === 1 &&
+      appliedRequest.session_ids[0] === selectedSessionId &&
+      (appliedRequest.days?.length ?? 0) === 0;
+    if (!isCurrentSingleSessionProjection) return [];
+
+    const ids = new Set<string>();
+    for (const participant of identityReview.participants) {
+      if (participant.status === "absent") ids.add(participant.person_id);
+    }
+    for (const candidate of identityReview.candidates) {
+      if (candidate.status === "excluded" && candidate.person_id) ids.add(candidate.person_id);
+    }
+    return Array.from(ids).sort();
+  }, [selectedSessionId, identityReview, appliedRequest]);
+
+  useEffect(() => {
+    setIdentityReview(null);
+  }, [selectedSessionId]);
+
   useEffect(() => {
     bootstrappedRef.current = bootstrapped;
   }, [bootstrapped]);
@@ -289,6 +314,20 @@ export function App() {
     setSelectedSessionId(id);
     setHighlightedSegmentId(null);
     setSession(await api.session(id));
+  }
+
+  async function inspectIdentitySession(sessionId: string, day?: string) {
+    if (day && day !== selectedDay) {
+      setSelectedDay(day);
+      setClusterDay(day);
+      try {
+        setLlm(await api.dailyLlm(day));
+      } catch {
+        setLlm(null);
+      }
+    }
+    setRightTab("identity");
+    await selectSession(sessionId);
   }
 
   // Debounced global transcript search: while the palette is open and the query is >=2 chars,
@@ -500,7 +539,7 @@ export function App() {
   // Summary-derived counts (the SSE stream no longer carries the full task array).
   const counts = summary?.status_counts ?? {};
   const summaryTotal = summary?.total ?? 0;
-  const activeCount = ACTIVE_STATUSES.reduce((n, s) => n + (counts[s] ?? 0), 0);
+  const inFlightCount = IN_FLIGHT_STATUSES.reduce((n, s) => n + (counts[s] ?? 0), 0);
   // Prefer the backend's settled-task count (it knows retryable-but-exhausted failures count
   // as done); fall back to total-minus-active only for an older backend without done_total.
   const doneCount =
@@ -511,7 +550,7 @@ export function App() {
 
   const importing = !!import_progress?.active;
   // The pipeline is "running" if importing, the worker is alive, OR a task is mid-flight.
-  const pipelineRunning = importing || worker_running || activeCount > 0;
+  const pipelineRunning = importing || worker_running || inFlightCount > 0;
 
   // Re-list days whenever the pipeline finishes (running -> idle), so a completed run
   // surfaces its new day without a manual refresh.
@@ -525,7 +564,7 @@ export function App() {
 
   // Live progress: import phase first (copying files), then transcription/processing
   // driven by the compact summary counts. At idle / 100% the bar disappears.
-  const inFlight = worker_running || activeCount > 0;
+  const inFlight = worker_running || inFlightCount > 0;
   const current: Stage = summary?.active_stage ? stageForTaskType(summary.active_stage) : "device";
   const total = importing ? import_progress!.total : inFlight ? summaryTotal : 0;
   const done = importing ? import_progress!.done : doneCount;
@@ -547,7 +586,7 @@ export function App() {
   // ⌘K command set, rebuilt from current state each render: jump to any tab, open any
   // loaded day (-> 审核), or run a global action. Keep to navigation/tab jumps for now —
   // only actions trivially callable from App scope.
-  const TAB_LABELS: Record<TabId, string> = { home: "首页", ingest: "录入", review: "审核", speakers: "声纹", llm: "观点", settings: "设置" };
+  const TAB_LABELS: Record<TabId, string> = { home: "首页", ingest: "录入", speakers: "身份", review: "转写审核", llm: "总结", settings: "设置" };
   const commands: Command[] = [
     ...(Object.keys(TAB_LABELS) as TabId[]).map((id) => ({
       id: `tab-${id}`,
@@ -779,11 +818,12 @@ export function App() {
     );
     return (
       <div className="tab-page single speakers-layout">
-        {/* Toolbar: a short title + the compact 提取声纹/匹配 control. */}
+        {/* Toolbar: identity review first, voiceprint extraction as the evidence source. */}
         <section className="speakers-toolbar card">
           <div className="speakers-toolbar-title">
             <Icon name="mic" />
-            <strong>声纹身份</strong>
+            <strong>身份审核</strong>
+            <span className="dim">确认本场出现的人，再放行总结</span>
           </div>
           <div className="speakers-extract">
             <VoiceprintPanel
@@ -800,11 +840,13 @@ export function App() {
 
         <VoiceprintWorkflowPanel status={idStatus} />
 
-        {/* Main row: the projection controls rail, the map (hero), the labeling/identify controls. */}
+        {/* Main row: scope controls | voiceprint evidence map | session identity gate. */}
         <div className="speakers-main speakers-main-proj">
           <div className="speakers-proj-rail">
             <ScopeSelector
               value={scope}
+              activeSessionId={selectedSessionId}
+              onInspectSession={(sessionId, day) => void guard(inspectIdentitySession)(sessionId, day)}
               onChange={(next) => {
                 setScope(next);
                 // A scope change auto-applies (re-projects with the current params).
@@ -837,6 +879,7 @@ export function App() {
               onSelectionChange={setVoiceprintSelectedCount}
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
+              sessionExcludedPersonIds={sessionExcludedPersonIds}
               onLabel={async (personId, segmentIds) => {
                 await api.labelSegments(personId, segmentIds);
                 push(`已标注 ${segmentIds.length} 段`);
@@ -845,14 +888,22 @@ export function App() {
             />
           </div>
           <div className="speakers-people">
-            <div className="people-mode" role="group" aria-label="右栏切换">
+            <div className="people-mode identity-mode" role="group" aria-label="身份工作台切换">
+              <button
+                type="button"
+                className={rightTab === "identity" ? "active" : ""}
+                aria-pressed={rightTab === "identity"}
+                onClick={() => setRightTab("identity")}
+              >
+                会话身份
+              </button>
               <button
                 type="button"
                 className={rightTab === "clusters" ? "active" : ""}
                 aria-pressed={rightTab === "clusters"}
                 onClick={() => setRightTab("clusters")}
               >
-                聚类
+                候选簇
               </button>
               <button
                 type="button"
@@ -860,11 +911,23 @@ export function App() {
                 aria-pressed={rightTab === "people"}
                 onClick={() => setRightTab("people")}
               >
-                人物
+                人物库
               </button>
             </div>
             {rightTab === "clusters" ? (
               <ClusterListPanel onChanged={onPeopleChanged} push={push} />
+            ) : rightTab === "identity" ? (
+              <IdentityReviewPanel
+                sessionId={selectedSessionId}
+                onChanged={onPeopleChanged}
+                onReviewChange={setIdentityReview}
+                onOpenClusters={() => setRightTab("clusters")}
+                onOpenSummary={() => {
+                  setLlmMode("session");
+                  setTab("llm");
+                }}
+                push={push}
+              />
             ) : (
               <PeoplePanel
                 sessionId={selectedSessionId}
@@ -902,7 +965,7 @@ export function App() {
   // rollup (LlmResultPanel) behind a day picker.
   function renderLlm() {
     const modeToggle = (
-      <div className="llm-mode card" role="tablist" aria-label="观点视图">
+      <div className="llm-mode card" role="tablist" aria-label="总结视图">
         <button
           type="button"
           role="tab"
@@ -910,7 +973,7 @@ export function App() {
           className={`nav-mode-btn${llmMode === "session" ? " active" : ""}`}
           onClick={() => setLlmMode("session")}
         >
-          会话观点
+          会话总结
         </button>
         <button
           type="button"
@@ -930,6 +993,7 @@ export function App() {
           {modeToggle}
           <ViewpointWorkspace
             initialDay={selectedDay}
+            initialSessionId={selectedSessionId}
             onPlaybackError={(message) => push("音频播放失败", message)}
           />
         </div>
@@ -940,7 +1004,7 @@ export function App() {
       <div className="tab-page single is-reading">
         {modeToggle}
         <div className="llm-daypick card">
-          <label htmlFor="llm-day">观点日期</label>
+          <label htmlFor="llm-day">总结日期</label>
           <select
             id="llm-day"
             value={selectedDay ?? ""}

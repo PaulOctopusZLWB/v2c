@@ -86,6 +86,37 @@ def test_web_worker_import_path_drains_more_than_default_max_steps(tmp_path: Pat
     assert worker._last_result.tasks_succeeded == total_tasks
 
 
+def test_web_worker_import_failure_still_drains_existing_queue(tmp_path: Path, monkeypatch) -> None:
+    # Directory import can fail after some files were already registered by another ingest path.
+    # The background UI worker must still drain whatever is already pending instead of leaving
+    # the header stuck on pending tasks until someone manually presses Run.
+    import personal_context_node.web.worker as _worker_module
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    calls: dict[str, int] = {"n": 0}
+
+    def fake_process_once(**kwargs) -> ProcessOnceResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ProcessOnceResult(task_id="t1", task_type="transcribe_diarize", status="succeeded")
+        return ProcessOnceResult(task_id=None, task_type=None, status="no_task")
+
+    monkeypatch.setattr(_pr_module, "process_once", fake_process_once)
+    monkeypatch.setattr(
+        _worker_module,
+        "import_audio_files",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("import failed after partial progress")),
+    )
+
+    worker = PipelineWorker(config=config)
+    assert worker.start_import("ignored") is True
+    worker._thread.join(timeout=30)
+
+    assert worker._last_result is not None
+    assert worker._last_result.status == "complete"
+    assert worker._last_result.tasks_succeeded == 1
+
+
 def test_drain_closes_persistent_asr_adapter_when_done(tmp_path: Path, monkeypatch) -> None:
     # A funasr_server drain owns a resident model subprocess; once drain_now() returns the
     # worker must close() it (try/finally), or every import leaks a live MPS process. We prove

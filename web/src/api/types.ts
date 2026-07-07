@@ -42,6 +42,37 @@ export interface Person {
   is_self: number;
 }
 
+export type ParticipantStatus = "present" | "absent" | "uncertain";
+
+export interface IdentityParticipant {
+  person_id: string;
+  display_name: string;
+  status: ParticipantStatus;
+}
+
+export interface IdentityCandidate {
+  person_id?: string | null;
+  display_name?: string | null;
+  speaker?: string | null;
+  status: "trusted" | "suggested" | "excluded" | "unknown" | "noise";
+  safe_label: string;
+  segment_count: number;
+  segment_ids: string[];
+  sample_text?: string | null;
+  evidence_sources?: string[];
+}
+
+export interface IdentityReview {
+  session_id: string;
+  can_summarize: boolean;
+  participants: IdentityParticipant[];
+  candidates: IdentityCandidate[];
+  new_person_candidates: IdentityCandidate[];
+  mixed_clusters?: unknown[];
+  excluded_people?: IdentityCandidate[];
+  negative_feedback_count: number;
+}
+
 export interface ImportProgress {
   active: boolean;
   done: number;
@@ -420,6 +451,7 @@ export interface ViewpointState {
   session_id: string;
   segments: ViewpointSegment[];
   prompt: ViewpointPrompt;
+  identity_review?: Pick<IdentityReview, "can_summarize" | "participants" | "negative_feedback_count">;
   generated: ViewpointContent | null;
   edited: ViewpointContent | null;
   effective: ViewpointContent | null;
