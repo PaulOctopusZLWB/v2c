@@ -377,7 +377,13 @@ export interface HomeRecentSession {
   /** sessions.date_key — the day this session belongs to. */
   day: string;
   started_at: string;
+  /** User-given session name (rename dialog); null → fall back to a time label. */
+  name?: string | null;
   segment_count: number;
+  /** Segments still pending review in this session(状态列「待审 N」). */
+  pending_segments?: number;
+  /** Confirmed-present participants joined with ' · '(身份审核);null when none. */
+  participants?: string | null;
   review_status: ReviewStatus | "blocked";
 }
 
@@ -393,6 +399,8 @@ export interface HomeOverview {
   recent_sessions: HomeRecentSession[];
   /** The most recent day string (for deep-linking 观点), or null when empty. */
   latest_day: string | null;
+  /** 今日标题行:今天的段数与语音时长(「已录 n 段 · 时长」)。 */
+  today?: { day: string; segments: number; speech_ms: number };
 }
 
 /** One cited claim/viewpoint with the transcript segment ids that back it. Refs are preserved

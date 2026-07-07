@@ -142,7 +142,7 @@ describe("ResultEditor layout", () => {
   const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
   it("bounds the result card and scrolls the editable body instead of growing indefinitely", () => {
-    expect(css).toMatch(/\.vp-result\s*\{[^}]*max-height:\s*min\(640px,\s*calc\(100vh - 220px\)\)[^}]*overflow:\s*hidden/);
+    expect(css).toMatch(/\.vp-result\s*\{[^}]*max-height:\s*min\(640px,\s*calc\(100vh - 160px\)\)[^}]*overflow:\s*hidden/);
     expect(css).toMatch(/\.vp-result-body\s*\{[^}]*overflow-y:\s*auto/);
   });
 });

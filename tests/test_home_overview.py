@@ -58,6 +58,17 @@ def _insert_fixture(database_path: Path) -> None:
             "insert into person_voiceprints (person_id, dim, vector, n_segments, updated_at) values (?, ?, ?, ?, ?)",
             ("per_self", 4, b"\x00\x00\x00\x00", 3, "x"),
         )
+        # ses_b: give it a user name + confirmed participants (今日 recent-sessions columns);
+        # the absent row must NOT show up in `participants`.
+        conn.execute("update sessions set name = ? where session_id = ?", ("周会 · 项目排期", "ses_b"))
+        conn.execute(
+            "insert into session_participants (session_id, person_id, status, source, note, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("ses_b", "per_self", "present", "manual", None, "x"),
+        )
+        conn.execute(
+            "insert into session_participants (session_id, person_id, status, source, note, updated_at) values (?, ?, ?, ?, ?, ?)",
+            ("ses_b", "per_b", "absent", "manual", None, "x"),
+        )
         # One embedding, one emotion (distinct segments).
         conn.execute(
             "insert into segment_embeddings (segment_id, model, dim, vector, created_at) values (?, ?, ?, ?, ?)",
@@ -103,8 +114,13 @@ def test_home_overview_recent_sessions_order_and_latest_day(tmp_path: Path) -> N
     assert recent[0]["day"] == "2087-05-11"
     assert recent[0]["segment_count"] == 1
     assert recent[0]["review_status"] == "pending_review"
+    assert recent[0]["name"] == "周会 · 项目排期"
+    assert recent[0]["pending_segments"] == 1
+    assert recent[0]["participants"] == "我"  # present only; the absent 李雷 is excluded
     assert recent[1]["session_id"] == "ses_a"
     assert recent[1]["review_status"] == "pending_review"  # seg_a2 still pending
+    assert recent[1]["name"] is None
+    assert recent[1]["participants"] is None
     assert overview["latest_day"] == "2087-05-11"
 
 
@@ -123,6 +139,9 @@ def test_home_overview_empty_db(tmp_path: Path) -> None:
     assert overview["coverage"] == {"days": 0, "sessions": 0, "segments": 0, "embedded": 0, "emoted": 0}
     assert overview["recent_sessions"] == []
     assert overview["latest_day"] is None
+    today = overview["today"]
+    assert today["segments"] == 0 and today["speech_ms"] == 0
+    assert len(today["day"]) == 10  # YYYY-MM-DD (local)
 
 
 def test_home_overview_route(tmp_path: Path) -> None:

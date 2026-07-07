@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.transcript_review import review_queue
@@ -57,14 +59,21 @@ def home_overview(*, config: AppConfig) -> dict[str, object]:
               s.session_id as session_id,
               s.date_key as day,
               s.started_at as started_at,
+              s.name as name,
               count(ts.segment_id) as segment_count,
               count(*) filter (where ts.is_active = 1 and r.status is null) as pending,
               count(*) filter (where ts.is_active = 1) as active_total,
-              max(case when r.status = 'needs_fix' then 1 else 0 end) as has_flag
+              max(case when r.status = 'needs_fix' then 1 else 0 end) as has_flag,
+              (
+                select group_concat(p.display_name, ' · ')
+                from session_participants sp
+                join persons p on p.person_id = sp.person_id
+                where sp.session_id = s.session_id and sp.status = 'present'
+              ) as participants
             from sessions s
             left join transcript_segments ts on ts.session_id = s.session_id and ts.is_active = 1
             left join transcript_segment_reviews r on r.segment_id = ts.segment_id
-            group by s.session_id, s.date_key, s.started_at, s.segment_count
+            group by s.session_id, s.date_key, s.started_at, s.name, s.segment_count
             order by s.started_at desc
             limit 5
             """,
@@ -73,6 +82,13 @@ def home_overview(*, config: AppConfig) -> dict[str, object]:
             conn,
             "select date_key as day from sessions order by date_key desc limit 1",
         )
+        # 今日标题行的 「已录 n 段 · 时长」: today's session aggregates (local date_key).
+        today_key = datetime.now().astimezone().strftime("%Y-%m-%d")
+        today_row = fetch_all(
+            conn,
+            "select coalesce(sum(segment_count), 0) as segments, coalesce(sum(active_speech_ms), 0) as speech_ms from sessions where date_key = ?",
+            (today_key,),
+        )[0]
     finally:
         conn.close()
 
@@ -81,7 +97,12 @@ def home_overview(*, config: AppConfig) -> dict[str, object]:
             "session_id": row["session_id"],
             "day": row["day"],
             "started_at": row["started_at"],
+            "name": row["name"],
             "segment_count": int(row["segment_count"] or 0),
+            "pending_segments": int(row["pending"] or 0),
+            # 「参与人」列 (今日 recent-sessions table): confirmed-present identity-review
+            # participants, joined with ' · '; null when none confirmed yet.
+            "participants": row["participants"],
             "review_status": _review_status(
                 active_total=int(row["active_total"] or 0),
                 pending=int(row["pending"] or 0),
@@ -103,6 +124,11 @@ def home_overview(*, config: AppConfig) -> dict[str, object]:
         },
         "recent_sessions": recent_sessions,
         "latest_day": latest_rows[0]["day"] if latest_rows else None,
+        "today": {
+            "day": today_key,
+            "segments": int(today_row["segments"] or 0),
+            "speech_ms": int(today_row["speech_ms"] or 0),
+        },
     }
 
 

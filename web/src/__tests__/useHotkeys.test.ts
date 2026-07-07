@@ -63,15 +63,20 @@ describe("useHotkeys", () => {
     expect(onJ).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT fire a single key when the target is a <button> (defer to its activation)", () => {
+  it("on a <button>: defers only the native activation keys (Space/Enter); letters still fire", () => {
+    // 两级旁路:点击后焦点常停在按钮上,字母/数字热键(1-5/t/j/k…)必须仍然可用,
+    // 只有 Space/Enter 交还给按钮的原生激活。
     const onSpace = vi.fn();
+    const onEnter = vi.fn();
     const onA = vi.fn();
-    renderHook(() => useHotkeys({ space: onSpace, a: onA }));
+    renderHook(() => useHotkeys({ space: onSpace, enter: onEnter, a: onA }));
     const button = document.createElement("button");
     press({ key: " ", target: button });
+    press({ key: "Enter", target: button });
     press({ key: "a", target: button });
     expect(onSpace).not.toHaveBeenCalled();
-    expect(onA).not.toHaveBeenCalled();
+    expect(onEnter).not.toHaveBeenCalled();
+    expect(onA).toHaveBeenCalledTimes(1);
   });
 
   it("does NOT fire a single key on a link with href or an activatable ARIA role", () => {

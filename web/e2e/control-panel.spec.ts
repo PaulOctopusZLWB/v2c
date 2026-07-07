@@ -18,20 +18,26 @@ import { expect, test } from "@playwright/test";
 
 const PANEL = "http://127.0.0.1:5173";
 
-test("设备导入 → 运行 → 日期/会话 → 接受 → 指派发言人 → 观点(只读)", async ({ page }) => {
+test("管道导入 → 运行 → 审核(日期/会话 → 接受 → 指派发言人)→ 总结", async ({ page }) => {
   await page.goto(PANEL);
+
+  // 0. The app opens on 今日; the DevicePanel lives on the 管道 tab (sidebar).
+  await page.getByRole("tab", { name: "管道" }).click();
 
   // 1. Device-first import: click 「导入」 on the first device card. No typed path.
   await page.locator(".device-card").first().getByRole("button", { name: "导入" }).click();
 
-  // 2. The background worker is alive — the header live indicator reads 运行中.
+  // 2. The background worker is alive — the glass status-bar pill goes live.
   //    (Mock backends complete fast; SSE drives the status.)
-  await expect(page.locator(".workbench-header .live")).toContainText("运行中", { timeout: 30_000 });
+  await expect(page.locator(".statusbar-pill.live")).toBeVisible({ timeout: 30_000 });
 
-  // 3. Navigate 日期 → 会话. Buttons are keyed by id, so language-neutral:
-  //    a day button (YYYY-MM-DD …) then a session button (ses_… · status).
-  await page.getByRole("button", { name: /^2087-/ }).first().click();
-  await page.getByRole("button", { name: /^ses_/ }).first().click();
+  // 3. Navigate 审核 → 按天浏览 → 日期 → 会话. Day buttons also exist in the
+  //    sidebar 资料库, so scope to the day rail (same as the unit tests).
+  await page.getByRole("tab", { name: "审核" }).click();
+  await page.getByRole("tab", { name: "按天浏览" }).click();
+  const rail = page.getByRole("navigation", { name: "日期与会话" });
+  await rail.getByRole("button", { name: /^2087-/ }).first().click();
+  await rail.getByRole("button", { name: /^ses_/ }).first().click();
 
   // 4. Accept a transcript segment. Match the per-segment 「接受」 button exactly
   //    so it does not collide with 「全部接受剩余」 or the 接受 status chip.
@@ -40,7 +46,8 @@ test("设备导入 → 运行 → 日期/会话 → 接受 → 指派发言人 �
   // 5. Assign a speaker to a person via the 「指派发言人 …」 select.
   await page.getByLabel(/^指派发言人 /).first().selectOption({ index: 1 });
 
-  // 6. Read-only viewpoint panel: shows 观点 and the Obsidian-only confirm pointer.
-  await expect(page.locator(".llm-panel").getByRole("heading", { name: /观点/ })).toBeVisible();
-  await expect(page.getByText(/确认\/拒绝请在 Obsidian 完成/)).toBeVisible();
+  // 6. 总结 tab: the per-session workspace is the default view (mode toggle visible).
+  await page.getByRole("tab", { name: "总结" }).click();
+  await expect(page.getByRole("tab", { name: "会话总结" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "日报汇总" })).toBeVisible();
 });

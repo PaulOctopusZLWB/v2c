@@ -1,103 +1,148 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HomePanel } from "../features/home/HomePanel";
-import type { HomeOverview } from "../api/types";
+import { describe, expect, it, vi } from "vitest";
+import { HomePanel, spineStages } from "../features/home/HomePanel";
+import type { HomeOverview, StatusSummary } from "../api/types";
 
 const overview: HomeOverview = {
   review: { pending_sessions: 3, pending_segments: 47 },
   people: { total: 8, enrolled: 5 },
   coverage: { days: 12, sessions: 30, segments: 1200, embedded: 900, emoted: 600 },
   recent_sessions: [
-    { session_id: "ses_b", day: "2087-05-11", started_at: "2087-05-11T09:00:00+08:00", segment_count: 14, review_status: "pending_review" },
-    { session_id: "ses_a", day: "2087-05-10", started_at: "2087-05-10T08:00:00+08:00", segment_count: 9, review_status: "accepted" }
+    {
+      session_id: "ses_b",
+      day: "2087-05-11",
+      started_at: "2087-05-11T09:00:00+08:00",
+      name: "周会 · 项目排期",
+      segment_count: 14,
+      pending_segments: 14,
+      participants: "张三 · 我",
+      review_status: "pending_review"
+    },
+    {
+      session_id: "ses_a",
+      day: "2087-05-10",
+      started_at: "2087-05-10T08:00:00+08:00",
+      name: null,
+      segment_count: 9,
+      pending_segments: 0,
+      participants: null,
+      review_status: "accepted"
+    }
   ],
   latest_day: "2087-05-11"
 };
 
-function mockFetch(body: HomeOverview = overview) {
-  return vi.fn(async (url: string) => {
-    if (String(url).split("?")[0] === "/api/home/overview")
-      return new Response(JSON.stringify(body), { status: 200 });
-    return new Response("{}", { status: 200 });
-  });
-}
-
 const noop = () => {};
+const baseProps = {
+  overview,
+  error: null,
+  summary: null,
+  running: false,
+  onStartReview: noop,
+  onGoPeople: noop,
+  onGoPipeline: noop,
+  onOpenSession: noop
+};
 
-describe("HomePanel", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-  beforeEach(() => {
-    vi.stubGlobal("fetch", mockFetch());
-  });
+describe("HomePanel (今日)", () => {
+  it("renders the 待审 hero (number + segments + actions), 人物 and 覆盖 cards", () => {
+    render(<HomePanel {...baseProps} />);
 
-  it("renders the pending review headline, people, and coverage stats", async () => {
-    render(<HomePanel onGoReview={noop} onGoSpeakers={noop} onGoLlm={noop} onOpenSession={noop} />);
-
-    // 待审 card: the big number (pending_sessions) + "N 处待审 · M 段" sub.
-    const reviewCard = await screen.findByRole("button", { name: "待审" });
+    const reviewCard = screen.getByRole("region", { name: "待审" });
     expect(within(reviewCard).getByText("3")).toBeInTheDocument();
-    expect(reviewCard.textContent).toMatch(/3 处待审 · 47 段/);
-    // 人物 card: total + enrolled (text is split across nodes, so assert on the card text).
+    expect(reviewCard.textContent).toMatch(/会话 · 47 段/);
+    expect(within(reviewCard).getByRole("button", { name: /开始审核/ })).toBeInTheDocument();
+    expect(within(reviewCard).getByRole("button", { name: /查看队列/ })).toBeInTheDocument();
+
     const peopleCard = screen.getByRole("button", { name: "人物" });
     expect(peopleCard.textContent).toMatch(/8/);
-    expect(peopleCard.textContent).toMatch(/5 已登记声纹/);
-    // 覆盖 stat strip: days / sessions / segments.
+    expect(peopleCard.textContent).toMatch(/已登记 5/);
+
     const coverage = screen.getByRole("region", { name: "覆盖" });
-    expect(within(coverage).getByText("12")).toBeInTheDocument(); // days
-    expect(within(coverage).getByText("30")).toBeInTheDocument(); // sessions
-    expect(within(coverage).getByText("1200")).toBeInTheDocument(); // segments
+    expect(within(coverage).getByText("12")).toBeInTheDocument();
+    expect(within(coverage).getByText("30")).toBeInTheDocument();
+    expect(within(coverage).getByText("1200")).toBeInTheDocument();
+    // 声纹 900/1200=75%, 情绪 600/1200=50%
+    expect(coverage.textContent).toMatch(/75%/);
+    expect(coverage.textContent).toMatch(/50%/);
   });
 
-  it("renders the recent-session rows", async () => {
-    render(<HomePanel onGoReview={noop} onGoSpeakers={noop} onGoLlm={noop} onOpenSession={noop} />);
-
-    const recent = await screen.findByRole("region", { name: "最近会话" });
-    expect(within(recent).getByText(/2087-05-11/)).toBeInTheDocument();
-    expect(within(recent).getByText(/2087-05-10/)).toBeInTheDocument();
-  });
-
-  it("clicking 待审 calls onGoReview", async () => {
-    const onGoReview = vi.fn();
-    render(<HomePanel onGoReview={onGoReview} onGoSpeakers={noop} onGoLlm={noop} onOpenSession={noop} />);
-
-    await userEvent.click(await screen.findByRole("button", { name: "待审" }));
-    expect(onGoReview).toHaveBeenCalledTimes(1);
-  });
-
-  it("clicking 人物 calls onGoSpeakers", async () => {
-    const onGoSpeakers = vi.fn();
-    render(<HomePanel onGoReview={noop} onGoSpeakers={onGoSpeakers} onGoLlm={noop} onOpenSession={noop} />);
-
-    await userEvent.click(await screen.findByRole("button", { name: /人物/ }));
-    expect(onGoSpeakers).toHaveBeenCalledTimes(1);
-  });
-
-  it("clicking 洞察 calls onGoLlm with the latest day", async () => {
-    const onGoLlm = vi.fn();
-    render(<HomePanel onGoReview={noop} onGoSpeakers={noop} onGoLlm={onGoLlm} onOpenSession={noop} />);
-
-    await userEvent.click(await screen.findByRole("button", { name: /洞察/ }));
-    expect(onGoLlm).toHaveBeenCalledWith("2087-05-11");
+  it("renders the recent-sessions table with 名称/参与人/状态 columns", () => {
+    render(<HomePanel {...baseProps} />);
+    const recent = screen.getByRole("region", { name: "最近会话" });
+    const pendingRow = within(recent).getByRole("button", { name: /周会 · 项目排期/ });
+    expect(pendingRow.textContent).toMatch(/张三 · 我/);
+    expect(pendingRow.textContent).toMatch(/待审 14/);
+    // 未命名会话回退到「会话 · N 段」;无参与人显示 —
+    const acceptedRow = within(recent).getByRole("button", { name: /会话 · 9 段/ });
+    expect(acceptedRow.textContent).toMatch(/已审/);
+    expect(acceptedRow.textContent).toMatch(/—/);
   });
 
   it("clicking a recent session calls onOpenSession with its ids", async () => {
     const onOpenSession = vi.fn();
-    render(<HomePanel onGoReview={noop} onGoSpeakers={noop} onGoLlm={noop} onOpenSession={onOpenSession} />);
-
-    const recent = await screen.findByRole("region", { name: "最近会话" });
-    const row = within(recent).getByText(/2087-05-11/).closest("button") as HTMLButtonElement;
-    await userEvent.click(row);
+    render(<HomePanel {...baseProps} onOpenSession={onOpenSession} />);
+    await userEvent.click(screen.getByRole("button", { name: /周会 · 项目排期/ }));
     expect(onOpenSession).toHaveBeenCalledWith("ses_b", "2087-05-11");
   });
 
-  it("shows a celebratory empty state when there is nothing to review", async () => {
-    vi.stubGlobal("fetch", mockFetch({ ...overview, review: { pending_sessions: 0, pending_segments: 0 } }));
-    render(<HomePanel onGoReview={noop} onGoSpeakers={noop} onGoLlm={noop} onOpenSession={noop} />);
+  it("开始审核 / 人物卡 / 管道横条 deep-link into their tabs", async () => {
+    const onStartReview = vi.fn();
+    const onGoPeople = vi.fn();
+    const onGoPipeline = vi.fn();
+    render(<HomePanel {...baseProps} onStartReview={onStartReview} onGoPeople={onGoPeople} onGoPipeline={onGoPipeline} />);
+    await userEvent.click(screen.getByRole("button", { name: /开始审核/ }));
+    expect(onStartReview).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "人物" }));
+    expect(onGoPeople).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "管道" }));
+    expect(onGoPipeline).toHaveBeenCalled();
+  });
 
-    expect(await screen.findByText("全部审核完毕")).toBeInTheDocument();
+  it("shows the all-clear state when nothing is pending", () => {
+    render(<HomePanel {...baseProps} overview={{ ...overview, review: { pending_sessions: 0, pending_segments: 0 } }} />);
+    expect(screen.getByText(/全部审核完毕/)).toBeInTheDocument();
+  });
+
+  it("shows the error state", () => {
+    render(<HomePanel {...baseProps} overview={null} error="boom" />);
+    expect(screen.getByRole("alert").textContent).toMatch(/boom/);
+  });
+
+  it("管道 spine shows idle when nothing runs, and stage states from the summary", () => {
+    const { rerender } = render(<HomePanel {...baseProps} />);
+    expect(screen.getByRole("button", { name: "管道" }).textContent).toMatch(/管道空闲/);
+
+    const summary: StatusSummary = {
+      status_counts: { running: 1 },
+      total: 10,
+      stage_counts: {
+        vad: { done: 4, total: 4 },
+        asr: { done: 2, total: 4 },
+        session_derive: { done: 0, total: 2 }
+      },
+      done_total: 6,
+      failed_total: 0,
+      eta_seconds: 120,
+      active_stage: "asr",
+      current_target: "TX01",
+      import_progress: null,
+      worker_running: true
+    };
+    rerender(<HomePanel {...baseProps} summary={summary} running />);
+    const spine = screen.getByRole("button", { name: "管道" });
+    expect(spine.textContent).toMatch(/TX01 处理中/);
+    expect(spine.textContent).toMatch(/✓ VAD/);
+    expect(spine.textContent).toMatch(/转写 50%/);
+  });
+});
+
+describe("spineStages", () => {
+  it("maps import/summary counts to the six-stage spine", () => {
+    const stages = spineStages(null, { active: true, done: 1, total: 4, current: "a.wav" });
+    expect(stages[0]).toEqual({ label: "导入", state: "running", pct: 25 });
+    expect(stages).toHaveLength(6);
+    expect(stages.slice(1).every((s) => s.state === "pending")).toBe(true);
   });
 });

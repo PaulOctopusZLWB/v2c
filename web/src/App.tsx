@@ -27,8 +27,8 @@ import { DynamicsCharts } from "./features/viz/DynamicsCharts";
 import { EmotionCharts } from "./features/viz/EmotionCharts";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { ViewpointWorkspace } from "./features/viewpoint/ViewpointWorkspace";
-import { Tabs } from "./features/workspace/Tabs";
-import { ThemeToggle } from "./features/workspace/ThemeToggle";
+import { Sidebar, SIDEBAR_NAV } from "./features/workspace/Sidebar";
+import { StatusBar } from "./features/workspace/StatusBar";
 import { useTheme } from "./features/workspace/useTheme";
 import { useTab } from "./features/workspace/useTab";
 import type { TabId } from "./features/workspace/useTab";
@@ -39,7 +39,10 @@ import { stageForTaskType, STAGES } from "./lib/stages";
 import type { Stage } from "./lib/stages";
 import { dayLabel, taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, DayStatusRow, Health, IdentityReview, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, HomeOverview, IdentityReview, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
+
+/** 状态条左侧的当前页名(设计稿全局框架)。 */
+const PAGE_TITLES: Record<TabId, string> = { home: "今日", ingest: "管道", review: "审核", speakers: "声纹", llm: "总结", settings: "设置" };
 
 const DEVICE_POLL_MS = 5000;
 const IN_FLIGHT_STATUSES = ["claimed", "running"];
@@ -157,14 +160,20 @@ export function App() {
       e.preventDefault();
       setPaletteOpen((v) => !v);
     },
-    // Enter 执行最新可操作 toast 的主操作(如「立即审核 ↵」)。对话框/⌘K 打开时让位
-    // (它们各自处理键盘);输入框聚焦时 useHotkeys 自动旁路。
+    // Enter:优先执行最新可操作 toast 的主操作(如「立即审核 ↵」);
+    // 首页无 toast 时 = 开始审核(设计稿全局键盘映射)。输入框聚焦时自动旁路。
     enter: (e) => {
       if (dialogRequest || paletteOpen) return;
       const actionable = [...toasts].reverse().find((toast) => toast.onAction);
-      if (!actionable) return;
-      e.preventDefault();
-      actionable.onAction?.();
+      if (actionable) {
+        e.preventDefault();
+        actionable.onAction?.();
+        return;
+      }
+      if (tab === "home") {
+        e.preventDefault();
+        setTab("review");
+      }
     },
     // Esc 只关最上层:Dialog(自行捕获处理)> ⌘K > 最新 toast。消费时标记
     // preventDefault,useHotkeys 会跳过已消费的键(其它监听者不再重复响应)。
@@ -173,11 +182,30 @@ export function App() {
       if (paletteOpen) { e.preventDefault(); setPaletteOpen(false); return; }
       const last = toasts[toasts.length - 1];
       if (last) { e.preventDefault(); dismiss(last.id); }
-    }
+    },
+    // 数字 1–5 直达主导航,t 切换主题(输入框聚焦时旁路;模态/⌘K 打开时让位)。
+    ...Object.fromEntries(
+      SIDEBAR_NAV.filter((n) => n.key).map((n) => [n.key!, () => { if (!dialogRequest && !paletteOpen) setTab(n.id); }])
+    ),
+    t: () => { if (!dialogRequest && !paletteOpen) themeController.toggle(); }
   });
   // Global transcript search, driven from the palette: the typed query + its async results.
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  // 首页 overview 提升到 App:今日页与侧栏「审核」徽标共用一次获取;审核动作
+  // (queueVersion)或 rename/delete(sessionsVersion)后刷新,保持徽标即时。
+  const [overview, setOverview] = useState<HomeOverview | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  // 身份/人物操作(onPeopleChanged)也 bump 这个计数,保证 参与人 列与徽标不落后。
+  const [overviewVersion, setOverviewVersion] = useState(0);
+  useEffect(() => {
+    let stale = false;
+    api
+      .homeOverview()
+      .then((data) => { if (!stale) { setOverview(data); setOverviewError(null); } })
+      .catch((err) => { if (!stale) setOverviewError(err instanceof Error ? err.message : "加载失败"); });
+    return () => { stale = true; };
+  }, [queueVersion, sessionsVersion, worker_running, overviewVersion]);
   // Mirror bootstrap state into a ref so the mount-time poll interval reads the latest value
   // (its closure captures the initial state).
   const bootstrappedRef = useRef(false);
@@ -258,6 +286,8 @@ export function App() {
     void api.persons().then((r) => setPersons(r.persons ?? [])).catch(() => undefined);
     void refreshIdStatus();
     setMapKey((k) => k + 1);
+    // 身份/人物变化也会改变首页的 参与人 列与侧栏徽标 → 触发 overview 重取。
+    setOverviewVersion((v) => v + 1);
   }
 
   // Identification progress (未识别 counter + stepper signals) for the 声纹 tab.
@@ -615,7 +645,7 @@ export function App() {
   // ⌘K command set, rebuilt from current state each render: jump to any tab, open any
   // loaded day (-> 审核), or run a global action. Keep to navigation/tab jumps for now —
   // only actions trivially callable from App scope.
-  const TAB_LABELS: Record<TabId, string> = { home: "首页", ingest: "录入", speakers: "身份", review: "转写审核", llm: "总结", settings: "设置" };
+  const TAB_LABELS = PAGE_TITLES;
   const commands: Command[] = [
     ...(Object.keys(TAB_LABELS) as TabId[]).map((id) => ({
       id: `tab-${id}`,
@@ -670,11 +700,8 @@ export function App() {
   // recovery path, so don't let a tab render an empty workspace behind it.
   if (bootstrapError && !bootstrapped) {
     return (
-      <main className="workbench">
+      <main className="workbench bare">
         <AmbientBackground />
-        <header className="workbench-header">
-          <h1>{t.app.title}</h1>
-        </header>
         <section className="tab-page single">
           <div className="empty error-state" role="alert">
             <Icon name="run" className="empty-icon" />
@@ -691,16 +718,18 @@ export function App() {
     );
   }
 
-  // 首页 (home): the default landing — actionable cards that deep-link into each tab.
+  // 今日 (home): the default landing — 待审 hero + 人物/覆盖卡 + 管道 spine + 最近会话表.
   function renderHome() {
     return (
       <HomePanel
-        onGoReview={() => setTab("review")}
-        onGoSpeakers={() => setTab("speakers")}
-        onGoLlm={(day) => {
-          void guard(selectDay)(day);
-          setTab("llm");
-        }}
+        overview={overview}
+        error={overviewError}
+        summary={summary}
+        importProgress={import_progress}
+        running={pipelineRunning}
+        onStartReview={() => setTab("review")}
+        onGoPeople={() => setTab("speakers")}
+        onGoPipeline={() => setTab("ingest")}
         onOpenSession={(sid, day) => {
           void guard(async () => {
             await selectDay(day);
@@ -712,11 +741,23 @@ export function App() {
     );
   }
 
-  // 录入 (ingest): device detection + import + the run-control/task surface.
+  // 管道 (ingest): device detection + import + the run-control/task surface;
+  // 分阶段进度明细(原全局头部的 Progress)现在住在这里。
   function renderIngest() {
     return (
       <div className="tab-page two-col">
         <div className="col-main">
+          {total > 0 ? (
+            <section className="card" aria-label="管道进度">
+              <Progress
+                done={done}
+                total={total}
+                label={progressLabel}
+                stages={importing ? undefined : stageBreakdown}
+                etaSeconds={importing ? null : etaSeconds}
+              />
+            </section>
+          ) : null}
           <div id="panel-device">
             <DevicePanel sources={sources ?? []} onImport={guard(handleImport)} onRefresh={() => void refreshDevices()} />
           </div>
@@ -1103,30 +1144,33 @@ export function App() {
   }
 
   return (
-    <main className="workbench tabbed">
+    <main className="workbench">
       <AmbientBackground />
-      <header className="workbench-header">
-        <div className="header-status">
-          <h1>{t.app.title}</h1>
-          <span className={pipelineRunning ? "live" : "dim"}>
-            {pipelineRunning ? <span className="live-dot" aria-hidden /> : null}
-            {pipelineRunning ? t.app.running : t.app.idle}
-          </span>
-          <Progress
-            done={done}
-            total={total}
-            label={progressLabel}
-            stages={importing ? undefined : stageBreakdown}
-            etaSeconds={importing ? null : etaSeconds}
-          />
-        </div>
-        <div className="header-actions">
-          <ThemeToggle theme={themeController.theme} onToggle={themeController.toggle} />
-          <Tabs active={tab} onSelect={setTab} />
-        </div>
-      </header>
-
-      {renderTab()}
+      <Sidebar
+        active={tab}
+        onSelect={setTab}
+        onOpenPalette={() => setPaletteOpen(true)}
+        pipelineRunning={pipelineRunning}
+        reviewPending={overview?.review.pending_sessions}
+        days={days}
+        onOpenDay={(day) => {
+          void guard(selectDay)(day);
+          setReviewMode("days");
+          setTab("review");
+        }}
+      />
+      <div className="workbench-main">
+        <StatusBar
+          pageTitle={PAGE_TITLES[tab]}
+          summary={summary}
+          importProgress={import_progress}
+          running={pipelineRunning}
+          onGoPipeline={() => setTab("ingest")}
+          theme={themeController.theme}
+          onToggleTheme={themeController.toggle}
+        />
+        {renderTab()}
+      </div>
 
       <CommandPalette
         open={paletteOpen}

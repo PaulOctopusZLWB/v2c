@@ -24,8 +24,14 @@ async function gotoTab(label: string) {
  *  review queue to the by-day browser (WorkspaceNav) so day/session buttons render. Both toggles
  *  are role="tab" — the workspace tab strip and the nav rail. */
 async function useDayBrowser() {
-  await gotoTab("转写审核");
+  await gotoTab("审核");
   await userEvent.click(await screen.findByRole("tab", { name: "按天浏览" }));
+}
+
+/** The day/session rail (WorkspaceNav) — day buttons also exist in the sidebar 资料库,
+ *  so day/session picks must be scoped to this region. */
+async function inDayRail() {
+  return within(await screen.findByRole("navigation", { name: "日期与会话" }));
 }
 
 function renderApp() {
@@ -74,7 +80,7 @@ describe("App container", () => {
 
     renderApp();
     // The DevicePanel + 导入 button live on the 录入 tab now.
-    await gotoTab("录入");
+    await gotoTab("管道");
     await userEvent.click(await screen.findByRole("button", { name: "导入" }));
 
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
@@ -111,7 +117,7 @@ describe("App container", () => {
         })
       })
     );
-    expect(await screen.findAllByText("运行中")).not.toHaveLength(0);
+    expect((await screen.findByRole("button", { name: /转写中 · a1/ })).textContent).toMatch(/转写中/);
   });
 
   it("does not show the live progress bar for idle pending tasks", async () => {
@@ -144,7 +150,7 @@ describe("App container", () => {
       })
     );
 
-    expect(await screen.findByText("空闲")).toBeInTheDocument();
+    expect((await screen.findAllByText(/管道空闲/)).length).toBeGreaterThan(0);
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
@@ -179,11 +185,10 @@ describe("App container", () => {
     );
 
     // The TaskList panel is never opened, so the lazy task array stays empty — these must
-    // come from the compact summary. The stage breakdown + ETA live in the always-visible header.
+    // come from the compact summary. The stage breakdown + ETA live on the 管道 tab now.
+    await gotoTab("管道");
     expect(await screen.findByText("1200/1500")).toBeInTheDocument(); // asr stage breakdown
     expect(screen.getByText(/剩余约/)).toBeInTheDocument(); // ETA
-    // RunInspector (with the task count) lives on the 录入 tab.
-    await gotoTab("录入");
     expect(await screen.findByText("1700")).toBeInTheDocument(); // RunInspector count == summary total
   });
 
@@ -221,12 +226,13 @@ describe("App container", () => {
       })
     );
 
-    // The progress bar lives in the always-visible header.
+    // The progress bar lives on the 管道 tab now.
+    await gotoTab("管道");
     const bar = await screen.findByRole("progressbar");
     expect(bar).toHaveAttribute("aria-valuenow", "1234"); // from done_total, not the 1500 fallback
     expect(bar).toHaveAttribute("aria-valuemax", "1700");
     // failed_total flows to the TaskList "重试全部失败 (N)" control on the 录入 tab.
-    await gotoTab("录入");
+    await gotoTab("管道");
     expect(await screen.findByRole("button", { name: /重试全部失败/ })).toHaveTextContent("42");
   });
 
@@ -260,7 +266,7 @@ describe("App container", () => {
     act(() => summaryListener!({ data: JSON.stringify({ status_counts: { failed_retryable: 1 }, total: 1, active_stage: null, current_target: null, import_progress: null, worker_running: false }) }));
 
     // The TaskList lives on the 录入 tab.
-    await gotoTab("录入");
+    await gotoTab("管道");
     // Open the <details> panel -> onToggle(true) -> refreshTasks() loads the failed row.
     const details = container.querySelector("details.task-list") as HTMLDetailsElement;
     details.open = true;
@@ -365,7 +371,7 @@ describe("App container", () => {
     runFinished = true;
     act(() => summaryListener!({ data: JSON.stringify({ status_counts: { succeeded: 1 }, total: 1, active_stage: null, current_target: null, import_progress: null, worker_running: false }) }));
 
-    expect(await screen.findByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
+    expect((await inDayRail()).getByRole("button", { name: /2087-05-10/ })).toBeInTheDocument();
   });
 
   it("fetches the per-day status aggregate alongside the day list on the poll", async () => {
@@ -410,8 +416,9 @@ describe("App container", () => {
 
     renderApp();
     await useDayBrowser();
-    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    const rail = await inDayRail();
+    await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
     await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
 
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
@@ -438,8 +445,9 @@ describe("App container", () => {
 
     renderApp();
     await useDayBrowser();
-    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    const rail = await inDayRail();
+    await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
     expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
 
     await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
@@ -471,8 +479,9 @@ describe("App container", () => {
 
     renderApp();
     await useDayBrowser();
-    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    const rail = await inDayRail();
+    await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
     await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
     expect(await screen.findByText("1/1 已接受")).toBeInTheDocument();
 
@@ -501,7 +510,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await screen.findByRole("heading", { level: 1 }); // bootstrap settled
+    await screen.findByRole("tab", { name: "今日" }); // shell rendered
 
     // Open the palette (⌘K) and type a query >=2 chars.
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })); });
@@ -537,7 +546,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await screen.findByRole("heading", { level: 1 });
+    await screen.findByRole("tab", { name: "今日" });
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })); });
 
     expect(await screen.findByText("切换明暗主题")).toBeInTheDocument();
@@ -554,7 +563,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await screen.findByRole("heading", { level: 1 }); // bootstrap settled
+    await screen.findByRole("tab", { name: "今日" }); // shell rendered
     await gotoTab("总结");
 
     // Default view is the editable per-session workspace: its day picker is present.
@@ -582,7 +591,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await gotoTab("身份");
+    await gotoTab("声纹");
 
     const toolbar = await screen.findByText("身份审核");
     const toolbarCard = toolbar.closest(".speakers-toolbar") as HTMLElement;
@@ -619,14 +628,15 @@ describe("App container", () => {
     // Default tab is 审核 — switch to the by-day browser, then pick a day + session; the
     // transcript panel mounts.
     await useDayBrowser();
-    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    const rail = await inDayRail();
+    await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
     await screen.findByText("你好"); // transcript content rendered
     expect(container.querySelector("#panel-transcript")).toBeInTheDocument();
 
     // Switch to 声纹: the transcript panel unmounts (only the active tab renders), and the
     // VoiceprintPanel shows. The session stays selected (it's App-level state).
-    await gotoTab("身份");
+    await gotoTab("声纹");
     expect(await screen.findByText("声纹覆盖")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).not.toBeInTheDocument();
     // The 对话分析 section is secondary — collapsed by default (not open).
@@ -636,7 +646,7 @@ describe("App container", () => {
 
     // Switch back to 审核: the transcript reappears with the same session still selected — no
     // need to re-pick the day/session.
-    await gotoTab("转写审核");
+    await gotoTab("审核");
     expect(await screen.findByText("你好")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).toBeInTheDocument();
   });
@@ -681,8 +691,9 @@ describe("App container", () => {
 
     renderApp();
     await useDayBrowser();
-    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    const rail = await inDayRail();
+    await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
     expect(await screen.findByRole("button", { name: /接受此人全部 · spk_01/ })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /匹配当前会话/ }));
@@ -736,8 +747,9 @@ describe("App container", () => {
 
     renderApp();
     await useDayBrowser();
-    await userEvent.click(await screen.findByRole("button", { name: /2087-05-10/ }));
-    await userEvent.click(await screen.findByRole("button", { name: /ses_1/ }));
+    const rail = await inDayRail();
+    await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
+    await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
 
     await waitFor(() => {
       const call = calls.find((c) => c.url === "/api/people/auto-attribute");

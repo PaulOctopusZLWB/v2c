@@ -1,25 +1,122 @@
-/* ---- APP SHELL — sticky header (row 1) over a single-scroll tab page (row 2) ----
+/* ---- APP SHELL(design handoff 全局框架)----
+   216px 侧栏 | 1fr 内容列(46px 玻璃状态条 + 单滚动 tab page)。
    The shell never scrolls; .tab-page is the single scroll owner per tab. */
 .workbench {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
-
-.workbench-header {
+/* bootstrap-error 等无侧栏画面:单列居中。 */
+.workbench.bare { grid-template-columns: 1fr; }
+.workbench-main {
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
-  padding: var(--s4) var(--s6);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  min-width: 0;
+  min-height: 0;
 }
-.workbench-header h1 { font-size: var(--fs-lg); margin: 0; }
-/* Status row (title · running badge · progress) stays above the tab strip, always visible. */
-.header-status { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
-/* Tab strip + theme toggle share a row; the toggle sits to the left of the tabs. */
-.header-actions { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
+
+/* ---- SIDEBAR ---- */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--s5) 10px;
+  background: var(--side);
+  border-right: 1px solid var(--border);
+}
+.sidebar-logo { display: flex; align-items: center; gap: 9px; padding: var(--s2) 10px var(--s5); }
+.sidebar-logo-mark {
+  width: 22px; height: 22px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000));
+  color: var(--accent-fg); font-family: var(--mono); font-size: var(--fs-xs); font-weight: var(--fw-bold);
+}
+.sidebar-logo-name { font-size: var(--fs-base); font-weight: var(--fw-semibold); letter-spacing: .02em; }
+.sidebar-search {
+  display: flex; align-items: center; gap: var(--s3);
+  margin: 0 10px 14px; padding: var(--s2h) 10px; min-height: auto;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-btn);
+  font-size: var(--fs-sm); color: var(--text-dim); cursor: pointer;
+}
+.sidebar-search:hover:not(:disabled) { border-color: var(--accent); color: var(--text-dim); }
+.sidebar-search-hint { flex: 1 1 auto; text-align: left; }
+.sidebar-search-key {
+  font-family: var(--mono); font-size: 10px; color: var(--text-2);
+  border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px;
+}
+.sidebar-nav { display: flex; flex-direction: column; gap: var(--s1); }
+.sidebar-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; min-height: auto;
+  background: transparent; border: 0; border-radius: var(--radius-btn);
+  font-size: var(--fs-base); color: var(--text-2); font-weight: var(--fw-normal);
+  cursor: pointer; text-align: left;
+}
+.sidebar-item:hover:not(:disabled) { color: var(--text); background: transparent; }
+.sidebar-item.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
+.sidebar-item-glyph { width: 16px; text-align: center; flex: none; font-size: var(--fs-sm); }
+.sidebar-item-label { flex: 1 1 auto; }
+.sidebar-item-end { display: inline-flex; align-items: center; gap: var(--s2h); }
+.sidebar-item-key { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+.sidebar-item.active .sidebar-item-key { color: var(--accent); }
+.sidebar-badge {
+  font-size: var(--fs-xs); color: var(--warn);
+  background: var(--panel-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill); padding: 0 7px;
+}
+.sidebar-section-head {
+  margin-top: 18px; padding: 0 10px;
+  font-size: var(--fs-xs); letter-spacing: .08em; color: var(--text-dim);
+}
+.sidebar-days { display: flex; flex-direction: column; gap: var(--s1); margin-top: var(--s2h); }
+.sidebar-day {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s2h) 10px; min-height: auto;
+  background: transparent; border: 0; border-radius: var(--radius-btn);
+  font-size: var(--fs-base); color: var(--text-2); cursor: pointer;
+}
+.sidebar-day:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
+.sidebar-day-count { font-size: var(--fs-xs); color: var(--text-dim); }
+.sidebar-bottom { margin-top: auto; display: flex; flex-direction: column; gap: var(--s2); }
+.sidebar-node {
+  display: flex; align-items: center; gap: var(--s3);
+  margin: var(--s3) 10px 0; padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: var(--fs-xs); color: var(--text-dim);
+}
+.sidebar-node-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+
+/* 呼吸点(运行中):导航项 / 状态胶囊 / spine 共用。 */
+.breathe-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  display: inline-block; flex: none;
+  animation: breathe 2s ease-in-out infinite;
+}
+.breathe-dot--sm { width: 7px; height: 7px; margin-right: var(--s2); }
+@media (prefers-reduced-motion: reduce) { .breathe-dot { animation: none; } }
+
+/* ---- GLOBAL STATUS BAR(46px 玻璃)---- */
+.statusbar {
+  flex: none;
+  height: var(--statusbar-h);
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 22px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.statusbar-title { font-size: var(--fs-base); color: var(--text-2); }
+.statusbar-end { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s4); }
+.statusbar-pill {
+  display: inline-flex; align-items: center; gap: var(--s3);
+  min-height: auto; padding: 4px 12px;
+  background: transparent; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill); font-size: var(--fs-sm); color: var(--text-2);
+  cursor: pointer;
+}
+.statusbar-pill.live { background: var(--accent-dim); border-color: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--accent-2); }
+.statusbar-pill:hover:not(:disabled) { border-color: var(--accent); }
 
 /* ---- per-tab page — THE single scroll owner; centered by tab type ----
    Three deliberate centered widths: wide (default, 录入·审核), reading
@@ -101,18 +198,6 @@
 
 .empty { padding: var(--s6) 0; }
 
-/* ---- workspace tabs (top-level strip — intentionally a bottom-border, NOT a pill) ---- */
-.tabs { display: flex; align-items: center; gap: var(--s2); }
-.tab {
-  background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
-  color: var(--text-2); min-height: var(--control-h); padding: 0 var(--control-pad-x);
-  cursor: pointer; font: inherit; font-size: var(--fs-base); font-weight: var(--fw-medium);
-  transition: color .12s, border-color .12s;
-}
-.tab:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: var(--fw-semibold); }
-.tab:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-glow); border-radius: var(--r1); }
-
 /* ---- merged-turn review ---- */
 /* .session-actions inherits the .toolbar primitive (gap --s3); only its margin is unique. */
 .session-actions { margin: var(--s3) 0 var(--s5); }
@@ -128,7 +213,7 @@
    only the bottom margin is unique here. */
 .nav-mode { display: flex; margin-bottom: var(--s4); }
 
-.review-queue { display: grid; gap: var(--s2); max-height: calc(100vh - 220px); overflow-y: auto; overscroll-behavior: contain; }
+.review-queue { display: grid; gap: var(--s2); max-height: calc(100vh - 160px); overflow-y: auto; overscroll-behavior: contain; }
 /* .rq-item is a .list-row in card form: keeps a visible border + stacked content. */
 .rq-item {
   display: grid; gap: var(--s2h);
@@ -1384,101 +1469,106 @@
   .dyn-donut-row { flex-direction: column; align-items: stretch; }
 }
 
-/* ---- 首页 (home / landing dashboard) ---- */
-/* The home tab opens on value: a responsive card grid. 待审 + 最近会话 span two columns so the
- * actionable headline and the recent-session list dominate; the rest are compact tiles.
- * Home page width is governed by .tab-page.single.is-reading; no .home width rule needed. */
-.home-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--s5);
-  align-items: start;
-}
-.home-card-review, .home-card-recent { grid-column: 1 / -1; }
+/* ---- 今日 (home, design handoff 1a) ---- */
+.home .today-head { display: flex; align-items: baseline; gap: 14px; }
+.today-title { font-size: var(--fs-page-title); font-weight: var(--fw-semibold); letter-spacing: .01em; }
+.today-sub { font-size: var(--fs-base); }
 
-/* .home-card is a .card--hero tile (lg radius + lifted shadow) rendered as a button. */
-.home-card {
-  display: flex; flex-direction: column; gap: var(--s3);
-  text-align: left; width: 100%;
-  background: var(--elev); border: 1px solid var(--border); border-radius: var(--r3);
-  padding: var(--s5); color: var(--text-2);
-  box-shadow: var(--shadow-2);
-  transition: border-color .15s ease, background .15s ease, transform .1s ease;
+/* 三卡行:待审 hero 占 1.4fr。 */
+.today-cards { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 14px; align-items: stretch; }
+.today-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 20px 22px; text-align: left; color: var(--text-2);
+  min-height: 0; font: inherit;
 }
-button.home-card { cursor: pointer; font: inherit; min-height: 0; }
-button.home-card:hover:not(:disabled) {
-  border-color: var(--accent); background: var(--panel-2);
-  box-shadow: var(--shadow-2), inset 0 0 0 1px var(--accent-glow);
+button.today-card { cursor: pointer; transition: border-color var(--t-fast); }
+button.today-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.today-card-label { font-size: var(--fs-sm); color: var(--text-dim); letter-spacing: .06em; }
+.today-card-label.is-accent { color: var(--accent-2); }
+.today-card-review {
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), color-mix(in srgb, var(--accent) 2%, transparent)),
+    var(--panel);
 }
-button.home-card:active:not(:disabled) { transform: translateY(1px); }
-button.home-card:focus-visible { outline: none; box-shadow: var(--shadow-2), 0 0 0 2px var(--accent-glow), 0 0 0 1px var(--accent); }
-button.home-card:disabled { opacity: .45; cursor: default; }
+/* 左上角辉光(glowpulse 呼吸)。 */
+.today-glow {
+  position: absolute; inset: -40px auto auto -40px;
+  width: 180px; height: 180px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%);
+  animation: glowpulse 4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .today-glow { animation: none; } }
+.today-num-row { display: flex; align-items: baseline; gap: var(--s3); }
+.today-bignum { font-size: var(--fs-3xl); font-weight: var(--fw-bold); line-height: 1; color: var(--text); }
+.today-card-review .today-bignum { color: var(--text); }
+.today-num-sub { font-size: var(--fs-base); color: var(--text-2); }
+.today-hint { font-size: 12.5px; color: var(--text-dim); display: inline-flex; align-items: center; gap: var(--s2); }
+.today-hint .icon { width: 14px; height: 14px; color: var(--ok); }
+.today-hint b { color: var(--ok); font-weight: var(--fw-semibold); }
+.today-card-actions { display: flex; gap: 10px; margin-top: var(--s2); }
+.today-stats { display: flex; gap: 18px; }
+.today-stat { display: flex; flex-direction: column; gap: var(--s1); }
+.today-stat b { font-size: var(--fs-xl); font-weight: var(--fw-semibold); color: var(--text); line-height: var(--lh-tight); }
+.today-stat span { font-size: var(--fs-xs); color: var(--text-dim); }
+.today-cov { display: flex; flex-direction: column; gap: 7px; width: 100%; font-size: var(--fs-xs); color: var(--text-dim); }
+.today-cov-row { display: flex; align-items: center; gap: var(--s3); }
+.today-cov-name { width: 28px; flex: none; }
+.today-cov-track { flex: 1; height: 3px; border-radius: var(--radius-pill); overflow: hidden; background: var(--border); }
+.today-cov-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
+.today-cov-fill.is-emote { background: var(--spk-purple); }
 
-.home-card-head { display: flex; align-items: center; justify-content: space-between; }
-.home-card-label {
-  display: inline-flex; align-items: center; gap: var(--s2);
-  font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--text);
-  text-transform: none; letter-spacing: .02em;
+/* 管道横条(玻璃底,整条可点)。 */
+.today-spine {
+  display: flex; flex-direction: column; gap: 12px; align-items: stretch;
+  width: 100%; min-height: 0; text-align: left; font: inherit;
+  background: var(--glass-bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 16px 22px; cursor: pointer; color: var(--text-2);
+  transition: border-color var(--t-fast);
 }
-.home-card-label .icon { width: 15px; height: 15px; color: var(--accent); }
-.home-card-go { width: 16px; height: 16px; color: var(--text-dim); }
-button.home-card:hover .home-card-go { color: var(--accent); }
-.home-card-sub { font-size: var(--fs-sm); color: var(--text-2); }
+.today-spine:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.today-spine-head { display: flex; align-items: center; gap: 10px; }
+.today-spine-target { font-size: var(--fs-sm); color: var(--accent-2); }
+.today-spine-more { margin-left: auto; font-size: var(--fs-sm); }
+.today-spine-track { display: flex; align-items: center; }
+.today-spine-cell { display: flex; align-items: center; flex: 1 1 auto; }
+.today-spine-cell:first-child { flex: 0 0 auto; }
+.today-spine-link { flex: 1; height: 1px; margin: 0 12px; background: var(--border-strong); }
+.today-spine-link.is-done, .today-spine-link.is-running { background: linear-gradient(90deg, var(--ok), var(--accent)); }
+.today-spine-stage { font-size: 12.5px; color: var(--text-dim); white-space: nowrap; display: inline-flex; align-items: center; }
+.today-spine-stage.is-done { color: var(--ok); }
+.today-spine-stage.is-running { color: var(--accent); font-weight: var(--fw-semibold); }
 
-/* The headline number (待审 sessions, 人物 count). */
-.home-bignum {
-  font-size: var(--fs-3xl); line-height: var(--lh-tight); font-weight: var(--fw-bold); color: var(--text);
-  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+/* 最近会话表。 */
+.today-recent { display: flex; flex-direction: column; gap: var(--s3); }
+.today-table { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--elev); }
+.today-row {
+  display: grid; grid-template-columns: 120px 1fr 130px 90px 80px;
+  align-items: center; gap: 14px; width: 100%;
+  padding: 11px 18px; min-height: 0;
+  background: transparent; border: 0; border-bottom: 1px solid var(--border);
+  font: inherit; text-align: left; color: var(--text-2); cursor: pointer;
+  border-radius: 0;
 }
-.home-card-review .home-bignum { color: var(--accent); }
-.home-bignum-unit { font-size: var(--fs-lg); font-weight: var(--fw-medium); color: var(--text-2); }
+.today-row:last-child { border-bottom: 0; }
+.today-row:hover:not(:disabled) { background: var(--panel-2); color: var(--text-2); border-color: var(--border); }
+.today-row-time { font-size: var(--fs-sm); color: var(--text-2); }
+.today-row-name { font-size: var(--fs-base); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-row-people { font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-row-status { font-size: var(--fs-xs); }
+.today-row-status.is-pending_review { color: var(--warn); }
+.today-row-status.is-accepted { color: var(--ok); }
+.today-row-status.is-blocked { color: var(--text-dim); }
+.today-row-open { font-size: var(--fs-sm); text-align: right; opacity: 0; }
+.today-row:hover .today-row-open { opacity: 1; }
 
-/* 待审 zero-state: a calm "all clear" tile. */
-.home-card-review.is-clear .home-clear {
-  display: flex; flex-direction: column; gap: var(--s2);
-}
-.home-clear strong { font-size: var(--fs-lg); color: var(--ok); }
-.home-clear-icon { width: 28px; height: 28px; color: var(--ok); }
-
-/* 覆盖 stat strip + completion bars. */
-.home-stat-strip { display: flex; gap: var(--s5); flex-wrap: wrap; }
-.home-stat { display: flex; flex-direction: column; gap: var(--s1); }
-.home-stat b {
-  font-size: var(--fs-2xl); font-weight: var(--fw-bold); color: var(--text);
-  font-variant-numeric: tabular-nums; line-height: var(--lh-tight);
-}
-.home-stat span { font-size: var(--fs-xs); color: var(--text-dim); }
-.home-cov-bars { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
-.home-cov-row { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-sm); }
-.home-cov-name { width: 28px; color: var(--text-2); flex: none; }
-.home-cov-track {
-  flex: 1; height: 6px; border-radius: var(--radius-pill); overflow: hidden;
-  background: var(--panel-2); border: 1px solid var(--border);
-}
-.home-cov-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-pill); }
-.home-cov-fill.emote { background: var(--warn); }
-.home-cov-pct { width: 36px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; flex: none; }
-
-.home-insight-day { font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text); }
-
-/* 最近会话 list — .home-recent-item is a .list-row in inset-card form. */
-.home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
-.home-recent-item {
-  background: var(--panel-2); border-color: var(--border);
-  padding: var(--s3) var(--s4); color: var(--text);
-}
-.home-recent-item:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--text); }
-.home-recent-day { font-size: var(--fs-base); font-weight: var(--fw-medium); }
-.home-recent-meta { font-size: var(--fs-sm); color: var(--text-dim); }
-.home-recent-status { margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); }
-.home-recent-status.status-accepted { color: var(--ok); }
-.home-recent-status.status-pending_review { color: var(--warn); }
-.home-recent-status.status-blocked { color: var(--text-dim); }
-.home-recent-go { width: 15px; height: 15px; color: var(--text-dim); flex: none; }
-.home-recent-item:hover .home-recent-go { color: var(--accent); }
-
-@media (max-width: 900px) {
-  .home-grid { grid-template-columns: 1fr; }
+@media (max-width: 1000px) {
+  .today-cards { grid-template-columns: 1fr; }
+  .today-row { grid-template-columns: 90px 1fr 90px; }
+  .today-row-people, .today-row-open { display: none; }
 }
 
 /* Loudness-leveling toggle in the review hints bar — a single pill-shaped toggle button. */
@@ -1581,7 +1671,7 @@ button.home-card:hover .home-card-go { color: var(--accent); }
 .vp-prompt-actions { display: flex; gap: var(--s3); flex-wrap: wrap; }
 
 /* ---- result (right) ---- */
-.vp-result { display: grid; gap: var(--s4); grid-template-rows: auto minmax(0, 1fr) auto auto; max-height: min(640px, calc(100vh - 220px)); overflow: hidden; }
+.vp-result { display: grid; gap: var(--s4); grid-template-rows: auto minmax(0, 1fr) auto auto; max-height: min(640px, calc(100vh - 160px)); overflow: hidden; }
 .vp-result-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
 .vp-result-head .status { font-size: var(--fs-xs); padding: 1px var(--s3); border-radius: var(--radius-pill); border: 1px solid var(--border); }
 .status.s-draft { color: var(--text-dim); }

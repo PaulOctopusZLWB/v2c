@@ -79,6 +79,10 @@
   --control-pad-x: 12px;
   --control-pad-x-sm: 8px;
 
+  /* app shell: 216px 主导航侧栏 + 1fr 内容(design handoff 全局框架) */
+  --sidebar-w: 216px;
+  --statusbar-h: 46px;
+
   /* page-width strategy — three deliberate, centered widths by tab type */
   --page-w-reading: 1100px; /* 首页 · 观点 · 设置 — comfortable reading measure */
   --page-w-wide:    1440px; /* 录入 · 审核 — two-col workbench, never full-bleed */
@@ -144,6 +148,9 @@
   --danger:  #c43d3d;  --err: var(--danger);
   --pending: #8c95a5;
 
+  /* sidebar ground — one step below --bg so the nav rail reads as chrome */
+  --side: #f7f9fc;
+
   /* glass surfaces (全局状态条 / 浮层) — combine with backdrop-filter: blur(var(--glass-blur)) */
   --glass-bg: rgba(255, 255, 255, 0.8);
 
@@ -192,6 +199,9 @@
   --danger:  #f57373;  --err: var(--danger);
   --pending: #626d7d;
 
+  /* sidebar ground — one step below --bg so the nav rail reads as chrome */
+  --side: #0a0c10;
+
   /* glass surfaces (全局状态条 / 浮层) — combine with backdrop-filter: blur(var(--glass-blur)) */
   --glass-bg: rgba(16, 19, 26, 0.72);
 
@@ -234,6 +244,13 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: .01em; }
 
 /* ---- motion: only meaningful state ---- */
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+/* 呼吸点(运行中元素专用):不透明度 + 光环双呼吸,2s 周期。 */
+@keyframes breathe {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 4px var(--accent-glow); }
+  50% { opacity: .45; box-shadow: 0 0 0 7px transparent; }
+}
+/* 卡片角落辉光的缓慢呼吸(待审卡等 hero 元素)。 */
+@keyframes glowpulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @keyframes slidein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 .live { color: var(--accent); }

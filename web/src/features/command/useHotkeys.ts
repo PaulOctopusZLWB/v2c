@@ -24,25 +24,32 @@ const ALWAYS_ACTIVE = new Set(["mod+k", "escape"]);
 /** Activatable-control roles that own a single-key activation (Space/Enter). */
 const ACTIVATABLE_ROLES = new Set(["button", "checkbox", "tab", "menuitem"]);
 
-/**
- * True when the event originated from a control the keystroke should defer to: an
- * editable field the user is typing into (INPUT/TEXTAREA/SELECT/contentEditable) OR
- * a focused activatable control (BUTTON, a link with href, or an element with an
- * activatable ARIA role). Deferring to the latter is an accessibility fix — Space on
- * a focused <button> must activate the button, not fire a global hotkey.
- */
-function isEditableTarget(target: EventTarget | null): boolean {
+/** True when the user is typing here: every non-ALWAYS_ACTIVE combo must defer. */
+function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  if (target.isContentEditable) return true;
-  // A focused activatable control owns single-key activation (Space/Enter).
+  return target.isContentEditable;
+}
+
+/**
+ * True for a focused activatable control (BUTTON, a link with href, or an element
+ * with an activatable ARIA role). These own ONLY their native activation keys —
+ * Space/Enter must activate the button, but letter/digit hotkeys (1-5, t, j/k…)
+ * still fire; otherwise every click parks focus on a button and kills the keyboard
+ * flow (整个新 UI 都是按钮:侧栏项、卡片、表行).
+ */
+function isActivatableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
   if (tag === "BUTTON") return true;
   if (tag === "A" && target.hasAttribute("href")) return true;
   const role = target.getAttribute("role");
-  if (role && ACTIVATABLE_ROLES.has(role)) return true;
-  return false;
+  return !!role && ACTIVATABLE_ROLES.has(role);
 }
+
+/** Keys an activatable control natively responds to (must not be hijacked). */
+const ACTIVATION_KEYS = new Set(["enter", "space"]);
 
 /**
  * Attach a single window keydown listener that dispatches to `bindings` keyed by
@@ -73,7 +80,12 @@ export function useHotkeys(
       const combo = eventToCombo(e);
       const handler = bindingsRef.current[combo];
       if (!handler) return;
-      if (!ALWAYS_ACTIVE.has(combo) && isEditableTarget(e.target)) return;
+      if (!ALWAYS_ACTIVE.has(combo)) {
+        // Two-tier deferral: typing fields swallow everything; activatable controls
+        // (buttons/links/tabs) swallow only their native activation keys.
+        if (isTextEntryTarget(e.target)) return;
+        if (isActivatableTarget(e.target) && ACTIVATION_KEYS.has(combo)) return;
+      }
       handler(e);
     }
     window.addEventListener("keydown", onKeyDown);
