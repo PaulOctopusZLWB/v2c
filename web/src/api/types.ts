@@ -20,8 +20,45 @@ export interface TranscriptSegment {
 
 export interface TranscriptSession {
   session_id: string;
+  /** User-given session name (rename dialog); null when unset. */
+  name?: string | null;
   review_status: ReviewStatus | "blocked";
   segments: TranscriptSegment[];
+}
+
+/* ---- AI 预审 (rule-based triage, GET /api/sessions/{id}/triage) ---- */
+
+export interface TriageReason {
+  /** Machine-matchable kind: low_confidence | speaker_doubt | hallucination | context_break. */
+  kind: string;
+  /** Display-ready Chinese pill copy, e.g. 「置信 0.41」「说话人存疑 → 可能是 李四」. */
+  label: string;
+}
+
+export interface TriageSegment {
+  segment_id: string;
+  /** high = 高置信可折叠批量接受;suspect = 可疑前置;manual = 正常人工审。 */
+  bin: "high" | "suspect" | "manual";
+  reasons: TriageReason[];
+  confidence: number | null;
+  review_status: ReviewStatus;
+  /** 预留:ASR 备选/LLM 纠错文本;存在时审核页出现「采纳 AI 修正」。 */
+  suggested_text: string | null;
+  suggested_speaker: { person_id: string; person_label: string } | null;
+}
+
+export interface SessionTriage {
+  session_id: string;
+  thresholds: { high: number; low: number };
+  summary: {
+    total: number;
+    bins: { high: number; suspect: number; manual: number };
+    pending_high: number;
+    pending_suspect: number;
+    pending_manual: number;
+    reasons: Record<string, number>;
+  };
+  segments: TriageSegment[];
 }
 
 export interface TaskRow {

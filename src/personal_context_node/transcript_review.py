@@ -132,6 +132,17 @@ def reviewed_segments_for_session(*, config: AppConfig, session_id: str) -> list
         conn.close()
 
 
+def session_name(*, config: AppConfig, session_id: str) -> str | None:
+    """The user-given session name (rename dialog), None when unset/unknown."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        rows = fetch_all(conn, "select name from sessions where session_id = ?", (session_id,))
+    finally:
+        conn.close()
+    return rows[0]["name"] if rows else None
+
+
 def session_review_status(*, config: AppConfig, session_id: str) -> str:
     rows = reviewed_segments_for_session(config=config, session_id=session_id)
     statuses = {str(r["review_status"]) for r in rows}

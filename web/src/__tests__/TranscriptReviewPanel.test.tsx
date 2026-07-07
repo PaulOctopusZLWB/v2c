@@ -29,8 +29,8 @@ describe("TranscriptReviewPanel", () => {
     expect(screen.getByText("在的")).toBeInTheDocument();
     expect(screen.getByText("我们开始吧")).toBeInTheDocument();
 
-    // Accept the first turn -> both of its segment ids in one batch call.
-    await userEvent.click(screen.getAllByRole("button", { name: "接受整段" })[0]);
+    // Accept the first (focused) turn -> both of its segment ids in one batch call.
+    await userEvent.click(screen.getAllByRole("button", { name: /^接受 a$/ })[0]);
     expect(onBatchReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
   });
 

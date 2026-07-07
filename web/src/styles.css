@@ -237,7 +237,21 @@
 .rf-toggle input { width: auto; height: auto; }
 
 .turn-list { display: grid; gap: var(--s4); }
-.turn { border-left: 3px solid var(--border); padding: var(--s3) 0 var(--s3) var(--s4); }
+/* Turn 卡(design 1c):--panel 底 + 3px 左状态边(pending=warn 淡 / accepted=ok /
+   rejected=err / flagged=warn),焦点卡换 accent 描边 + 辉光。 */
+.turn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 10px;
+  padding: var(--s4) 18px;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.turn.is-pending { border-left-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.turn.is-accepted { border-left-color: var(--ok); }
+.turn.is-rejected { border-left-color: var(--err); }
+.turn.is-flagged, .turn.is-mixed { border-left-color: var(--warn); }
 .turn-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); }
 /* Unattributed turn: the diarizer's raw spk_NN with no resolved person. Dim the chip and tack on
    a quiet 未识别 hint so it reads as "not yet a person" vs an attributed name chip. */
@@ -263,15 +277,84 @@
 /* .turn-actions inherits the .toolbar primitive; only its margin is unique. */
 .turn-actions { margin-top: var(--s3); }
 
-/* Keyboard focus ring: a bright accent left-border + faint inset glow so the focused
-   turn reads at a glance during j/k triage. */
+/* Keyboard focus ring(设计稿焦点卡):accent 描边 + 外发光 + surface 底;
+   左侧 3px 状态边保持状态色不被覆盖。 */
 .turn.focused {
-  border-left-color: var(--accent) !important;
-  border-left-width: 3px;
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-  box-shadow: inset 0 0 0 1px var(--accent-glow);
-  border-radius: var(--r1);
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 28px -12px var(--accent-glow);
 }
+.turn.focused.is-pending { border-left-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+
+/* 可疑原因 warn 胶囊 + 已决策角标。 */
+.turn-reason {
+  font-size: var(--fs-xs); color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: var(--radius-pill); padding: 1px 9px; white-space: nowrap;
+}
+.turn-badge { margin-left: auto; font-size: 11.5px; font-weight: var(--fw-semibold); white-space: nowrap; }
+.turn-badge.is-accepted { color: var(--ok); }
+.turn-badge.is-rejected { color: var(--err); }
+.turn-badge.is-flagged { color: var(--warn); }
+
+/* 焦点卡展开操作行按钮。 */
+.turn-act {
+  min-height: auto; padding: 5px 12px; font-size: 12.5px; border-radius: var(--radius-sm);
+  background: var(--elev); border: 1px solid var(--border-strong); color: var(--text-2);
+}
+.turn-act.is-accept { border-color: color-mix(in srgb, var(--ok) 35%, transparent); color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.turn-act.is-accept:hover:not(:disabled) { border-color: var(--ok); color: var(--ok); }
+.turn-act.is-adopt { border-color: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--accent-2); background: var(--accent-dim); }
+.turn-act.is-adopt:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-2); }
+
+/* ── AI 预审:头部/横幅/折叠行/完成卡 ── */
+.review-head { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
+.review-title { font-size: var(--fs-card-title); font-weight: var(--fw-semibold); }
+.review-rename { min-height: auto; padding: 2px 6px; background: transparent; border: 0; color: var(--text-dim); font-size: var(--fs-sm); }
+.review-rename:hover:not(:disabled) { color: var(--accent-2); }
+.review-meta { font-size: var(--fs-xs); }
+.review-progress { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s3); font-size: var(--fs-sm); }
+.review-progress-track { width: 160px; height: 4px; border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
+.review-progress-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--radius-pill); transition: width .4s ease; }
+@media (prefers-reduced-motion: reduce) { .review-progress-fill { transition: none; } }
+
+.triage-banner {
+  display: flex; align-items: center; gap: var(--s5);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), color-mix(in srgb, var(--accent) 2%, transparent)),
+    var(--panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 10px; padding: 13px 18px; margin: var(--s3) 0;
+}
+.triage-banner .breathe-dot { width: 8px; height: 8px; animation-duration: 2.4s; }
+.triage-banner-copy { flex: 1 1 auto; font-size: 12.5px; color: var(--text-2); line-height: var(--lh-relaxed); }
+.triage-banner-copy strong { color: var(--text); }
+.triage-banner-copy .ok { color: var(--ok); }
+.triage-banner-copy .warn { color: var(--warn); }
+.triage-banner-done { color: var(--ok); font-size: 12.5px; white-space: nowrap; }
+
+.triage-collapsed {
+  display: flex; align-items: center; gap: var(--s4); width: 100%;
+  border: 1px dashed var(--border-strong); border-radius: 10px;
+  background: transparent; padding: var(--s4) 18px;
+  color: var(--text-dim); font-size: var(--fs-base); text-align: left; min-height: 0;
+}
+.triage-collapsed .ok { color: var(--ok); }
+.triage-collapsed b { color: var(--text-2); font-weight: var(--fw-medium); }
+.triage-collapsed-toggle { margin-left: auto; font-size: var(--fs-sm); color: var(--text-2); }
+
+.review-complete {
+  display: flex; align-items: center; gap: 14px;
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  background: var(--panel); border-radius: 10px; padding: var(--s5) 20px;
+}
+.review-complete-check { font-size: 18px; color: var(--ok); }
+.review-complete-copy { flex: 1 1 auto; font-size: 13.5px; color: var(--text); }
+.review-complete-btn { background: var(--ok); border-color: var(--ok); color: #04121a; font-weight: var(--fw-semibold); }
+.review-complete-btn:hover:not(:disabled) { border-color: var(--ok); color: #04121a; filter: brightness(1.05); }
+
+.review-hints b { color: var(--text-2); font-weight: var(--fw-medium); }
+.review-hints-left { margin-left: auto; color: var(--accent-2); }
 
 /* Slim persistent shortcut hint bar pinned at the bottom of the review panel. */
 .review-hints {

@@ -19,6 +19,7 @@ from personal_context_node.transcript_review import (
     search_transcripts,
     session_review_status,
     sessions_for_day,
+    session_name,
 )
 
 
@@ -83,6 +84,7 @@ def session_transcript(request: Request, session_id: str) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     return {
         "session_id": session_id,
+        "name": session_name(config=config, session_id=session_id),
         "review_status": session_review_status(config=config, session_id=session_id),
         "segments": reviewed_segments_for_session(config=config, session_id=session_id),
     }

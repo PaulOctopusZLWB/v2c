@@ -419,7 +419,7 @@ describe("App container", () => {
     const rail = await inDayRail();
     await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
-    await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^接受 a$/ }));
 
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(calls).toContain("/api/transcripts/sessions/ses_1");
@@ -448,12 +448,12 @@ describe("App container", () => {
     const rail = await inDayRail();
     await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
-    expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector(".turn .turn-summary")?.textContent).toBe("0/1"));
 
-    await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^接受 a$/ }));
 
     // The batch-review fetch is still pending, yet the turn's accepted count already updated.
-    expect(await screen.findByText("1/1 已接受")).toBeInTheDocument();
+    expect(await screen.findByText("✓ 已接受")).toBeInTheDocument();
 
     // Once the API resolves, the Undo toast appears.
     releaseBatch!();
@@ -482,13 +482,13 @@ describe("App container", () => {
     const rail = await inDayRail();
     await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
-    await userEvent.click(await screen.findByRole("button", { name: "接受整段" }));
-    expect(await screen.findByText("1/1 已接受")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: /^接受 a$/ }));
+    expect(await screen.findByText("✓ 已接受")).toBeInTheDocument();
 
     // Undo: the segment was pending before, so undo CLEARS the review (back to pending).
     await userEvent.click(await screen.findByRole("button", { name: /撤销/ }));
     await waitFor(() => expect(calls).toContain("/api/transcripts/segments/clear-review"));
-    expect(await screen.findByText("0/1 已接受")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector(".turn .turn-summary")?.textContent).toBe("0/1"));
   });
 
   it("⌘K transcript search debounces api.search, renders the hit, and jumps to the utterance", async () => {

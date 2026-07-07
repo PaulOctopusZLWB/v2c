@@ -75,8 +75,9 @@ describe("TurnBlock", () => {
 
   it("batch-reviews the whole turn as accepted", async () => {
     const onBatchReview = vi.fn().mockResolvedValue(undefined);
-    render(<TurnBlock turn={turn} persons={[]} onBatchReview={onBatchReview} />);
-    await userEvent.click(screen.getByRole("button", { name: "接受整段" }));
+    // 操作行只在焦点卡上展开(设计稿),按钮名带 mono 快捷键角标。
+    render(<TurnBlock turn={turn} persons={[]} onBatchReview={onBatchReview} focused />);
+    await userEvent.click(screen.getByRole("button", { name: /^接受/ }));
     expect(onBatchReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
   });
 });

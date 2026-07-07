@@ -437,6 +437,15 @@ export function App() {
     setSessionsVersion((v) => v + 1);
   }
 
+  // 采纳 AI 预审的说话人建议:逐段 override 归属到建议人,并接受这些段;
+  // 然后重载会话让 turn 重新按新身份分组。
+  async function handleAdoptSpeaker(segmentIds: string[], personId: string) {
+    for (const id of segmentIds) await api.overridePerson(id, personId);
+    await api.batchReview(segmentIds, "accepted");
+    await reloadSession();
+    setQueueVersion((v) => v + 1);
+  }
+
   // Delete a session (cascades server-side), then refresh the day + session lists and the review
   // queue; if the deleted session was open, clear the selection so the panel doesn't show stale data.
   async function handleDeleteSession(sessionId: string) {
@@ -852,6 +861,13 @@ export function App() {
                 onAcceptSession={handleAcceptSession}
                 onMatchCurrentSession={guard(handleMatchCurrentSession)}
                 onPlaybackError={(message) => push("音频播放失败", message)}
+                onAdoptSpeaker={guard(handleAdoptSpeaker)}
+                onRenameSession={(name) => guard(async () => {
+                  await handleRenameSession(session.session_id, name);
+                  await reloadSession();
+                })()}
+                promptText={promptText}
+                onArchive={() => setTab("home")}
               />
               <SpeakerPanel
                 speakers={speakers}
