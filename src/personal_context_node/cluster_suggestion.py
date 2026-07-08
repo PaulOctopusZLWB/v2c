@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from personal_context_node.config import AppConfig
-from personal_context_node.speaker_embeddings import get_embeddings, get_person_centroids
+from personal_context_node.speaker_embeddings import _non_speaker_person_ids, get_embeddings, get_person_centroids
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -53,9 +53,14 @@ def cluster_suggestion(*, config: AppConfig, cluster_id: str) -> dict[str, objec
         return payload
     mean = mean / norm
 
+    # 噪音/多人(non_speaker)是噪声类,不是真实声纹身份 —— 绝不作为聚类的猜测人选
+    # (与 speaker_embeddings.suggest_people_for_session 一致)。
+    noise_ids = _non_speaker_person_ids(config=config)
     best_person: str | None = None
     best_score = -1.0
     for person_id, centroid in centroids.items():
+        if person_id in noise_ids:
+            continue
         score = float(np.dot(mean, centroid))
         if score > best_score:
             best_score = score

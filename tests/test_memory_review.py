@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,38 @@ def _seed(config: AppConfig, *, count: int = 2) -> None:
                     f"2087-05-10T0{i}:00:00+08:00",
                 ),
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _seed_one(config: AppConfig, *, candidate_id: str) -> None:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into memory_candidates (
+              candidate_id, candidate_claim, claim_type, subject_json,
+              confidence, evidence_refs_json, status, memory_card_id, date_key, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                candidate_id,
+                "又一条待确认主张。",
+                "fact",
+                json.dumps({"type": "project", "id": "personal_context_node", "label": "Personal Context Node"}),
+                0.9,
+                json.dumps(
+                    [{"evidence_id": "ev_after", "source_type": "transcript_segment", "source_id": "seg_after", "quote": "又一条。"}],
+                    ensure_ascii=False,
+                ),
+                "pending_review",
+                None,
+                "2087-05-11",
+                "2087-05-11T00:00:00+08:00",
+            ),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -119,6 +152,42 @@ def test_reject_defer_restore_cycle(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         reject_candidate(config=config, candidate_id="nope")
+
+
+def test_concurrent_confirm_does_not_fork_the_signing_chain(tmp_path: Path) -> None:
+    """两次并发 confirm 同一候选:锁串行化 → 恰好一次成功签名,另一次干净失败,
+    签名链不劈叉(否则两个同 owner_sequence 的事件会被互相判 rejected,永久锁死)。"""
+    config = _config(tmp_path)
+    _seed(config, count=1)
+
+    def run() -> object:
+        try:
+            return confirm_candidate(config=config, candidate_id="cand_0")
+        except ValueError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [f.result() for f in [pool.submit(run), pool.submit(run)]]
+
+    receipts = [r for r in results if not isinstance(r, ValueError)]
+    failures = [r for r in results if isinstance(r, ValueError)]
+    assert len(receipts) == 1 and len(failures) == 1  # exactly one won
+
+    conn = connect(config.database_path)
+    try:
+        # Exactly one signed event, and it materialized (not trust-rejected by a fork).
+        events = fetch_all(conn, "select event_type, trust_status from signed_events")
+        active = fetch_all(conn, "select card_id from active_memory_cards")
+    finally:
+        conn.close()
+    assert len(events) == 1
+    assert events[0]["trust_status"] == "trusted"
+    assert len(active) == 1
+
+    # A subsequent confirm of a NEW candidate still signs cleanly (chain not wedged).
+    _seed_one(config, candidate_id="cand_after")
+    receipt = confirm_candidate(config=config, candidate_id="cand_after")
+    assert receipt.card_id.startswith("mem_")
 
 
 def test_memory_routes(tmp_path: Path) -> None:

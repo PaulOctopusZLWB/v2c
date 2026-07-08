@@ -124,11 +124,12 @@ def session_triage(*, config: AppConfig, session_id: str) -> dict[str, object] |
 
         # 规则 3 — 疑似幻听 / 上下文断裂。
         hallucination = False
-        if text and duration_ms > 0:
-            cps = len(text) / (duration_ms / 1000)
-            if cps > HALLUCINATION_CPS or (
-                duration_ms < HALLUCINATION_MIN_MS and len(text) >= HALLUCINATION_MIN_CHARS
-            ):
+        if text:
+            # 语速离谱(需要正时长做除法);以及极短时长塞长文本(含 0ms 这一最极端形态,
+            # 不走除法,所以不能被 duration_ms > 0 一起挡掉)。
+            if duration_ms > 0 and len(text) / (duration_ms / 1000) > HALLUCINATION_CPS:
+                hallucination = True
+            elif duration_ms < HALLUCINATION_MIN_MS and len(text) >= HALLUCINATION_MIN_CHARS:
                 hallucination = True
         if text and prev_text is not None and text == prev_text and len(text) >= HALLUCINATION_MIN_CHARS:
             hallucination = True  # 与相邻段完全重复(ASR 幻听常见形态)

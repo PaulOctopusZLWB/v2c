@@ -321,8 +321,11 @@ def set_session_prompt_override(*, config: AppConfig, session_id: str, template:
 def set_segment_text(*, config: AppConfig, segment_id: str, text: str) -> bool:
     """Update a transcript segment's text (trimmed). Returns whether a row matched (404 semantics).
 
-    Staleness is derived on read from the live fingerprint, so no extra writes happen here.
+    Also syncs the FTS index for this one segment so ⌘K search reflects the correction — the
+    count-diff rebuild can't detect an in-place text change on its own.
     """
+    from personal_context_node.transcript_fts import sync_segment_text
+
     trimmed = text.strip()
     conn = connect(config.database_path)
     try:
@@ -331,6 +334,8 @@ def set_segment_text(*, config: AppConfig, segment_id: str, text: str) -> bool:
             "update transcript_segments set text = ? where segment_id = ?",
             (trimmed, segment_id),
         )
+        if cursor.rowcount > 0:
+            sync_segment_text(conn, segment_id=segment_id, text=trimmed)
         conn.commit()
         return cursor.rowcount > 0
     finally:

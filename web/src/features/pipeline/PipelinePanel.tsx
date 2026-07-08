@@ -51,11 +51,13 @@ export function PipelinePanel({
     }
   };
 
-  // 新段进入时把流滚到底(列表底对齐,最新在最下)。
+  // 新段进入时把流滚到底(列表底对齐,最新在最下)。缓冲封顶后 length 不再变化,
+  // 所以按「最后一段 id」触发,保证每来一段都跟随滚动。
   const feedRef = useRef<HTMLDivElement>(null);
+  const lastSegmentId = segments.length ? segments[segments.length - 1].segment_id : null;
   useEffect(() => {
     feedRef.current?.scrollTo?.({ top: feedRef.current.scrollHeight });
-  }, [segments.length]);
+  }, [lastSegmentId]);
 
   return (
     <div className="tab-page pipeline-layout">

@@ -197,7 +197,11 @@ async def events_stream(request: Request) -> StreamingResponse:
 
             # Nothing is in flight and no worker is running: no further change can occur
             # without a new request, so close the stream (the EventSource reconnects later).
-            if not worker_running and not any(r["status"] in _ACTIVE_TASK_STATUSES for r in rows):
+            # An active import counts as in-flight too — otherwise the stream could close on a
+            # tick where tasks settle while a copy is still running, dropping the run.completed
+            # event (derive_tick_events keeps saw_activity latched during import).
+            import_active = bool(import_progress and import_progress.get("active"))
+            if not worker_running and not import_active and not any(r["status"] in _ACTIVE_TASK_STATUSES for r in rows):
                 break
             await asyncio.sleep(1.0)
 

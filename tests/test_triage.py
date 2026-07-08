@@ -132,6 +132,31 @@ def test_triage_pending_counts_exclude_reviewed(tmp_path: Path) -> None:
     assert by_id["seg_low"]["review_status"] == "rejected"
 
 
+def test_triage_flags_zero_duration_long_text_as_hallucination(tmp_path: Path) -> None:
+    """end_ms == start_ms(0ms)且 ≥8 字是「极短时长塞长文本」最极端形态,必须标幻听
+    (旧代码把这条判据和 CPS 除法一起挡在 duration_ms > 0 之后,会漏标)。"""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values ('a','d','/s',1,1,'/r','sha256:x',1,'x','x','imported')"
+        )
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values ('s0','2087-05-10','x','x','derived',1,0,'z1','x','x')"
+        )
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at, absolute_start_at) values ('z1','a','c','s0',5000,5000,'零时长却塞了很长一句幻听文本。','zh','spk_1','vp_z','e_z',0.96,'m','m','v',1,'x','2087-05-10T08:00:00+08:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    seg = session_triage(config=config, session_id="s0")["segments"][0]
+    assert seg["bin"] == "suspect"
+    assert any(r["kind"] == "hallucination" for r in seg["reasons"])
+
+
 def test_triage_no_fanout_when_mappings_share_a_cluster(tmp_path: Path) -> None:
     """speaker_mappings.speaker_cluster_id 非唯一;两行映射同一 cluster 不得把段扇出成两行。"""
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")

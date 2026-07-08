@@ -103,6 +103,34 @@ describe("MemoryPanel (记忆确认)", () => {
     );
   });
 
+  it("确认 in flight disables the buttons so a double-tap can't fire two confirms", async () => {
+    // A slow confirm keeps the request in flight while we click again; the busy guard must
+    // prevent a second POST (defence-in-depth over the backend serialization lock).
+    const gate: { release: (() => void) | null } = { release: null };
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url) === "/api/memory/candidates") return new Response(JSON.stringify(listing), { status: 200 });
+      if (String(url).endsWith("/confirm")) {
+        await new Promise<void>((r) => { gate.release = r; });
+        return new Response(JSON.stringify({ candidate_id: "cand_pref", card_id: "mem_x", event_type: "memory_card.created", signature: "abcd1234", note_path: null }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }));
+    render(<MemoryPanel push={noop} />);
+    await screen.findByText("偏好");
+
+    const confirmBtn = screen.getByRole("button", { name: /确认并签名/ });
+    await userEvent.click(confirmBtn);
+    await waitFor(() => expect(confirmBtn).toBeDisabled());
+    await userEvent.click(confirmBtn); // ignored while busy
+    gate.release?.();
+
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === "/api/memory/cand_pref/confirm").length).toBe(1)
+    );
+  });
+
   it("拒绝 → z 撤销 restores the candidate", async () => {
     const calls = stubFetch();
     const push = vi.fn();

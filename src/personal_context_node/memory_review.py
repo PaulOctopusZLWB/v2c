@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -23,6 +24,15 @@ from personal_context_node.identity_keys import effective_owner_did, load_or_cre
 from personal_context_node.obsidian_memory import publish_confirmed_memory_note
 from personal_context_node.signed_event_store import create_chained_event, insert_signed_event
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+# Serialize every status-mutating memory op. FastAPI runs these sync endpoints on a
+# threadpool, and each opens its own sqlite connection, so two overlapping confirms would
+# each read the same max(owner_sequence) and pending_review status BEFORE either inserts —
+# forking the Ed25519 chain at one sequence number (both events then get trust-rejected,
+# permanently wedging future signing). We are a single local node, so a process-wide lock
+# fully serializes read-modify-write; the second request then sees status='confirmed' and
+# fails its guard cleanly. Also blocks a confirm racing a reject/defer on the same row.
+_MEMORY_WRITE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -114,6 +124,11 @@ def confirm_candidate(*, config: AppConfig, candidate_id: str, edited_claim: str
     """
     if edited_claim is not None and not edited_claim.strip():
         raise ValueError("empty edited claim")
+    with _MEMORY_WRITE_LOCK:
+        return _confirm_candidate_locked(config=config, candidate_id=candidate_id, edited_claim=edited_claim)
+
+
+def _confirm_candidate_locked(*, config: AppConfig, candidate_id: str, edited_claim: str | None) -> ConfirmReceipt:
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -185,24 +200,27 @@ def confirm_candidate(*, config: AppConfig, candidate_id: str, edited_claim: str
 
 
 def _set_status(*, config: AppConfig, candidate_id: str, expect: tuple[str, ...], status: str) -> None:
-    conn = connect(config.database_path)
-    try:
-        initialize(conn)
-        row = conn.execute(
-            "select status from memory_candidates where candidate_id = ?", (candidate_id,)
-        ).fetchone()
-        if row is None:
-            raise ValueError(f"unknown candidate: {candidate_id}")
-        if str(row["status"]) not in expect:
-            raise ValueError(f"candidate not in {expect}: {candidate_id} ({row['status']})")
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            "update memory_candidates set status = ?, reviewed_at = ?, updated_at = ? where candidate_id = ?",
-            (status, now if status != "pending_review" else None, now, candidate_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    # Shares the confirm lock so a reject/defer can't race a confirm on the same row
+    # (which could leave a signed+materialized card behind a 'rejected' candidate).
+    with _MEMORY_WRITE_LOCK:
+        conn = connect(config.database_path)
+        try:
+            initialize(conn)
+            row = conn.execute(
+                "select status from memory_candidates where candidate_id = ?", (candidate_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"unknown candidate: {candidate_id}")
+            if str(row["status"]) not in expect:
+                raise ValueError(f"candidate not in {expect}: {candidate_id} ({row['status']})")
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "update memory_candidates set status = ?, reviewed_at = ?, updated_at = ? where candidate_id = ?",
+                (status, now if status != "pending_review" else None, now, candidate_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def reject_candidate(*, config: AppConfig, candidate_id: str) -> None:

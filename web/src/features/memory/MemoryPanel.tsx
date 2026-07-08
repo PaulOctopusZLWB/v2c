@@ -40,6 +40,8 @@ export function MemoryPanel({
   const [error, setError] = useState<string | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(0);
   const [receipts, setReceipts] = useState<Record<string, Receipt>>({});
+  // 进行中的候选(纵深防御:确认签名不可并发,后端已有锁,前端也禁掉重复提交)。
+  const [busyId, setBusyId] = useState<string | null>(null);
   // z 撤销栈:最近的 reject/defer(confirm 已签名,不入栈)。
   const undoStack = useRef<Array<{ candidate_id: string; action: "rejected" | "deferred" }>>([]);
   const audio = useSegmentAudio();
@@ -66,7 +68,8 @@ export function MemoryPanel({
     setFocusedIdx((i) => Math.min(Math.max(i + delta, 0), Math.max(candidates.length - 1, 0)));
 
   const act = async (candidate: MemoryCandidate, action: "confirm" | "reject" | "defer") => {
-    if (candidate.status !== "pending_review") return;
+    if (candidate.status !== "pending_review" || busyId) return;
+    setBusyId(candidate.candidate_id);
     try {
       if (action === "confirm") {
         const receipt = await api.confirmMemory(candidate.candidate_id);
@@ -89,6 +92,8 @@ export function MemoryPanel({
       move(1);
     } catch (err) {
       push("记忆操作失败", err instanceof Error ? err.message : undefined);
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -223,19 +228,20 @@ export function MemoryPanel({
                   ✓ memory_card.created
                   {receipt ? <> · sig {receipt.signature.slice(0, 4)}…{receipt.signature.slice(-4)}</> : null}
                   {candidate.memory_card_id ? <> · {candidate.memory_card_id.slice(0, 12)}…</> : null}
-                  {" "}· 已写回 40_Confirmed_Memory/
+                  {/* 只在「本会话确认且 vault 写失败」时隐藏;往期确认(无回执)默认已写回。 */}
+                  {!receipt || receipt.note_path ? <> · 已写回 40_Confirmed_Memory/</> : null}
                 </p>
               ) : null}
 
               {focused && pending ? (
                 <div className="memory-actions" onClick={(e) => e.stopPropagation()}>
-                  <button className="memory-act is-confirm" onClick={() => void act(candidate, "confirm")}>
+                  <button className="memory-act is-confirm" disabled={busyId === candidate.candidate_id} onClick={() => void act(candidate, "confirm")}>
                     确认并签名 <kbd className="key-hint">a</kbd>
                   </button>
-                  <button className="memory-act" onClick={() => void act(candidate, "reject")}>
+                  <button className="memory-act" disabled={busyId === candidate.candidate_id} onClick={() => void act(candidate, "reject")}>
                     拒绝 <kbd className="key-hint">r</kbd>
                   </button>
-                  <button className="memory-act" onClick={() => void act(candidate, "defer")}>
+                  <button className="memory-act" disabled={busyId === candidate.candidate_id} onClick={() => void act(candidate, "defer")}>
                     搁置 <kbd className="key-hint">d</kbd>
                   </button>
                 </div>
