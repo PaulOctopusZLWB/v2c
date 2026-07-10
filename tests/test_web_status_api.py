@@ -150,6 +150,54 @@ def test_day_status_flips_to_ready_when_all_tasks_terminal_and_session_exists(tm
     assert rows["2026-06-04"]["status"] == "processing"  # one task still active
 
 
+def test_day_status_marks_terminal_no_session_day_empty(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = "2026-06-05T10:00:00+00:00"
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
+              local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "aud_empty",
+                "test",
+                "/empty.wav",
+                0,
+                0,
+                "/l_empty.wav",
+                "sha:empty",
+                1000,
+                "2026-06-05T10:00:00+00:00",
+                now,
+                "imported",
+            ),
+        )
+        conn.execute(
+            """
+            insert into tasks (
+              task_id, task_type, target_type, target_id, status,
+              retry_count, max_retries, available_at, created_at, updated_at
+            ) values ('task_empty', 'transcribe_diarize', 'audio_file', 'aud_empty', 'failed_terminal', 1, 3, ?, ?, ?)
+            """,
+            (now, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+
+    rows = {r["day"]: r for r in client.get("/api/transcripts/day-status").json()["days"]}
+
+    assert rows["2026-06-05"]["status"] == "empty"
+    assert rows["2026-06-05"]["session_count"] == 0
+    assert rows["2026-06-05"]["active_count"] == 0
+
+
 def test_root_returns_api_marker_when_frontend_not_built(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     client = TestClient(create_app(config=config))

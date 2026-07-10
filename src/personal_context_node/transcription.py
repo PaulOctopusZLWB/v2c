@@ -152,6 +152,8 @@ def transcribe_audio_file_diarized(*, config: AppConfig, asr: ASRPort, audio_fil
         # local_raw_path is the already-rooted raw path (mirrors transcribe_pending_chunks'
         # local_chunk_path handling — do NOT re-prefix config.data_dir).
         asr_result = asr.transcribe(Path(str(audio["local_raw_path"])))
+        if not asr_result.segments:
+            raise TerminalPortError(f"ASR produced no transcript segments for audio file: {audio_file_id}")
         decode_config_json = json.dumps(asr_result.decode_config, ensure_ascii=False, sort_keys=True)
         now = datetime.now(timezone.utc).isoformat()
         segments_created = 0

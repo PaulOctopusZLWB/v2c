@@ -209,7 +209,7 @@ export interface DayStatusRow {
   session_count: number;
   active_count: number;
   total_count: number;
-  status: "processing" | "ready";
+  status: "processing" | "ready" | "empty";
 }
 
 export interface Health {

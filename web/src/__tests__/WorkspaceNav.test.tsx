@@ -136,14 +136,16 @@ describe("WorkspaceNav", () => {
     await waitFor(() => expect(onDeleteSession).not.toHaveBeenCalled());
   });
 
-  it("renders a per-day 处理中 / 可审 badge from the dayStatus prop", () => {
+  it("renders a per-day 处理中 / 可审 / 无转写 badge from the dayStatus prop", () => {
     const days = [
       { day: "2087-05-10", session_count: 2 },
-      { day: "2087-05-11", session_count: 0 }
+      { day: "2087-05-11", session_count: 0 },
+      { day: "2087-05-12", session_count: 0 }
     ];
     const dayStatus = [
       { day: "2087-05-10", session_count: 2, active_count: 0, total_count: 5, status: "ready" as const },
-      { day: "2087-05-11", session_count: 0, active_count: 3, total_count: 5, status: "processing" as const }
+      { day: "2087-05-11", session_count: 0, active_count: 3, total_count: 5, status: "processing" as const },
+      { day: "2087-05-12", session_count: 0, active_count: 0, total_count: 5, status: "empty" as const }
     ];
     render(
       <WorkspaceNav
@@ -159,5 +161,7 @@ describe("WorkspaceNav", () => {
     expect(ready).toHaveTextContent("可审");
     const processing = screen.getByRole("button", { name: /2087-05-11/ });
     expect(processing).toHaveTextContent("处理中");
+    const empty = screen.getByRole("button", { name: /2087-05-12/ });
+    expect(empty).toHaveTextContent("无转写");
   });
 });

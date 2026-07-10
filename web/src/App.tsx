@@ -38,6 +38,7 @@ import { CommandPalette, type Command } from "./features/command/CommandPalette"
 import { useHotkeys } from "./features/command/useHotkeys";
 import { usePipelineStatus } from "./hooks/usePipelineStatus";
 import { stageForTaskType, STAGES } from "./lib/stages";
+import { mergeDaysWithStatus } from "./lib/days";
 import type { Stage } from "./lib/stages";
 import { dayLabel, taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
@@ -280,8 +281,9 @@ export function App() {
     // Fetch the day list and the per-day processing/ready aggregate together so the
     // rail can render a live badge during a run, not only on running -> idle.
     const [daysResult, statusResult] = await Promise.all([api.days(), api.dayStatus().catch(() => ({ days: [] }))]);
-    setDays(daysResult.days ?? []);
-    setDayStatus(statusResult.days ?? []);
+    const statusDays = statusResult.days ?? [];
+    setDays(mergeDaysWithStatus(daysResult.days ?? [], statusDays));
+    setDayStatus(statusDays);
   }
 
   // Reload the enriched person roster (enrollment + attribution counts) for the People panel.
@@ -322,16 +324,19 @@ export function App() {
   async function refreshBootstrap() {
     setBootstrapError(null);
     try {
-      const [personsResult, healthResult, daysResult, devicesResult, peopleResult] = await Promise.all([
+      const [personsResult, healthResult, daysResult, statusResult, devicesResult, peopleResult] = await Promise.all([
         api.persons(),
         api.health(),
         api.days(),
+        api.dayStatus().catch(() => ({ days: [] })),
         api.devices(),
         api.people().catch(() => ({ people: [] as PersonRow[] }))
       ]);
+      const statusDays = statusResult.days ?? [];
       setPersons(personsResult.persons ?? []);
       setHealth(healthResult);
-      setDays(daysResult.days ?? []);
+      setDays(mergeDaysWithStatus(daysResult.days ?? [], statusDays));
+      setDayStatus(statusDays);
       setSources(devicesResult.sources ?? []);
       setPeople(peopleResult.people ?? []);
       setBootstrapped(true);

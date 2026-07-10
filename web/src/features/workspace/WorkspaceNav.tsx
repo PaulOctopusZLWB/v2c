@@ -56,6 +56,8 @@ export function WorkspaceNav({
       </div>
       {days.map((d) => {
         const status = statusByDay.get(d.day);
+        const statusClass = status === "ready" ? "s-accepted" : status === "empty" ? "s-rejected" : "s-pending_review";
+        const statusLabel = status ? t.day[status] : "";
         return (
           <button
             key={d.day}
@@ -66,8 +68,8 @@ export function WorkspaceNav({
             <span>{dayLabel(d.day)}</span>
             <span className="day-end">
               {status ? (
-                <span className={`badge ${status === "ready" ? "s-accepted" : "s-pending_review"}`}>
-                  {status === "ready" ? t.day.ready : t.day.processing}
+                <span className={`badge ${statusClass}`}>
+                  {statusLabel}
                 </span>
               ) : null}
               <span className="count">{d.session_count}</span>

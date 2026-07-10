@@ -198,6 +198,22 @@ def test_diarized_empty_audio_fails_terminally_without_calling_asr(tmp_path: Pat
     assert rows == []
 
 
+def test_diarized_asr_empty_segments_fails_terminally(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_audio_file(database_path=config.database_path)
+    asr = FakeDiarizedASRAdapter([])
+
+    with pytest.raises(TerminalPortError, match="ASR produced no transcript segments"):
+        transcribe_audio_file_diarized(config=config, asr=asr, audio_file_id="aud_diar")
+
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select segment_id from transcript_segments where audio_file_id = 'aud_diar'")
+    finally:
+        conn.close()
+    assert rows == []
+
+
 def test_diarized_multi_session_keeps_session_ids_stable_across_rerun(tmp_path: Path) -> None:
     # A single whole-file diarized recording with an internal silence gap >
     # session_gap_minutes splits into 2 sessions. Because each diarized session must own

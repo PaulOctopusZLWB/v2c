@@ -288,8 +288,8 @@ def day_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
     Status logic:
     - 'ready': the day has at least one session AND all tasks whose target traces to
       this day are in a terminal state (succeeded, failed_terminal, or retry-exhausted).
-    - 'processing': otherwise (still has pending/claimed/running/retryable tasks, or
-      no sessions yet).
+    - 'empty': all tasks are terminal, but no sessions were derived.
+    - 'processing': otherwise (still has pending/claimed/running/retryable tasks).
 
     Uses a single grouped query — no N+1.
     """
@@ -300,12 +300,12 @@ def day_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
             conn,
             """
             with day_tasks as (
-              -- vad / asr tasks: keyed to audio_file's recorded day
+              -- file-scoped tasks: keyed to audio_file's recorded day
               select substr(af.recorded_at, 1, 10) as day, t.status, t.retry_count, t.max_retries
               from tasks t
               join audio_files af on af.audio_file_id = t.target_id
-              where t.task_type in ('vad', 'asr')
-                and t.target_type in ('audio_file', 'audio_chunk')
+              where t.task_type in ('vad', 'asr', 'transcribe_diarize')
+                and t.target_type = 'audio_file'
               -- for asr tasks keyed on audio_chunk, resolve the chunk's file day
               union all
               select substr(af.recorded_at, 1, 10) as day, t.status, t.retry_count, t.max_retries
@@ -350,6 +350,7 @@ def day_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
               da.total_count,
               case
                 when coalesce(ds.session_count, 0) > 0 and da.active_count = 0 then 'ready'
+                when coalesce(ds.session_count, 0) = 0 and da.active_count = 0 then 'empty'
                 else 'processing'
               end as status
             from day_agg da
