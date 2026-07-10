@@ -80,6 +80,22 @@ export function sessionHeader(segments: TranscriptSegment[]): { time: string; se
   return { time: `${first}–${last}`, segs, speakers };
 }
 
+/** Humanize a duration in milliseconds for the 阶段耗时 panel: <1s → "420ms",
+ *  <60s → "3.2s", else → "1m 05s". Negative/NaN inputs clamp to 0. */
+export function humanizeDuration(ms: number): string {
+  const v = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+  if (v < 1000) return `${Math.round(v)}ms`;
+  const totalSeconds = v / 1000;
+  if (totalSeconds < 60) {
+    const s = Math.round(totalSeconds * 10) / 10;
+    return `${s}s`;
+  }
+  const totalWholeSeconds = Math.round(totalSeconds);
+  const m = Math.floor(totalWholeSeconds / 60);
+  const s = totalWholeSeconds % 60;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
 /** Day label: keep the date, add weekday for scanability. */
 export function dayLabel(day: string): string {
   const wd = ["日", "一", "二", "三", "四", "五", "六"];

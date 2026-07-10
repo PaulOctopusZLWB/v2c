@@ -603,6 +603,29 @@ export interface ViewpointState {
   note_path: string | null;
 }
 
+/** Per-task_type latency + outcome breakdown from `GET /api/pipeline/metrics` — 管道控制室
+ *  「阶段耗时」面板的数据源。`duration_ms` 及 `success_rate` 在该 task_type 尚无已完成任务时为 null。 */
+export interface PipelineTaskDuration {
+  count: number;
+  avg: number;
+  p50: number;
+  p95: number;
+  max: number;
+}
+
+export interface PipelineTaskMetric {
+  task_type: string;
+  counts: { succeeded: number; failed_terminal: number; pending: number };
+  total: number;
+  success_rate: number | null;
+  duration_ms: PipelineTaskDuration | null;
+}
+
+export interface PipelineMetrics {
+  task_types: PipelineTaskMetric[];
+  generated_at: string;
+}
+
 export interface DailyLlmResult {
   day: string;
   context: { content: Record<string, unknown>; model_name: string | null; updated_at: string } | null;

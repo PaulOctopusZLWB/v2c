@@ -36,11 +36,25 @@ class PipelineWorker:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._last_result: DrainResult | None = None
+        # Resident pipeline adapters, cached across drains so the funasr_server model
+        # subprocess survives between runs (reloading the model per drain costs seconds
+        # to tens of seconds). Keyed by the effective config (+ adapter factory identity,
+        # so a test-monkeypatched build_pipeline_adapters is never served a stale cache);
+        # a web settings change rebuilds on the next drain, same as before.
+        self._adapters = None
+        self._adapters_key: str | None = None
         self._import: dict | None = None
         self._embedding: dict | None = None
         self._embedding_result: dict | None = None
         self._emotion: dict | None = None
         self._emotion_result: dict | None = None
+        # Combined embedding+emotion extraction result (start_combined_extraction). Progress is
+        # reported through the EXISTING self._embedding / self._emotion slots (see
+        # _extract_embeddings_and_emotions) so the current SSE/status routes -- which read
+        # embedding_state()/emotion_state() and know nothing about a combined run -- keep working
+        # unchanged; this slot only carries the combined run's final result for callers that want
+        # it (e.g. a future combined-specific route), without adding a new route dependency.
+        self._combined_result: dict | None = None
         # DI seam: tests replace this with a factory returning a stub adapter so no real CAM++
         # model is loaded. Default builds a resident PersistentCommandEmbedAdapter from config.
         self._embed_factory = self._default_embed_factory
@@ -72,12 +86,13 @@ class PipelineWorker:
         which inject their own factory)."""
         from personal_context_node.adapters.embed.command import PersistentCommandEmbedAdapter
 
-        return PersistentCommandEmbedAdapter(
-            command=[
-                "python3", "scripts/funasr_campplus_embed_wrapper.py", "--server",
-                "--device", self._config.asr_device,
-            ]
-        )
+        command = [
+            "python3", "scripts/funasr_campplus_embed_wrapper.py", "--server",
+            "--device", self._config.asr_device,
+        ]
+        if self._config.asr_precision == "fp16":
+            command.extend(["--precision", "fp16"])
+        return PersistentCommandEmbedAdapter(command=command)
 
     def _default_emotion_factory(self):
         """Build a resident emotion2vec adapter pointed at the --server wrapper. Imported lazily so
@@ -85,12 +100,13 @@ class PipelineWorker:
         which inject their own factory)."""
         from personal_context_node.adapters.emotion.command import PersistentCommandEmotionAdapter
 
-        return PersistentCommandEmotionAdapter(
-            command=[
-                "python3", "scripts/funasr_emotion2vec_wrapper.py", "--server",
-                "--device", self._config.asr_device,
-            ]
-        )
+        command = [
+            "python3", "scripts/funasr_emotion2vec_wrapper.py", "--server",
+            "--device", self._config.asr_device,
+        ]
+        if self._config.asr_precision == "fp16":
+            command.extend(["--precision", "fp16"])
+        return PersistentCommandEmotionAdapter(command=command)
 
     def start_embedding_extraction(
         self, *, session_id: str | None = None, day: str | None = None, embed_factory=None
@@ -138,10 +154,66 @@ class PipelineWorker:
             self._thread.start()
             return True
 
+    def start_combined_extraction(
+        self,
+        *,
+        session_id: str | None = None,
+        day: str | None = None,
+        embed_factory=None,
+        classify_factory=None,
+    ) -> bool:
+        """Start a background CAM++ embedding + emotion2vec classification pass in ONE sweep.
+
+        Uses extract_pending_embeddings_and_emotions so each pending segment's audio path is
+        resolved once instead of twice (once per standalone extraction). Reuses the single
+        self._thread guard so is_running() is true throughout and start() won't double-spawn
+        against an embedding-only or emotion-only run either. ``embed_factory``/``classify_factory``
+        (zero-arg callables returning an object with ``embed``/``close`` and ``classify``/``close``
+        respectively) are the DI seam for tests; when omitted they fall back to
+        self._embed_factory / self._emotion_factory. BOTH resident model subprocesses are released
+        in `finally`, even if one factory or the extraction itself raises.
+        """
+        with self._lock:
+            if self.is_running():
+                return False
+            self._stop.clear()
+            embed_fac = embed_factory or self._embed_factory
+            classify_fac = classify_factory or self._emotion_factory
+            self._embedding = {"active": True, "done": 0, "total": 0}
+            self._emotion = {"active": True, "done": 0, "total": 0}
+            self._thread = threading.Thread(
+                target=self._extract_embeddings_and_emotions,
+                kwargs={
+                    "session_id": session_id, "day": day,
+                    "embed_factory": embed_fac, "classify_factory": classify_fac,
+                },
+                daemon=True,
+            )
+            self._thread.start()
+            return True
+
+    def _resident_adapters(self, effective):
+        """Return cached pipeline adapters, rebuilding only when the effective config (or the
+        adapter factory, under test monkeypatching) changed since the last drain. Keeping the
+        adapters resident keeps the funasr_server model loaded across drains."""
+        key = f"{id(build_pipeline_adapters)}:{effective.model_dump_json()}"
+        if self._adapters is None or key != self._adapters_key:
+            self.close_adapters()
+            self._adapters = build_pipeline_adapters(config=effective)
+            self._adapters_key = key
+        return self._adapters
+
+    def close_adapters(self) -> None:
+        """Release any resident adapter subprocess (config change, app shutdown)."""
+        if self._adapters is not None:
+            _close_adapters(self._adapters)
+            self._adapters = None
+            self._adapters_key = None
+
     def _drain_to_completion(self, *, max_steps: int = 200) -> DrainResult:
-        """Build adapters, loop drain_process_queue in batches of max_steps until the queue is
-        empty (status 'complete') or a stop is requested, then close any resident adapter.
-        Shared by every drain entry point so the funasr_server subprocess is always released."""
+        """Loop drain_process_queue in batches of max_steps until the queue is empty (status
+        'complete') or a stop is requested. Adapters stay resident across drains (see
+        _resident_adapters); close_adapters() releases them on config change or shutdown."""
         # Re-read DB-backed runtime overrides each drain so web config changes take effect on the
         # NEXT drain without a restart. ASR overrides go through model_copy; GLM_* overrides are
         # exported to os.environ, which the glm_llm_wrapper subprocess inherits (no env= is passed).
@@ -151,25 +223,24 @@ class PipelineWorker:
         effective = _settings.effective_config(self._config)
         # apply_glm_env reverts a cleared override to the launch baseline (not the last-applied value).
         _settings.apply_glm_env(overrides)
-        adapters = build_pipeline_adapters(config=effective)
+        adapters = self._resident_adapters(effective)
+        workers = max(1, int(getattr(effective, "pipeline_workers", 1) or 1))
         total_steps = 0
         total_succeeded = 0
         total_failed = 0
         last_status = "complete"
-        try:
-            while not self._stop.is_set():
-                result = drain_process_queue(
-                    config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
-                    max_steps=max_steps, should_stop=self._stop.is_set, job_name="web.drain",
-                )
-                total_steps += result.process_steps
-                total_succeeded += result.tasks_succeeded
-                total_failed += result.tasks_failed
-                last_status = result.status
-                if result.status in ("complete", "stopped"):
-                    break
-        finally:
-            _close_adapters(adapters)
+        while not self._stop.is_set():
+            result = drain_process_queue(
+                config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
+                max_steps=max_steps, should_stop=self._stop.is_set, job_name="web.drain",
+                workers=workers,
+            )
+            total_steps += result.process_steps
+            total_succeeded += result.tasks_succeeded
+            total_failed += result.tasks_failed
+            last_status = result.status
+            if result.status in ("complete", "stopped"):
+                break
         return DrainResult(
             process_steps=total_steps,
             tasks_succeeded=total_succeeded,
@@ -268,6 +339,64 @@ class PipelineWorker:
             with contextlib.suppress(Exception):
                 adapter.close()
             # Guard against an extraction that raised before the success branch set active=False.
+            if self._emotion is not None and self._emotion.get("active"):
+                state = dict(self._emotion)
+                state["active"] = False
+                self._emotion = state
+
+    def _extract_embeddings_and_emotions(
+        self, *, session_id: str | None, day: str | None, embed_factory, classify_factory
+    ) -> None:
+        from personal_context_node.speaker_embeddings import extract_pending_embeddings_and_emotions
+
+        def _cb(done: int, total: int) -> None:
+            # One shared progress stream (see extract_pending_embeddings_and_emotions: "done" ticks
+            # once per segment regardless of how many artifacts it needed) fans out to BOTH existing
+            # state slots so embedding_state()/emotion_state() (and any SSE route reading them) show
+            # the same live progress during a combined run, with no route changes required.
+            self._embedding = {"active": True, "done": done, "total": total}
+            self._emotion = {"active": True, "done": done, "total": total}
+
+        embed_adapter = None
+        classify_adapter = None
+        try:
+            embed_adapter = embed_factory()
+            classify_adapter = classify_factory()
+            result = extract_pending_embeddings_and_emotions(
+                config=self._config,
+                embed_fn=embed_adapter.embed,
+                classify_fn=classify_adapter.classify,
+                session_id=session_id, day=day, progress=_cb,
+            )
+            self._combined_result = result
+            embedding_result = result.get("embedding", {})
+            emotion_result = result.get("emotion", {})
+            self._embedding_result = embedding_result
+            self._emotion_result = emotion_result
+            self._embedding = {
+                "active": False,
+                "done": int(embedding_result.get("total", 0)),
+                "total": int(embedding_result.get("total", 0)),
+            }
+            self._emotion = {
+                "active": False,
+                "done": int(emotion_result.get("total", 0)),
+                "total": int(emotion_result.get("total", 0)),
+            }
+        finally:
+            # ALWAYS release BOTH resident model subprocesses, even if extraction (or building
+            # either factory) raised -- two models are resident at once here, so neither must leak.
+            if classify_adapter is not None:
+                with contextlib.suppress(Exception):
+                    classify_adapter.close()
+            if embed_adapter is not None:
+                with contextlib.suppress(Exception):
+                    embed_adapter.close()
+            # Guard against a raise before the success branch set active=False on either slot.
+            if self._embedding is not None and self._embedding.get("active"):
+                state = dict(self._embedding)
+                state["active"] = False
+                self._embedding = state
             if self._emotion is not None and self._emotion.get("active"):
                 state = dict(self._emotion)
                 state["active"] = False

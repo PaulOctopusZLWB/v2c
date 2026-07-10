@@ -651,6 +651,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     # confirmed labels and enrollment works immediately.
     _ensure_column(conn, "segment_person_overrides", "source", "text not null default 'manual'")
     _ensure_column(conn, "sessions", "primary_person_id", "text")
+    # Fingerprint of the EFFECTIVE prompt used for the last successful session summary. Paired
+    # with source_fingerprint (segments) by the summarize_session incremental skip: a prompt
+    # edit (override or global template) must invalidate the skip even when segments are
+    # unchanged. NULL (legacy rows) reads as not-fresh, forcing one regenerate that stamps it.
+    _ensure_column(conn, "session_viewpoint_state", "summary_prompt_fingerprint", "text")
     # User-chosen session name surfaced in the 审核 list + 声纹 scope picker (nullable: most sessions
     # stay unnamed and show their time label instead).
     _ensure_column(conn, "sessions", "name", "text")
@@ -732,6 +737,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.execute("drop index if exists idx_tasks_claim")
     conn.execute("create index if not exists idx_tasks_claim on tasks(task_type, status, priority, available_at)")
     conn.execute("create index if not exists idx_tasks_target on tasks(target_type, target_id)")
+    # process_status_rows orders the full table by created_at on every SSE tick.
+    conn.execute("create index if not exists idx_tasks_created on tasks(created_at)")
+    # process_status_rows correlates transcript_segments.chunk_id = tasks.target_id per task
+    # row; without this index each of those subqueries is a full segment-table scan.
+    conn.execute("create index if not exists idx_segments_chunk on transcript_segments(chunk_id)")
     _ensure_column(conn, "memory_candidates", "source_type", "text not null default 'llm_daily_context'")
     _ensure_column(conn, "memory_candidates", "edited_claim", "text")
     _ensure_column(conn, "memory_candidates", "review_note_path", "text")

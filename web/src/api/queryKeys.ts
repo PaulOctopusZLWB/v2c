@@ -6,5 +6,6 @@ export const queryKeys = {
   persons: () => ["persons"] as const,
   homeOverview: () => ["homeOverview"] as const,
   embeddingStatus: (scope: { session_id?: string | null; day?: string | null }) =>
-    ["embeddingStatus", scope.session_id ?? null, scope.day ?? null] as const
+    ["embeddingStatus", scope.session_id ?? null, scope.day ?? null] as const,
+  pipelineMetrics: () => ["pipelineMetrics"] as const
 };

@@ -1,8 +1,17 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PipelinePanel } from "../features/pipeline/PipelinePanel";
 import type { StatusSummary } from "../api/types";
+
+/** 面板内部用 usePipelineMetricsQuery 拉「阶段耗时」,测试需要 QueryClientProvider + 一个
+ *  兜底的 fetch 桩(未显式 stub 时返回空 task_types,面板渲染占位文案)。 */
+function renderPanel(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 /** 可控的 EventSource 桩:测试里手动派发命名事件。 */
 class FakeEventSource {
@@ -58,11 +67,13 @@ describe("PipelinePanel (管道控制室)", () => {
   beforeEach(() => {
     vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
     vi.stubGlobal("localStorage", fakeStorage());
+    // 阶段耗时面板的兜底数据源:除非某条用例另有 stub,一律返回空 task_types。
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ task_types: [], generated_at: "" }), { status: 200 })));
   });
   afterEach(() => vi.unstubAllGlobals());
 
   it("renders the stage stack: done ✓ counts, running card with progress, pending", () => {
-    render(<PipelinePanel {...baseProps} />);
+    renderPanel(<PipelinePanel {...baseProps} />);
     const stages = screen.getByRole("complementary", { name: "管道阶段" });
     expect(stages.textContent).toMatch(/VAD/);
     expect(stages.textContent).toMatch(/4\/4/); // done counts
@@ -75,7 +86,7 @@ describe("PipelinePanel (管道控制室)", () => {
   });
 
   it("streams segment.transcribed into the live feed (newest gets the caret)", () => {
-    render(<PipelinePanel {...baseProps} />);
+    renderPanel(<PipelinePanel {...baseProps} />);
     expect(screen.getByText(/等待新转写段/)).toBeInTheDocument();
 
     emit("segment.transcribed", { segment_id: "s1", session_id: null, text: "第一段文本", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2087-05-10T14:23:07+08:00", confidence: 0.9 });
@@ -92,7 +103,7 @@ describe("PipelinePanel (管道控制室)", () => {
 
   it("run.completed shows the ok bar with 立即审核 ↵ and logs to the event tail", async () => {
     const onGoReview = vi.fn();
-    render(<PipelinePanel {...baseProps} onGoReview={onGoReview} />);
+    renderPanel(<PipelinePanel {...baseProps} onGoReview={onGoReview} />);
     emit("run.completed", { total: 10, done_total: 10, failed_total: 0 });
 
     expect(screen.getByText(/转写完成/)).toBeInTheDocument();
@@ -103,7 +114,7 @@ describe("PipelinePanel (管道控制室)", () => {
   });
 
   it("task.failed and stage.changed land in the mono event tail", () => {
-    render(<PipelinePanel {...baseProps} />);
+    renderPanel(<PipelinePanel {...baseProps} />);
     emit("stage.changed", { stage: "asr", previous: "vad", target: "TX01" });
     emit("task.failed", { task_id: "t9", task_type: "asr", target_id: "chunk_9", error: "timed out" });
 
@@ -113,7 +124,7 @@ describe("PipelinePanel (管道控制室)", () => {
   });
 
   it("完成后自动跳转审核 toggle persists to localStorage", async () => {
-    render(<PipelinePanel {...baseProps} />);
+    renderPanel(<PipelinePanel {...baseProps} />);
     const toggle = screen.getByRole("checkbox", { name: /完成后自动跳转审核/ });
     expect(toggle).not.toBeChecked();
     await userEvent.click(toggle);
@@ -123,7 +134,7 @@ describe("PipelinePanel (管道控制室)", () => {
   });
 
   it("renders the injected slots (运行控制/设备/任务列表/进度)", () => {
-    render(
+    renderPanel(
       <PipelinePanel
         {...baseProps}
         progress={<div data-testid="slot-progress" />}

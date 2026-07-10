@@ -705,6 +705,67 @@ print(json.dumps({
         raise AssertionError("CommandLLMAdapter accepted a per_speaker item without speaker_cluster_id")
 
 
+def test_command_llm_adapter_logs_duration_and_usage_when_present(tmp_path: Path, caplog) -> None:
+    script = tmp_path / "usage_llm.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "h",
+  "summary": "s",
+  "topics": [],
+  "decisions": [],
+  "todos": [],
+  "open_questions": [],
+  "usage": {"input_tokens": 123, "output_tokens": 45}
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    with caplog.at_level("INFO", logger="personal_context_node.adapters.llm.command"):
+        summary = adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+
+    assert summary.headline == "h"
+    records = [r.message for r in caplog.records if "llm_call" in r.message]
+    assert len(records) == 1
+    message = records[0]
+    assert "task=session_summary" in message
+    assert "outcome=ok" in message
+    assert "input_tokens=123" in message
+    assert "output_tokens=45" in message
+    assert "duration_ms=" in message
+
+
+def test_command_llm_adapter_logs_duration_without_usage(tmp_path: Path, caplog) -> None:
+    script = tmp_path / "no_usage_llm.py"
+    script.write_text(
+        """
+import json
+print(json.dumps({
+  "headline": "h",
+  "summary": "s",
+  "topics": [],
+  "decisions": [],
+  "todos": [],
+  "open_questions": []
+}, ensure_ascii=False))
+""".strip(),
+        encoding="utf-8",
+    )
+    adapter = CommandLLMAdapter(command=["python3", str(script)])
+
+    with caplog.at_level("INFO", logger="personal_context_node.adapters.llm.command"):
+        adapter.generate_session_summary(session_id="ses_1", transcript_segments=[])
+
+    records = [r.message for r in caplog.records if "llm_call" in r.message]
+    assert len(records) == 1
+    assert "input_tokens=None" in records[0]
+    assert "output_tokens=None" in records[0]
+    assert "outcome=ok" in records[0]
+
+
 def test_command_llm_adapter_rejects_blank_session_todo_evidence_refs(tmp_path: Path) -> None:
     script = tmp_path / "blank_session_todo_evidence.py"
     script.write_text(

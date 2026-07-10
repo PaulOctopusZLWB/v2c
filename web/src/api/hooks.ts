@@ -45,3 +45,11 @@ export function useEmbeddingStatusQuery(scope: { session_id?: string | null; day
     queryFn: () => api.embeddingStatus(scope)
   });
 }
+
+/** 管道控制室「阶段耗时」面板:按 task_type 的成功率 + 时长分位数。 */
+export function usePipelineMetricsQuery() {
+  return useQuery({
+    queryKey: queryKeys.pipelineMetrics(),
+    queryFn: () => api.pipelineMetrics()
+  });
+}

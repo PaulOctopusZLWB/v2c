@@ -1885,6 +1885,20 @@ button.today-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--
 .pipe-tail-row.is-failed { color: var(--err); }
 .pipe-tail-row.is-completed { color: var(--ok); }
 
+/* 阶段耗时统计面板(design-handoff 追加):任务栏内 taskList 与事件流 tail 之间。 */
+.stage-durations { display: flex; flex-direction: column; }
+.stage-durations-empty { text-align: center; padding: var(--s4) 0; }
+.stage-durations-rows { display: flex; flex-direction: column; gap: var(--s3); }
+.stage-duration-row {
+  border: 1px solid var(--border); border-radius: var(--r2);
+  padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
+}
+.stage-duration-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.stage-duration-name { font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+.stage-duration-rate { color: var(--text-dim); font-size: var(--fs-sm); }
+.stage-duration-metrics { display: flex; gap: var(--s4); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-dim); }
+.stage-duration-counts { display: flex; gap: var(--s2); flex-wrap: wrap; }
+
 @media (max-width: 1100px) {
   .pipeline-layout { grid-template-columns: 1fr; overflow: visible; }
   .pipe-feed { min-height: 240px; }

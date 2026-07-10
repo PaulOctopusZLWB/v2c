@@ -43,9 +43,15 @@ def fts_available(conn: sqlite3.Connection) -> bool:
 
 
 def ensure_fts_index(conn: sqlite3.Connection) -> None:
-    """Create + lazily rebuild the FTS index when it drifts from transcript_segments.
+    """Create the FTS index (if missing) and incrementally sync it to transcript_segments.
 
-    单用户本地库,行数在万级:计数不一致时整体重建(秒级)比维护触发器简单可靠。
+    单用户本地库,行数在万级,但每次搜索都会调用一次 —— 之前靠“行数不一致就整表重建”,
+    ASR 重跑一遍(旧段大量 is_active=0、等量新段插入)行数不变、也会被判定为一致而漏更新
+    调用方只好每次都 delete + 逐行重建,秒级抖动。这里改成两条集合差 SQL:
+      1) insert 缺失的 active 段(在 transcript_segments 里 active 但不在 fts 里的)
+      2) delete 多余的 fts 行(fts 里有,但对应段已不 active/已不存在的)
+    两条都是一次性批量 SQL(select ... where not exists 是索引可达的,不是逐行 Python 循环),
+    没有触发器 —— schema 归 storage/sqlite.py 管。
     """
     conn.execute(
         """
@@ -53,16 +59,34 @@ def ensure_fts_index(conn: sqlite3.Connection) -> None:
         using fts5(segment_id unindexed, text_tokens)
         """
     )
-    fts_count = conn.execute("select count(*) from transcript_fts").fetchone()[0]
-    seg_count = conn.execute("select count(*) from transcript_segments where is_active = 1").fetchone()[0]
-    if int(fts_count) == int(seg_count):
-        return
-    conn.execute("delete from transcript_fts")
-    for row in conn.execute("select segment_id, text from transcript_segments where is_active = 1"):
-        conn.execute(
+    # 1) 缺失的 active 段:在 transcript_segments 里 is_active=1,但 fts 里还没有这一行
+    #    (新插入的段,或此前从未建过索引)。
+    to_insert = conn.execute(
+        """
+        select ts.segment_id, ts.text
+        from transcript_segments ts
+        where ts.is_active = 1
+          and not exists (select 1 from transcript_fts f where f.segment_id = ts.segment_id)
+        """
+    ).fetchall()
+    if to_insert:
+        conn.executemany(
             "insert into transcript_fts (segment_id, text_tokens) values (?, ?)",
-            (row["segment_id"], cjk_tokenize(str(row["text"] or ""))),
+            [(row["segment_id"], cjk_tokenize(str(row["text"] or ""))) for row in to_insert],
         )
+    # 2) 该从索引里摘掉的行:fts 有,但对应段已不 active(ASR 重跑后旧段 is_active=0)
+    #    或段本身已被删除(delete_session)。
+    conn.execute(
+        """
+        delete from transcript_fts
+        where segment_id in (
+          select f.segment_id from transcript_fts f
+          left join transcript_segments ts
+            on ts.segment_id = f.segment_id and ts.is_active = 1
+          where ts.segment_id is null
+        )
+        """
+    )
     conn.commit()
 
 

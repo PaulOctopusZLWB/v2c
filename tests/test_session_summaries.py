@@ -28,6 +28,20 @@ class RecordingSessionLLM:
         )
 
 
+class CountingSessionLLM:
+    """Delegates to RuleBasedLLMAdapter but counts how many times it was actually invoked."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def generate_session_summary(self, *, session_id: str, transcript_segments: list[dict[str, object]], prompt: str | None = None):
+        self.call_count += 1
+        return RuleBasedLLMAdapter().generate_session_summary(
+            session_id=session_id,
+            transcript_segments=transcript_segments,
+        )
+
+
 class ChunkRecordingSessionLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[dict[str, object]]]] = []
@@ -370,6 +384,99 @@ def test_summarize_session_rejects_empty_decision_evidence_refs_without_side_eff
         conn.close()
     assert summaries == []
     assert evidence_refs == []
+
+
+# --- fingerprint incremental skip -----------------------------------------
+
+
+def test_summarize_session_skips_llm_when_fingerprint_unchanged(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+    llm = CountingSessionLLM()
+
+    first = summarize_session(config=config, session_id="ses_test", llm=llm)
+    second = summarize_session(config=config, session_id="ses_test", llm=llm)
+
+    assert first.summaries_created == 1
+    assert second.summaries_created == 0
+    assert llm.call_count == 1
+
+    conn = connect(config.database_path)
+    try:
+        summaries = fetch_all(conn, "select summary_id from summaries")
+    finally:
+        conn.close()
+    # still exactly one summary row (no duplicate / no unnecessary rewrite).
+    assert len(summaries) == 1
+
+
+def test_summarize_session_recalls_llm_when_fingerprint_changes(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+    llm = CountingSessionLLM()
+
+    summarize_session(config=config, session_id="ses_test", llm=llm)
+    assert llm.call_count == 1
+
+    # Edit a segment's text -> the fingerprint changes -> the next call must re-invoke the LLM.
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update transcript_segments set text = ? where segment_id = ?", ("修改后的文字", "seg_1"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = summarize_session(config=config, session_id="ses_test", llm=llm)
+
+    assert result.summaries_created == 1
+    assert llm.call_count == 2
+
+
+def test_summarize_session_force_bypasses_skip(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+    llm = CountingSessionLLM()
+
+    summarize_session(config=config, session_id="ses_test", llm=llm)
+    assert llm.call_count == 1
+
+    # Transcript unchanged, but force=True must re-invoke the LLM anyway.
+    result = summarize_session(config=config, session_id="ses_test", llm=llm, force=True)
+
+    assert result.summaries_created == 1
+    assert llm.call_count == 2
+
+
+def test_summarize_session_recalls_llm_when_prompt_changes(tmp_path: Path) -> None:
+    # Editing the prompt (session override or global template) must invalidate the
+    # fingerprint skip even though the transcript segments are unchanged.
+    from personal_context_node.session_viewpoint import (
+        set_session_prompt_override,
+        set_session_prompt_template,
+    )
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_and_segments(config.database_path)
+    llm = CountingSessionLLM()
+
+    summarize_session(config=config, session_id="ses_test", llm=llm)
+    assert llm.call_count == 1
+
+    set_session_prompt_override(config=config, session_id="ses_test", template="请用要点列表总结这次对话。")
+    result = summarize_session(config=config, session_id="ses_test", llm=llm)
+    assert result.summaries_created == 1
+    assert llm.call_count == 2
+
+    # Unchanged again -> skip.
+    assert summarize_session(config=config, session_id="ses_test", llm=llm).summaries_created == 0
+    assert llm.call_count == 2
+
+    # A GLOBAL template edit must also invalidate (once the override is cleared it applies).
+    set_session_prompt_override(config=config, session_id="ses_test", template=None)
+    set_session_prompt_template(config=config, template="全局新模板:输出更精炼。")
+    result = summarize_session(config=config, session_id="ses_test", llm=llm)
+    assert result.summaries_created == 1
+    assert llm.call_count == 3
 
 
 def _insert_session_and_segments(

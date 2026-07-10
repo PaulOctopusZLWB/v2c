@@ -18,6 +18,87 @@ def test_resolve_device_prefers_mps_when_available() -> None:
     assert fw.resolve_device("cpu", mps_available=lambda: True) == "cpu"   # explicit override respected
 
 
+def test_wrapper_cli_accepts_precision_flag_via_subprocess(tmp_path: Path) -> None:
+    # End-to-end argv parsing through the REAL main() parser (not a hand-rolled stand-in): an
+    # unknown audio path with --precision fp16 must still hit the (unrelated) terminal_exit_code
+    # path rather than argparse rejecting the flag.
+    missing = tmp_path / "missing.wav"
+    result = subprocess.run(
+        [sys.executable, "scripts/funasr_sensevoice_wrapper.py", str(missing), "--precision", "fp16"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 3  # terminal: missing audio file, but the flag parsed fine
+    assert "does not exist" in result.stderr
+
+
+def test_wrapper_cli_rejects_invalid_precision_value() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/funasr_sensevoice_wrapper.py", "x.wav", "--precision", "int8"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 2  # argparse error exit code
+    assert "invalid choice" in result.stderr
+
+
+def test_maybe_half_is_noop_for_fp32() -> None:
+    class FakeModel:
+        def __init__(self):
+            self.halved = False
+
+    model = FakeModel()
+    result = fw.maybe_half(model, "fp32")
+    assert result is model
+    assert model.halved is False
+
+
+def test_maybe_half_casts_reachable_torch_modules_to_fp16() -> None:
+    import torch.nn as nn
+
+    class FakeAutoModel:
+        def __init__(self):
+            self.model = nn.Linear(4, 4)  # a real nn.Module so .half() actually runs
+
+    model = FakeAutoModel()
+    assert model.model.weight.dtype.__str__() == "torch.float32"
+    result = fw.maybe_half(model, "fp16")
+    assert result is model
+    assert str(model.model.weight.dtype) == "torch.float16"
+
+
+def test_maybe_half_falls_back_to_fp32_on_conversion_failure(caplog) -> None:
+    # A model whose .half() raises (simulating an MPS-unsupported op) must NOT crash the wrapper;
+    # maybe_half catches it, warns, and returns the model as-is (still fp32).
+    class BoomModule:
+        def half(self):
+            raise RuntimeError("MPS does not support fp16 for this op")
+
+    class FakeAutoModel:
+        def __init__(self):
+            self.model = BoomModule()
+
+    import torch.nn as nn
+
+    # BoomModule is not an nn.Module, so _cast_model_half's isinstance check would skip it; force
+    # the failure path by making the top-level model itself raise via a monkeypatched _cast.
+    orig_cast = fw._cast_model_half
+
+    def _boom(_model) -> None:
+        raise RuntimeError("MPS does not support fp16 for this op")
+
+    fw._cast_model_half = _boom
+    try:
+        with caplog.at_level("WARNING"):
+            result = fw.maybe_half(FakeAutoModel(), "fp16")
+        assert result is not None  # still returns the model, not None/crash
+        assert any("fp16 conversion failed" in message for message in caplog.messages)
+    finally:
+        fw._cast_model_half = orig_cast
+
+
 def test_run_server_emits_one_result_line_per_chunk_path(tmp_path: Path) -> None:
     class FakeModel:
         def generate(self, *, input, **kw):

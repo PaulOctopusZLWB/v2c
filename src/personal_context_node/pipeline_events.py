@@ -14,6 +14,7 @@ polls into the richer event set the 管道控制室 consumes:
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 
 from personal_context_node.config import AppConfig
@@ -35,19 +36,26 @@ class EventCursor:
     initialized: bool = False
 
 
-def max_segment_rowid(*, config: AppConfig) -> int:
-    conn = connect(config.database_path)
+def max_segment_rowid(*, config: AppConfig, conn: sqlite3.Connection | None = None) -> int:
+    owns_conn = conn is None
+    if conn is None:
+        conn = connect(config.database_path)
     try:
         initialize(conn)
         rows = fetch_all(conn, "select coalesce(max(rowid), 0) as m from transcript_segments")
     finally:
-        conn.close()
+        if owns_conn:
+            conn.close()
     return int(rows[0]["m"])
 
 
-def fetch_new_segments(*, config: AppConfig, after_rowid: int) -> tuple[list[dict[str, object]], int]:
+def fetch_new_segments(
+    *, config: AppConfig, after_rowid: int, conn: sqlite3.Connection | None = None
+) -> tuple[list[dict[str, object]], int]:
     """New active segments past the cursor (ordered by rowid), and the advanced cursor."""
-    conn = connect(config.database_path)
+    owns_conn = conn is None
+    if conn is None:
+        conn = connect(config.database_path)
     try:
         initialize(conn)
         rows = fetch_all(
@@ -63,7 +71,8 @@ def fetch_new_segments(*, config: AppConfig, after_rowid: int) -> tuple[list[dic
             (after_rowid, MAX_SEGMENTS_PER_TICK),
         )
     finally:
-        conn.close()
+        if owns_conn:
+            conn.close()
     cursor = int(rows[-1]["_rowid"]) if rows else after_rowid
     events = [
         {

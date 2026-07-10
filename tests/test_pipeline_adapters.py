@@ -152,6 +152,78 @@ def test_build_asr_diarize_command_override_wins() -> None:
     assert adapter.command == ["uv", "run", "python", "scripts/diarize.py", "--server"]
 
 
+def test_build_asr_funasr_server_appends_precision_fp16() -> None:
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_command=None, mock_text=None,
+        asr_device="cpu", language="ja", model_id="iic/Custom", model_version="v9",
+        asr_precision="fp16",
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert adapter.command == [
+        "python3", "scripts/funasr_sensevoice_wrapper.py", "--server",
+        "--model", "iic/Custom", "--model-version", "v9",
+        "--device", "cpu", "--language", "ja",
+        "--precision", "fp16",
+    ]
+
+
+def test_build_asr_funasr_server_omits_precision_flag_for_fp32_default() -> None:
+    # fp32 is the default and must NOT change the existing argv (byte-for-byte compatibility).
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_command=None, mock_text=None,
+        asr_device="cpu", language="ja", model_id="iic/Custom", model_version="v9",
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert "--precision" not in adapter.command
+
+
+def test_build_asr_diarize_mode_appends_precision_fp16() -> None:
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_mode="diarize", asr_command=None, mock_text=None,
+        asr_device="mps", language="zh", asr_precision="fp16",
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert adapter.command[-2:] == ["--precision", "fp16"]
+
+
+def test_build_asr_funasr_command_mode_appends_precision_fp16() -> None:
+    from personal_context_node.adapters.asr.command import CommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr", asr_command=None, mock_text=None,
+        model_id="iic/Custom", model_version="v9", language="ja", asr_precision="fp16",
+    )
+    assert isinstance(adapter, CommandASRAdapter)
+    assert adapter.command == [
+        "python3", "scripts/funasr_sensevoice_wrapper.py",
+        "--model", "iic/Custom", "--model-version", "v9", "--language", "ja",
+        "--precision", "fp16",
+    ]
+
+
+def test_build_asr_precision_ignored_when_explicit_command_given() -> None:
+    # An explicit asr_command (shlex.split) must win over any constructed argv, precision included.
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+    adapter = build_asr(
+        asr_backend="funasr_server", asr_command="uv run python scripts/custom.py --server",
+        mock_text=None, asr_precision="fp16",
+    )
+    assert isinstance(adapter, PersistentCommandASRAdapter)
+    assert adapter.command == ["uv", "run", "python", "scripts/custom.py", "--server"]
+
+
+def test_build_pipeline_adapters_threads_asr_precision() -> None:
+    from personal_context_node.adapters.asr.persistent_command import PersistentCommandASRAdapter
+
+    config = AppConfig(asr_backend="funasr_server", asr_precision="fp16")
+    adapters = build_pipeline_adapters(config=config)
+    assert isinstance(adapters.asr, PersistentCommandASRAdapter)
+    assert "--precision" in adapters.asr.command
+    assert adapters.asr.command[adapters.asr.command.index("--precision") + 1] == "fp16"
+
+
 def test_command_with_quoted_space_path_is_one_token() -> None:
     # A repo path containing a space (e.g. "v2c 本地部署") must survive command parsing:
     # shlex honours the quotes so the interpreter path stays a single argv token.

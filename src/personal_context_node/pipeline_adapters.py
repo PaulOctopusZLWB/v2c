@@ -87,6 +87,7 @@ def build_asr(
     asr_spk_model: str = "cam++",
     asr_spk_mode: str = "punc_segment",
     asr_preset_spk_num: int | None = None,
+    asr_precision: str = "fp32",
 ) -> ASRPort:
     if asr_backend == "mock":
         return MockASRAdapter(text=mock_text, language=language, model_name=model_name)
@@ -117,6 +118,8 @@ def build_asr(
         else:
             command = ["python3", "scripts/funasr_sensevoice_wrapper.py", "--server",
                        "--model", model_id, "--model-version", model_version, "--device", asr_device, "--language", language]
+        if not asr_command and asr_precision == "fp16":
+            command.extend(["--precision", "fp16"])
         return PersistentCommandASRAdapter(command=command, timeout_seconds=timeout_seconds, model_version=model_version)
     if asr_backend == "funasr":
         command = (
@@ -133,6 +136,8 @@ def build_asr(
                 language,
             ]
         )
+        if not asr_command and asr_precision == "fp16":
+            command.extend(["--precision", "fp16"])
         return CommandASRAdapter(command=command, timeout_seconds=timeout_seconds)
     raise ValueError("asr_backend must be 'mock', 'command', 'funasr', or 'funasr_server'")
 
@@ -177,6 +182,7 @@ def build_pipeline_adapters(*, config: AppConfig) -> PipelineAdapters:
             asr_spk_model=config.asr_spk_model,
             asr_spk_mode=config.asr_spk_mode,
             asr_preset_spk_num=config.asr_preset_spk_num,
+            asr_precision=config.asr_precision,
         ),
         llm=build_llm(
             llm_backend=config.llm_backend,

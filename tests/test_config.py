@@ -261,3 +261,27 @@ preset_spk_num = 3
     assert config.asr_spk_model == "eres2net"
     assert config.asr_spk_mode == "punc_segment"
     assert config.asr_preset_spk_num == 3
+
+
+def test_app_config_default_asr_precision_is_fp32() -> None:
+    assert AppConfig().asr_precision == "fp32"
+
+
+def test_app_config_loads_asr_precision_from_toml(tmp_path: Path) -> None:
+    config_path = tmp_path / "local.toml"
+    config_path.write_text(
+        """
+[asr]
+precision = "fp16"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = AppConfig.from_toml(config_path)
+
+    assert config.asr_precision == "fp16"
+
+
+def test_app_config_rejects_invalid_asr_precision() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(asr_precision="int8")

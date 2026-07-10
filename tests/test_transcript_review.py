@@ -457,6 +457,71 @@ def test_sessions_for_day_surfaces_name(tmp_path: Path) -> None:
     assert sessions_for_day(config=config, day="2087-05-10")[0]["name"] is None
 
 
+def test_sessions_for_day_review_status_matches_session_review_status_per_session(tmp_path: Path) -> None:
+    """sessions_for_day now computes review_status via one aggregate query instead of an N+1
+    loop over session_review_status(); this pins that the aggregate result is identical to
+    calling session_review_status() per session, across every status it can produce
+    (accepted, pending_review, blocked-via-needs_fix), plus a session with zero active
+    segments (all inactive -> also 'blocked')."""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path)  # ses_test: seg_1, seg_2, both pending
+
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_accepted", "2087-05-10", "2087-05-10T09:00:00+08:00", "2087-05-10T09:00:02+08:00", "derived_from_segments", 1, 1000, "seg_acc_1", "x", "x"),
+        )
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("seg_acc_1", "aud_test", "chk_acc_1", "ses_accepted", 0, 1000, "已审核", "zh", "self", "self", "ev_acc_1", 1.0, "MockASRAdapter", "mock-asr", "test", 1, "x"),
+        )
+
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_blocked", "2087-05-10", "2087-05-10T10:00:00+08:00", "2087-05-10T10:00:02+08:00", "derived_from_segments", 1, 1000, "seg_block_1", "x", "x"),
+        )
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("seg_block_1", "aud_test", "chk_block_1", "ses_blocked", 0, 1000, "需修复", "zh", "self", "self", "ev_block_1", 1.0, "MockASRAdapter", "mock-asr", "test", 1, "x"),
+        )
+
+        conn.execute(
+            "insert into sessions (session_id, date_key, started_at, ended_at, source, segment_count, active_speech_ms, first_segment_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("ses_empty", "2087-05-10", "2087-05-10T11:00:00+08:00", "2087-05-10T11:00:02+08:00", "derived_from_segments", 1, 1000, "seg_empty_1", "x", "x"),
+        )
+        # All-inactive session (e.g. superseded ASR run with nothing re-derived yet).
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("seg_empty_1", "aud_test", "chk_empty_1", "ses_empty", 0, 1000, "已失活", "zh", "self", "self", "ev_empty_1", 1.0, "MockASRAdapter", "mock-asr", "test", 0, "x"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    review_segment(config=config, segment_id="seg_acc_1", status="accepted", note="")
+    review_segment(config=config, segment_id="seg_block_1", status="needs_fix", note="听不清")
+
+    sessions = sessions_for_day(config=config, day="2087-05-10")
+    by_id = {str(s["session_id"]): s for s in sessions}
+    assert set(by_id) == {"ses_test", "ses_accepted", "ses_blocked", "ses_empty"}
+
+    for session_id, expected in [
+        ("ses_test", "pending_review"),
+        ("ses_accepted", "accepted"),
+        ("ses_blocked", "blocked"),
+        ("ses_empty", "blocked"),
+    ]:
+        assert by_id[session_id]["review_status"] == expected
+        # Must match the per-session helper exactly (that's the semantics being preserved).
+        assert by_id[session_id]["review_status"] == session_review_status(config=config, session_id=session_id)
+
+    # Field shape besides review_status is unchanged.
+    assert set(by_id["ses_test"]) == {"session_id", "started_at", "segment_count", "name", "review_status"}
+    assert by_id["ses_test"]["segment_count"] == 2
+
+
 def test_review_queue_surfaces_name(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_session_with_segments(config.database_path)

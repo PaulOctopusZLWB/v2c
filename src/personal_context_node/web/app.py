@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -25,7 +26,15 @@ from personal_context_node.web.worker import PipelineWorker
 
 
 def create_app(*, config: AppConfig) -> FastAPI:
-    app = FastAPI(title="Personal Context Node Control Panel")
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        yield
+        # The worker keeps model adapters (funasr_server subprocess) resident across
+        # drains; release them when the app stops so no orphan model process lingers.
+        app.state.worker.request_stop()
+        app.state.worker.close_adapters()
+
+    app = FastAPI(title="Personal Context Node Control Panel", lifespan=_lifespan)
     app.state.config = config
 
     @app.get("/api/health")

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
+import time
 from typing import get_args
 
 from personal_context_node.adapters.command_runner import run_command
@@ -18,6 +20,8 @@ from personal_context_node.core.ports.llm import (
     SpeakerViewpoint,
 )
 
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_CLAIM_TYPES = set(get_args(ClaimType))
 RAW_AUDIO_PATH_FIELDS = {"audio_path", "local_raw_path", "raw_audio_path", "source_path", "work_audio_path"}
@@ -76,6 +80,8 @@ class CommandLLMAdapter:
         )
 
     def _run_json(self, payload: dict[str, object]) -> dict[str, object]:
+        task = str(payload.get("task", "unknown"))
+        started = time.monotonic()
         try:
             completed = run_command(
                 self.command,
@@ -83,15 +89,53 @@ class CommandLLMAdapter:
                 timeout_seconds=self.timeout_seconds,
             )
         except subprocess.TimeoutExpired as exc:
+            duration_ms = round((time.monotonic() - started) * 1000, 1)
+            logger.info(
+                "llm_call command=%s task=%s duration_ms=%s outcome=timeout",
+                self.command[0] if self.command else "",
+                task,
+                duration_ms,
+            )
             raise RetryablePortError(f"LLM command timed out after {self.timeout_seconds:g}s") from exc
+        duration_ms = round((time.monotonic() - started) * 1000, 1)
         if completed.returncode != 0:
+            logger.info(
+                "llm_call command=%s task=%s duration_ms=%s outcome=error exit_code=%s",
+                self.command[0] if self.command else "",
+                task,
+                duration_ms,
+                completed.returncode,
+            )
             raise RetryablePortError(f"LLM command failed with exit {completed.returncode}: {completed.stderr.strip()}")
         try:
             decoded = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
+            logger.info(
+                "llm_call command=%s task=%s duration_ms=%s outcome=invalid_json",
+                self.command[0] if self.command else "",
+                task,
+                duration_ms,
+            )
             raise TerminalPortError(f"invalid LLM JSON: {exc}") from exc
         if not isinstance(decoded, dict):
+            logger.info(
+                "llm_call command=%s task=%s duration_ms=%s outcome=invalid_shape",
+                self.command[0] if self.command else "",
+                task,
+                duration_ms,
+            )
             raise TerminalPortError("LLM output must be an object")
+        usage = decoded.get("usage")
+        input_tokens = usage.get("input_tokens") if isinstance(usage, dict) else None
+        output_tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
+        logger.info(
+            "llm_call command=%s task=%s duration_ms=%s outcome=ok input_tokens=%s output_tokens=%s",
+            self.command[0] if self.command else "",
+            task,
+            duration_ms,
+            input_tokens,
+            output_tokens,
+        )
         return decoded
 
 

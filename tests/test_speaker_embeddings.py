@@ -6,6 +6,7 @@ import numpy as np
 
 from personal_context_node import transcription
 from personal_context_node.config import AppConfig
+from personal_context_node.segment_emotions import get_emotions, pending_emotion_segment_ids
 from personal_context_node.speaker_embeddings import (
     auto_attribute_enrolled,
     clear_projection_cache,
@@ -15,6 +16,7 @@ from personal_context_node.speaker_embeddings import (
     enroll_person,
     ensure_person,
     extract_pending_embeddings,
+    extract_pending_embeddings_and_emotions,
     get_embeddings,
     global_clusters,
     identification_status,
@@ -176,6 +178,182 @@ def test_extract_scoped_by_session(tmp_path: Path, monkeypatch) -> None:
 
     stored = get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_o1", "seg_o2"])
     assert set(stored) == {"seg_o1", "seg_o2"}
+    assert pending_embedding_segment_ids(config=config, session_id="ses_test") == ["seg_1", "seg_2"]
+
+
+def test_combined_extraction_processes_union_of_pending(tmp_path: Path, monkeypatch) -> None:
+    # seg_1: pending both; seg_2: already embedded (pending emotion only);
+    # seg_3: already emoted (pending embedding only) -> union is all three, but each artifact's
+    # own "total" only counts what THAT artifact was actually missing.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+    put_embeddings_bulk(config=config, items=[("seg_2", [0.1, 0.2, 0.3])])
+    from personal_context_node.segment_emotions import put_emotions_bulk
+
+    put_emotions_bulk(config=config, items=[("seg_3", {"label": "中立/neutral", "scores": {"中立/neutral": 1.0}})])
+
+    monkeypatch.setattr(
+        transcription, "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+    embed_fn = lambda path: [0.4, 0.5, 0.6]
+    classify_fn = lambda path: {"label": "开心/happy", "scores": {"开心/happy": 1.0}}
+
+    result = extract_pending_embeddings_and_emotions(
+        config=config, embed_fn=embed_fn, classify_fn=classify_fn,
+    )
+
+    # embedding was pending for seg_1 + seg_3 (seg_2 already had one).
+    assert result["embedding"]["embedded"] == 2
+    assert result["embedding"]["total"] == 2
+    # emotion was pending for seg_1 + seg_2 (seg_3 already had one).
+    assert result["emotion"]["emoted"] == 2
+    assert result["emotion"]["total"] == 2
+
+    assert set(get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_3"])) == {
+        "seg_1", "seg_2", "seg_3",
+    }
+    assert set(get_emotions(config=config, segment_ids=["seg_1", "seg_2", "seg_3"])) == {
+        "seg_1", "seg_2", "seg_3",
+    }
+    assert pending_embedding_segment_ids(config=config) == []
+    assert pending_emotion_segment_ids(config=config) == []
+
+
+def test_combined_extraction_resolves_audio_path_once_per_segment(tmp_path: Path, monkeypatch) -> None:
+    # The whole point of combining the two loops is to halve audio-path resolution when a segment
+    # needs BOTH artifacts -- assert segment_audio_path is called exactly once per segment even
+    # though both embed_fn and classify_fn are invoked for it.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+
+    calls: list[str] = []
+
+    def fake_path(*, config, segment_id):
+        calls.append(segment_id)
+        return Path(f"/slices/{segment_id}.wav")
+
+    monkeypatch.setattr(transcription, "segment_audio_path", fake_path)
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+    classify_fn = lambda path: {"label": "中立/neutral", "scores": {"中立/neutral": 1.0}}
+
+    extract_pending_embeddings_and_emotions(config=config, embed_fn=embed_fn, classify_fn=classify_fn)
+
+    assert sorted(calls) == ["seg_1", "seg_2", "seg_3"]  # exactly once each, not twice
+
+
+def test_combined_extraction_one_bad_segment_does_not_abort_others(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+    monkeypatch.setattr(
+        transcription, "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+
+    def embed_fn(path: str) -> list[float]:
+        if "seg_2" in path:
+            raise RuntimeError("CAM++ failed on this slice")
+        return [0.1, 0.2, 0.3]
+
+    def classify_fn(path: str) -> dict:
+        if "seg_3" in path:
+            raise RuntimeError("emotion2vec failed on this slice")
+        return {"label": "中立/neutral", "scores": {"中立/neutral": 1.0}}
+
+    result = extract_pending_embeddings_and_emotions(
+        config=config, embed_fn=embed_fn, classify_fn=classify_fn,
+    )
+
+    assert result["embedding"] == {"embedded": 2, "skipped_missing_audio": 0, "failed": 1, "total": 3}
+    assert result["emotion"] == {"emoted": 2, "skipped_missing_audio": 0, "failed": 1, "total": 3}
+    assert pending_embedding_segment_ids(config=config) == ["seg_2"]
+    assert pending_emotion_segment_ids(config=config) == ["seg_3"]
+
+
+def test_combined_extraction_skips_missing_audio_for_both(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+
+    def fake_path(*, config, segment_id):
+        if segment_id == "seg_2":
+            return None
+        return Path(f"/slices/{segment_id}.wav")
+
+    monkeypatch.setattr(transcription, "segment_audio_path", fake_path)
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+    classify_fn = lambda path: {"label": "中立/neutral", "scores": {"中立/neutral": 1.0}}
+
+    result = extract_pending_embeddings_and_emotions(
+        config=config, embed_fn=embed_fn, classify_fn=classify_fn,
+    )
+
+    assert result["embedding"] == {"embedded": 2, "skipped_missing_audio": 1, "failed": 0, "total": 3}
+    assert result["emotion"] == {"emoted": 2, "skipped_missing_audio": 1, "failed": 0, "total": 3}
+    assert pending_embedding_segment_ids(config=config) == ["seg_2"]
+    assert pending_emotion_segment_ids(config=config) == ["seg_2"]
+
+
+def test_combined_extraction_reports_progress_over_union(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+    monkeypatch.setattr(
+        transcription, "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+    classify_fn = lambda path: {"label": "中立/neutral", "scores": {"中立/neutral": 1.0}}
+
+    calls: list[tuple[int, int]] = []
+    extract_pending_embeddings_and_emotions(
+        config=config, embed_fn=embed_fn, classify_fn=classify_fn,
+        progress=lambda done, total: calls.append((done, total)),
+    )
+
+    assert len(calls) == 3  # union size, not embedding total + emotion total
+    assert calls[-1] == (3, 3)
+
+
+def test_combined_extraction_second_pass_has_nothing_left(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2"])
+    monkeypatch.setattr(
+        transcription, "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+    classify_fn = lambda path: {"label": "中立/neutral", "scores": {"中立/neutral": 1.0}}
+
+    first = extract_pending_embeddings_and_emotions(config=config, embed_fn=embed_fn, classify_fn=classify_fn)
+    assert first["embedding"]["embedded"] == 2
+    assert first["emotion"]["emoted"] == 2
+
+    second = extract_pending_embeddings_and_emotions(config=config, embed_fn=embed_fn, classify_fn=classify_fn)
+    assert second["embedding"] == {"embedded": 0, "skipped_missing_audio": 0, "failed": 0, "total": 0}
+    assert second["emotion"] == {"emoted": 0, "skipped_missing_audio": 0, "failed": 0, "total": 0}
+
+
+def test_combined_extraction_scoped_by_session(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2"])
+    _insert_session_with_segments(
+        config.database_path, ["seg_o1", "seg_o2"], session_id="ses_other", audio_file_id="aud_other"
+    )
+    monkeypatch.setattr(
+        transcription, "segment_audio_path",
+        lambda *, config, segment_id: Path(f"/slices/{segment_id}.wav"),
+    )
+    embed_fn = lambda path: [0.1, 0.2, 0.3]
+    classify_fn = lambda path: {"label": "中立/neutral", "scores": {"中立/neutral": 1.0}}
+
+    result = extract_pending_embeddings_and_emotions(
+        config=config, embed_fn=embed_fn, classify_fn=classify_fn, session_id="ses_other",
+    )
+
+    assert result["embedding"]["embedded"] == 2
+    assert result["emotion"]["emoted"] == 2
+    assert set(get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_o1", "seg_o2"])) == {
+        "seg_o1", "seg_o2",
+    }
     assert pending_embedding_segment_ids(config=config, session_id="ses_test") == ["seg_1", "seg_2"]
 
 

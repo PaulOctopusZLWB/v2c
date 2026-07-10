@@ -414,8 +414,12 @@ def rerun_task(*, config: AppConfig, task_type: str, target_type: str, target_id
         conn.close()
 
 
-def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
-    conn = connect(config.database_path)
+def process_status_rows(*, config: AppConfig, conn: sqlite3.Connection | None = None) -> list[dict[str, object]]:
+    # `conn` lets hot callers (the 1s SSE poll) reuse one connection instead of
+    # reopening the DB every tick; owned connections are still closed here.
+    owns_conn = conn is None
+    if conn is None:
+        conn = connect(config.database_path)
     try:
         initialize(conn)
         rows = fetch_all(
@@ -475,7 +479,79 @@ def process_status_rows(*, config: AppConfig) -> list[dict[str, object]]:
             row["duration_ms"] = _duration_ms(started_at=row.pop("started_at"), finished_at=row.pop("finished_at"))
         return rows
     finally:
+        if owns_conn:
+            conn.close()
+
+
+def task_metrics(*, config: AppConfig, recent_limit: int = 500) -> dict[str, object]:
+    """Per-task-type pipeline metrics: status counts + duration percentiles.
+
+    Durations are computed over the most recent `recent_limit` finished attempts per
+    task type, so the numbers track the CURRENT backend/model rather than averaging
+    over the whole history of the table.
+    """
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        count_rows = fetch_all(
+            conn,
+            "select task_type, status, count(*) as n from tasks group by task_type, status",
+        )
+        duration_rows = fetch_all(
+            conn,
+            """
+            select task_type, started_at, finished_at
+            from (
+              select task_type, started_at, finished_at,
+                     row_number() over (partition by task_type order by finished_at desc) as rn
+              from tasks
+              where started_at is not null and finished_at is not null
+                and status in ('succeeded', 'failed_terminal', 'failed_retryable')
+            )
+            where rn <= ?
+            """,
+            (recent_limit,),
+        )
+    finally:
         conn.close()
+    counts_by_type: dict[str, dict[str, int]] = {}
+    for row in count_rows:
+        counts_by_type.setdefault(str(row["task_type"]), {})[str(row["status"])] = int(row["n"])
+    durations_by_type: dict[str, list[int]] = {}
+    for row in duration_rows:
+        duration = _duration_ms(started_at=row["started_at"], finished_at=row["finished_at"])
+        if duration is not None and duration >= 0:
+            durations_by_type.setdefault(str(row["task_type"]), []).append(duration)
+    task_types = []
+    for task_type in sorted(set(counts_by_type) | set(durations_by_type)):
+        counts = counts_by_type.get(task_type, {})
+        durations = sorted(durations_by_type.get(task_type, []))
+        succeeded = counts.get("succeeded", 0)
+        failed = counts.get("failed_terminal", 0) + counts.get("failed_retryable", 0)
+        settled = succeeded + failed
+        task_types.append(
+            {
+                "task_type": task_type,
+                "counts": counts,
+                "total": sum(counts.values()),
+                "success_rate": round(succeeded / settled, 4) if settled else None,
+                "duration_ms": {
+                    "count": len(durations),
+                    "avg": round(sum(durations) / len(durations)) if durations else None,
+                    "p50": _percentile(durations, 0.50),
+                    "p95": _percentile(durations, 0.95),
+                    "max": durations[-1] if durations else None,
+                },
+            }
+        )
+    return {"task_types": task_types, "generated_at": _now()}
+
+
+def _percentile(sorted_values: list[int], q: float) -> int | None:
+    if not sorted_values:
+        return None
+    index = min(len(sorted_values) - 1, max(0, round(q * (len(sorted_values) - 1))))
+    return sorted_values[index]
 
 
 def _update_task(*, config: AppConfig, task_id: str, expected_run_id: str | None = None, **fields: object) -> bool:

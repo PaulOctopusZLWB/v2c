@@ -181,9 +181,20 @@ def effective_session_prompt(*, config: AppConfig, session_id: str) -> dict[str,
     }
 
 
+def session_prompt_fingerprint(*, config: AppConfig, session_id: str) -> str:
+    """sha256 of the session's EFFECTIVE prompt (override ?? global template ?? default).
+
+    Stamped alongside source_fingerprint on regenerate; the summarize_session incremental
+    skip compares it so a prompt edit forces a real re-run even on unchanged segments.
+    """
+    effective = str(effective_session_prompt(config=config, session_id=session_id)["effective"])
+    return hashlib.sha256(effective.encode("utf-8")).hexdigest()
+
+
 def record_summary_regenerated(*, config: AppConfig, session_id: str) -> None:
-    """Stamp the sidecar after a fresh summarize_session: write the live segments' fingerprint, clear
-    any prior manual edit, reset status to 'draft'. The per-session prompt_override is left intact.
+    """Stamp the sidecar after a fresh summarize_session: write the live segments' fingerprint
+    plus the effective prompt's fingerprint, clear any prior manual edit, reset status to
+    'draft'. The per-session prompt_override is left intact.
 
     Regenerate discards prior manual edits by design (the frontend warns first). source_fingerprint
     is the fingerprint of the *reviewed* segments, so the new summary reads as not-stale.
@@ -199,21 +210,23 @@ def record_summary_regenerated(*, config: AppConfig, session_id: str) -> None:
         for row in rows
     ]
     fingerprint = session_fingerprint(segments)
+    prompt_fingerprint = session_prompt_fingerprint(config=config, session_id=session_id)
     conn = connect(config.database_path)
     try:
         initialize(conn)
         conn.execute(
             """
             insert into session_viewpoint_state
-              (session_id, source_fingerprint, edited_content_json, status, updated_at)
-            values (?, ?, null, 'draft', ?)
+              (session_id, source_fingerprint, summary_prompt_fingerprint, edited_content_json, status, updated_at)
+            values (?, ?, ?, null, 'draft', ?)
             on conflict(session_id) do update set
               source_fingerprint = excluded.source_fingerprint,
+              summary_prompt_fingerprint = excluded.summary_prompt_fingerprint,
               edited_content_json = null,
               status = 'draft',
               updated_at = excluded.updated_at
             """,
-            (session_id, fingerprint, _now()),
+            (session_id, fingerprint, prompt_fingerprint, _now()),
         )
         conn.commit()
     finally:

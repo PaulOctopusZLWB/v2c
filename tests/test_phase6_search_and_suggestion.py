@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 from personal_context_node.cluster_suggestion import cluster_suggestion
 from personal_context_node.config import AppConfig
 from personal_context_node.session_viewpoint import set_segment_text
-from personal_context_node.storage.sqlite import connect, initialize
-from personal_context_node.transcript_fts import cjk_tokenize, fts_query
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+from personal_context_node.transcript_fts import cjk_tokenize, ensure_fts_index, fts_query
 from personal_context_node.transcript_review import search_transcripts
 from personal_context_node.web.app import create_app
 
@@ -82,6 +82,78 @@ def test_fts_index_rebuilds_after_new_segments(tmp_path: Path) -> None:
 
     hits = search_transcripts(config=config, query="排期", limit=10)
     assert [h["segment_id"] for h in hits] == ["g4", "g1"]  # 最新在前
+
+
+def test_fts_index_drops_row_when_segment_deactivated_same_count(tmp_path: Path) -> None:
+    """行数不变但一个段被 ASR 重跑标记 is_active=0、同时插入一个新段占位 —— 旧的按“行数是否
+    相等”判断一致性的实现会误判索引仍然新鲜,漏删旧段、漏插新段。增量差集同步必须两边都发现。
+    """
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed(config)
+    # 建好初始索引(3 个 active 段)。
+    assert len(search_transcripts(config=config, query="排期", limit=10)) == 1
+
+    conn = connect(config.database_path)
+    try:
+        # 模拟 ASR 重跑:g1 被判失活,同时插入等量的新段 g5(同一时间戳意义上的替代)。
+        conn.execute("update transcript_segments set is_active = 0 where segment_id = 'g1'")
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at, absolute_start_at) values ('g5','a','c_g5','ses_1',0,1000,'今天讨论项目排期。','zh','spk_1','vp_a','e_g5',0.9,'m','m','v2',1,'x','2087-05-10T08:00:30+08:00')"
+        )
+        conn.commit()
+        # Row count is unchanged (3 active before, 3 active after: g1 removed, g5 added) —
+        # exactly the case the old count-diff check would have missed.
+        seg_count = conn.execute(
+            "select count(*) from transcript_segments where is_active = 1"
+        ).fetchone()[0]
+        assert seg_count == 3
+    finally:
+        conn.close()
+
+    hits = [h["segment_id"] for h in search_transcripts(config=config, query="排期", limit=10)]
+    # 旧的失活段 g1 不再出现,新段 g5 出现。
+    assert "g1" not in hits
+    assert "g5" in hits
+
+
+def test_ensure_fts_index_syncs_insert_and_delete_in_one_call(tmp_path: Path) -> None:
+    """直接单测 ensure_fts_index:插入新 active 段 + 失活一个旧段后,一次调用两边都同步。"""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed(config)
+    conn = connect(config.database_path)
+    try:
+        ensure_fts_index(conn)
+        before = {row["segment_id"] for row in fetch_all(conn, "select segment_id from transcript_fts")}
+        assert before == {"g1", "g2", "g3"}
+
+        conn.execute("update transcript_segments set is_active = 0 where segment_id = 'g2'")
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at, absolute_start_at) values ('g6','a','c_g6','ses_1',0,1000,'新的一段文本。','zh','spk_2','vp_b','e_g6',0.9,'m','m','v',1,'x','2087-05-10T08:03:00+08:00')"
+        )
+        conn.commit()
+
+        ensure_fts_index(conn)
+        after = {row["segment_id"] for row in fetch_all(conn, "select segment_id from transcript_fts")}
+        assert after == {"g1", "g3", "g6"}
+    finally:
+        conn.close()
+
+
+def test_ensure_fts_index_removes_rows_for_deleted_segments(tmp_path: Path) -> None:
+    """段被彻底删除(如 delete_session)后,fts 里对应行也要被摘掉,即便 segment_id 完全消失
+    (不是简单变成 is_active=0)。"""
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed(config)
+    conn = connect(config.database_path)
+    try:
+        ensure_fts_index(conn)
+        conn.execute("delete from transcript_segments where segment_id = 'g3'")
+        conn.commit()
+        ensure_fts_index(conn)
+        after = {row["segment_id"] for row in fetch_all(conn, "select segment_id from transcript_fts")}
+        assert after == {"g1", "g2"}
+    finally:
+        conn.close()
 
 
 def test_fts_reflects_in_place_text_edit(tmp_path: Path) -> None:

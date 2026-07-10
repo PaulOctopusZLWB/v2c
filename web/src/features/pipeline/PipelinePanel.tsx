@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ImportProgress, StatusSummary } from "../../api/types";
 import { pipelineStages } from "../../lib/pipelineStages";
 import { usePipelineFeed } from "../../hooks/usePipelineFeed";
+import { usePipelineMetricsQuery } from "../../api/hooks";
 import { speakerColor } from "../../lib/speakerColors";
 import { timeOfDay } from "../../lib/format";
+import { StageDurationsPanel } from "./StageDurationsPanel";
 
 /* 管道控制室(design handoff 1b):280px 阶段栈 | 1fr 实时转写流 | 270px 任务栏。
  * 阶段栈与今日横条共用 pipelineStages 推导;实时转写流吃 segment.transcribed;
@@ -41,6 +43,7 @@ export function PipelinePanel({
 }) {
   const { segments, tail, completed } = usePipelineFeed();
   const stages = pipelineStages(summary, importProgress);
+  const { data: metrics } = usePipelineMetricsQuery();
   const [autoReview, setAutoReview] = useState(readAutoReview);
   const setAuto = (on: boolean) => {
     setAutoReview(on);
@@ -138,6 +141,7 @@ export function PipelinePanel({
         {runInspector}
         {devicePanel}
         {taskList}
+        <StageDurationsPanel metrics={metrics?.task_types} />
         {tail.length ? (
           <div className="pipe-tail num" aria-label="事件流">
             {tail.slice(-12).map((entry) => (

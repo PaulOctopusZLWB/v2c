@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
@@ -70,6 +72,12 @@ PROCESS_TASK_ORDER = (
     "asr",
     "archive",
 )
+# Stages whose adapters own a single resident model subprocess (funasr_server & friends).
+# Those adapters are NOT reentrant, so in a concurrent drain these types are pinned to one
+# dedicated worker thread; everything else is safe to run in parallel (independent targets,
+# per-call subprocess or pure-Python adapters).
+GPU_TASK_TYPES = ("vad", "transcribe_diarize", "asr")
+CPU_TASK_TYPES = tuple(t for t in PROCESS_TASK_ORDER if t not in GPU_TASK_TYPES)
 
 
 def process_once(
@@ -80,11 +88,14 @@ def process_once(
     asr: ASRPort,
     llm: LLMPort | None = None,
     max_chunk_ms: int = 30_000,
+    task_types: tuple[str, ...] | None = None,
+    reclaim: bool = True,
 ) -> ProcessOnceResult:
     llm_adapter = llm or RuleBasedLLMAdapter()
-    reclaim_expired_tasks(config=config, lease_seconds=config.task_lease_seconds)
+    if reclaim:
+        reclaim_expired_tasks(config=config, lease_seconds=config.task_lease_seconds)
     task = None
-    for task_type in PROCESS_TASK_ORDER:
+    for task_type in (task_types or PROCESS_TASK_ORDER):
         task = claim_next_task(config=config, task_type=task_type, run_id=run_id, lease_seconds=config.task_lease_seconds)
         if task is not None:
             break
@@ -178,6 +189,34 @@ def preview_next_process_task(*, config: AppConfig) -> ProcessOnceResult:
         conn.close()
 
 
+def _has_claimable_task(*, config: AppConfig, task_types: tuple[str, ...]) -> bool:
+    """Read-only probe mirroring claim_next_task's WHERE clause (no lock, no claim)."""
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        for task_type in task_types:
+            row = conn.execute(
+                """
+                select 1
+                from tasks
+                where task_type = ?
+                  and (
+                    status = 'pending'
+                    or (status = 'failed_retryable' and retry_count < max_retries)
+                  )
+                  and available_at <= ?
+                limit 1
+                """,
+                (task_type, now),
+            ).fetchone()
+            if row is not None:
+                return True
+        return False
+    finally:
+        conn.close()
+
+
 @dataclass(frozen=True)
 class DrainResult:
     process_steps: int
@@ -196,8 +235,22 @@ def drain_process_queue(
     max_steps: int = 200,
     should_stop: Callable[[], bool] = lambda: False,
     job_name: str = "process.drain",
+    workers: int | None = None,
 ) -> DrainResult:
     chunk_ms = max_chunk_ms if max_chunk_ms is not None else config.max_chunk_ms
+    worker_count = workers if workers is not None else max(1, int(getattr(config, "pipeline_workers", 1) or 1))
+    if worker_count > 1:
+        return _drain_concurrent(
+            config=config,
+            vad=vad,
+            asr=asr,
+            llm=llm,
+            chunk_ms=chunk_ms,
+            max_steps=max_steps,
+            should_stop=should_stop,
+            job_name=job_name,
+            worker_count=worker_count,
+        )
     process_steps = 0
     tasks_succeeded = 0
     tasks_failed = 0
@@ -236,6 +289,118 @@ def drain_process_queue(
         process_steps=process_steps,
         tasks_succeeded=tasks_succeeded,
         tasks_failed=tasks_failed,
+        status=status,
+    )
+
+
+def _drain_concurrent(
+    *,
+    config: AppConfig,
+    vad: VADPort,
+    asr: ASRPort,
+    llm: LLMPort | None,
+    chunk_ms: int,
+    max_steps: int,
+    should_stop: Callable[[], bool],
+    job_name: str,
+    worker_count: int,
+) -> DrainResult:
+    """Multi-threaded drain. Thread 0 owns the GPU stages (resident-model adapters are
+    single-subprocess, non-reentrant); threads 1..n-1 run the CPU stages in parallel.
+    Lease-based claiming (begin immediate + claimed_by_run_id guard) already makes
+    concurrent claims safe; WAL + busy_timeout serialize the commits.
+
+    A thread exits only when its own claim comes back empty AND no other thread is
+    executing (twice in a row, with a sleep between) — an executing task may still fan
+    out downstream work, so "my queue is empty" alone is not "the drain is done".
+    Downstream enqueues commit before the executor is marked idle, so the exit check
+    cannot race past freshly fanned-out work.
+    """
+    reclaim_expired_tasks(config=config, lease_seconds=config.task_lease_seconds)
+    lock = threading.Lock()
+    state = {"steps": 0, "succeeded": 0, "failed": 0, "executing": 0, "stopped": False}
+
+    def _loop(task_types: tuple[str, ...]) -> None:
+        idle_rounds = 0
+        while True:
+            if should_stop():
+                with lock:
+                    state["stopped"] = True
+                return
+            with lock:
+                if state["stopped"] or state["steps"] >= max_steps:
+                    return
+            # Cheap read-only probe first: an idle thread polling every 0.2s must not
+            # insert a job_runs row (record_job_run) per poll while a sibling grinds
+            # through a long ASR task.
+            outcome = "no_task"
+            if _has_claimable_task(config=config, task_types=task_types):
+                with lock:
+                    state["executing"] += 1
+                run_id = f"run_{uuid4().hex}"
+                try:
+                    result = record_job_run(
+                        config=config,
+                        job_name=job_name,
+                        run_id=run_id,
+                        operation=lambda run_id=run_id: process_once(
+                            config=config, run_id=run_id, vad=vad, asr=asr, llm=llm,
+                            max_chunk_ms=chunk_ms, task_types=task_types, reclaim=False,
+                        ),
+                    ).result
+                    outcome = result.status  # "no_task" | "succeeded"
+                except Exception:
+                    # Same isolation as the single-threaded drain: process_once already marked
+                    # the task failed (with backoff); count it and keep draining.
+                    outcome = "task_failed"
+                finally:
+                    with lock:
+                        state["executing"] -= 1
+            if outcome == "no_task":
+                # Exit only after two consecutive empty probes with every executor idle.
+                # Fan-out commits happen-before the executor decrements `executing`, so a
+                # freshly fanned-out task is always visible to the second probe.
+                with lock:
+                    others_busy = state["executing"] > 0
+                if others_busy:
+                    idle_rounds = 0
+                else:
+                    idle_rounds += 1
+                    if idle_rounds >= 2:
+                        return
+                time.sleep(0.2)
+                continue
+            idle_rounds = 0
+            with lock:
+                state["steps"] += 1
+                if outcome == "succeeded":
+                    state["succeeded"] += 1
+                else:
+                    state["failed"] += 1
+
+    gpu_order = tuple(t for t in PROCESS_TASK_ORDER if t in GPU_TASK_TYPES)
+    cpu_order = tuple(t for t in PROCESS_TASK_ORDER if t not in GPU_TASK_TYPES)
+    thread_types: list[tuple[str, ...]] = [gpu_order]
+    thread_types.extend([cpu_order] * (worker_count - 1))
+    threads = [
+        threading.Thread(target=_loop, args=(types,), daemon=True, name=f"drain-{i}")
+        for i, types in enumerate(thread_types)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    if state["stopped"]:
+        status = "stopped"
+    elif preview_next_process_task(config=config).status == "no_task":
+        status = "complete"
+    else:
+        status = "step_limit"
+    return DrainResult(
+        process_steps=state["steps"],
+        tasks_succeeded=state["succeeded"],
+        tasks_failed=state["failed"],
         status=status,
     )
 

@@ -127,6 +127,9 @@ def write_launchd_plists(
             environment_path=environment_path,
         ),
         # process: advances the declarative pipeline DAG (vad -> asr -> ... -> publish).
+        # --drain works through the WHOLE queue per invocation (models load once per run);
+        # without it each 10-minute interval processed exactly one task and the pipeline
+        # spent most of the day idle-waiting between stages.
         LaunchdJob(
             label="com.personal-context-node.process",
             command=[
@@ -134,6 +137,7 @@ def write_launchd_plists(
                 "run",
                 "pcn",
                 "process-run",
+                "--drain",
                 *config_args,
                 "--data-dir",
                 data_dir,
@@ -154,6 +158,7 @@ def write_launchd_plists(
                 "run",
                 "pcn",
                 "process-run",
+                "--drain",
                 *config_args,
                 "--data-dir",
                 data_dir,

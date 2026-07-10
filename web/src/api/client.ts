@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, ParticipantStatus, Person, PersonRow, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -35,6 +35,8 @@ export const api = {
   stop: () => request<{ stop_requested: boolean }>("/api/pipeline/stop", { method: "POST" }),
   retry: (taskId: string) => request<{ task_id: string; status: string }>(`/api/pipeline/tasks/${taskId}/retry`, { method: "POST" }),
   retryFailed: () => request<{ retried: number }>("/api/pipeline/retry-failed", { method: "POST" }),
+  // 阶段耗时统计(管道控制室「阶段耗时」面板):按 task_type 聚合的成功率 + 时长分位数。
+  pipelineMetrics: () => request<PipelineMetrics>("/api/pipeline/metrics"),
   // status
   statusTasks: () => request<{ tasks: TaskRow[] }>("/api/status/tasks"),
   health: () => request<Health>("/api/health"),

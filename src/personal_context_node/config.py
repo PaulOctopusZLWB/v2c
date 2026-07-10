@@ -55,6 +55,10 @@ class AppConfig(BaseModel):
     asr_model_id: str = "iic/SenseVoiceSmall"
     asr_model_version: str = "funasr-sensevoice-local"
     asr_device: str = "mps"
+    # Inference numeric precision for the funasr wrappers (asr/embed/emotion). Defaults to fp32
+    # (safe everywhere); "fp16" trades a little accuracy for speed/memory on GPU-ish backends. The
+    # wrappers themselves fall back to fp32 with a warning if fp16 conversion fails (e.g. on MPS).
+    asr_precision: str = "fp32"
     asr_mode: str = "chunk"
     asr_diarize_model: str = "paraformer-zh"
     asr_punc_model: str = "ct-punc"
@@ -84,6 +88,11 @@ class AppConfig(BaseModel):
     # True restores the old auto-chain (session_derive → summarize_session → daily_generate →
     # obsidian_publish fires automatically as upstream tasks succeed).
     pipeline_auto_viewpoints: bool = False
+    # Number of concurrent drain workers. 1 = the historical single-threaded drain. When >1,
+    # one worker owns the GPU-bound stages (vad/asr/transcribe_diarize — their resident model
+    # adapters are single-subprocess and not reentrant) and the others run CPU-bound stages
+    # (session_derive/summarize/daily/publish/archive) in parallel.
+    pipeline_workers: int = 1
     log_dir_path: Path | None = None
     log_level: str = "INFO"
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
@@ -96,6 +105,13 @@ class AppConfig(BaseModel):
         # (burning ASR/VAD/LLM retries; archive always pending). Fail fast at config load.
         if value <= 0:
             raise ValueError("commands.timeout_seconds must be positive")
+        return value
+
+    @field_validator("asr_precision")
+    @classmethod
+    def _validate_asr_precision(cls, value: str) -> str:
+        if value not in ("fp32", "fp16"):
+            raise ValueError("asr.precision must be 'fp32' or 'fp16'")
         return value
 
     @classmethod
@@ -143,6 +159,7 @@ class AppConfig(BaseModel):
             "asr_model_id": asr.get("model_id", cls.model_fields["asr_model_id"].default),
             "asr_model_version": asr.get("model_version", cls.model_fields["asr_model_version"].default),
             "asr_device": asr.get("device", cls.model_fields["asr_device"].default),
+            "asr_precision": asr.get("precision", cls.model_fields["asr_precision"].default),
             "asr_mode": asr.get("mode", cls.model_fields["asr_mode"].default),
             "asr_diarize_model": asr.get("diarize_model", cls.model_fields["asr_diarize_model"].default),
             "asr_punc_model": asr.get("punc_model", cls.model_fields["asr_punc_model"].default),
@@ -181,6 +198,10 @@ class AppConfig(BaseModel):
             "pipeline_auto_viewpoints": raw.get("pipeline", {}).get(
                 "auto_viewpoints",
                 cls.model_fields["pipeline_auto_viewpoints"].default,
+            ),
+            "pipeline_workers": raw.get("pipeline", {}).get(
+                "workers",
+                cls.model_fields["pipeline_workers"].default,
             ),
             "log_dir_path": _optional_resolve_path(base_dir, logging_cfg.get("log_dir")),
             "log_level": logging_cfg.get("level", cls.model_fields["log_level"].default),

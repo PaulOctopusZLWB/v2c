@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -103,3 +105,64 @@ def test_server_loop_ignores_blank_lines() -> None:
     stdout = io.StringIO()
     ew.run_server(FakeModel(), stdin, stdout)
     assert len(stdout.getvalue().splitlines()) == 1
+
+
+def test_maybe_half_is_noop_for_fp32() -> None:
+    class FakeModel:
+        pass
+
+    model = FakeModel()
+    assert ew.maybe_half(model, "fp32") is model
+
+
+def test_maybe_half_casts_reachable_torch_modules_to_fp16() -> None:
+    import torch.nn as nn
+
+    class FakeAutoModel:
+        def __init__(self):
+            self.model = nn.Linear(4, 4)
+
+    model = FakeAutoModel()
+    result = ew.maybe_half(model, "fp16")
+    assert result is model
+    assert str(model.model.weight.dtype) == "torch.float16"
+
+
+def test_maybe_half_falls_back_to_fp32_on_conversion_failure(caplog) -> None:
+    orig_cast = ew._cast_model_half
+
+    def _boom(_model) -> None:
+        raise RuntimeError("MPS does not support fp16 for this op")
+
+    ew._cast_model_half = _boom
+    try:
+        with caplog.at_level("WARNING"):
+            result = ew.maybe_half(object(), "fp16")
+        assert result is not None
+        assert any("fp16 conversion failed" in message for message in caplog.messages)
+    finally:
+        ew._cast_model_half = orig_cast
+
+
+def test_wrapper_cli_rejects_invalid_precision_value() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/funasr_emotion2vec_wrapper.py", "--precision", "int8"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 2
+    assert "invalid choice" in result.stderr
+
+
+def test_wrapper_cli_accepts_valid_precision_choices() -> None:
+    for value in ("fp32", "fp16"):
+        result = subprocess.run(
+            [sys.executable, "scripts/funasr_emotion2vec_wrapper.py", "--precision", value],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 2
+        assert "invalid choice" not in result.stderr
+        assert "this wrapper only runs in --server mode" in result.stderr

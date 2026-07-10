@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -13,11 +14,15 @@ from personal_context_node.identity_review import safe_llm_segments
 from personal_context_node.session_viewpoint import (
     effective_session_prompt,
     record_summary_regenerated,
+    session_fingerprint,
+    session_prompt_fingerprint,
 )
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.summary_schemas import validate_session_summary
 from personal_context_node.transcript_review import accepted_segments_clause
 
+
+logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "llm_port.session_summary.v2"
 
@@ -27,7 +32,25 @@ class SessionSummaryResult:
     summaries_created: int
 
 
-def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> SessionSummaryResult:
+def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort, force: bool = False) -> SessionSummaryResult:
+    """Generate (or reuse) the session_summary for ``session_id``.
+
+    Incremental skip: before calling the LLM, we compute the fingerprint of the current
+    (reviewed) transcript segments and compare it against the fingerprint recorded for the last
+    *successful* summary of this session at the current ``PROMPT_VERSION`` (stored in
+    ``session_viewpoint_state.source_fingerprint`` — written by ``record_summary_regenerated``
+    right after a successful generate, in the same table/column already used to compute
+    ``viewpoint_state()['stale']``), and likewise the EFFECTIVE prompt's fingerprint against
+    ``session_viewpoint_state.summary_prompt_fingerprint``. When both match, neither the
+    transcript nor the prompt changed since the last successful run, so we skip the (slow,
+    costly) LLM call entirely and report ``summaries_created=0`` — the existing summary row is
+    left as-is and remains the one ``llm_results.session_summary()`` returns. Editing the prompt
+    (per-session override or global template) invalidates the skip. ``force=True`` bypasses the
+    skip unconditionally (no current caller passes it: process_runner.py's pipeline call and the
+    routes_viewpoints.py "regenerate" button both go through the default — a regenerate with an
+    unchanged transcript AND prompt is a no-op LLM-wise, and callers observe no difference in
+    return-value semantics either way).
+    """
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -57,6 +80,13 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
             (session_id,),
         )
         if not segments:
+            return SessionSummaryResult(summaries_created=0)
+        if not force and _has_fresh_summary(conn, config=config, session_id=session_id, segments=segments):
+            logger.info(
+                "summarize_session skipped (fingerprint unchanged): session_id=%s prompt_version=%s",
+                session_id,
+                PROMPT_VERSION,
+            )
             return SessionSummaryResult(summaries_created=0)
         llm_segments, identity_prompt = safe_llm_segments(
             config=config,
@@ -90,6 +120,58 @@ def summarize_session(*, config: AppConfig, session_id: str, llm: LLMPort) -> Se
         return SessionSummaryResult(summaries_created=1)
     finally:
         conn.close()
+
+
+def _has_fresh_summary(
+    conn: sqlite3.Connection, *, config: AppConfig, session_id: str, segments: list[dict[str, object]]
+) -> bool:
+    """True when a successful summary at PROMPT_VERSION exists AND its recorded fingerprints
+    match the live state — i.e. regenerating would produce nothing new.
+
+    Two fingerprints must BOTH match (stored on session_viewpoint_state, stamped by
+    ``record_summary_regenerated`` right after each successful generate):
+    - ``source_fingerprint``: the reviewed segments (text/speaker/order) — same column the
+      viewpoint 'stale' flag uses;
+    - ``summary_prompt_fingerprint``: the EFFECTIVE prompt (per-session override ?? global
+      template ?? default) — so editing the prompt and hitting regenerate does a real re-run
+      even on unchanged segments. NULL (legacy rows) reads as not-fresh.
+    """
+    summary_row = fetch_all(
+        conn,
+        """
+        select 1 from summaries
+        where summary_type = 'session' and target_type = 'session'
+          and target_id = ? and prompt_version = ?
+        limit 1
+        """,
+        (session_id, PROMPT_VERSION),
+    )
+    if not summary_row:
+        return False
+    sidecar_row = fetch_all(
+        conn,
+        "select source_fingerprint, summary_prompt_fingerprint from session_viewpoint_state where session_id = ?",
+        (session_id,),
+    )
+    if not sidecar_row or sidecar_row[0]["source_fingerprint"] is None:
+        return False
+    if sidecar_row[0]["summary_prompt_fingerprint"] is None:
+        return False
+    if str(sidecar_row[0]["summary_prompt_fingerprint"]) != session_prompt_fingerprint(
+        config=config, session_id=session_id
+    ):
+        return False
+    stored_fingerprint = str(sidecar_row[0]["source_fingerprint"])
+    live_segments = [
+        {
+            "segment_id": segment["segment_id"],
+            "text": segment["text"],
+            "speaker": segment.get("speaker"),
+            "person_label": segment.get("person_label"),
+        }
+        for segment in segments
+    ]
+    return stored_fingerprint == session_fingerprint(live_segments)
 
 
 def _persist_session_summary(conn: sqlite3.Connection, summary: SessionSummary) -> None:

@@ -265,21 +265,66 @@ def list_days(*, config: AppConfig) -> list[dict[str, object]]:
         conn.close()
 
 
+def _review_status_from_counts(*, total: int, pending: int, needs_fix: int) -> str:
+    """Same precedence as session_review_status: blocked > pending_review > accepted.
+
+    total counts ACTIVE segments for the session; pending counts active segments with no
+    review row (or an explicit 'pending_review' row); needs_fix counts active segments
+    reviewed as 'needs_fix'. A session with zero active segments is 'blocked' (mirrors
+    session_review_status's `not rows` branch).
+    """
+    if total == 0 or needs_fix > 0:
+        return "blocked"
+    if pending > 0:
+        return "pending_review"
+    return "accepted"
+
+
 def sessions_for_day(*, config: AppConfig, day: str) -> list[dict[str, object]]:
+    """Sessions for a day, each carrying review_status — one aggregate query, no N+1.
+
+    Previously looped sessions and called session_review_status() per row (fresh connection
+    + full segment scan each time). Now a single grouped query over transcript_segments
+    (left-joined to transcript_segment_reviews) computes the same per-session counts that
+    _review_status_from_counts folds into the identical status string.
+    """
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        sessions = fetch_all(
+        return fetch_all(
             conn,
-            "select session_id, started_at, segment_count, name from sessions where date_key = ? order by started_at",
+            """
+            select
+              s.session_id as session_id,
+              s.started_at as started_at,
+              s.segment_count as segment_count,
+              s.name as name,
+              case
+                when coalesce(counts.total, 0) = 0 or coalesce(counts.needs_fix, 0) > 0 then 'blocked'
+                when coalesce(counts.pending, 0) > 0 then 'pending_review'
+                else 'accepted'
+              end as review_status
+            from sessions s
+            left join (
+              select
+                ts.session_id as session_id,
+                count(*) as total,
+                count(*) filter (
+                  where r.status is null or r.status = 'pending_review'
+                ) as pending,
+                count(*) filter (where r.status = 'needs_fix') as needs_fix
+              from transcript_segments ts
+              left join transcript_segment_reviews r on r.segment_id = ts.segment_id
+              where ts.is_active = 1
+              group by ts.session_id
+            ) counts on counts.session_id = s.session_id
+            where s.date_key = ?
+            order by s.started_at
+            """,
             (day,),
         )
     finally:
         conn.close()
-    # review_status is computed per session via the existing helper (N+1 is fine for a local single-user panel).
-    for session in sessions:
-        session["review_status"] = session_review_status(config=config, session_id=str(session["session_id"]))
-    return sessions
 
 
 def day_status_rows(*, config: AppConfig) -> list[dict[str, object]]:

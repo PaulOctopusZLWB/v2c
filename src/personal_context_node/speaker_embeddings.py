@@ -1184,6 +1184,143 @@ def extract_pending_embeddings(
     return {"embedded": embedded, "skipped_missing_audio": skipped, "failed": failed, "total": total}
 
 
+def extract_pending_embeddings_and_emotions(
+    *,
+    config: AppConfig,
+    embed_fn: Callable[[str], list[float]],
+    classify_fn: Callable[[str], dict],
+    session_id: str | None = None,
+    day: str | None = None,
+    embed_model: str = "cam++",
+    emotion_model: str | None = None,
+    batch_size: int = 32,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict:
+    """Embed AND classify-emotion every pending segment in one pass over its audio slice.
+
+    Combines ``extract_pending_embeddings`` and ``segment_emotions.extract_pending_emotions``:
+    the pending scope is the UNION of "missing embedding" and "missing emotion" segments, and each
+    segment's audio path is resolved via ``segment_audio_path`` exactly ONCE regardless of how many
+    of the two artifacts it is missing — then fed to whichever of ``embed_fn``/``classify_fn``
+    applies. This halves the audio-path resolution and (when both are pending) the file I/O
+    compared to running the two extractions back to back.
+
+    Per artifact, the skip/fail/write semantics exactly mirror the standalone functions:
+    - a segment with no resolvable audio path is "skipped" for whichever artifact it lacks (kept
+      pending), counted in that artifact's ``skipped_missing_audio``;
+    - one bad ``embed_fn``/``classify_fn`` call (or a non-finite embedding) is caught, counted as
+      "failed" for that artifact ONLY, and does not affect the other artifact or abort the pass;
+    - each artifact is upserted via its own bulk writer in batches of ``batch_size`` (independent
+      batching per artifact, since one may have fewer pending than the other in this run).
+
+    Returns ``{"embedding": {...as extract_pending_embeddings...}, "emotion": {...as
+    extract_pending_emotions...}}``. ``progress(done, total)`` reports over the UNION size (one
+    segment fully processed for whichever artifacts it needed = one "done" tick), so a caller
+    driving a single progress bar for the combined pass sees an accurate total.
+    """
+    # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
+    from personal_context_node.segment_emotions import (
+        _MODEL as _EMOTION_MODEL,
+        pending_emotion_segment_ids,
+        put_emotions_bulk,
+    )
+    from personal_context_node.transcription import segment_audio_path
+
+    if emotion_model is None:
+        emotion_model = _EMOTION_MODEL
+
+    pending_embed_ids = set(pending_embedding_segment_ids(config=config, session_id=session_id, day=day))
+    pending_emotion_ids = set(pending_emotion_segment_ids(config=config, session_id=session_id, day=day))
+    union_ids = sorted(pending_embed_ids | pending_emotion_ids)
+    total = len(union_ids)
+
+    embedded = 0
+    embed_skipped = 0
+    embed_failed = 0
+    emoted = 0
+    emotion_skipped = 0
+    emotion_failed = 0
+    done = 0
+
+    embed_batch: list[tuple[str, Sequence[float]]] = []
+    emotion_batch: list[tuple[str, dict]] = []
+
+    def flush_embed() -> None:
+        nonlocal embedded
+        if embed_batch:
+            embedded += put_embeddings_bulk(config=config, items=embed_batch, model=embed_model)
+            embed_batch.clear()
+
+    def flush_emotion() -> None:
+        nonlocal emoted
+        if emotion_batch:
+            emoted += put_emotions_bulk(config=config, items=emotion_batch, model=emotion_model)
+            emotion_batch.clear()
+
+    try:
+        for segment_id in union_ids:
+            needs_embed = segment_id in pending_embed_ids
+            needs_emotion = segment_id in pending_emotion_ids
+
+            # Resolve the audio path exactly once, regardless of how many artifacts are pending.
+            path = segment_audio_path(config=config, segment_id=segment_id)
+
+            if needs_embed:
+                if path is None:
+                    embed_skipped += 1
+                else:
+                    try:
+                        vector = embed_fn(str(path))
+                    except Exception:
+                        embed_failed += 1
+                    else:
+                        if not np.all(np.isfinite(np.asarray(vector, dtype=np.float32))):
+                            embed_failed += 1
+                        else:
+                            embed_batch.append((segment_id, vector))
+                            if len(embed_batch) >= batch_size:
+                                flush_embed()
+
+            if needs_emotion:
+                if path is None:
+                    emotion_skipped += 1
+                else:
+                    try:
+                        emotion = classify_fn(str(path))
+                    except Exception:
+                        emotion_failed += 1
+                    else:
+                        emotion_batch.append((segment_id, emotion))
+                        if len(emotion_batch) >= batch_size:
+                            flush_emotion()
+
+            done += 1
+            if progress is not None:
+                progress(done, total)
+    finally:
+        # Flush whatever was buffered even if an unexpected error escaped the loop.
+        flush_embed()
+        flush_emotion()
+
+    if embedded:
+        clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
+
+    return {
+        "embedding": {
+            "embedded": embedded,
+            "skipped_missing_audio": embed_skipped,
+            "failed": embed_failed,
+            "total": len(pending_embed_ids),
+        },
+        "emotion": {
+            "emoted": emoted,
+            "skipped_missing_audio": emotion_skipped,
+            "failed": emotion_failed,
+            "total": len(pending_emotion_ids),
+        },
+    }
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 

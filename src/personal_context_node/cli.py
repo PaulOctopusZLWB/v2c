@@ -1529,6 +1529,8 @@ def process_run(
     mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use mock VAD, ASR, and LLM backends."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the next runnable task without mutating state."),
+    drain: bool = typer.Option(False, "--drain", help="Drain the whole task queue instead of processing a single task."),
+    max_steps: int = typer.Option(200, min=1, help="Maximum tasks per --drain run."),
 ) -> None:
     _process_run(
         config_path=config_path,
@@ -1544,6 +1546,8 @@ def process_run(
         llm_command=llm_command,
         mock_text=mock_text,
         dry_run=dry_run,
+        drain=drain,
+        max_steps=max_steps,
     )
 
 
@@ -1566,6 +1570,8 @@ def process_run_group(
     mock_text: str | None = typer.Option(None, help="Text emitted by mock ASR."),
     mock: bool = typer.Option(False, "--mock", help="Explicitly use mock VAD, ASR, and LLM backends."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the next runnable task without mutating state."),
+    drain: bool = typer.Option(False, "--drain", help="Drain the whole task queue instead of processing a single task."),
+    max_steps: int = typer.Option(200, min=1, help="Maximum tasks per --drain run."),
 ) -> None:
     _process_run(
         config_path=config_path,
@@ -1581,6 +1587,8 @@ def process_run_group(
         llm_command=llm_command,
         mock_text=mock_text,
         dry_run=dry_run,
+        drain=drain,
+        max_steps=max_steps,
     )
 
 
@@ -1599,6 +1607,8 @@ def _process_run(
     llm_command: str | None,
     mock_text: str | None,
     dry_run: bool,
+    drain: bool = False,
+    max_steps: int = 200,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     if dry_run:
@@ -1638,6 +1648,32 @@ def _process_run(
         llm_command=llm_command or config.llm_command,
         timeout_seconds=config.command_timeout_seconds,
     )
+    if drain:
+        # Scheduled/production path: work through the whole queue in one invocation
+        # instead of one task per launchd interval (which left the pipeline idle for
+        # most of each 10-minute window). Adapters (and their resident models) are
+        # built once and reused for every task in the run.
+        drain_result = drain_process_queue(
+            config=config,
+            vad=vad,
+            asr=asr,
+            llm=llm,
+            max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
+            max_steps=max_steps,
+            job_name="process-run.drain",
+        )
+        _close_adapter(asr)
+        typer.echo(
+            " ".join(
+                [
+                    f"status={drain_result.status}",
+                    f"process_steps={drain_result.process_steps}",
+                    f"tasks_succeeded={drain_result.tasks_succeeded}",
+                    f"tasks_failed={drain_result.tasks_failed}",
+                ]
+            )
+        )
+        return
     run_id = f"run_{uuid4().hex}"
     result = record_job_run(
         config=config,
@@ -1652,6 +1688,7 @@ def _process_run(
             max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
         ),
     ).result
+    _close_adapter(asr)
     typer.echo(
         " ".join(
             [
@@ -1661,6 +1698,15 @@ def _process_run(
             ]
         )
     )
+
+
+def _close_adapter(adapter) -> None:
+    closer = getattr(adapter, "close", None)
+    if callable(closer):
+        try:
+            closer()
+        except Exception:
+            pass
 
 
 def _build_vad(

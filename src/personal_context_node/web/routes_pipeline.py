@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from personal_context_node.config import AppConfig
 from personal_context_node.ingest import import_audio_files
 from personal_context_node.pipeline_events import EventCursor, derive_tick_events, fetch_new_segments, max_segment_rowid
-from personal_context_node.tasks import process_status_rows, retry_failed_tasks, retry_task
+from personal_context_node.storage.sqlite import connect
+from personal_context_node.tasks import process_status_rows, retry_failed_tasks, retry_task, task_metrics
 
 
 router = APIRouter(prefix="/api/pipeline")
@@ -78,6 +79,13 @@ def retry_failed_route(request: Request) -> dict[str, object]:
     return {"retried": count}
 
 
+@router.get("/metrics")
+def pipeline_metrics(request: Request) -> dict[str, object]:
+    """Per-stage timing/success metrics (P50/P95 over recent finished attempts)."""
+    config: AppConfig = request.app.state.config
+    return task_metrics(config=config)
+
+
 # Task statuses that mean "more is still going to happen on its own" — the SSE stream
 # stays open while any task is in flight or the worker is running. Once everything is
 # terminal AND the worker is idle, the stream closes after its final snapshot and the
@@ -111,98 +119,104 @@ async def events_stream(request: Request) -> StreamingResponse:
 
     async def stream():
         last_signature: str | None = None
+        # One connection for the whole stream: the 1s poll must not reopen the DB
+        # (and re-contend the WAL) three times per tick for the life of the tab.
+        stream_conn = connect(config.database_path)
         # 事件游标(每连接一份):新段 rowid / 上个活跃阶段 / 已知失败集 / 是否观察到活动。
-        cursor = EventCursor(segment_rowid=max_segment_rowid(config=config))
+        cursor = EventCursor(segment_rowid=max_segment_rowid(config=config, conn=stream_conn))
         # Emit an immediate compact summary, then poll for changes.
-        for _ in range(10_000):
-            if await request.is_disconnected():
-                break
-            rows = process_status_rows(config=config)
-            import_progress = worker.import_state()
-            worker_running = worker.is_running()
-
-            # Build a compact status summary (counts + max updated_at) — much smaller
-            # than the full 1881-row task array that was previously serialised every tick.
-            from collections import Counter
-            status_counts = dict(Counter(str(r["status"]) for r in rows))
-            total = len(rows)
-            # Per-stage done/total + done/failed totals + an ETA, so the always-visible header
-            # can show the breakdown and remaining time WITHOUT fetching the full task list.
-            # "done" = settled (will not progress on its own); "failed" = settled-with-failure.
-            stage_counts: dict[str, dict[str, int]] = {}
-            done_total = 0
-            failed_total = 0
-            for r in rows:
-                bucket = stage_counts.setdefault(str(r["task_type"]), {"done": 0, "total": 0})
-                bucket["total"] += 1
-                if _is_settled(r):
-                    bucket["done"] += 1
-                    done_total += 1
-                    if _is_failed(r):
-                        failed_total += 1
-            durations = [int(r["duration_ms"]) for r in rows if r["duration_ms"] is not None]
-            remaining = total - done_total
-            eta_seconds = round(remaining * (sum(durations) / len(durations)) / 1000.0) if durations and remaining > 0 else None
-            # Determine the active stage and current target from the first running/claimed task.
-            active_stage: str | None = None
-            current_target: str | None = None
-            for r in rows:
-                if r["status"] in ("claimed", "running"):
-                    active_stage = str(r["task_type"])
-                    current_target = str(r["target_id"])
+        try:
+            for _ in range(10_000):
+                if await request.is_disconnected():
                     break
+                rows = process_status_rows(config=config, conn=stream_conn)
+                import_progress = worker.import_state()
+                worker_running = worker.is_running()
 
-            # Compact change-signature: every field that the rendered payload shows must be
-            # part of it, or a transition that changes only that field (e.g. the worker going
-            # idle after the last task settled, or the active stage/target advancing) would be
-            # silently dropped and the UI would freeze on a stale frame. Still tiny — counts,
-            # not per-task detail.
-            signature = json.dumps(
-                (sorted(status_counts.items()), worker_running, active_stage, current_target, import_progress),
-                sort_keys=True,
-                default=str,
-            )
-            payload = {
-                "status_counts": status_counts,
-                "total": total,
-                "stage_counts": stage_counts,
-                "done_total": done_total,
-                "failed_total": failed_total,
-                "eta_seconds": eta_seconds,
-                "active_stage": active_stage,
-                "current_target": current_target,
-                "import_progress": import_progress,
-                "worker_running": worker_running,
-            }
-            summary_changed = signature != last_signature
-            if summary_changed:
-                last_signature = signature
-                yield "event: status.summary\n"
-                yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+                # Build a compact status summary (counts + max updated_at) — much smaller
+                # than the full 1881-row task array that was previously serialised every tick.
+                from collections import Counter
+                status_counts = dict(Counter(str(r["status"]) for r in rows))
+                total = len(rows)
+                # Per-stage done/total + done/failed totals + an ETA, so the always-visible header
+                # can show the breakdown and remaining time WITHOUT fetching the full task list.
+                # "done" = settled (will not progress on its own); "failed" = settled-with-failure.
+                stage_counts: dict[str, dict[str, int]] = {}
+                done_total = 0
+                failed_total = 0
+                for r in rows:
+                    bucket = stage_counts.setdefault(str(r["task_type"]), {"done": 0, "total": 0})
+                    bucket["total"] += 1
+                    if _is_settled(r):
+                        bucket["done"] += 1
+                        done_total += 1
+                        if _is_failed(r):
+                            failed_total += 1
+                durations = [int(r["duration_ms"]) for r in rows if r["duration_ms"] is not None]
+                remaining = total - done_total
+                eta_seconds = round(remaining * (sum(durations) / len(durations)) / 1000.0) if durations and remaining > 0 else None
+                # Determine the active stage and current target from the first running/claimed task.
+                active_stage: str | None = None
+                current_target: str | None = None
+                for r in rows:
+                    if r["status"] in ("claimed", "running"):
+                        active_stage = str(r["task_type"])
+                        current_target = str(r["target_id"])
+                        break
 
-            # 管道控制室的细粒度事件:新段 / 阶段切换 / 新失败 / 进度 / 收尾。
-            new_segments, cursor.segment_rowid = fetch_new_segments(
-                config=config, after_rowid=cursor.segment_rowid or 0
-            )
-            for name, data in derive_tick_events(
-                cursor=cursor,
-                rows=rows,
-                summary=payload,
-                summary_changed=summary_changed,
-                is_failed=_is_failed,
-                new_segments=new_segments,
-            ):
-                yield f"event: {name}\n"
-                yield f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+                # Compact change-signature: every field that the rendered payload shows must be
+                # part of it, or a transition that changes only that field (e.g. the worker going
+                # idle after the last task settled, or the active stage/target advancing) would be
+                # silently dropped and the UI would freeze on a stale frame. Still tiny — counts,
+                # not per-task detail.
+                signature = json.dumps(
+                    (sorted(status_counts.items()), worker_running, active_stage, current_target, import_progress),
+                    sort_keys=True,
+                    default=str,
+                )
+                payload = {
+                    "status_counts": status_counts,
+                    "total": total,
+                    "stage_counts": stage_counts,
+                    "done_total": done_total,
+                    "failed_total": failed_total,
+                    "eta_seconds": eta_seconds,
+                    "active_stage": active_stage,
+                    "current_target": current_target,
+                    "import_progress": import_progress,
+                    "worker_running": worker_running,
+                }
+                summary_changed = signature != last_signature
+                if summary_changed:
+                    last_signature = signature
+                    yield "event: status.summary\n"
+                    yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 
-            # Nothing is in flight and no worker is running: no further change can occur
-            # without a new request, so close the stream (the EventSource reconnects later).
-            # An active import counts as in-flight too — otherwise the stream could close on a
-            # tick where tasks settle while a copy is still running, dropping the run.completed
-            # event (derive_tick_events keeps saw_activity latched during import).
-            import_active = bool(import_progress and import_progress.get("active"))
-            if not worker_running and not import_active and not any(r["status"] in _ACTIVE_TASK_STATUSES for r in rows):
-                break
-            await asyncio.sleep(1.0)
+                # 管道控制室的细粒度事件:新段 / 阶段切换 / 新失败 / 进度 / 收尾。
+                new_segments, cursor.segment_rowid = fetch_new_segments(
+                    config=config, after_rowid=cursor.segment_rowid or 0, conn=stream_conn
+                )
+                for name, data in derive_tick_events(
+                    cursor=cursor,
+                    rows=rows,
+                    summary=payload,
+                    summary_changed=summary_changed,
+                    is_failed=_is_failed,
+                    new_segments=new_segments,
+                ):
+                    yield f"event: {name}\n"
+                    yield f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+                # Nothing is in flight and no worker is running: no further change can occur
+                # without a new request, so close the stream (the EventSource reconnects later).
+                # An active import counts as in-flight too — otherwise the stream could close on a
+                # tick where tasks settle while a copy is still running, dropping the run.completed
+                # event (derive_tick_events keeps saw_activity latched during import).
+                import_active = bool(import_progress and import_progress.get("active"))
+                if not worker_running and not import_active and not any(r["status"] in _ACTIVE_TASK_STATUSES for r in rows):
+                    break
+                await asyncio.sleep(1.0)
+        finally:
+            stream_conn.close()
 
     return StreamingResponse(stream(), media_type="text/event-stream")
