@@ -170,3 +170,80 @@ def test_wrapper_cli_accepts_valid_precision_choices() -> None:
         assert result.returncode == 2
         assert "invalid choice" not in result.stderr
         assert "this wrapper only runs in --server mode" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Batch protocol: {"batch": [...]} in -> {"results": [...]} out.
+
+
+def test_run_server_batch_line_returns_results_in_order() -> None:
+    class FakeBatchModel:
+        def __init__(self):
+            self.batch_calls: list[tuple[list, int]] = []
+
+        def generate(self, *, input, batch_size=1, **kw):
+            if isinstance(input, list):
+                self.batch_calls.append((list(input), batch_size))
+                stacked = np.asarray([[float(i), 1.0] for i in range(len(input))])
+                return [{"spk_embedding": stacked}]  # ONE dict carrying the stacked (B, dim) rows
+            return [{"spk_embedding": np.asarray([[9.0, 9.0]])}]
+
+    model = FakeBatchModel()
+    stdin = io.StringIO(
+        json.dumps({"batch": [
+            {"segment_id": "s1", "audio_path": "/a.wav"},
+            {"segment_id": "s2", "audio_path": "/b.wav"},
+        ]}) + "\n"
+    )
+    stdout = io.StringIO()
+    ew.run_server(model, stdin, stdout)
+
+    lines = stdout.getvalue().splitlines()
+    assert len(lines) == 1  # one line in -> ONE line out, protocol stays in sync
+    results = json.loads(lines[0])["results"]
+    assert [r["segment_id"] for r in results] == ["s1", "s2"]
+    assert results[0]["embedding"] == [0.0, 1.0]
+    assert results[1]["embedding"] == [1.0, 1.0]
+    assert model.batch_calls == [(["/a.wav", "/b.wav"], 2)]  # one true batched generate call
+
+
+def test_run_batch_falls_back_to_solo_on_whole_batch_failure() -> None:
+    class FlakyBatchModel:
+        def generate(self, *, input, batch_size=1, **kw):
+            if isinstance(input, list):
+                raise RuntimeError("batch blew up")
+            if input == "/bad.wav":
+                raise RuntimeError("corrupt wav")
+            return [{"spk_embedding": np.asarray([[1.0, 2.0]])}]
+
+    results = ew.run_batch(
+        FlakyBatchModel(),
+        [{"segment_id": "good", "audio_path": "/good.wav"}, {"segment_id": "bad", "audio_path": "/bad.wav"}],
+    )
+    # The failed batch degrades to solo calls: the good item still succeeds, only the corrupt
+    # wav carries an error.
+    assert results[0] == {"segment_id": "good", "embedding": [1.0, 2.0]}
+    assert results[1]["segment_id"] == "bad" and "corrupt wav" in results[1]["error"]
+
+
+def test_run_batch_row_count_mismatch_degrades_to_solo() -> None:
+    class ShortBatchModel:
+        def generate(self, *, input, batch_size=1, **kw):
+            if isinstance(input, list):
+                return [{"spk_embedding": np.asarray([[1.0, 2.0]])}]  # 1 row for N inputs
+            return [{"spk_embedding": np.asarray([[3.0, 4.0]])}]
+
+    results = ew.run_batch(
+        ShortBatchModel(),
+        [{"segment_id": "s1", "audio_path": "/a.wav"}, {"segment_id": "s2", "audio_path": "/b.wav"}],
+    )
+    assert [r["segment_id"] for r in results] == ["s1", "s2"]
+    assert all(r.get("embedding") == [3.0, 4.0] for r in results)  # solo fallback served both
+
+
+def test_run_batch_empty_is_noop() -> None:
+    class ExplodingModel:
+        def generate(self, **kw):
+            raise AssertionError("must not be called for an empty batch")
+
+    assert ew.run_batch(ExplodingModel(), []) == []

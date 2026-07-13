@@ -39,6 +39,9 @@ def test_pipeline_declares_all_task_edges() -> None:
         ("session_derive", "summarize_session", "session"),
         ("summarize_session", "daily_generate", "date_key"),
         ("daily_generate", "obsidian_publish", "date_key"),
+        # Feature-extraction LEAF (both ASR modes): fans in from transcription, gates nothing.
+        ("transcribe_diarize", "extract_features", "audio_file"),
+        ("asr", "extract_features", "audio_file"),
     ]
 
 

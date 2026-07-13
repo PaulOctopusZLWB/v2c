@@ -93,3 +93,67 @@ def test_error_payload_raises(tmp_path: Path) -> None:
 def test_empty_command_rejected() -> None:
     with pytest.raises(ValueError):
         PersistentCommandEmbedAdapter(command=[])
+
+
+# ---------------------------------------------------------------------------
+# embed_batch: one wire round-trip per bucket.
+
+
+def test_embed_batch_round_trip(tmp_path: Path) -> None:
+    script = _write_fake_wrapper(
+        tmp_path,
+        body="""
+        import json, sys
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            item = json.loads(line)
+            results = []
+            for entry in item["batch"]:
+                if entry["audio_path"].endswith("bad.wav"):
+                    results.append({"segment_id": entry["segment_id"], "error": "corrupt"})
+                else:
+                    results.append({"segment_id": entry["segment_id"], "embedding": [0.1, 0.2]})
+            sys.stdout.write(json.dumps({"results": results}) + "\\n")
+            sys.stdout.flush()
+        """,
+    )
+    adapter = PersistentCommandEmbedAdapter(command=[sys.executable, str(script)])
+    try:
+        results = adapter.embed_batch([("s1", "/a.wav"), ("s2", "/bad.wav"), ("s3", "/c.wav")])
+        # Per-item error entries ride the result list without raising -- only protocol-level
+        # failures raise (see mismatch test below).
+        assert [r["segment_id"] for r in results] == ["s1", "s2", "s3"]
+        assert results[0]["embedding"] == [0.1, 0.2]
+        assert results[1]["error"] == "corrupt"
+        assert results[2]["embedding"] == [0.1, 0.2]
+    finally:
+        adapter.close()
+
+
+def test_embed_batch_result_count_mismatch_raises_and_closes(tmp_path: Path) -> None:
+    script = _write_fake_wrapper(
+        tmp_path,
+        body="""
+        import json, sys
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            sys.stdout.write(json.dumps({"results": [{"segment_id": "only-one", "embedding": [1.0]}]}) + "\\n")
+            sys.stdout.flush()
+        """,
+    )
+    adapter = PersistentCommandEmbedAdapter(command=[sys.executable, str(script)])
+    with pytest.raises(RuntimeError, match="batch returned 1 results for 2 items"):
+        adapter.embed_batch([("s1", "/a.wav"), ("s2", "/b.wav")])
+    # The stream can no longer be trusted to stay in sync -> the server was killed.
+    assert adapter._proc is None
+
+
+def test_embed_batch_empty_items_is_noop() -> None:
+    # A command that could never spawn successfully: proof the empty batch never touches it.
+    adapter = PersistentCommandEmbedAdapter(command=["/nonexistent/embed-server"])
+    assert adapter.embed_batch([]) == []
+    assert adapter._proc is None

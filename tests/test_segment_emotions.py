@@ -349,3 +349,80 @@ def _insert_session_with_segments(
         conn.commit()
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# BATCHED extraction (classify_batch_fn) + audio_file_id scoping.
+
+
+def test_pending_emotion_segment_ids_audio_file_scope(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_a1"], session_id="ses_a", audio_file_id="aud_a")
+    _insert_session_with_segments(config.database_path, ["seg_b1"], session_id="ses_b", audio_file_id="aud_b")
+
+    assert pending_emotion_segment_ids(config=config, audio_file_id="aud_a") == ["seg_a1"]
+    assert pending_emotion_segment_ids(config=config, audio_file_id="aud_b") == ["seg_b1"]
+    assert pending_emotion_segment_ids(config=config, audio_file_id="aud_none") == []
+
+
+def test_extract_pending_emotions_batched_path(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3", "seg_4"])
+
+    # seg_3 has no resolvable audio -> skipped; the rest go through in batch_size=2 chunks.
+    monkeypatch.setattr(
+        transcription,
+        "bulk_segment_audio_info",
+        lambda *, config, segment_ids: {
+            sid: (Path(f"/slices/{sid}.wav"), 1000) for sid in segment_ids if sid != "seg_3"
+        },
+    )
+    calls: list[list[str]] = []
+
+    def classify_batch_fn(items):
+        calls.append([sid for sid, _ in items])
+        out = []
+        for sid, _path in items:
+            if sid == "seg_2":
+                out.append({"segment_id": sid, "error": "decode failure"})
+            else:
+                out.append({"segment_id": sid, "label": "开心/happy", "scores": {"开心/happy": 0.8}})
+        return out
+
+    def _fail_serial(path: str) -> dict:
+        raise AssertionError("serial classify_fn must not be called on the batched path")
+
+    ticks: list[tuple[int, int]] = []
+    result = extract_pending_emotions(
+        config=config, classify_fn=_fail_serial, classify_batch_fn=classify_batch_fn,
+        batch_size=2, progress=lambda done, total: ticks.append((done, total)),
+    )
+
+    assert result == {"emoted": 2, "skipped_missing_audio": 1, "failed": 1, "total": 4}
+    assert calls == [["seg_1", "seg_2"], ["seg_4"]]  # size-capped chunks in pending order
+    assert set(get_emotions(config=config, segment_ids=["seg_1", "seg_2", "seg_4"])) == {"seg_1", "seg_4"}
+    # seg_2 (failed) and seg_3 (skipped) stay pending.
+    assert pending_emotion_segment_ids(config=config) == ["seg_2", "seg_3"]
+    assert ticks[-1] == (4, 4)
+
+
+def test_extract_pending_emotions_batched_chunk_failure_isolated(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2"])
+    monkeypatch.setattr(
+        transcription,
+        "bulk_segment_audio_info",
+        lambda *, config, segment_ids: {sid: (Path(f"/s/{sid}.wav"), 1000) for sid in segment_ids},
+    )
+    calls = {"n": 0}
+
+    def classify_batch_fn(items):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("wire timeout")
+        return [{"segment_id": sid, "label": "中立/neutral", "scores": {}} for sid, _ in items]
+
+    result = extract_pending_emotions(
+        config=config, classify_fn=lambda p: {}, classify_batch_fn=classify_batch_fn, batch_size=1,
+    )
+    assert result == {"emoted": 1, "skipped_missing_audio": 0, "failed": 1, "total": 2}

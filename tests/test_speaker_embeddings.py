@@ -1571,3 +1571,177 @@ def test_identification_status_counts(tmp_path: Path) -> None:
     assert st["clusters"] == 2  # vp_001, vp_002 (self is not vp_*)
     assert st["identified"] == 2
     assert st["unidentified"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Zero-padding BATCHED extraction (embed_batch_fn / _bucket_by_duration).
+
+
+def test_bucket_by_duration_groups_only_equal_frame_counts() -> None:
+    # ONLY exactly-equal fbank frame counts may share a bucket: any zero padding measurably
+    # corrupts the CAM++ voiceprint (even <=1.25x duration ratios degraded real production
+    # cosines to 0.71), while equal-frame batches are bit-identical to solo inference.
+    from personal_context_node.speaker_embeddings import _bucket_by_duration, _fbank_frame_key
+
+    # frames = 1 + (ms - 25) // 10: 1000..1004ms -> 98 frames; 1005ms -> 99.
+    assert _fbank_frame_key(1000) == _fbank_frame_key(1004) == 98
+    assert _fbank_frame_key(1005) == 99
+    assert _fbank_frame_key(24) < 0  # sub-window clips key on negative exact ms
+
+    items = [("a", "pa", 1000), ("b", "pb", 1004), ("c", "pc", 1005), ("d", "pd", 5000)]
+    buckets = _bucket_by_duration(items, max_batch_size=32)
+    assert buckets == [
+        [("a", "pa"), ("b", "pb")],  # same 98-frame count -> zero-padding-free batch
+        [("c", "pc")],  # 99 frames -> its own (solo-equivalent) bucket
+        [("d", "pd")],
+    ]
+
+    same = [(f"s{i}", f"p{i}", 2000) for i in range(40)]
+    assert [len(b) for b in _bucket_by_duration(same, max_batch_size=32)] == [32, 8]
+
+    assert _bucket_by_duration([]) == []
+    assert _bucket_by_duration([("x", "px", 0)]) == [[("x", "px")]]
+    # Two sub-window clips of the SAME exact length may batch; a different length may not.
+    assert _bucket_by_duration([("x", "px", 20), ("y", "py", 20), ("z", "pz", 21)]) == [
+        [("z", "pz")],
+        [("x", "px"), ("y", "py")],
+    ]
+
+
+def _fail_serial(path: str) -> list[float]:
+    raise AssertionError("serial embed_fn must not be called on the batched path")
+
+
+def test_extract_pending_embeddings_batched_path(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+
+    # seg_2 has no resolvable audio -> skipped (kept pending); the rest share one duration bucket.
+    monkeypatch.setattr(
+        transcription,
+        "bulk_segment_audio_info",
+        lambda *, config, segment_ids: {
+            sid: (Path(f"/slices/{sid}.wav"), 1000) for sid in segment_ids if sid != "seg_2"
+        },
+    )
+    calls: list[list[tuple[str, str]]] = []
+
+    def embed_batch_fn(items):
+        calls.append(list(items))
+        return [{"segment_id": sid, "embedding": [0.1, 0.2, 0.3]} for sid, _ in items]
+
+    ticks: list[tuple[int, int]] = []
+    result = extract_pending_embeddings(
+        config=config, embed_fn=_fail_serial, embed_batch_fn=embed_batch_fn,
+        progress=lambda done, total: ticks.append((done, total)),
+    )
+
+    assert result == {"embedded": 2, "skipped_missing_audio": 1, "failed": 0, "total": 3}
+    assert len(calls) == 1  # equal durations -> ONE bucket, one wire round-trip
+    assert [sid for sid, _ in calls[0]] == ["seg_1", "seg_3"]
+    assert set(get_embeddings(config=config, segment_ids=["seg_1", "seg_3"])) == {"seg_1", "seg_3"}
+    assert pending_embedding_segment_ids(config=config) == ["seg_2"]  # skipped stays pending
+    assert ticks[-1] == (3, 3)
+
+
+def test_extract_pending_embeddings_batched_error_isolation(tmp_path: Path, monkeypatch) -> None:
+    # Bucket A (seg_1+seg_2, ~1s): per-item error entry fails ONLY that item. Bucket B (seg_3,
+    # 10s): the whole wire call raising fails only that bucket. The pass never aborts.
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2", "seg_3"])
+
+    durations = {"seg_1": 1000, "seg_2": 1004, "seg_3": 10_000}  # seg_1+seg_2 share a frame count
+    monkeypatch.setattr(
+        transcription,
+        "bulk_segment_audio_info",
+        lambda *, config, segment_ids: {
+            sid: (Path(f"/slices/{sid}.wav"), durations[sid]) for sid in segment_ids
+        },
+    )
+
+    def embed_batch_fn(items):
+        ids = [sid for sid, _ in items]
+        if "seg_3" in ids:
+            raise RuntimeError("wire timeout")
+        return [
+            {"segment_id": "seg_1", "embedding": [1.0, 2.0]},
+            {"segment_id": "seg_2", "error": "bad wav"},
+        ]
+
+    result = extract_pending_embeddings(config=config, embed_fn=_fail_serial, embed_batch_fn=embed_batch_fn)
+
+    assert result == {"embedded": 1, "skipped_missing_audio": 0, "failed": 2, "total": 3}
+    assert set(get_embeddings(config=config, segment_ids=["seg_1", "seg_2", "seg_3"])) == {"seg_1"}
+    assert pending_embedding_segment_ids(config=config) == ["seg_2", "seg_3"]
+
+
+def test_extract_pending_embeddings_batched_rejects_non_finite(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1"])
+    monkeypatch.setattr(
+        transcription,
+        "bulk_segment_audio_info",
+        lambda *, config, segment_ids: {sid: (Path(f"/s/{sid}.wav"), 1000) for sid in segment_ids},
+    )
+    result = extract_pending_embeddings(
+        config=config, embed_fn=_fail_serial,
+        embed_batch_fn=lambda items: [{"segment_id": sid, "embedding": [float("nan"), 1.0]} for sid, _ in items],
+    )
+    assert result == {"embedded": 0, "skipped_missing_audio": 0, "failed": 1, "total": 1}
+
+
+def test_pending_embedding_segment_ids_audio_file_scope(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_a1", "seg_a2"], session_id="ses_a", audio_file_id="aud_a")
+    _insert_session_with_segments(config.database_path, ["seg_b1"], session_id="ses_b", audio_file_id="aud_b")
+
+    assert pending_embedding_segment_ids(config=config, audio_file_id="aud_a") == ["seg_a1", "seg_a2"]
+    assert pending_embedding_segment_ids(config=config, audio_file_id="aud_b") == ["seg_b1"]
+    assert pending_embedding_segment_ids(config=config, audio_file_id="aud_none") == []
+
+
+def test_combined_batched_runs_embed_and_emotion_concurrently(tmp_path: Path, monkeypatch) -> None:
+    import threading
+
+    from personal_context_node.segment_emotions import get_emotions as _get_emotions
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_session_with_segments(config.database_path, ["seg_1", "seg_2"])
+    monkeypatch.setattr(
+        transcription,
+        "bulk_segment_audio_info",
+        lambda *, config, segment_ids: {sid: (Path(f"/s/{sid}.wav"), 1000) for sid in segment_ids},
+    )
+
+    # Each pass blocks until the OTHER has started: only a truly concurrent combined run can
+    # finish without tripping the 5s timeouts. (A serial implementation deadlocks the first
+    # pass's wait and fails the assertion inside the worker thread, which re-raises after join.)
+    embed_started = threading.Event()
+    emotion_started = threading.Event()
+
+    def embed_batch_fn(items):
+        embed_started.set()
+        assert emotion_started.wait(5.0), "emotion pass did not run concurrently with embed pass"
+        return [{"segment_id": sid, "embedding": [0.5, 0.5]} for sid, _ in items]
+
+    def classify_batch_fn(items):
+        emotion_started.set()
+        assert embed_started.wait(5.0), "embed pass did not run concurrently with emotion pass"
+        return [{"segment_id": sid, "label": "happy", "scores": {"happy": 0.9}} for sid, _ in items]
+
+    ticks: list[tuple[int, int]] = []
+    result = extract_pending_embeddings_and_emotions(
+        config=config,
+        embed_fn=_fail_serial,
+        classify_fn=lambda path: (_ for _ in ()).throw(AssertionError("serial classify_fn must not run")),
+        embed_batch_fn=embed_batch_fn,
+        classify_batch_fn=classify_batch_fn,
+        progress=lambda done, total: ticks.append((done, total)),
+    )
+
+    assert result["embedding"] == {"embedded": 2, "skipped_missing_audio": 0, "failed": 0, "total": 2}
+    assert result["emotion"] == {"emoted": 2, "skipped_missing_audio": 0, "failed": 0, "total": 2}
+    assert set(get_embeddings(config=config, segment_ids=["seg_1", "seg_2"])) == {"seg_1", "seg_2"}
+    assert set(_get_emotions(config=config, segment_ids=["seg_1", "seg_2"])) == {"seg_1", "seg_2"}
+    # Progress ticks once per ARTIFACT operation on the concurrent path: 2 embeds + 2 emotions.
+    assert sorted(ticks)[-1] == (4, 4)

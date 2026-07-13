@@ -11,7 +11,7 @@ from personal_context_node.audio_preprocessing import preprocess_imported_audio
 from personal_context_node.config import AppConfig
 from personal_context_node.core.ports.asr import ASRResult, ASRSegment
 from personal_context_node.pipeline import run_first_milestone
-from personal_context_node.storage.sqlite import connect, fetch_all
+from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.transcription import transcribe_pending_chunks
 
 
@@ -162,3 +162,131 @@ def test_transcribe_works_with_relative_data_dir(tmp_path: Path, monkeypatch) ->
     finally:
         conn.close()
     assert any(row["text"] == "relative ok" for row in active)
+
+
+# ---------------------------------------------------------------------------
+# bulk_segment_audio_info: one-connection batched sibling of segment_audio_path.
+
+
+def _bulkinfo_write_pcm_wav(path: Path, *, ms: int = 3000, rate: int = 16000) -> None:
+    import wave
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(b"\x01\x00" * (rate * ms // 1000))
+
+
+def _bulkinfo_seed(
+    config: AppConfig,
+    *,
+    raw_path: Path,
+    chunk_path: Path | None,
+    segments: list[tuple[str, int, int]],  # (segment_id, start_ms, end_ms)
+    audio_file_id: str = "aud_bulk",
+) -> None:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            "insert into audio_files (audio_file_id, source_device, source_path, local_raw_path, sha256, duration_ms, recorded_at, imported_at, status) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (audio_file_id, "DJI Mic 3", "/src/a.wav", str(raw_path), f"sha:{audio_file_id}", 3000, "2026-07-01T08:00:00+08:00", "2026-07-01T09:00:00+08:00", "imported"),
+        )
+        if chunk_path is not None:
+            conn.execute(
+                "insert into audio_chunks (chunk_id, audio_file_id, source_start_ms, source_end_ms, local_chunk_path, status) values ('chk_real', ?, 0, 1000, ?, 'transcribed')",
+                (audio_file_id, str(chunk_path)),
+            )
+        for segment_id, start_ms, end_ms in segments:
+            chunk_id = "chk_real" if chunk_path is not None and segment_id.endswith("_chunked") else f"chk_{segment_id}"
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, absolute_start_at, absolute_end_at, text, language, speaker, evidence_id, confidence, asr_backend, model_name, model_version, is_active, created_at) values (?, ?, ?, null, ?, ?, ?, ?, ?, 'zh', 'self', ?, 1.0, 'Mock', 'mock', 'test', 1, ?)",
+                (segment_id, audio_file_id, chunk_id, start_ms, end_ms, "2026-07-01T08:00:00+08:00", "2026-07-01T08:00:01+08:00", f"text {segment_id}", f"ev_{segment_id}", "2026-07-01T08:00:02+08:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_bulk_segment_audio_info_resolves_chunk_and_fallback_paths(tmp_path: Path) -> None:
+    from personal_context_node.transcription import bulk_segment_audio_info
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw = tmp_path / "raw" / "a.wav"
+    chunk = tmp_path / "work" / "chunk.wav"
+    _bulkinfo_write_pcm_wav(raw, ms=3000)
+    _bulkinfo_write_pcm_wav(chunk, ms=1000)
+    _bulkinfo_seed(
+        config,
+        raw_path=raw,
+        chunk_path=chunk,
+        segments=[("seg_chunked", 0, 800), ("seg_diar", 500, 2500)],
+    )
+
+    info = bulk_segment_audio_info(config=config, segment_ids=["seg_chunked", "seg_diar"])
+
+    # Chunk-backed segment resolves to the whole chunk file, and duration_ms is the ACTUAL
+    # audio length from the WAV header (1000ms chunk), NOT the 800ms segment window — the
+    # zero-padding batch bucketing needs the length the model will really see.
+    assert info["seg_chunked"] == (chunk, 1000)
+    # Diarize-mode segment (no matching chunk) falls back to the idempotent slice cache.
+    path, duration_ms = info["seg_diar"]
+    assert duration_ms == 2000
+    assert path == config.data_dir / "audio" / "segments" / "seg_diar.wav"
+    assert path.exists()
+
+    # Second call reuses the slice cache: even if slicing were to break, the path still resolves.
+    again = bulk_segment_audio_info(config=config, segment_ids=["seg_diar"])
+    assert again["seg_diar"] == (path, 2000)
+
+
+def test_bulk_segment_audio_info_single_connection(tmp_path: Path, monkeypatch) -> None:
+    import personal_context_node.transcription as tr
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw = tmp_path / "raw" / "a.wav"
+    _bulkinfo_write_pcm_wav(raw, ms=3000)
+    _bulkinfo_seed(
+        config,
+        raw_path=raw,
+        chunk_path=None,
+        segments=[(f"seg_{i}", i * 100, i * 100 + 100) for i in range(20)],
+    )
+
+    real_connect = tr.connect
+    counter = {"n": 0}
+
+    def counting_connect(path):
+        counter["n"] += 1
+        return real_connect(path)
+
+    monkeypatch.setattr(tr, "connect", counting_connect)
+    info = tr.bulk_segment_audio_info(config=config, segment_ids=[f"seg_{i}" for i in range(20)])
+    assert len(info) == 20
+    assert counter["n"] == 1  # ONE connection for the whole pass (vs one per segment before)
+
+
+def test_bulk_segment_audio_info_omits_unsafe_and_unresolvable(tmp_path: Path) -> None:
+    from personal_context_node.transcription import bulk_segment_audio_info
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    raw = tmp_path / "raw" / "a.wav"
+    _bulkinfo_write_pcm_wav(raw, ms=3000)
+    _bulkinfo_seed(config, raw_path=raw, chunk_path=None, segments=[("seg_ok", 0, 1000), ("seg_zero", 500, 500)])
+    # A second file whose raw source does NOT exist -> its segment is unresolvable.
+    _bulkinfo_seed(
+        config,
+        raw_path=tmp_path / "raw" / "missing.wav",
+        chunk_path=None,
+        segments=[("seg_gone", 0, 1000)],
+        audio_file_id="aud_gone",
+    )
+
+    info = bulk_segment_audio_info(
+        config=config, segment_ids=["seg_ok", "seg_zero", "seg_gone", "../evil", "seg_unknown"]
+    )
+    # Only the resolvable, safe id survives: zero-length window, missing source, unsafe id and
+    # unknown id are all simply absent (caller treats absence like segment_audio_path -> None).
+    assert set(info) == {"seg_ok"}

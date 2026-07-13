@@ -166,3 +166,39 @@ def test_wrapper_cli_accepts_valid_precision_choices() -> None:
         assert result.returncode == 2
         assert "invalid choice" not in result.stderr
         assert "this wrapper only runs in --server mode" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Batch protocol: {"batch": [...]} in -> {"results": [...]} out (per-item loop inside).
+
+
+def test_run_server_batch_line_classifies_each_item_independently() -> None:
+    class FakeModel:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def generate(self, audio_path, **kw):
+            self.calls.append(audio_path)
+            if audio_path == "/bad.wav":
+                raise RuntimeError("decode failure")
+            return [{"labels": ["开心/happy", "难过/sad"], "scores": [0.8, 0.2]}]
+
+    model = FakeModel()
+    stdin = io.StringIO(
+        json.dumps({"batch": [
+            {"segment_id": "s1", "audio_path": "/a.wav"},
+            {"segment_id": "s2", "audio_path": "/bad.wav"},
+            {"segment_id": "s3", "audio_path": "/c.wav"},
+        ]}) + "\n"
+    )
+    stdout = io.StringIO()
+    ew.run_server(model, stdin, stdout)
+
+    lines = stdout.getvalue().splitlines()
+    assert len(lines) == 1  # one line in -> ONE line out
+    results = json.loads(lines[0])["results"]
+    assert [r["segment_id"] for r in results] == ["s1", "s2", "s3"]
+    assert results[0]["label"] == "开心/happy"
+    assert "decode failure" in results[1]["error"]  # one bad item errors ONLY itself
+    assert results[2]["label"] == "开心/happy"
+    assert model.calls == ["/a.wav", "/bad.wav", "/c.wav"]  # per-item loop (no true batch API)

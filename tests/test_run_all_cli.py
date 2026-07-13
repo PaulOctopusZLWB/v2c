@@ -69,8 +69,10 @@ auto_viewpoints = true
 
     assert result.exit_code == 0, result.output
     assert "imported_files=1" in result.output
-    assert "process_steps=6" in result.output
-    assert "tasks_succeeded=6" in result.output
+    # 7 steps: vad, asr, session_derive, summarize, daily, publish + the extract_features
+    # leaf that asr fans out (mock backend -> mock extraction adapters, fully hermetic).
+    assert "process_steps=7" in result.output
+    assert "tasks_succeeded=7" in result.output
     assert "status=complete" in result.output
 
     session_notes = sorted((vault / "20_Conversations" / "2025-06-10").glob("ses_*.md"))

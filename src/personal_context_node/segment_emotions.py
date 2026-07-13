@@ -176,7 +176,11 @@ def emotion_labels_for_scope(
 
 
 def pending_emotion_segment_ids(
-    *, config: AppConfig, session_id: str | None = None, day: str | None = None
+    *,
+    config: AppConfig,
+    session_id: str | None = None,
+    day: str | None = None,
+    audio_file_id: str | None = None,
 ) -> list[str]:
     """Active transcript segments lacking an emotion row, optionally scoped.
 
@@ -195,6 +199,9 @@ def pending_emotion_segment_ids(
         join = "join sessions s on s.session_id = ts.session_id"
         where.append("s.date_key = ?")
         params.append(day)
+    if audio_file_id is not None:
+        where.append("ts.audio_file_id = ?")
+        params.append(audio_file_id)
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -214,12 +221,69 @@ def pending_emotion_segment_ids(
     return [str(row["segment_id"]) for row in rows]
 
 
+def _run_classify_batched(
+    *,
+    config: AppConfig,
+    classify_batch_fn: Callable[[list[tuple[str, str]]], list[dict]],
+    pending: list[str],
+    model: str,
+    batch_size: int,
+    tick: Callable[[], None],
+) -> dict:
+    """Batched emotion sub-pass over ``pending``: bulk path resolve -> fixed-size chunks ->
+    one ``classify_batch_fn`` wire round-trip per chunk -> bulk write per chunk.
+
+    Unlike the embedding side there is NO padding constraint (the wrapper loops per item — the
+    batch line only amortizes the wire round-trip), so chunks are simple size-capped slices in
+    pending order. Per-item skip/fail semantics mirror the serial loop; a chunk whose wire call
+    raises fails only that chunk. ``tick`` fires once per segment.
+    """
+    # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
+    from personal_context_node.transcription import bulk_segment_audio_info
+
+    info = bulk_segment_audio_info(config=config, segment_ids=pending)
+    emoted = 0
+    failed = 0
+    skipped = 0
+    items: list[tuple[str, str]] = []
+    for segment_id in pending:
+        entry = info.get(segment_id)
+        if entry is None:
+            skipped += 1
+            tick()
+        else:
+            items.append((segment_id, str(entry[0])))
+
+    size = max(1, int(batch_size))
+    for start in range(0, len(items), size):
+        chunk = items[start : start + size]
+        try:
+            results = classify_batch_fn(chunk)
+        except Exception:
+            failed += len(chunk)
+            for _ in chunk:
+                tick()
+            continue
+        writes: list[tuple[str, dict]] = []
+        for (segment_id, _path), result in zip(chunk, results):
+            if isinstance(result, dict) and "label" in result and "error" not in result:
+                writes.append((segment_id, {"label": result["label"], "scores": result.get("scores", {})}))
+            else:
+                failed += 1
+            tick()
+        if writes:
+            emoted += put_emotions_bulk(config=config, items=writes, model=model)
+    return {"emoted": emoted, "skipped_missing_audio": skipped, "failed": failed, "total": len(pending)}
+
+
 def extract_pending_emotions(
     *,
     config: AppConfig,
     classify_fn: Callable[[str], dict],
+    classify_batch_fn: Callable[[list[tuple[str, str]]], list[dict]] | None = None,
     session_id: str | None = None,
     day: str | None = None,
+    audio_file_id: str | None = None,
     model: str = _MODEL,
     batch_size: int = 32,
     progress: Callable[[int, int], None] | None = None,
@@ -229,11 +293,33 @@ def extract_pending_emotions(
     ``classify_fn`` takes an audio file path (str) and returns ``{"label", "scores"}``; the heavy
     emotion2vec model is injected here so this orchestration stays model-free (and test-stubbable).
     Segments whose audio slice is unavailable are skipped (kept pending) and counted separately.
+
+    When ``classify_batch_fn`` is provided (see ``PersistentCommandEmotionAdapter.classify_batch``)
+    the pass resolves audio paths in bulk and sends size-capped chunks over one wire round-trip
+    each instead of one per segment. Omitted (the default), behavior is exactly the historical
+    serial loop.
     """
+    pending = pending_emotion_segment_ids(
+        config=config, session_id=session_id, day=day, audio_file_id=audio_file_id
+    )
+
+    if classify_batch_fn is not None:
+        total = len(pending)
+        done = 0
+
+        def _tick() -> None:
+            nonlocal done
+            done += 1
+            if progress is not None:
+                progress(done, total)
+
+        return _run_classify_batched(
+            config=config, classify_batch_fn=classify_batch_fn, pending=pending,
+            model=model, batch_size=batch_size, tick=_tick,
+        )
+
     # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
     from personal_context_node.transcription import segment_audio_path
-
-    pending = pending_emotion_segment_ids(config=config, session_id=session_id, day=day)
     total = len(pending)
     emoted = 0
     skipped = 0

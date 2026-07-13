@@ -93,6 +93,11 @@ class AppConfig(BaseModel):
     # adapters are single-subprocess and not reentrant) and the others run CPU-bound stages
     # (session_derive/summarize/daily/publish/archive) in parallel.
     pipeline_workers: int = 1
+    # Feature extraction (CAM++ voiceprint + emotion2vec) tuning. batch_size caps how many
+    # same-duration-bucket segments ride one funasr generate() call; auto gates the
+    # transcribe/asr → extract_features pipeline edge (a pure leaf — never blocks sessions).
+    extraction_batch_size: int = 32
+    pipeline_auto_extract_features: bool = True
     log_dir_path: Path | None = None
     log_level: str = "INFO"
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
@@ -105,6 +110,13 @@ class AppConfig(BaseModel):
         # (burning ASR/VAD/LLM retries; archive always pending). Fail fast at config load.
         if value <= 0:
             raise ValueError("commands.timeout_seconds must be positive")
+        return value
+
+    @field_validator("extraction_batch_size")
+    @classmethod
+    def _validate_extraction_batch_size(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("extraction.batch_size must be >= 1")
         return value
 
     @field_validator("asr_precision")
@@ -202,6 +214,14 @@ class AppConfig(BaseModel):
             "pipeline_workers": raw.get("pipeline", {}).get(
                 "workers",
                 cls.model_fields["pipeline_workers"].default,
+            ),
+            "extraction_batch_size": raw.get("extraction", {}).get(
+                "batch_size",
+                cls.model_fields["extraction_batch_size"].default,
+            ),
+            "pipeline_auto_extract_features": raw.get("extraction", {}).get(
+                "auto",
+                cls.model_fields["pipeline_auto_extract_features"].default,
             ),
             "log_dir_path": _optional_resolve_path(base_dir, logging_cfg.get("log_dir")),
             "log_level": logging_cfg.get("level", cls.model_fields["log_level"].default),

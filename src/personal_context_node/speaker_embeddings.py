@@ -102,7 +102,13 @@ def get_embeddings(*, config: AppConfig, segment_ids: list[str]) -> dict[str, np
     return result
 
 
-def pending_embedding_segment_ids(*, config: AppConfig, session_id: str | None = None, day: str | None = None) -> list[str]:
+def pending_embedding_segment_ids(
+    *,
+    config: AppConfig,
+    session_id: str | None = None,
+    day: str | None = None,
+    audio_file_id: str | None = None,
+) -> list[str]:
     """Active transcript segments lacking an embedding row, optionally scoped.
 
     Ordered by (absolute_start_at, segment_id) for deterministic batching.
@@ -120,6 +126,9 @@ def pending_embedding_segment_ids(*, config: AppConfig, session_id: str | None =
         join = "join sessions s on s.session_id = ts.session_id"
         where.append("s.date_key = ?")
         params.append(day)
+    if audio_file_id is not None:
+        where.append("ts.audio_file_id = ?")
+        params.append(audio_file_id)
     conn = connect(config.database_path)
     try:
         initialize(conn)
@@ -1121,12 +1130,121 @@ def _person_labels(*, config: AppConfig, person_ids: list[str]) -> dict[str, str
     return {str(row["person_id"]): str(row["display_name"]) for row in rows}
 
 
+# Batching guardrail: funasr zero-pads a variable-length batch at the fbank-FRAME level and
+# CAM++ has no length masking, so ANY padding corrupts the voiceprint — measured on real
+# production slices, even duration ratios <= 1.25 within a bucket degraded cosine(solo vs
+# batched same audio) to as low as 0.71 (downstream identify thresholds sit near 0.5, and the
+# tens of thousands of stored embeddings were all computed solo). The ONLY safe grouping is
+# zero padding at all: segments whose fbank frame counts are exactly equal batch to results
+# bit-identical to solo inference (measured cosine 1.000000), and on real data ~94% of segments
+# share their frame count with at least one sibling, ~80% are in groups of 4+.
+#
+# Kaldi fbank (25ms window / 10ms shift, snip_edges) at 16kHz gives
+#   frames = 1 + (duration_ms - 25) // 10        for duration_ms >= 25
+# which is exact for the 48k/16k sources this pipeline ingests (16000 samples/s divides both).
+
+
+def _fbank_frame_key(duration_ms: int) -> int:
+    """Bucket key: the exact Kaldi fbank frame count for a clip of ``duration_ms``.
+
+    Sub-25ms clips (shorter than one fbank window) key on their negative exact millisecond
+    length instead — equal length still means an identical, padding-free batch, and the
+    negative range can never collide with a real frame count (which is >= 1).
+    """
+    duration = int(duration_ms)
+    if duration < 25:
+        return -duration - 1
+    return 1 + (duration - 25) // 10
+
+
+def _bucket_by_duration(
+    items: list[tuple[str, str, int]],
+    *,
+    max_batch_size: int = 32,
+) -> list[list[tuple[str, str]]]:
+    """Group ``(segment_id, audio_path, duration_ms)`` into ZERO-PADDING buckets.
+
+    Only segments with the exact same fbank frame count (see ``_fbank_frame_key``) share a
+    bucket, capped at ``max_batch_size``; everything else rides a smaller (possibly singleton)
+    bucket, which is exactly solo inference. Buckets come out in ascending frame-count order,
+    items in their incoming (pending) order within a bucket — fully deterministic.
+    """
+    if not items:
+        return []
+    groups: dict[int, list[tuple[str, str]]] = {}
+    for segment_id, path, duration_ms in items:
+        groups.setdefault(_fbank_frame_key(int(duration_ms)), []).append((segment_id, path))
+    size = max(1, int(max_batch_size))
+    buckets: list[list[tuple[str, str]]] = []
+    for key in sorted(groups):
+        group = groups[key]
+        for start in range(0, len(group), size):
+            buckets.append(group[start : start + size])
+    return buckets
+
+
+def _run_embed_batched(
+    *,
+    config: AppConfig,
+    embed_batch_fn: Callable[[list[tuple[str, str]]], list[dict]],
+    pending: list[str],
+    model: str,
+    batch_size: int,
+    tick: Callable[[], None],
+) -> dict:
+    """Batched embedding sub-pass over ``pending``: bulk path resolve -> duration buckets ->
+    one ``embed_batch_fn`` wire round-trip per bucket -> bulk write per bucket.
+
+    Per-item skip/fail semantics mirror the serial loop: a segment with no resolvable audio is
+    "skipped" (kept pending); a per-item error entry or non-finite vector is "failed"; a whole
+    bucket whose wire call raises (timeout/protocol poisoning — the adapter already killed the
+    server) fails ONLY that bucket and the pass continues. ``tick`` fires once per segment.
+    """
+    # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
+    from personal_context_node.transcription import bulk_segment_audio_info
+
+    info = bulk_segment_audio_info(config=config, segment_ids=pending)
+    embedded = 0
+    failed = 0
+    skipped = 0
+    items: list[tuple[str, str, int]] = []
+    for segment_id in pending:
+        entry = info.get(segment_id)
+        if entry is None:
+            skipped += 1
+            tick()
+        else:
+            items.append((segment_id, str(entry[0]), int(entry[1])))
+
+    for bucket in _bucket_by_duration(items, max_batch_size=batch_size):
+        try:
+            results = embed_batch_fn(bucket)
+        except Exception:
+            failed += len(bucket)
+            for _ in bucket:
+                tick()
+            continue
+        writes: list[tuple[str, Sequence[float]]] = []
+        for (segment_id, _path), result in zip(bucket, results):
+            vector = result.get("embedding") if isinstance(result, dict) else None
+            if vector is None or not np.all(np.isfinite(np.asarray(vector, dtype=np.float32))):
+                failed += 1
+            else:
+                writes.append((segment_id, vector))
+            tick()
+        if writes:
+            embedded += put_embeddings_bulk(config=config, items=writes, model=model)
+    return {"embedded": embedded, "skipped_missing_audio": skipped, "failed": failed, "total": len(pending)}
+
+
 def extract_pending_embeddings(
     *,
     config: AppConfig,
     embed_fn: Callable[[str], list[float]],
+    embed_batch_fn: Callable[[list[tuple[str, str]]], list[dict]] | None = None,
     session_id: str | None = None,
     day: str | None = None,
+    audio_file_id: str | None = None,
     model: str = "cam++",
     batch_size: int = 32,
     progress: Callable[[int, int], None] | None = None,
@@ -1136,11 +1254,36 @@ def extract_pending_embeddings(
     ``embed_fn`` takes an audio file path (str) and returns the embedding vector; the heavy
     CAM++ model is injected here so this orchestration stays model-free (and test-stubbable).
     Segments whose audio slice is unavailable are skipped (kept pending) and counted separately.
+
+    When ``embed_batch_fn`` is provided (see ``PersistentCommandEmbedAdapter.embed_batch``) the
+    pass runs the duration-bucketed BATCHED path instead of the per-segment serial loop — same
+    counters, same return shape, ~7x faster on real hardware. Omitted (the default), behavior is
+    exactly the historical serial loop.
     """
+    pending = pending_embedding_segment_ids(
+        config=config, session_id=session_id, day=day, audio_file_id=audio_file_id
+    )
+
+    if embed_batch_fn is not None:
+        total = len(pending)
+        done = 0
+
+        def _tick() -> None:
+            nonlocal done
+            done += 1
+            if progress is not None:
+                progress(done, total)
+
+        result = _run_embed_batched(
+            config=config, embed_batch_fn=embed_batch_fn, pending=pending,
+            model=model, batch_size=batch_size, tick=_tick,
+        )
+        if result["embedded"]:
+            clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
+        return result
+
     # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
     from personal_context_node.transcription import segment_audio_path
-
-    pending = pending_embedding_segment_ids(config=config, session_id=session_id, day=day)
     total = len(pending)
     embedded = 0
     skipped = 0
@@ -1189,8 +1332,11 @@ def extract_pending_embeddings_and_emotions(
     config: AppConfig,
     embed_fn: Callable[[str], list[float]],
     classify_fn: Callable[[str], dict],
+    embed_batch_fn: Callable[[list[tuple[str, str]]], list[dict]] | None = None,
+    classify_batch_fn: Callable[[list[tuple[str, str]]], list[dict]] | None = None,
     session_id: str | None = None,
     day: str | None = None,
+    audio_file_id: str | None = None,
     embed_model: str = "cam++",
     emotion_model: str | None = None,
     batch_size: int = 32,
@@ -1217,10 +1363,17 @@ def extract_pending_embeddings_and_emotions(
     extract_pending_emotions...}}``. ``progress(done, total)`` reports over the UNION size (one
     segment fully processed for whichever artifacts it needed = one "done" tick), so a caller
     driving a single progress bar for the combined pass sees an accurate total.
+
+    When BOTH ``embed_batch_fn`` and ``classify_batch_fn`` are provided, the two artifacts run
+    CONCURRENTLY on two threads (two resident model subprocesses working at once) with the
+    batched per-artifact passes. Progress then ticks once per ARTIFACT operation — ``total`` is
+    ``len(pending embeddings) + len(pending emotions)`` — still monotonic and ending at total,
+    so any fraction-style progress consumer keeps working.
     """
     # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
     from personal_context_node.segment_emotions import (
         _MODEL as _EMOTION_MODEL,
+        _run_classify_batched,
         pending_emotion_segment_ids,
         put_emotions_bulk,
     )
@@ -1229,8 +1382,66 @@ def extract_pending_embeddings_and_emotions(
     if emotion_model is None:
         emotion_model = _EMOTION_MODEL
 
-    pending_embed_ids = set(pending_embedding_segment_ids(config=config, session_id=session_id, day=day))
-    pending_emotion_ids = set(pending_emotion_segment_ids(config=config, session_id=session_id, day=day))
+    if embed_batch_fn is not None and classify_batch_fn is not None:
+        pending_embed = pending_embedding_segment_ids(
+            config=config, session_id=session_id, day=day, audio_file_id=audio_file_id
+        )
+        pending_emotion = pending_emotion_segment_ids(
+            config=config, session_id=session_id, day=day, audio_file_id=audio_file_id
+        )
+        combined_total = len(pending_embed) + len(pending_emotion)
+        tick_lock = threading.Lock()
+        ticks = 0
+
+        def _tick() -> None:
+            nonlocal ticks
+            with tick_lock:
+                ticks += 1
+                done_now = ticks
+            if progress is not None:
+                progress(done_now, combined_total)
+
+        results: dict[str, dict] = {}
+        errors: list[BaseException] = []
+
+        def _embed_pass() -> None:
+            try:
+                results["embedding"] = _run_embed_batched(
+                    config=config, embed_batch_fn=embed_batch_fn, pending=pending_embed,
+                    model=embed_model, batch_size=batch_size, tick=_tick,
+                )
+            except BaseException as exc:  # surfaced after join — a thread must not die silently
+                errors.append(exc)
+
+        def _emotion_pass() -> None:
+            try:
+                results["emotion"] = _run_classify_batched(
+                    config=config, classify_batch_fn=classify_batch_fn, pending=pending_emotion,
+                    model=emotion_model, batch_size=batch_size, tick=_tick,
+                )
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=_embed_pass, daemon=True),
+            threading.Thread(target=_emotion_pass, daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if errors:
+            raise errors[0]
+        if results.get("embedding", {}).get("embedded"):
+            clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
+        return {"embedding": results["embedding"], "emotion": results["emotion"]}
+
+    pending_embed_ids = set(
+        pending_embedding_segment_ids(config=config, session_id=session_id, day=day, audio_file_id=audio_file_id)
+    )
+    pending_emotion_ids = set(
+        pending_emotion_segment_ids(config=config, session_id=session_id, day=day, audio_file_id=audio_file_id)
+    )
     union_ids = sorted(pending_embed_ids | pending_emotion_ids)
     total = len(union_ids)
 

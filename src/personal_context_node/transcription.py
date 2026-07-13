@@ -393,3 +393,94 @@ def segment_audio_path(*, config: AppConfig, segment_id: str) -> Path | None:
     if cache_path.exists():
         return cache_path  # idempotent reuse — no re-slice
     return _slice_wav(source, cache_path, int(fallback[0]["start_ms"]), int(fallback[0]["end_ms"]))
+
+
+_BULK_SQL_CHUNK = 500  # keep IN-clause bind-var counts well under SQLite's per-statement limit
+
+
+def bulk_segment_audio_info(*, config: AppConfig, segment_ids: list[str]) -> dict[str, tuple[Path, int]]:
+    """Resolve ``segment_id -> (audio_path, duration_ms)`` for MANY segments at once.
+
+    The batched sibling of ``segment_audio_path``: one connection and a fixed number of chunked
+    queries instead of a fresh connection + two queries per segment (which dominates orchestration
+    cost on a multi-thousand-segment extraction pass). Same resolution semantics — a chunk's
+    ``local_chunk_path`` wins when it exists on disk; diarize-mode segments (no audio_chunks row)
+    fall back to the idempotent per-segment slice cache, slicing the source raw wav on a miss via
+    ``_slice_wav``. ``duration_ms`` comes straight off ``end_ms - start_ms`` (no file probing).
+
+    Unsafe ids and segments with no resolvable audio are simply absent from the result — callers
+    treat a missing key exactly like ``segment_audio_path`` returning ``None``.
+
+    ``duration_ms`` is the ACTUAL audio duration read from the resolved file's WAV header (a
+    44-byte read), falling back to ``end_ms - start_ms`` when the header is unparseable. The
+    distinction matters for chunk-backed segments — they resolve to the whole chunk file, whose
+    length is what the embed model actually sees — and the duration feeds the zero-padding
+    batch-bucketing (see speaker_embeddings._fbank_frame_key), which needs exact frame counts.
+    """
+    safe_ids = [sid for sid in segment_ids if _is_safe_segment_id(sid)]
+    if not safe_ids:
+        return {}
+    rows: list = []
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(safe_ids), _BULK_SQL_CHUNK):
+            chunk = safe_ids[start : start + _BULK_SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows.extend(
+                fetch_all(
+                    conn,
+                    f"""
+                    select
+                      ts.segment_id,
+                      ts.start_ms,
+                      ts.end_ms,
+                      ac.local_chunk_path,
+                      af.local_raw_path
+                    from transcript_segments ts
+                    left join audio_chunks ac on ac.chunk_id = ts.chunk_id
+                    left join audio_files af on af.audio_file_id = ts.audio_file_id
+                    where ts.is_active = 1 and ts.segment_id in ({placeholders})
+                    """,
+                    tuple(chunk),
+                )
+            )
+    finally:
+        conn.close()
+
+    result: dict[str, tuple[Path, int]] = {}
+    for row in rows:
+        segment_id = str(row["segment_id"])
+        start_ms = int(row["start_ms"])
+        end_ms = int(row["end_ms"])
+        window_ms = max(0, end_ms - start_ms)
+        if row["local_chunk_path"]:
+            chunk_path = Path(str(row["local_chunk_path"]))
+            if chunk_path.exists():
+                result[segment_id] = (chunk_path, _wav_duration_ms(chunk_path, fallback_ms=window_ms))
+                continue
+        if not row["local_raw_path"]:
+            continue
+        source = Path(str(row["local_raw_path"]))
+        if not source.exists():
+            continue
+        cache_path = config.data_dir / "audio" / "segments" / f"{segment_id}.wav"
+        if not cache_path.exists():
+            sliced = _slice_wav(source, cache_path, start_ms, end_ms)
+            if sliced is None:
+                continue
+        result[segment_id] = (cache_path, _wav_duration_ms(cache_path, fallback_ms=window_ms))
+    return result
+
+
+def _wav_duration_ms(path: Path, *, fallback_ms: int) -> int:
+    """Actual audio length in ms from a WAV header (44-byte read); ``fallback_ms`` on any error."""
+    try:
+        meta = _read_wav_metadata(path)
+        block_align = int(meta["channels"]) * int(meta["bits_per_sample"]) // 8
+        sample_rate = int(meta["sample_rate"])
+        if block_align <= 0 or sample_rate <= 0:
+            return fallback_ms
+        return int(meta["data_size"]) // block_align * 1000 // sample_rate
+    except (ValueError, KeyError, OSError, struct.error):
+        return fallback_ms

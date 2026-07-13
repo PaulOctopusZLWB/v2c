@@ -1652,16 +1652,25 @@ def _process_run(
         # Scheduled/production path: work through the whole queue in one invocation
         # instead of one task per launchd interval (which left the pipeline idle for
         # most of each 10-minute window). Adapters (and their resident models) are
-        # built once and reused for every task in the run.
-        drain_result = drain_process_queue(
-            config=config,
-            vad=vad,
-            asr=asr,
-            llm=llm,
-            max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
-            max_steps=max_steps,
-            job_name="process-run.drain",
-        )
+        # built once and reused for every task in the run. The extraction pair is lazy
+        # (no subprocess until an extract_features task actually runs).
+        from personal_context_node.feature_extraction import build_extraction_adapters, close_extraction_adapters
+
+        extraction_adapters = build_extraction_adapters(config=config)
+        try:
+            drain_result = drain_process_queue(
+                config=config,
+                vad=vad,
+                asr=asr,
+                llm=llm,
+                embed=extraction_adapters[0],
+                emotion=extraction_adapters[1],
+                max_chunk_ms=max_chunk_ms or config.max_chunk_ms,
+                max_steps=max_steps,
+                job_name="process-run.drain",
+            )
+        finally:
+            close_extraction_adapters(extraction_adapters)
         _close_adapter(asr)
         typer.echo(
             " ".join(

@@ -8,6 +8,10 @@ line -- and emits one JSON line per item carrying the 8-class acoustic emotion:
 failure rides the stream as ``{"segment_id": ..., "error": "<msg>"}`` and does NOT kill
 the daemon.
 
+A ``{"batch": [items...]}`` input line instead answers with one ``{"results": [...]}`` line
+(per-item loop inside — emotion2vec has no true batch API; the batch line only amortizes the
+wire round-trip, mirroring the embed wrapper's protocol).
+
 Mirrors ``funasr_campplus_embed_wrapper.py``: argparse, the resident stdin loop,
 MPS-fallback env, ``disable_update=True``, JSON-per-line I/O, and a model import kept
 INSIDE the server function so unit tests need neither funasr nor torch.
@@ -79,27 +83,53 @@ def normalize_emotion(labels, scores) -> tuple[str, dict[str, float]]:
     return dominant, scores_dict
 
 
+def _classify_one(model, item: dict) -> dict:
+    """One solo generate() for a ``{"segment_id", "audio_path"}`` item -> result payload."""
+    segment_id = item.get("segment_id") if isinstance(item, dict) else None
+    try:
+        audio_path = item["audio_path"]
+        # FunASR/tqdm may print to stdout during inference; redirect it to stderr so only
+        # our explicit JSON line reaches the one-line-per-result protocol stream.
+        with contextlib.redirect_stdout(sys.stderr):
+            result = model.generate(audio_path, granularity="utterance", extract_embedding=False)
+        record = result[0]
+        label, scores = normalize_emotion(record["labels"], record["scores"])
+        return {"segment_id": segment_id, "label": label, "scores": scores}
+    except Exception as exc:  # one bad item must not kill the resident server
+        return {"segment_id": segment_id, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def run_batch(model, items: list) -> list[dict]:
+    """Classify a batch of items, one result per item in input order.
+
+    emotion2vec has no true batch API (funasr loops per item internally), so this simply loops —
+    the batch line's value is amortizing the JSON round-trip per bucket, mirroring the embed
+    wrapper's protocol so both adapters share one shape. One bad item errors only itself.
+    """
+    return [_classify_one(model, item) for item in items or []]
+
+
 def run_server(model, in_stream, out_stream) -> int:
-    """Resident loop: one ``{"segment_id", "audio_path"}`` JSON per input line -> one
-    ``{"segment_id", "label", "scores"}`` (or ``{"segment_id", "error"}``) JSON per output line."""
+    """Resident loop, one JSON line in -> one JSON line out.
+
+    Legacy item ``{"segment_id", "audio_path"}`` -> ``{"segment_id", "label", "scores"|"error"}``.
+    Batch item ``{"batch": [{"segment_id", "audio_path"}, ...]}`` -> ``{"results": [...]}`` with
+    one entry per input, in order.
+    """
     for raw_line in in_stream:
         line = raw_line.strip()
         if not line:
             continue
-        segment_id = None
         try:
             item = json.loads(line)
-            segment_id = item.get("segment_id")
-            audio_path = item["audio_path"]
-            # FunASR/tqdm may print to stdout during inference; redirect it to stderr so only
-            # our explicit JSON line reaches the one-line-per-result protocol stream.
-            with contextlib.redirect_stdout(sys.stderr):
-                result = model.generate(audio_path, granularity="utterance", extract_embedding=False)
-            record = result[0]
-            label, scores = normalize_emotion(record["labels"], record["scores"])
-            payload = {"segment_id": segment_id, "label": label, "scores": scores}
-        except Exception as exc:  # one bad item must not kill the resident server
-            payload = {"segment_id": segment_id, "error": f"{type(exc).__name__}: {exc}"}
+        except Exception as exc:
+            out_stream.write(json.dumps({"segment_id": None, "error": f"{type(exc).__name__}: {exc}"}) + "\n")
+            out_stream.flush()
+            continue
+        if isinstance(item, dict) and "batch" in item:
+            payload = {"results": run_batch(model, item["batch"])}
+        else:
+            payload = _classify_one(model, item)
         out_stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
         out_stream.flush()
     return 0

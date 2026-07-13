@@ -285,3 +285,32 @@ precision = "fp16"
 def test_app_config_rejects_invalid_asr_precision() -> None:
     with pytest.raises(ValidationError):
         AppConfig(asr_precision="int8")
+
+
+def test_app_config_loads_extraction_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "local.toml"
+    config_path.write_text(
+        """
+[extraction]
+batch_size = 8
+auto = false
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = AppConfig.from_toml(config_path)
+
+    assert config.extraction_batch_size == 8
+    assert config.pipeline_auto_extract_features is False
+
+    # Defaults without an [extraction] section: batch 32, auto-extraction on.
+    bare = tmp_path / "bare.toml"
+    bare.write_text("", encoding="utf-8")
+    defaults = AppConfig.from_toml(bare)
+    assert defaults.extraction_batch_size == 32
+    assert defaults.pipeline_auto_extract_features is True
+
+
+def test_app_config_rejects_non_positive_extraction_batch_size() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(extraction_batch_size=0)

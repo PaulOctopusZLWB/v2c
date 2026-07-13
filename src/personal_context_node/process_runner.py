@@ -18,6 +18,7 @@ from personal_context_node.core.ports.llm import LLMPort
 from personal_context_node.core.ports.asr import ASRPort
 from personal_context_node.core.ports.vad import VADPort
 from personal_context_node.daily_reports import set_daily_report_status
+from personal_context_node.feature_extraction import extract_features_for_audio_file
 from personal_context_node.jobs import record_job_run
 from personal_context_node.llm_processing import generate_daily_context
 from personal_context_node.obsidian_publish import publish_obsidian_day
@@ -55,6 +56,14 @@ PIPELINE = (
     PipelineEdge("session_derive", "summarize_session", "session", lambda conn, config, target_id: _session_ids_for_day_in_conn(conn, day=target_id, config=config)),
     PipelineEdge("summarize_session", "daily_generate", "date_key", lambda conn, config, target_id: _ready_daily_generate_dates_in_conn(conn, session_id=target_id)),
     PipelineEdge("daily_generate", "obsidian_publish", "date_key", lambda _conn, _config, target_id: [target_id]),
+    # Feature-extraction LEAF (per audio_file, both ASR modes): voiceprint + emotion extraction
+    # auto-runs after transcription but gates NOTHING — no edge has extract_features as upstream,
+    # and the *→session_derive fan-in predicates never reference it, so a slow/failed extraction
+    # can never delay sessions, summaries, or reports. In chunked-asr mode sibling chunks each
+    # re-fan-out the same file's task; the idempotent enqueue + reset just means "re-check the
+    # pending scope", which is exactly right as new segments land.
+    PipelineEdge("transcribe_diarize", "extract_features", "audio_file", lambda _conn, _config, target_id: [target_id]),
+    PipelineEdge("asr", "extract_features", "audio_file", lambda conn, config, target_id: _audio_file_ids_for_chunk_in_conn(conn, chunk_id=target_id)),
 )
 # The pipeline's "viewpoint tail" — the three edges that auto-chain 观点 generation +
 # daily report + Obsidian publish. When config.pipeline_auto_viewpoints is False (the
@@ -71,12 +80,16 @@ PROCESS_TASK_ORDER = (
     "obsidian_publish",
     "asr",
     "archive",
+    # Last in claim order: the extraction leaf must never starve transcription/derivation work.
+    "extract_features",
 )
 # Stages whose adapters own a single resident model subprocess (funasr_server & friends).
 # Those adapters are NOT reentrant, so in a concurrent drain these types are pinned to one
 # dedicated worker thread; everything else is safe to run in parallel (independent targets,
-# per-call subprocess or pure-Python adapters).
-GPU_TASK_TYPES = ("vad", "transcribe_diarize", "asr")
+# per-call subprocess or pure-Python adapters). extract_features drives resident CAM++ +
+# emotion2vec MPS subprocesses, so it shares the GPU lane (serialized with ASR — as a leaf it
+# is not latency-critical, and co-running would contend for MPS/unified memory).
+GPU_TASK_TYPES = ("vad", "transcribe_diarize", "asr", "extract_features")
 CPU_TASK_TYPES = tuple(t for t in PROCESS_TASK_ORDER if t not in GPU_TASK_TYPES)
 
 
@@ -87,6 +100,8 @@ def process_once(
     vad: VADPort,
     asr: ASRPort,
     llm: LLMPort | None = None,
+    embed: object | None = None,
+    emotion: object | None = None,
     max_chunk_ms: int = 30_000,
     task_types: tuple[str, ...] | None = None,
     reclaim: bool = True,
@@ -135,6 +150,13 @@ def process_once(
             archive_completed_audio(
                 config=config,
                 archive=build_archive_adapter(config=config),
+            )
+        elif task.task_type == "extract_features":
+            extract_features_for_audio_file(
+                config=config,
+                audio_file_id=task.target_id,
+                embed=embed,
+                emotion=emotion,
             )
         else:
             raise ValueError(f"unsupported task type: {task.task_type}")
@@ -231,6 +253,8 @@ def drain_process_queue(
     vad: VADPort,
     asr: ASRPort,
     llm: LLMPort | None = None,
+    embed: object | None = None,
+    emotion: object | None = None,
     max_chunk_ms: int | None = None,
     max_steps: int = 200,
     should_stop: Callable[[], bool] = lambda: False,
@@ -245,6 +269,8 @@ def drain_process_queue(
             vad=vad,
             asr=asr,
             llm=llm,
+            embed=embed,
+            emotion=emotion,
             chunk_ms=chunk_ms,
             max_steps=max_steps,
             should_stop=should_stop,
@@ -266,7 +292,8 @@ def drain_process_queue(
                 job_name=job_name,
                 run_id=run_id,
                 operation=lambda run_id=run_id: process_once(
-                    config=config, run_id=run_id, vad=vad, asr=asr, llm=llm, max_chunk_ms=chunk_ms
+                    config=config, run_id=run_id, vad=vad, asr=asr, llm=llm,
+                    embed=embed, emotion=emotion, max_chunk_ms=chunk_ms,
                 ),
             ).result
         except Exception:
@@ -299,6 +326,8 @@ def _drain_concurrent(
     vad: VADPort,
     asr: ASRPort,
     llm: LLMPort | None,
+    embed: object | None = None,
+    emotion: object | None = None,
     chunk_ms: int,
     max_steps: int,
     should_stop: Callable[[], bool],
@@ -345,6 +374,7 @@ def _drain_concurrent(
                         run_id=run_id,
                         operation=lambda run_id=run_id: process_once(
                             config=config, run_id=run_id, vad=vad, asr=asr, llm=llm,
+                            embed=embed, emotion=emotion,
                             max_chunk_ms=chunk_ms, task_types=task_types, reclaim=False,
                         ),
                     ).result
@@ -510,6 +540,11 @@ def _enqueue_downstream_tasks_in_conn(
             continue
         if not auto_viewpoints and edge.upstream_task_type in _VIEWPOINT_TAIL_UPSTREAMS:
             continue
+        # Gate the extraction leaf by its OWN downstream type: its upstreams
+        # (transcribe_diarize/asr) also feed session_derive, so filtering by upstream type
+        # would wrongly suppress the session edges too.
+        if edge.downstream_task_type == "extract_features" and not config.pipeline_auto_extract_features:
+            continue
         for target_id in edge.target_ids(conn, config, upstream_target_id):
             result = enqueue_task_in_conn(
                 conn,
@@ -551,6 +586,16 @@ def _chunk_ids_for_audio_file(*, config: AppConfig, audio_file_id: str) -> list[
         return _chunk_ids_for_audio_file_in_conn(conn, audio_file_id=audio_file_id)
     finally:
         conn.close()
+
+
+def _audio_file_ids_for_chunk_in_conn(conn: sqlite3.Connection, *, chunk_id: str) -> list[str]:
+    """Resolve a chunk's parent audio_file_id (the asr→extract_features edge target)."""
+    rows = fetch_all(
+        conn,
+        "select audio_file_id from audio_chunks where chunk_id = ?",
+        (chunk_id,),
+    )
+    return [str(row["audio_file_id"]) for row in rows if row["audio_file_id"]]
 
 
 def _chunk_ids_for_audio_file_in_conn(conn: sqlite3.Connection, *, audio_file_id: str) -> list[str]:

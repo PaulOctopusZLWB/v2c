@@ -123,7 +123,9 @@ def test_concurrent_drain_picks_up_fanned_out_downstream_work(tmp_path: Path, mo
     result = drain_process_queue(config=config, vad=_UnusedPort(), asr=_UnusedPort())
 
     assert result.status == "complete"
-    assert result.tasks_succeeded == 2  # vad + the asr task it fanned out
+    # vad + the asr task it fanned out + the extract_features leaf asr fanned out (which
+    # no-ops: the chunk has no transcript segments, so its pending scope is empty).
+    assert result.tasks_succeeded == 3
     assert asr_calls["n"] == 1
 
 

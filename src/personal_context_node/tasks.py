@@ -41,6 +41,7 @@ ALLOWED_TASK_TYPES = {
     "daily_generate",
     "obsidian_publish",
     "archive",
+    "extract_features",
 }
 
 

@@ -61,6 +61,11 @@ class PipelineWorker:
         # DI seam: tests replace this with a factory returning a stub adapter so no real
         # emotion2vec model is loaded. Default builds a resident PersistentCommandEmotionAdapter.
         self._emotion_factory = self._default_emotion_factory
+        # Resident (embed, emotion) adapter pair for the pipeline's extract_features task,
+        # cached across drains like self._adapters so the CAM++/emotion2vec subprocesses
+        # survive between runs. Built from the SAME factories the manual extraction routes use.
+        self._feature_adapters: tuple[object, object] | None = None
+        self._feature_adapters_key: str | None = None
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -209,6 +214,28 @@ class PipelineWorker:
             _close_adapters(self._adapters)
             self._adapters = None
             self._adapters_key = None
+        self.close_feature_adapters()
+
+    def _resident_feature_adapters(self, effective) -> tuple[object, object]:
+        """Return the cached (embed, emotion) adapter pair for extract_features tasks,
+        rebuilding only when the effective config (or a test-monkeypatched factory) changed."""
+        key = f"{id(self._embed_factory)}:{id(self._emotion_factory)}:{effective.model_dump_json()}"
+        if self._feature_adapters is None or key != self._feature_adapters_key:
+            self.close_feature_adapters()
+            self._feature_adapters = (self._embed_factory(), self._emotion_factory())
+            self._feature_adapters_key = key
+        return self._feature_adapters
+
+    def close_feature_adapters(self) -> None:
+        """Release the resident extract_features adapter pair (config change, app shutdown)."""
+        if self._feature_adapters is not None:
+            for adapter in self._feature_adapters:
+                closer = getattr(adapter, "close", None)
+                if callable(closer):
+                    with contextlib.suppress(Exception):
+                        closer()
+            self._feature_adapters = None
+            self._feature_adapters_key = None
 
     def _drain_to_completion(self, *, max_steps: int = 200) -> DrainResult:
         """Loop drain_process_queue in batches of max_steps until the queue is empty (status
@@ -229,9 +256,13 @@ class PipelineWorker:
         total_succeeded = 0
         total_failed = 0
         last_status = "complete"
+        # The adapter objects are lazy (subprocess spawns on first use), so passing the resident
+        # pair into every drain costs nothing until an extract_features task actually runs.
+        feature_embed, feature_emotion = self._resident_feature_adapters(effective)
         while not self._stop.is_set():
             result = drain_process_queue(
                 config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
+                embed=feature_embed, emotion=feature_emotion,
                 max_steps=max_steps, should_stop=self._stop.is_set, job_name="web.drain",
                 workers=workers,
             )
@@ -298,6 +329,9 @@ class PipelineWorker:
         try:
             result = extract_pending_embeddings(
                 config=self._config, embed_fn=adapter.embed,
+                # getattr: a test-injected stub without embed_batch falls back to the serial path.
+                embed_batch_fn=getattr(adapter, "embed_batch", None),
+                batch_size=max(1, int(getattr(self._config, "extraction_batch_size", 32) or 32)),
                 session_id=session_id, day=day, progress=_cb,
             )
             self._embedding_result = result
@@ -326,6 +360,9 @@ class PipelineWorker:
         try:
             result = extract_pending_emotions(
                 config=self._config, classify_fn=adapter.classify,
+                # getattr: a test-injected stub without classify_batch falls back to the serial path.
+                classify_batch_fn=getattr(adapter, "classify_batch", None),
+                batch_size=max(1, int(getattr(self._config, "extraction_batch_size", 32) or 32)),
                 session_id=session_id, day=day, progress=_cb,
             )
             self._emotion_result = result
@@ -366,6 +403,10 @@ class PipelineWorker:
                 config=self._config,
                 embed_fn=embed_adapter.embed,
                 classify_fn=classify_adapter.classify,
+                # getattr: stubs without the batch methods fall back to the serial union pass.
+                embed_batch_fn=getattr(embed_adapter, "embed_batch", None),
+                classify_batch_fn=getattr(classify_adapter, "classify_batch", None),
+                batch_size=max(1, int(getattr(self._config, "extraction_batch_size", 32) or 32)),
                 session_id=session_id, day=day, progress=_cb,
             )
             self._combined_result = result

@@ -96,3 +96,52 @@ def test_error_payload_raises(tmp_path: Path) -> None:
 def test_empty_command_rejected() -> None:
     with pytest.raises(ValueError):
         PersistentCommandEmotionAdapter(command=[])
+
+
+# ---------------------------------------------------------------------------
+# classify_batch: one wire round-trip per chunk.
+
+
+def test_classify_batch_round_trip(tmp_path: Path) -> None:
+    script = _write_fake_wrapper(
+        tmp_path,
+        body="""
+        import json, sys
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            item = json.loads(line)
+            results = []
+            for entry in item["batch"]:
+                results.append({"segment_id": entry["segment_id"], "label": "happy", "scores": {"happy": 0.9}})
+            sys.stdout.write(json.dumps({"results": results}) + "\\n")
+            sys.stdout.flush()
+        """,
+    )
+    adapter = PersistentCommandEmotionAdapter(command=[sys.executable, str(script)])
+    try:
+        results = adapter.classify_batch([("s1", "/a.wav"), ("s2", "/b.wav")])
+        assert [r["segment_id"] for r in results] == ["s1", "s2"]
+        assert all(r["label"] == "happy" for r in results)
+    finally:
+        adapter.close()
+
+
+def test_classify_batch_result_count_mismatch_raises_and_closes(tmp_path: Path) -> None:
+    script = _write_fake_wrapper(
+        tmp_path,
+        body="""
+        import json, sys
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            sys.stdout.write(json.dumps({"results": []}) + "\\n")
+            sys.stdout.flush()
+        """,
+    )
+    adapter = PersistentCommandEmotionAdapter(command=[sys.executable, str(script)])
+    with pytest.raises(RuntimeError, match="batch returned 0 results for 1 items"):
+        adapter.classify_batch([("s1", "/a.wav")])
+    assert adapter._proc is None

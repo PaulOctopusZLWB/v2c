@@ -80,6 +80,45 @@ class PersistentCommandEmbedAdapter:
             raise RuntimeError(f"embed server error: {payload['error']}")
         return [float(v) for v in payload["embedding"]]
 
+    def embed_batch(self, items: list[tuple[str, str]]) -> list[dict]:
+        """Embed a duration-homogeneous bucket in one wire round-trip; results in input order.
+
+        ``items`` is ``[(segment_id, audio_path), ...]``. Each returned entry is the server's
+        per-item payload — ``{"segment_id", "embedding"}`` or ``{"segment_id", "error"}`` — so a
+        bad wav inside the bucket does NOT raise here; only protocol-level failures (timeout, EOF,
+        bad JSON, result-count mismatch) raise, killing the poisoned server exactly like embed().
+        """
+        if not items:
+            return []
+        proc = self._ensure()
+        request = {"batch": [{"segment_id": sid, "audio_path": path} for sid, path in items]}
+        try:
+            proc.stdin.write(json.dumps(request) + "\n")
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            self.close()
+            raise RuntimeError("embed server stdin closed") from exc
+        line = self._readline_with_timeout(proc)
+        if line is None:
+            self.close()
+            raise RuntimeError(f"embed server timed out after {self.timeout_seconds:g}s")
+        if not line:
+            self.close()
+            raise RuntimeError("embed server exited before returning a result")
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            self.close()
+            raise RuntimeError(f"invalid embed server JSON: {exc}") from exc
+        results = payload.get("results")
+        if not isinstance(results, list) or len(results) != len(items):
+            # A malformed/short reply means the stream can no longer be trusted to stay in
+            # one-line-in/one-line-out sync — kill the server so the next call starts clean.
+            self.close()
+            got = len(results) if isinstance(results, list) else None
+            raise RuntimeError(f"embed server batch returned {got} results for {len(items)} items")
+        return results
+
     def close(self) -> None:
         proc = self._proc
         self._proc = None
