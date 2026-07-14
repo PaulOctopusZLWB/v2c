@@ -2115,3 +2115,44 @@ button.today-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--
   .ambient-aurora { animation: none; }
   .ambient-particles { display: none; }
 }
+
+/* ===== 收件箱(默认页):最新待定稿会话置顶,一张卡完成确认→证据→定稿 ===== */
+.inbox-layout { display: flex; justify-content: center; }
+.inbox-column { width: min(760px, 100%); display: flex; flex-direction: column; gap: var(--s3); }
+.inbox-head { display: flex; align-items: baseline; gap: var(--s3); padding: var(--s2) 0; }
+.inbox-head h1 { margin: 0; font-size: 20px; }
+.inbox-empty { max-width: 560px; margin: 48px auto; text-align: center; }
+.inbox-card { padding: 0; overflow: hidden; }
+.inbox-card.is-finalized { opacity: 0.82; }
+.inbox-card-head {
+  display: flex; width: 100%; align-items: center; justify-content: space-between;
+  gap: var(--s3); padding: var(--s4); background: none; border: none; cursor: pointer;
+  text-align: left; color: inherit; font: inherit;
+}
+.inbox-card-title { display: flex; flex-direction: column; gap: 2px; }
+.inbox-card-state { display: flex; align-items: center; gap: var(--s2); flex-shrink: 0; }
+.inbox-present { font-size: 12px; color: var(--ok, #3a9); }
+.inbox-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.inbox-badge.pending { color: var(--warn, #c90); border-color: currentColor; }
+.inbox-badge.done { color: var(--ok, #3a9); border-color: currentColor; }
+.inbox-card-body { padding: 0 var(--s4) var(--s4); display: flex; flex-direction: column; gap: var(--s3); }
+.inbox-attendance { display: flex; flex-direction: column; gap: var(--s2); }
+.inbox-candidate {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) var(--s3); border: 1px solid var(--border); border-radius: 8px;
+}
+.inbox-candidate.unknown { border-style: dashed; }
+.inbox-candidate-actions { margin-left: auto; display: flex; gap: var(--s2); }
+.inbox-candidate-actions button, .inbox-candidate.unknown > button { font-size: 12px; padding: 3px 10px; }
+.inbox-evidence summary { cursor: pointer; display: flex; align-items: center; gap: var(--s2); color: var(--dim, #888); }
+.inbox-evidence-group { margin-top: var(--s2); }
+.inbox-evidence-label {
+  display: flex; width: 100%; justify-content: space-between; padding: var(--s2) var(--s3);
+  background: none; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; color: inherit;
+}
+.inbox-evidence-list { list-style: none; margin: var(--s2) 0 0; padding: 0 0 0 var(--s3); display: flex; flex-direction: column; gap: 4px; }
+.inbox-evidence-list li { display: flex; gap: var(--s2); align-items: baseline; font-size: 13px; }
+.inbox-card-actions { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.inbox-export-path { font-size: 11px; word-break: break-all; }
+.inbox-done > summary { cursor: pointer; color: var(--dim, #888); padding: var(--s2) 0; }
+.inbox-done .inbox-card { margin-top: var(--s2); }

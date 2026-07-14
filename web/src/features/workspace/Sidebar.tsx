@@ -15,12 +15,10 @@ export interface SidebarNavItem {
 }
 
 export const SIDEBAR_NAV: SidebarNavItem[] = [
-  { id: "home", label: "今日", glyph: "◆", key: "1" },
-  { id: "ingest", label: "管道", glyph: "▶", key: "2" },
-  { id: "review", label: "审核", glyph: "☰", key: "3" },
-  { id: "speakers", label: "声纹", glyph: "◉", key: "4" },
-  { id: "memory", label: "记忆", glyph: "❖", key: "5" },
-  { id: "llm", label: "总结", glyph: "≡", key: "6" }
+  { id: "inbox", label: "收件箱", glyph: "◆", key: "1" },
+  { id: "speakers", label: "人物", glyph: "◉", key: "2" },
+  { id: "ingest", label: "管道", glyph: "▶", key: "3" },
+  { id: "memory", label: "记忆", glyph: "❖", key: "4" }
 ];
 
 export function Sidebar({
@@ -78,7 +76,7 @@ export function Sidebar({
               <span className="sidebar-item-label">{item.label}</span>
               <span className="sidebar-item-end">
                 {item.id === "ingest" && pipelineRunning ? <span className="breathe-dot" aria-label="运行中" /> : null}
-                {item.id === "review" && reviewPending ? (
+                {item.id === "inbox" && reviewPending ? (
                   <span className="sidebar-badge num">{reviewPending}</span>
                 ) : null}
                 {item.id === "memory" && memoryPending ? (

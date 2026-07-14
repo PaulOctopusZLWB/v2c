@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 
-export type TabId = "home" | "ingest" | "review" | "speakers" | "memory" | "llm" | "settings";
+export type TabId = "inbox" | "home" | "ingest" | "review" | "speakers" | "memory" | "llm" | "settings";
 
-const TAB_IDS: readonly TabId[] = ["home", "ingest", "review", "speakers", "memory", "llm", "settings"];
-const DEFAULT_TAB: TabId = "home";
+const TAB_IDS: readonly TabId[] = ["inbox", "home", "ingest", "review", "speakers", "memory", "llm", "settings"];
+// 收件箱是默认页:"每次开完会打开"看到的就是最新待定稿会话。
+const DEFAULT_TAB: TabId = "inbox";
 
 /** Reads the current tab from the URL hash (`#tab=<id>`), falling back to the default. */
 function tabFromHash(): TabId {

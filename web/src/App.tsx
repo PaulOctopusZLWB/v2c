@@ -29,6 +29,7 @@ import { DynamicsCharts } from "./features/viz/DynamicsCharts";
 import { EmotionCharts } from "./features/viz/EmotionCharts";
 import { LlmResultPanel } from "./features/llm/LlmResultPanel";
 import { ViewpointWorkspace } from "./features/viewpoint/ViewpointWorkspace";
+import { InboxPanel } from "./features/inbox/InboxPanel";
 import { Sidebar, SIDEBAR_NAV } from "./features/workspace/Sidebar";
 import { StatusBar } from "./features/workspace/StatusBar";
 import { useTheme } from "./features/workspace/useTheme";
@@ -45,7 +46,7 @@ import { t } from "./i18n";
 import type { DailyLlmResult, DayStatusRow, Health, HomeOverview, IdentityReview, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
 
 /** 状态条左侧的当前页名(设计稿全局框架)。 */
-const PAGE_TITLES: Record<TabId, string> = { home: "今日", ingest: "管道", review: "审核", speakers: "声纹", memory: "记忆", llm: "总结", settings: "设置" };
+const PAGE_TITLES: Record<TabId, string> = { inbox: "收件箱", home: "今日", ingest: "管道", review: "审核", speakers: "人物", memory: "记忆", llm: "总结", settings: "设置" };
 
 const DEVICE_POLL_MS = 5000;
 const IN_FLIGHT_STATUSES = ["claimed", "running"];
@@ -1193,6 +1194,16 @@ export function App() {
         return renderHome();
       case "ingest":
         return renderIngest();
+      case "inbox":
+        return (
+          <InboxPanel
+            push={push}
+            onOpenWorkbench={(sessionId) => {
+              void guard(inspectIdentitySession)(sessionId);
+              setTab("speakers");
+            }}
+          />
+        );
       case "review":
         return renderReview();
       case "speakers":

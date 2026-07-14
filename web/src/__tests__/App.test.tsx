@@ -16,13 +16,23 @@ const EMPTY_HOME = {
 };
 
 /** Click a workspace tab by its Chinese label, awaiting the role="tab" element. */
+/** Sidebar tabs are clicked; legacy surfaces (审核/总结/今日) left primary nav in the 收件箱
+ *  redesign and are hash-routed instead — still fully functional, reachable via ⌘K or deep link. */
 async function gotoTab(label: string) {
+  const hashTabs: Record<string, string> = { 审核: "review", 总结: "llm", 今日: "home" };
+  const id = hashTabs[label];
+  if (id) {
+    act(() => {
+      window.location.hash = `tab=${id}`;
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    return;
+  }
   await userEvent.click(await screen.findByRole("tab", { name: label }));
 }
 
-/** The default tab is now 首页, so first jump to 审核, then switch its left rail from the global
- *  review queue to the by-day browser (WorkspaceNav) so day/session buttons render. Both toggles
- *  are role="tab" — the workspace tab strip and the nav rail. */
+/** Jump to the 审核 surface (hash-routed), then switch its left rail from the global review
+ *  queue to the by-day browser (WorkspaceNav) so day/session buttons render. */
 async function useDayBrowser() {
   await gotoTab("审核");
   await userEvent.click(await screen.findByRole("tab", { name: "按天浏览" }));
@@ -510,7 +520,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await screen.findByRole("tab", { name: "今日" }); // shell rendered
+    await screen.findByRole("tab", { name: "收件箱" }); // shell rendered
 
     // Open the palette (⌘K) and type a query >=2 chars.
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })); });
@@ -546,7 +556,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await screen.findByRole("tab", { name: "今日" });
+    await screen.findByRole("tab", { name: "收件箱" });
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })); });
 
     expect(await screen.findByText("切换明暗主题")).toBeInTheDocument();
@@ -563,7 +573,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await screen.findByRole("tab", { name: "今日" }); // shell rendered
+    await screen.findByRole("tab", { name: "收件箱" }); // shell rendered
     await gotoTab("总结");
 
     // Default view is the editable per-session workspace: its day picker is present.
@@ -591,7 +601,7 @@ describe("App container", () => {
     });
 
     renderApp();
-    await gotoTab("声纹");
+    await gotoTab("人物");
 
     const toolbar = await screen.findByText("身份审核");
     const toolbarCard = toolbar.closest(".speakers-toolbar") as HTMLElement;
@@ -636,7 +646,7 @@ describe("App container", () => {
 
     // Switch to 声纹: the transcript panel unmounts (only the active tab renders), and the
     // VoiceprintPanel shows. The session stays selected (it's App-level state).
-    await gotoTab("声纹");
+    await gotoTab("人物");
     expect(await screen.findByText("声纹覆盖")).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).not.toBeInTheDocument();
     // The 对话分析 section is secondary — collapsed by default (not open).

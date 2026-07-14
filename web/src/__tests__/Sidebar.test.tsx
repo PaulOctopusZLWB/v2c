@@ -12,21 +12,22 @@ const baseProps = {
 };
 
 describe("Sidebar", () => {
-  it("renders the five main nav items with digit hints, plus 设置 pinned at the bottom", () => {
-    render(<Sidebar {...baseProps} active="home" />);
+  it("renders the four main nav items with digit hints, plus 设置 pinned at the bottom", () => {
+    render(<Sidebar {...baseProps} active="inbox" />);
     const tabs = screen.getAllByRole("tab");
-    // 可访问名 = 纯标签(字形/快捷键是装饰);顺序:5 主项 + 设置钉底。
-    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["今日", "管道", "审核", "声纹", "记忆", "总结", "设置"]);
-    // 数字快捷键角标 1–5 依次渲染。
-    expect(tabs.slice(0, 6).map((t) => t.querySelector(".sidebar-item-key")?.textContent)).toEqual(["1", "2", "3", "4", "5", "6"]);
+    // 可访问名 = 纯标签(字形/快捷键是装饰);顺序:收件箱优先的 4 主项 + 设置钉底。
+    // 逐字句审核/总结退出主导航(证据抽屉与 codex 接管),仍可经 ⌘K/hash 到达。
+    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["收件箱", "人物", "管道", "记忆", "设置"]);
+    // 数字快捷键角标 1–4 依次渲染。
+    expect(tabs.slice(0, 4).map((t) => t.querySelector(".sidebar-item-key")?.textContent)).toEqual(["1", "2", "3", "4"]);
   });
 
   it("marks the active item with aria-current and calls onSelect on click", async () => {
     const onSelect = vi.fn();
-    render(<Sidebar {...baseProps} active="review" onSelect={onSelect} />);
-    expect(screen.getByRole("tab", { name: /审核/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("tab", { name: /声纹/ })).not.toHaveAttribute("aria-current");
-    await userEvent.click(screen.getByRole("tab", { name: /声纹/ }));
+    render(<Sidebar {...baseProps} active="inbox" onSelect={onSelect} />);
+    expect(screen.getByRole("tab", { name: /收件箱/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("tab", { name: /人物/ })).not.toHaveAttribute("aria-current");
+    await userEvent.click(screen.getByRole("tab", { name: /人物/ }));
     expect(onSelect).toHaveBeenCalledWith("speakers");
   });
 

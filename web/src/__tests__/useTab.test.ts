@@ -7,9 +7,9 @@ describe("useTab", () => {
     window.location.hash = "";
   });
 
-  it("defaults to home", () => {
+  it("defaults to the inbox (每次开完会打开看到的就是待定稿会话)", () => {
     const { result } = renderHook(() => useTab());
-    expect(result.current.tab).toBe("home");
+    expect(result.current.tab).toBe("inbox");
   });
 
   it("initializes from an existing #tab=speakers hash", () => {
@@ -37,6 +37,6 @@ describe("useTab", () => {
   it("ignores an invalid tab id and keeps the default", () => {
     window.location.hash = "#tab=bogus";
     const { result } = renderHook(() => useTab());
-    expect(result.current.tab).toBe("home");
+    expect(result.current.tab).toBe("inbox");
   });
 });

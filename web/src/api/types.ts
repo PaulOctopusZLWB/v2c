@@ -143,12 +143,51 @@ export interface IdentityCandidate {
 export interface IdentityReview {
   session_id: string;
   can_summarize: boolean;
+  /** 定稿门槛(与 can_summarize 同判据:至少一位确认出席)。 */
+  can_finalize?: boolean;
+  /** 已定稿时的导出状态;null/缺省 = 尚未定稿。 */
+  finalized?: SessionFinalized | null;
   participants: IdentityParticipant[];
   candidates: IdentityCandidate[];
   new_person_candidates: IdentityCandidate[];
   mixed_clusters?: unknown[];
   excluded_people?: IdentityCandidate[];
   negative_feedback_count: number;
+}
+
+/** 定稿状态:导出产物(md+json)的位置与时间。 */
+export interface SessionFinalized {
+  finalized_at: string;
+  export_md_path: string;
+  export_json_path?: string;
+  present_count?: number;
+  segment_count?: number;
+}
+
+/** 定稿动作的返回(POST /api/sessions/{id}/finalize)。 */
+export interface FinalizeResult {
+  session_id: string;
+  finalized_at: string;
+  export_md_path: string;
+  export_json_path: string;
+  present_count: number;
+  segment_count: number;
+  unidentified_voices: Array<{ label: string; segment_count: number }>;
+}
+
+/** 收件箱里的一张会话卡(GET /api/inbox)。 */
+export interface InboxSession {
+  session_id: string;
+  date_key: string;
+  name: string | null;
+  started_at: string;
+  ended_at: string;
+  segment_count: number;
+  attributed_count: number;
+  unidentified_count: number;
+  present: string[];
+  absent_count: number;
+  finalized: { finalized_at: string; export_md_path: string } | null;
 }
 
 export interface ImportProgress {

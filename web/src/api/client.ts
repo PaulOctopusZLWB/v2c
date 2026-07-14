@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentifySessionResult, IdentityReview, LabelSegment, NeighborCorrectionPreview, ParticipantCascade, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, FinalizeResult, Health, HomeOverview, IdentifySessionResult, IdentityReview, InboxSession, LabelSegment, NeighborCorrectionPreview, ParticipantCascade, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -162,6 +162,11 @@ export const api = {
     request<AutoAttributeResult>("/api/people/auto-attribute", { method: "POST", body: JSON.stringify(params) }),
   identityReview: (sessionId: string) =>
     request<IdentityReview>(`/api/sessions/${sessionId}/identity-review`),
+  // 收件箱:最近会话 + 出席/定稿状态(默认页数据源)。
+  inbox: (limit = 20) => request<{ sessions: InboxSession[]; pending: number }>(`/api/inbox${query({ limit })}`),
+  // 定稿:把会话事实冻结成 exports/sessions/ 下的 md+json(codex 的输入)。
+  finalizeSession: (sessionId: string) =>
+    request<FinalizeResult>(`/api/sessions/${sessionId}/finalize`, { method: "POST" }),
   // Full automatic identify pass (match → prune <1% → smooth → cluster leftovers) under the
   // CURRENT review constraints — the review panel's 重新识别 button.
   identifySession: (sessionId: string) =>
