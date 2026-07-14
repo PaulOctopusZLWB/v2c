@@ -132,6 +132,7 @@ export function VoiceprintMap({
   const [clearingKey, setClearingKey] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [correctionNote, setCorrectionNote] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   // Keep onResult out of the fetch effect's deps (it may change identity each render).
   const onResultRef = useRef(onResult);
   useEffect(() => { onResultRef.current = onResult; }, [onResult]);
@@ -225,6 +226,7 @@ export function VoiceprintMap({
     rectRef.current = null;
     setRect(null);
     setCorrectionNote(null);
+    setActionError(null);
     viewRef.current = { ...IDENTITY };
     if (!request) {
       setPoints(null);
@@ -681,7 +683,7 @@ export function VoiceprintMap({
     const ok = window.confirm(`取消“${label}”的识别归属？\n将 ${segmentIds.length} 段回到未识别，不会删除人物档案。`);
     if (!ok) return;
     setClearingKey(key);
-    setError(null);
+    setActionError(null);
     setCorrectionNote(null);
     try {
       await onClearAttributions(segmentIds);
@@ -689,7 +691,8 @@ export function VoiceprintMap({
       await refetchProjection();
       onChanged?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "取消识别失败");
+      const message = err instanceof Error ? err.message : "未知错误";
+      setActionError(`取消识别失败：${message}`);
     } finally {
       setClearingKey(null);
     }
@@ -699,7 +702,7 @@ export function VoiceprintMap({
   const runNeighborCorrection = useCallback(async () => {
     if (!request || !onPreviewNeighborCorrection || !onApplyNeighborCorrection) return;
     setCorrecting(true);
-    setError(null);
+    setActionError(null);
     setCorrectionNote(null);
     try {
       const preview = await onPreviewNeighborCorrection(request);
@@ -715,7 +718,8 @@ export function VoiceprintMap({
       await refetchProjection();
       onChanged?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "邻域纠偏失败");
+      const message = err instanceof Error ? err.message : "未知错误";
+      setActionError(`邻域纠偏失败：${message}`);
     } finally {
       setCorrecting(false);
     }
@@ -861,6 +865,10 @@ export function VoiceprintMap({
 
         {correctionNote && !loading ? (
           <div className="vmap-correction-note" role="status">{correctionNote}</div>
+        ) : null}
+
+        {actionError && !loading ? (
+          <div className="vmap-correction-note error" role="alert">{actionError}</div>
         ) : null}
 
         {hover && !loading ? (

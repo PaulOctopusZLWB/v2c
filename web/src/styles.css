@@ -753,6 +753,10 @@
   line-height: var(--lh-snug);
   box-shadow: var(--shadow);
 }
+.vmap-correction-note.error {
+  border-color: color-mix(in srgb, var(--err) 55%, var(--border-strong));
+  color: var(--err);
+}
 
 /* 框选 toggle uses the shared .ghost button; mark its on-state like the method toggle */
 .vmap-actions .ghost.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }

@@ -132,6 +132,19 @@ describe("VoiceprintMap", () => {
     await waitFor(() => expect(onClearAttributions).toHaveBeenCalledWith(["seg_1", "seg_2"]));
   });
 
+  it("reports clear-attribution failures without replacing a valid projection", async () => {
+    const onClearAttributions = vi.fn().mockRejectedValue(new Error("Not Found"));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<VoiceprintMap request={REQ} onClearAttributions={onClearAttributions} />);
+    await screen.findByRole("list", { name: /图例/ });
+
+    await userEvent.click(screen.getByRole("button", { name: /取消李雷的识别/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("取消识别失败：Not Found");
+    expect(screen.queryByText(/投影失败/)).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: /图例/ })).toBeInTheDocument();
+  });
+
   it("previews and applies neighbour correction only after confirmation", async () => {
     const preview = {
       total: 4,
