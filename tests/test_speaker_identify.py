@@ -280,6 +280,30 @@ def test_cascade_present_is_non_destructive(tmp_path: Path) -> None:
     assert _override_map(config.database_path)["seg_02"] == ("per_a", "voiceprint")
 
 
+def test_absent_person_cannot_return_via_neighbor_smoothing(tmp_path: Path) -> None:
+    # Regression (caught on real acceptance data): the absent person's MANUAL labels stay in the
+    # session by design, and the neighbour-smoothing step then voted their unattributed cluster
+    # mates right back to them — undoing the cascade. The identify pass must pass the absent set
+    # into apply_neighbor_corrections.
+    clear_projection_cache()
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    ids = [f"seg_{i:02d}" for i in range(20)]
+    _insert_session_with_segments(config.database_path, ids)
+    # ONE tight voice cluster: every segment near axis 0.
+    put_embeddings_bulk(config=config, items=[(sid, _unit_axis(0, noise=0.02 + 0.005 * i)) for i, sid in enumerate(ids)])
+    _insert_persons(config.database_path, {"per_b": "Bob"})
+    # Bob manually labelled on 10 of them (manual labels survive the cascade as visible conflicts).
+    for i in range(10):
+        _write_override(config.database_path, segment_id=f"seg_{i:02d}", person_id="per_b", source="manual")
+    _mark_participant(config.database_path, session_id="ses_test", person_id="per_b", status="absent")
+
+    result = cascade_participant_update(config=config, session_id="ses_test", person_id="per_b", status="absent")
+
+    assert result["identify"]["excluded_absent"] == ["per_b"]
+    voiceprint_people = {pid for pid, source in _override_map(config.database_path).values() if source == "voiceprint"}
+    assert "per_b" not in voiceprint_people  # smoothing did NOT vote the cluster back to Bob
+
+
 def test_clear_person_session_attributions_scopes_to_session(tmp_path: Path) -> None:
     config = _seed_session(tmp_path, n=6)
     _insert_persons(config.database_path, {"per_a": "Alice"})

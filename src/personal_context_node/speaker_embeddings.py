@@ -390,12 +390,17 @@ def preview_neighbor_corrections(
     majority_ratio: float = 0.75,
     similarity_floor: float = 0.35,
     max_points: int = 4000,
+    exclude_person_ids: set[str] | None = None,
 ) -> dict:
     """Preview local-neighbour person attribution corrections for the current map scope.
 
     This is a conservative smoothing pass for "one wrong colour inside a strong cluster". It reads
     current overrides, votes over nearest in-scope embedding neighbours, and returns a dry-run plan.
     Manual overrides can vote as neighbours but are never mutation candidates.
+
+    ``exclude_person_ids`` blocks corrections TOWARD those persons (the identity-review cascade:
+    someone marked absent still has manual labels in scope that would otherwise pull their
+    neighbours back to them).
     """
     params = _neighbor_params(k=k, min_neighbours=min_neighbours, majority_ratio=majority_ratio, similarity_floor=similarity_floor, max_points=max_points)
     scope_ids, total_before_cap = _correction_scope_segment_ids(
@@ -454,6 +459,8 @@ def preview_neighbor_corrections(
         confidence = winning_count / float(len(vote_people))
         if confidence < params["majority_ratio"] or target_person == current_person:
             continue
+        if target_person is not None and exclude_person_ids and target_person in exclude_person_ids:
+            continue  # never smooth segments TOWARD an excluded (e.g. review-absent) person
 
         target_label = _attribution_label(attributions=attributions, person_id=target_person)
         corrections.append(
@@ -490,6 +497,7 @@ def apply_neighbor_corrections(
     majority_ratio: float = 0.75,
     similarity_floor: float = 0.35,
     max_points: int = 4000,
+    exclude_person_ids: set[str] | None = None,
 ) -> dict:
     """Apply the previewed neighbour corrections as voiceprint-sourced overrides."""
     preview = preview_neighbor_corrections(
@@ -501,6 +509,7 @@ def apply_neighbor_corrections(
         majority_ratio=majority_ratio,
         similarity_floor=similarity_floor,
         max_points=max_points,
+        exclude_person_ids=exclude_person_ids,
     )
     corrections = list(preview.get("corrections", []))
     if not corrections:

@@ -276,6 +276,11 @@ def _run_all(
     max_steps: int,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    if asr_backend is not None and asr_backend != config.asr_backend:
+        # Extraction adapters (CAM++/emotion2vec vs mocks) are chosen from config.asr_backend
+        # inside the extract_features handler — the CLI override must reach them (see
+        # _process_run) or a mock run-all builds real funasr wrappers and fails.
+        config = config.model_copy(update={"asr_backend": asr_backend})
     import_result = _import_recordings(config=config, source_dir=source_dir)
     vad = _build_vad(
         vad_backend=vad_backend or config.vad_backend,
@@ -1682,6 +1687,12 @@ def _process_run(
     max_steps: int = 200,
 ) -> None:
     config = _load_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
+    if asr_backend is not None and asr_backend != config.asr_backend:
+        # The extraction adapters (CAM++/emotion2vec vs their mocks) are chosen from
+        # config.asr_backend deep inside the task handlers — the CLI override (--mock or
+        # --asr-backend) must reach them, or a mock run builds REAL funasr wrappers and the
+        # extract_features task fails wholesale.
+        config = config.model_copy(update={"asr_backend": asr_backend})
     if dry_run:
         result = preview_next_process_task(config=config)
         typer.echo(
