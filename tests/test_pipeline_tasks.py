@@ -42,6 +42,10 @@ def test_pipeline_declares_all_task_edges() -> None:
         # Feature-extraction LEAF (both ASR modes): fans in from transcription, gates nothing.
         ("transcribe_diarize", "extract_features", "audio_file"),
         ("asr", "extract_features", "audio_file"),
+        # Speaker-identification LEAF: dual upstream covers both orderings of the
+        # extraction/derivation race; gates nothing downstream.
+        ("extract_features", "identify_speakers", "session"),
+        ("session_derive", "identify_speakers", "session"),
     ]
 
 

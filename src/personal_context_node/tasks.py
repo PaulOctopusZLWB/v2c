@@ -42,6 +42,7 @@ ALLOWED_TASK_TYPES = {
     "obsidian_publish",
     "archive",
     "extract_features",
+    "identify_speakers",
 }
 
 

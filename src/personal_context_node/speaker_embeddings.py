@@ -683,6 +683,7 @@ def auto_attribute_enrolled(
     session_id: str | None = None,
     day: str | None = None,
     threshold: float = 0.5,
+    exclude_person_ids: set[str] | None = None,
 ) -> dict:
     """Global, manual-respecting "identify": assign every in-scope embedded segment to a person.
 
@@ -707,9 +708,13 @@ def auto_attribute_enrolled(
          are written ``source='voiceprint'``. Non-finite / dim-mismatched vectors are skipped.
       d. Returns ``{"assigned", "unassigned", "total", "per_person", "threshold"}`` where per_person
          counts only the voiceprint assignments (manual labels are separate).
+
+    ``exclude_person_ids`` removes those persons' exemplars from the vote entirely (used by the
+    identity-review cascade: a person marked "本场没出现" must not attract this scope's segments).
     """
     if not (0.0 <= threshold <= 1.0):
         raise ValueError("threshold must be in [0, 1]")
+    excluded = exclude_person_ids or set()
 
     # (a) Build the labelled exemplar set from every manual override.
     conn = connect(config.database_path)
@@ -722,7 +727,9 @@ def auto_attribute_enrolled(
         )
     finally:
         conn.close()
-    labeled_pairs = [(str(r["segment_id"]), str(r["person_id"])) for r in manual_rows]
+    labeled_pairs = [
+        (str(r["segment_id"]), str(r["person_id"])) for r in manual_rows if str(r["person_id"]) not in excluded
+    ]
     if not labeled_pairs:
         raise ValueError("no labeled segments to attribute against")
 

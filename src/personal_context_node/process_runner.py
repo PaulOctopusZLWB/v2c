@@ -25,6 +25,7 @@ from personal_context_node.obsidian_publish import publish_obsidian_day
 from personal_context_node.obsidian_review import confirm_checked_candidates
 from personal_context_node.session_summaries import summarize_session
 from personal_context_node.sessions import derive_sessions_for_day
+from personal_context_node.speaker_identify import identify_session_speakers
 from personal_context_node.speaker_review import sync_speaker_review
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.tasks import claim_next_task, enqueue_task_in_conn, fail_task, reclaim_expired_tasks, start_task
@@ -64,13 +65,22 @@ PIPELINE = (
     # pending scope", which is exactly right as new segments land.
     PipelineEdge("transcribe_diarize", "extract_features", "audio_file", lambda _conn, _config, target_id: [target_id]),
     PipelineEdge("asr", "extract_features", "audio_file", lambda conn, config, target_id: _audio_file_ids_for_chunk_in_conn(conn, chunk_id=target_id)),
+    # Speaker-identification LEAF (per session): once voiceprints land, auto-match + prune +
+    # neighbour-smooth + cluster the leftovers into review candidates. Like extract_features it
+    # gates NOTHING downstream. Dual upstream covers both orderings of the extract/derive race:
+    # each finished extraction re-identifies the sessions it touched (idempotent re-enqueue +
+    # reset = "re-check the scope", converging as more voiceprints land), and a freshly derived
+    # session is identified if its day already has embeddings.
+    PipelineEdge("extract_features", "identify_speakers", "session", lambda conn, config, target_id: _identify_session_ids_for_file_in_conn(conn, audio_file_id=target_id)),
+    PipelineEdge("session_derive", "identify_speakers", "session", lambda conn, config, target_id: _identify_session_ids_for_day_in_conn(conn, day=target_id)),
 )
 # The pipeline's "viewpoint tail" — the three edges that auto-chain 观点 generation +
 # daily report + Obsidian publish. When config.pipeline_auto_viewpoints is False (the
 # default), these are NOT enqueued: the pipeline stops after session_derive and the tail
-# stages are driven manually (per-session generate + manual publish). The two
-# *→session_derive edges and vad→asr are always live.
-_VIEWPOINT_TAIL_UPSTREAMS = frozenset({"session_derive", "summarize_session", "daily_generate"})
+# stages are driven manually (per-session generate + manual publish). Filtered by DOWNSTREAM
+# type (the tail stages themselves): session_derive also feeds the always-live identify leaf,
+# so filtering by upstream would wrongly suppress that edge too.
+_VIEWPOINT_TAIL_DOWNSTREAMS = frozenset({"summarize_session", "daily_generate", "obsidian_publish"})
 PROCESS_TASK_ORDER = (
     "vad",
     "transcribe_diarize",
@@ -80,8 +90,9 @@ PROCESS_TASK_ORDER = (
     "obsidian_publish",
     "asr",
     "archive",
-    # Last in claim order: the extraction leaf must never starve transcription/derivation work.
+    # Last in claim order: the leaves must never starve transcription/derivation work.
     "extract_features",
+    "identify_speakers",
 )
 # Stages whose adapters own a single resident model subprocess (funasr_server & friends).
 # Those adapters are NOT reentrant, so in a concurrent drain these types are pinned to one
@@ -158,6 +169,8 @@ def process_once(
                 embed=embed,
                 emotion=emotion,
             )
+        elif task.task_type == "identify_speakers":
+            identify_session_speakers(config=config, session_id=task.target_id)
         else:
             raise ValueError(f"unsupported task type: {task.task_type}")
         _succeed_task_and_enqueue_downstream(config=config, task_id=task.task_id, run_id=run_id, upstream_task_type=task.task_type, upstream_target_id=task.target_id)
@@ -538,12 +551,14 @@ def _enqueue_downstream_tasks_in_conn(
     for edge in PIPELINE:
         if edge.upstream_task_type != upstream_task_type:
             continue
-        if not auto_viewpoints and edge.upstream_task_type in _VIEWPOINT_TAIL_UPSTREAMS:
+        if not auto_viewpoints and edge.downstream_task_type in _VIEWPOINT_TAIL_DOWNSTREAMS:
             continue
-        # Gate the extraction leaf by its OWN downstream type: its upstreams
-        # (transcribe_diarize/asr) also feed session_derive, so filtering by upstream type
-        # would wrongly suppress the session edges too.
+        # Gate each leaf by its OWN downstream type: their upstreams
+        # (transcribe_diarize/asr/session_derive) also feed other stages, so filtering by
+        # upstream type would wrongly suppress those edges too.
         if edge.downstream_task_type == "extract_features" and not config.pipeline_auto_extract_features:
+            continue
+        if edge.downstream_task_type == "identify_speakers" and not config.pipeline_auto_identify:
             continue
         for target_id in edge.target_ids(conn, config, upstream_target_id):
             result = enqueue_task_in_conn(
@@ -765,6 +780,47 @@ def _session_ids_for_day_in_conn(conn: sqlite3.Connection, *, day: str, config: 
     if config is not None and config.require_identified_speakers and _day_has_unidentified_speakers_in_conn(conn, date_key=day):
         return []
     return [str(row["session_id"]) for row in rows]
+
+
+def _identify_session_ids_for_file_in_conn(conn: sqlite3.Connection, *, audio_file_id: str) -> list[str]:
+    """Sessions touched by this file that already carry embeddings (extract→identify fan-out).
+
+    Empty when the file's segments have no session yet (extraction won the race against
+    session_derive) — the session_derive→identify edge covers that ordering.
+    """
+    rows = fetch_all(
+        conn,
+        """
+        select distinct ts.session_id
+        from transcript_segments ts
+        join segment_embeddings se on se.segment_id = ts.segment_id
+        where ts.audio_file_id = ? and ts.session_id is not null and ts.is_active = 1
+        order by ts.session_id
+        """,
+        (audio_file_id,),
+    )
+    return [str(row["session_id"]) for row in rows]
+
+
+def _identify_session_ids_for_day_in_conn(conn: sqlite3.Connection, *, day: str) -> list[str]:
+    """The day's sessions that already have voiceprints (session_derive→identify fan-out).
+
+    config=None on purpose: the require_identified_speakers gate suppresses summarize targets
+    until voices are attributed, but identify is the stage that DOES the attributing — gating
+    it on itself would deadlock the day.
+    """
+    session_ids = _session_ids_for_day_in_conn(conn, day=day, config=None)
+    ready: list[str] = []
+    for session_id in session_ids:
+        row = conn.execute(
+            "select 1 from transcript_segments ts "
+            "join segment_embeddings se on se.segment_id = ts.segment_id "
+            "where ts.session_id = ? and ts.is_active = 1 limit 1",
+            (session_id,),
+        ).fetchone()
+        if row is not None:
+            ready.append(session_id)
+    return ready
 
 
 def _ready_daily_generate_dates(*, config: AppConfig, session_id: str) -> list[str]:

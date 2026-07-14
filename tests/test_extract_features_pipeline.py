@@ -90,15 +90,20 @@ def _tasks_by_type(config: AppConfig, task_type: str) -> list[dict]:
 
 
 def test_extract_features_is_a_pure_leaf_in_the_gpu_lane() -> None:
-    # No edge may have extract_features as UPSTREAM (a leaf gates nothing), and no session_derive
-    # readiness predicate references it (its upstreams still fan into session_derive directly).
-    assert not any(edge.upstream_task_type == "extract_features" for edge in PIPELINE)
+    # extract_features may fan out ONLY to the identify leaf (which itself gates nothing), and no
+    # session_derive readiness predicate references either leaf (their upstreams still fan into
+    # session_derive directly) — so a slow/failed extraction can never delay sessions/summaries.
+    downstream_of_extract = {edge.downstream_task_type for edge in PIPELINE if edge.upstream_task_type == "extract_features"}
+    assert downstream_of_extract == {"identify_speakers"}
+    assert not any(edge.upstream_task_type == "identify_speakers" for edge in PIPELINE)
     downstreams = {edge.downstream_task_type for edge in PIPELINE if edge.upstream_task_type in ("transcribe_diarize", "asr")}
     assert {"session_derive", "extract_features"} <= downstreams
-    # Resident MPS subprocess pair -> pinned to the GPU lane, last in claim order (never starves ASR).
+    # Resident MPS subprocess pair -> pinned to the GPU lane; both leaves last in claim order
+    # (never starve ASR); identify is pure CPU (numpy/sqlite/UMAP) so it rides the CPU lane.
     assert "extract_features" in GPU_TASK_TYPES
     assert "extract_features" not in CPU_TASK_TYPES
-    assert PROCESS_TASK_ORDER[-1] == "extract_features"
+    assert "identify_speakers" in CPU_TASK_TYPES
+    assert PROCESS_TASK_ORDER[-2:] == ("extract_features", "identify_speakers")
 
 
 def test_transcribe_diarize_fans_out_extract_features(tmp_path: Path) -> None:
@@ -207,6 +212,80 @@ def test_extract_features_task_writes_both_artifacts_and_is_idempotent(tmp_path:
     )
     assert third.status == "succeeded"
     assert len(embed.batch_calls) == 1  # no pending segments -> no second wire call
+
+
+def test_identify_speakers_fans_out_once_extraction_lands(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_mode="diarize")
+    raw = tmp_path / "raw" / "a.wav"
+    _write_pcm_wav(raw)
+    _seed_audio_file(config, audio_file_id="aud_1", raw_path=raw)
+    enqueue_task(config=config, task_type="transcribe_diarize", target_type="audio_file", target_id="aud_1")
+
+    embed, emotion = _FakeEmbedAdapter(), _FakeEmotionAdapter()
+    kwargs = dict(config=config, vad=MockVADAdapter(), asr=_FakeDiarizedASR(), llm=MockLLMAdapter(), embed=embed, emotion=emotion)
+
+    assert process_once(run_id="r1", **kwargs).task_type == "transcribe_diarize"
+    # Derive first: sessions exist but no embeddings yet -> the session_derive edge stays quiet.
+    assert process_once(run_id="r2", task_types=("session_derive",), **kwargs).status == "succeeded"
+    assert _tasks_by_type(config, "identify_speakers") == []
+
+    # Extraction lands -> the extract edge fans identify out per touched session.
+    assert process_once(run_id="r3", task_types=("extract_features",), **kwargs).status == "succeeded"
+    identify_tasks = _tasks_by_type(config, "identify_speakers")
+    assert len(identify_tasks) == 1
+    assert identify_tasks[0]["target_type"] == "session"
+    assert identify_tasks[0]["status"] == "pending"
+
+    # The identify pass runs to success and, as a leaf, enqueues nothing new.
+    result = process_once(run_id="r4", task_types=("identify_speakers",), **kwargs)
+    assert result.task_type == "identify_speakers" and result.status == "succeeded"
+    types_now = {r["task_type"] for r in process_status_rows(config=config)}
+    assert types_now == {"transcribe_diarize", "session_derive", "extract_features", "identify_speakers"}
+
+
+def test_identify_speakers_covers_extract_before_derive_race(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_mode="diarize")
+    raw = tmp_path / "raw" / "a.wav"
+    _write_pcm_wav(raw)
+    _seed_audio_file(config, audio_file_id="aud_1", raw_path=raw)
+    enqueue_task(config=config, task_type="transcribe_diarize", target_type="audio_file", target_id="aud_1")
+
+    embed, emotion = _FakeEmbedAdapter(), _FakeEmotionAdapter()
+    kwargs = dict(config=config, vad=MockVADAdapter(), asr=_FakeDiarizedASR(), llm=MockLLMAdapter(), embed=embed, emotion=emotion)
+
+    assert process_once(run_id="r1", **kwargs).task_type == "transcribe_diarize"
+    # Extraction wins the race: segments have no session yet -> extract edge stays quiet.
+    assert process_once(run_id="r2", task_types=("extract_features",), **kwargs).status == "succeeded"
+    assert _tasks_by_type(config, "identify_speakers") == []
+
+    # Derive then assigns sessions; its identify edge sees the existing embeddings and fans out.
+    assert process_once(run_id="r3", task_types=("session_derive",), **kwargs).status == "succeeded"
+    identify_tasks = _tasks_by_type(config, "identify_speakers")
+    assert len(identify_tasks) == 1
+    assert identify_tasks[0]["target_type"] == "session"
+
+
+def test_identify_speakers_gated_by_config_without_hurting_siblings(tmp_path: Path) -> None:
+    config = AppConfig(
+        data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault", asr_mode="diarize",
+        pipeline_auto_identify=False,
+    )
+    raw = tmp_path / "raw" / "a.wav"
+    _write_pcm_wav(raw)
+    _seed_audio_file(config, audio_file_id="aud_1", raw_path=raw)
+    enqueue_task(config=config, task_type="transcribe_diarize", target_type="audio_file", target_id="aud_1")
+
+    embed, emotion = _FakeEmbedAdapter(), _FakeEmotionAdapter()
+    kwargs = dict(config=config, vad=MockVADAdapter(), asr=_FakeDiarizedASR(), llm=MockLLMAdapter(), embed=embed, emotion=emotion)
+
+    assert process_once(run_id="r1", **kwargs).task_type == "transcribe_diarize"
+    assert process_once(run_id="r2", task_types=("session_derive",), **kwargs).status == "succeeded"
+    assert process_once(run_id="r3", task_types=("extract_features",), **kwargs).status == "succeeded"
+
+    # The gate suppresses ONLY the identify leaf; extraction + derivation are untouched.
+    assert _tasks_by_type(config, "identify_speakers") == []
+    assert len(_tasks_by_type(config, "extract_features")) == 1
+    assert len(_tasks_by_type(config, "session_derive")) == 1
 
 
 def test_worker_feature_adapters_are_resident_and_closeable(tmp_path: Path) -> None:

@@ -98,6 +98,14 @@ class AppConfig(BaseModel):
     # transcribe/asr → extract_features pipeline edge (a pure leaf — never blocks sessions).
     extraction_batch_size: int = 32
     pipeline_auto_extract_features: bool = True
+    # Automatic per-session speaker identification (pipeline leaf after voiceprints land):
+    # kNN match against enrolled exemplars -> prune persons below identify_min_session_share of
+    # the session's embedded segments (voiceprint-sourced only) -> conservative neighbour
+    # smoothing -> session-scoped clustering of the leftovers into review candidates.
+    pipeline_auto_identify: bool = True
+    identify_threshold: float = 0.5
+    identify_min_session_share: float = 0.01
+    identify_min_cluster_size: int = 15
     log_dir_path: Path | None = None
     log_level: str = "INFO"
     dji_mic_3: DeviceDiscoveryConfig = DeviceDiscoveryConfig()
@@ -117,6 +125,20 @@ class AppConfig(BaseModel):
     def _validate_extraction_batch_size(cls, value: int) -> int:
         if value < 1:
             raise ValueError("extraction.batch_size must be >= 1")
+        return value
+
+    @field_validator("identify_threshold", "identify_min_session_share")
+    @classmethod
+    def _validate_identify_fractions(cls, value: float) -> float:
+        if not (0.0 <= value <= 1.0):
+            raise ValueError("identify threshold/share values must be in [0, 1]")
+        return value
+
+    @field_validator("identify_min_cluster_size")
+    @classmethod
+    def _validate_identify_min_cluster_size(cls, value: int) -> int:
+        if value < 2:
+            raise ValueError("identify.min_cluster_size must be >= 2")
         return value
 
     @field_validator("asr_precision")
