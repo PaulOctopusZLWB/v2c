@@ -171,9 +171,14 @@ def identity_review_for_session(*, config: AppConfig, session_id: str) -> dict[s
             candidate["evidence_sources"].append(source)
 
     present_count = sum(1 for row in participants if row["status"] == "present")
+    from personal_context_node.session_finalize import finalization_state
+
     return {
         "session_id": session_id,
         "can_summarize": present_count > 0,
+        # 定稿即产品终点(codex 接手认知层):门槛与 can_summarize 相同——至少一位确认出席。
+        "can_finalize": present_count > 0,
+        "finalized": finalization_state(config=config, session_id=session_id),
         "participants": participants,
         "candidates": sorted(grouped.values(), key=lambda item: (str(item["status"]), str(item["display_name"]))),
         "new_person_candidates": sorted(new_person_candidates.values(), key=lambda item: str(item["speaker"])),

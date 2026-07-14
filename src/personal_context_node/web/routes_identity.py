@@ -11,37 +11,11 @@ from personal_context_node.identity_review import (
     record_not_person,
     set_session_participant,
 )
+from personal_context_node.session_finalize import finalize_session
 from personal_context_node.speaker_identify import cascade_participant_update, identify_session_speakers
-from personal_context_node.storage.sqlite import connect, initialize
-from personal_context_node.tasks import enqueue_task
 
 
 router = APIRouter(prefix="/api")
-
-
-def _release_session_summary(request: Request, *, config: AppConfig, session_id: str) -> bool:
-    """Enqueue the session summary once the review can vouch for it (first 'present' verdict).
-
-    Only when no session summary exists yet: confirming attendance on an already-summarized
-    session must not burn an LLM call. The enqueued task is picked up by the worker's normal
-    background drain; nothing runs inside this request.
-    """
-    conn = connect(config.database_path)
-    try:
-        initialize(conn)
-        existing = conn.execute(
-            "select 1 from summaries where summary_type = 'session' and target_type = 'session' and target_id = ? limit 1",
-            (session_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    if existing is not None:
-        return False
-    enqueue_task(config=config, task_type="summarize_session", target_type="session", target_id=session_id)
-    worker = getattr(request.app.state, "worker", None)
-    if worker is not None:
-        worker.start()  # kick a background drain; no-op if one is already running
-    return True
 
 
 class ParticipantRequest(BaseModel):
@@ -88,14 +62,26 @@ def set_session_participant_route(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # The review verdict drives the data: absent -> clear that person's inferred attributions
-    # and re-identify the session without them; first present -> release the session summary.
+    # and re-identify the session without them. (Synthesis/Obsidian is codex's layer — nothing
+    # LLM-shaped runs here; the reviewer finishes by hitting 定稿/finalize.)
     cascade = cascade_participant_update(
         config=config, session_id=session_id, person_id=payload.person_id, status=payload.status
     )
-    summary_enqueued = False
-    if payload.status == "present":
-        summary_enqueued = _release_session_summary(request, config=config, session_id=session_id)
-    return {**participant, "cascade": cascade, "summary_enqueued": summary_enqueued}
+    return {**participant, "cascade": cascade}
+
+
+@router.post("/sessions/{session_id}/finalize")
+def finalize_session_route(request: Request, session_id: str) -> dict[str, object]:
+    """定稿:把会话事实冻结成 exports/sessions/ 下的 md+json 产物(codex 的输入合同)。
+
+    Requires ≥1 present participant; idempotent (re-finalizing regenerates the files after
+    attendance/attribution changes).
+    """
+    config: AppConfig = request.app.state.config
+    try:
+        return finalize_session(config=config, session_id=session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/identify")
@@ -141,11 +127,5 @@ def confirm_candidate_route(request: Request, payload: ConfirmCandidateRequest) 
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        summary_enqueued = _release_session_summary(request, config=config, session_id=payload.session_id)
-        return {
-            "accepted": True,
-            "action": payload.action,
-            "participant": participant,
-            "summary_enqueued": summary_enqueued,
-        }
+        return {"accepted": True, "action": payload.action, "participant": participant}
     return {"accepted": True, "action": payload.action}

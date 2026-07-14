@@ -382,6 +382,15 @@ on segment_identity_negative_feedback(session_id);
 create index if not exists idx_segment_identity_negative_person
 on segment_identity_negative_feedback(person_id);
 
+create table if not exists session_finalizations (
+  session_id text primary key references sessions(session_id),
+  finalized_at text not null,
+  export_md_path text not null,
+  export_json_path text not null,
+  present_count integer not null,
+  segment_count integer not null
+);
+
 create table if not exists segment_embeddings (
   segment_id text primary key references transcript_segments(segment_id),
   model text not null,

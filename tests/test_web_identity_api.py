@@ -81,35 +81,71 @@ def test_absent_participant_cascades_and_identify_endpoint_reruns(tmp_path: Path
     assert stats["excluded_absent"] == ["per_b"]  # review constraints honoured on re-trigger
 
 
-def test_first_present_verdict_releases_the_session_summary(tmp_path: Path) -> None:
+def test_finalize_writes_the_export_artifact_pair(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _seed_api_identity_session(config.database_path)
     client = TestClient(create_app(config=config))
 
-    response = client.post("/api/sessions/ses_1/participants", json={"person_id": "per_a", "status": "present"})
+    # 400 before anyone is confirmed present — attendance IS the finalization criterion.
+    blocked = client.post("/api/sessions/ses_1/finalize")
+    assert blocked.status_code == 400
 
-    assert response.status_code == 200, response.text
-    assert response.json()["summary_enqueued"] is True
+    present = client.post("/api/sessions/ses_1/participants", json={"person_id": "per_a", "status": "present"})
+    assert present.status_code == 200, present.text
+    # Confirming attendance runs nothing LLM-shaped anymore (codex owns synthesis).
     conn = connect(config.database_path)
     try:
-        task = conn.execute("select status from tasks where task_type = 'summarize_session' and target_id = 'ses_1'").fetchone()
+        assert conn.execute("select 1 from tasks where task_type = 'summarize_session'").fetchone() is None
     finally:
         conn.close()
-    assert task is not None  # the background drain owns it from here
 
-    # A later present verdict once a summary row exists must NOT enqueue again (no repeat LLM
-    # burn). Simulate the summary having been generated.
+    finalized = client.post("/api/sessions/ses_1/finalize")
+    assert finalized.status_code == 200, finalized.text
+    body = finalized.json()
+    md = Path(body["export_md_path"])
+    js = Path(body["export_json_path"])
+    assert md.exists() and js.exists()
+    # Exports live with the project data dir, per date, per session.
+    assert str(md).startswith(str(tmp_path / "data")) and "exports/sessions/2087-05-10" in str(md)
+
+    text = md.read_text(encoding="utf-8")
+    assert "Alice(出现)" in text
+    assert "hello" in text  # FULL transcript in the md
+    assert "spk_01" not in text  # machine vocabulary never reaches the artifact
+
+    import json as _json
+
+    payload = _json.loads(js.read_text(encoding="utf-8"))
+    assert payload["attendance"]["present"][0]["display_name"] == "Alice"
+    assert payload["segments"][0]["audio_url"] == "/api/audio/segments/seg_1"
+    assert payload["segments"][0]["speaker_display"] == "Alice"
+
+    # The review payload reflects the finalized state; re-finalizing is idempotent.
+    review = client.get("/api/sessions/ses_1/identity-review").json()
+    assert review["can_finalize"] is True
+    assert review["finalized"]["export_md_path"] == str(md)
+    assert client.post("/api/sessions/ses_1/finalize").status_code == 200
+
+
+def test_finalize_labels_unidentified_voices_without_machine_ids(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_api_identity_session(config.database_path)
     conn = connect(config.database_path)
     try:
-        conn.execute(
-            "insert into summaries (summary_id, summary_type, target_type, target_id, content_json, created_at, updated_at) values ('sum_1', 'session', 'session', 'ses_1', '{}', 'now', 'now')"
-        )
+        # An unattributed second voice: must surface as 声音A, never as its spk_02/vp label.
+        conn.execute("insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, is_active) values ('seg_2', 'aud_1', 'chk_2', 'ses_1', 1000, 2000, '第二个声音', 'zh', 'spk_02', 'vp_007', 'ev_2', 1)")
         conn.commit()
     finally:
         conn.close()
-    again = client.post("/api/sessions/ses_1/participants", json={"person_id": "per_a", "status": "present"})
-    assert again.status_code == 200
-    assert again.json()["summary_enqueued"] is False
+    client = TestClient(create_app(config=config))
+    client.post("/api/sessions/ses_1/participants", json={"person_id": "per_a", "status": "present"})
+
+    body = client.post("/api/sessions/ses_1/finalize").json()
+
+    assert body["unidentified_voices"] == [{"label": "声音A", "segment_count": 1}]
+    text = Path(body["export_md_path"]).read_text(encoding="utf-8")
+    assert "声音A" in text and "第二个声音" in text
+    assert "vp_007" not in text and "spk_02" not in text
 
 
 def _seed_api_identity_session(database_path: Path) -> None:
