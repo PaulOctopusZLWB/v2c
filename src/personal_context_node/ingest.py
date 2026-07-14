@@ -10,7 +10,7 @@ import tempfile
 import time
 import wave
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -179,8 +179,11 @@ def import_audio_files_in_conn(
                 mtime_ns=source_stat.st_mtime_ns,
             ):
                 continue
-            recorded_at = _recorded_at_from_name(path=source_path)
-            recorded_date = recorded_at[:10]
+            # A timestamped recorder filename is the start-time source of truth. For an
+            # unnamed phone recording, mtime is normally the file completion time; use it only
+            # as a provisional storage date until the normalized duration is known below.
+            provisional_recorded_at = _recorded_at_from_name(path=source_path)
+            recorded_date = provisional_recorded_at[:10]
             local_dir = config.raw_audio_dir / recorded_date
             local_dir.mkdir(parents=True, exist_ok=True)
             audio_file_id = f"aud_{uuid4().hex}"
@@ -193,6 +196,18 @@ def import_audio_files_in_conn(
                     target_path=local_path,
                     timeout_seconds=config.command_timeout_seconds,
                 )
+            duration_ms = _duration_ms(local_path)
+            recorded_at = _recorded_at_from_name(path=source_path, duration_ms=duration_ms)
+            if recorded_at[:10] != recorded_date:
+                corrected_dir = config.raw_audio_dir / recorded_at[:10]
+                corrected_dir.mkdir(parents=True, exist_ok=True)
+                corrected_path = _raw_store_path(
+                    local_dir=corrected_dir,
+                    source_path=source_path,
+                    audio_file_id=audio_file_id,
+                )
+                local_path.replace(corrected_path)
+                local_path = corrected_path
             _repair_wav_file_metadata(local_path, recorded_at)
             sha256 = _sha256(local_path)
             mark_raw_evidence_read_only(local_path)
@@ -211,7 +226,7 @@ def import_audio_files_in_conn(
                     source_stat.st_mtime_ns,
                     str(local_path),
                     sha256,
-                    _duration_ms(local_path),
+                    duration_ms,
                     recorded_at,
                     datetime.now(timezone.utc).isoformat(),
                     "imported",
@@ -420,12 +435,18 @@ def _duration_ms_from_riff_chunks(path: Path) -> int:
     return round(frames / sample_rate * 1000)
 
 
-def _recorded_at_from_name(path: Path) -> str:
+def _recorded_at_from_name(path: Path, *, duration_ms: int | None = None) -> str:
     parsed = _recorded_at_from_name_or_none(path=path)
     if parsed:
         return parsed
-    # isoformat() already emits a valid offset (e.g. +08:00); do not hand-build it.
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    # Phone/voice-recorder exports often have no timestamp in the filename. Their filesystem
+    # mtime is the completed-file time, not the recording start. Once normalization gives us an
+    # exact duration, subtract it; using "now" here shifted old recordings to every import run.
+    completed_at = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+    if duration_ms is not None:
+        completed_at -= timedelta(milliseconds=max(0, duration_ms))
+        return completed_at.isoformat(timespec="milliseconds")
+    return completed_at.isoformat(timespec="seconds")
 
 
 def _recorded_at_from_name_or_none(path: Path) -> str | None:

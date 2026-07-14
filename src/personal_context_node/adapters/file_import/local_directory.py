@@ -89,8 +89,8 @@ class LocalDirectoryFileImportAdapter:
         )
 
     def copy_to_raw_store(self, source: StableSourceAudioFile, destination_dir: Path) -> ImportedRawAudio:
-        recorded_at = _recorded_at_from_name(source.source.source_path)
-        target_dir = destination_dir / recorded_at[:10]
+        provisional_recorded_at = _recorded_at_from_name(source.source.source_path)
+        target_dir = destination_dir / provisional_recorded_at[:10]
         target_dir.mkdir(parents=True, exist_ok=True)
         # Two distinct recordings can share a filename (same day, different cards). Reserve a
         # non-colliding destination atomically (O_EXCL) so a second import — even a concurrent
@@ -106,6 +106,16 @@ class LocalDirectoryFileImportAdapter:
                     target_path=local_raw_path,
                     timeout_seconds=3600.0,
                 )
+            duration_ms = _duration_ms(local_raw_path)
+            recorded_at = _recorded_at_from_name(source_path, duration_ms=duration_ms)
+            if recorded_at[:10] != provisional_recorded_at[:10]:
+                corrected_dir = destination_dir / recorded_at[:10]
+                corrected_dir.mkdir(parents=True, exist_ok=True)
+                corrected_path = _reserve_destination_path(
+                    corrected_dir, _raw_target_name(source_path)
+                )
+                local_raw_path.replace(corrected_path)
+                local_raw_path = corrected_path
             _repair_wav_file_metadata(local_raw_path, recorded_at)
         except BaseException:
             # A failed copy/repair (source vanished, disk full, malformed WAV) must not strand
@@ -117,7 +127,7 @@ class LocalDirectoryFileImportAdapter:
             source=source,
             local_raw_path=local_raw_path,
             sha256=_sha256(local_raw_path),
-            duration_ms=_duration_ms(local_raw_path),
+            duration_ms=duration_ms,
             recorded_at=recorded_at,
         )
 

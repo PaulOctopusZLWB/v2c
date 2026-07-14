@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,6 +71,40 @@ def test_copy_to_raw_store_converts_m4a_to_wav_with_transcoder(tmp_path: Path, m
     assert called["source"] == source_audio.name
     assert called["target"] == "TX02_MIC001_20250611_190910_orig.wav"
     assert imported.local_raw_path.suffix == ".wav"
+
+
+def test_unnamed_recording_uses_completion_time_minus_duration(tmp_path: Path) -> None:
+    device_root = tmp_path / "phone"
+    source_audio = device_root / "新录音.wav"
+    _write_tiny_wav(source_audio)
+    completed_at = datetime.fromisoformat("2026-07-14T16:10:11+08:00")
+    os.utime(source_audio, (completed_at.timestamp(), completed_at.timestamp()))
+    adapter = LocalDirectoryFileImportAdapter(device_roots=[device_root], device_label="Phone")
+
+    imported = adapter.copy_to_raw_store(
+        adapter.wait_until_stable(adapter.discover_audio_files(adapter.discover_devices()[0])[0], stable_seconds=0),
+        tmp_path / "raw",
+    )
+
+    assert imported.recorded_at == "2026-07-14T16:10:10.000+08:00"
+    assert imported.local_raw_path.parent.name == "2026-07-14"
+
+
+def test_unnamed_recording_moves_to_actual_start_date_across_midnight(tmp_path: Path) -> None:
+    device_root = tmp_path / "phone"
+    source_audio = device_root / "recording.wav"
+    _write_tiny_wav(source_audio)
+    completed_at = datetime.fromisoformat("2026-07-15T00:00:00+08:00")
+    os.utime(source_audio, (completed_at.timestamp(), completed_at.timestamp()))
+    adapter = LocalDirectoryFileImportAdapter(device_roots=[device_root], device_label="Phone")
+
+    imported = adapter.copy_to_raw_store(
+        adapter.wait_until_stable(adapter.discover_audio_files(adapter.discover_devices()[0])[0], stable_seconds=0),
+        tmp_path / "raw",
+    )
+
+    assert imported.recorded_at == "2026-07-14T23:59:59.000+08:00"
+    assert imported.local_raw_path.parent.name == "2026-07-14"
 
 
 def test_local_directory_file_import_adapter_discovers_configured_audio_globs_recursively(tmp_path: Path) -> None:

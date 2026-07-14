@@ -5,6 +5,7 @@ import re
 import stat
 import struct
 import wave
+from datetime import datetime
 from pathlib import Path
 
 import personal_context_node.ingest as ingest_module
@@ -353,6 +354,26 @@ def test_ingest_import_records_source_file_metadata(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert audio_files == [{"source_size_bytes": stat.st_size, "source_mtime_ns": stat.st_mtime_ns}]
+
+
+def test_ingest_import_unnamed_audio_uses_completion_time_minus_duration(tmp_path: Path) -> None:
+    source = tmp_path / "sample_data"
+    audio_path = source / "新录音.wav"
+    _write_tiny_wav(audio_path)
+    completed_at = datetime.fromisoformat("2026-07-14T16:10:11+08:00")
+    os.utime(audio_path, (completed_at.timestamp(), completed_at.timestamp()))
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+
+    result = import_audio_files(config=config, source_dir=source)
+
+    assert result.imported_files == 1
+    conn = connect(config.database_path)
+    try:
+        row = fetch_all(conn, "select recorded_at, local_raw_path from audio_files")[0]
+    finally:
+        conn.close()
+    assert row["recorded_at"] == "2026-07-14T16:10:10.000+08:00"
+    assert Path(str(row["local_raw_path"])).parent.name == "2026-07-14"
 
 
 def test_ingest_import_identity_includes_source_size_mtime_and_hash(tmp_path: Path) -> None:
