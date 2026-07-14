@@ -737,6 +737,18 @@
   color: var(--text-dim);
 }
 .vmap-legend-clear:hover:not(:disabled) { color: var(--err); border-color: var(--err); }
+.vmap-legend-clear.confirming {
+  color: var(--err);
+  border-color: var(--err);
+  background: color-mix(in srgb, var(--err) 13%, var(--panel-2));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 15%, transparent);
+}
+.vmap-legend-clear-x {
+  font-size: 18px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  transform: translateY(-1px);
+}
 .vmap-legend-clear:disabled { opacity: .55; cursor: progress; }
 .vmap-correction-note {
   position: absolute;

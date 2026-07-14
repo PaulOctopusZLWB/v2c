@@ -130,6 +130,7 @@ export function VoiceprintMap({
   // Subsampling note from the last result (the scope had more points than max_points).
   const [capped, setCapped] = useState<{ n: number; total: number } | null>(null);
   const [clearingKey, setClearingKey] = useState<string | null>(null);
+  const [armedClearKey, setArmedClearKey] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [correctionNote, setCorrectionNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -227,6 +228,7 @@ export function VoiceprintMap({
     setRect(null);
     setCorrectionNote(null);
     setActionError(null);
+    setArmedClearKey(null);
     viewRef.current = { ...IDENTITY };
     if (!request) {
       setPoints(null);
@@ -644,6 +646,7 @@ export function VoiceprintMap({
 
   // Switching colour mode changes what the legend keys mean, so any active focus is cleared.
   const switchColorMode = (mode: ColorMode) => {
+    setArmedClearKey(null);
     setColorMode((cur) => {
       if (cur !== mode) setFocusKey(null);
       return mode;
@@ -680,9 +683,14 @@ export function VoiceprintMap({
     if (!onClearAttributions) return;
     const segmentIds = segmentIdsForPersonKey(key);
     if (segmentIds.length === 0) return;
-    const ok = window.confirm(`取消“${label}”的识别归属？\n将 ${segmentIds.length} 段回到未识别，不会删除人物档案。`);
-    if (!ok) return;
+    if (armedClearKey !== key) {
+      setArmedClearKey(key);
+      setActionError(null);
+      setCorrectionNote(null);
+      return;
+    }
     setClearingKey(key);
+    setArmedClearKey(null);
     setActionError(null);
     setCorrectionNote(null);
     try {
@@ -696,7 +704,7 @@ export function VoiceprintMap({
     } finally {
       setClearingKey(null);
     }
-  }, [onClearAttributions, onChanged, refetchProjection, segmentIdsForPersonKey]);
+  }, [armedClearKey, onClearAttributions, onChanged, refetchProjection, segmentIdsForPersonKey]);
 
   const canRunNeighborCorrection = !!request && !!onPreviewNeighborCorrection && !!onApplyNeighborCorrection;
   const runNeighborCorrection = useCallback(async () => {
@@ -919,6 +927,7 @@ export function VoiceprintMap({
                 c.key !== SESSION_EXCLUDED_KEY &&
                 !!onClearAttributions;
               const clearing = clearingKey === c.key;
+              const armed = armedClearKey === c.key;
               const personLegendTitle =
                 colorMode === "person"
                   ? `${c.label}: 全局归属图例,不会自动进入本场总结名单; 点击只是在图上聚焦。`
@@ -942,15 +951,21 @@ export function VoiceprintMap({
                   {canClearLegend ? (
                     <button
                       type="button"
-                      className="vmap-legend-clear"
-                      aria-label={`取消${c.label}的识别`}
-                      title={`取消${c.label}的识别归属`}
-                      disabled={clearingKey !== null}
-                      aria-busy={clearing}
-                      onClick={() => void clearLegendAttributions(c.key, c.label)}
-                    >
-                      {clearing ? <span className="spinner" aria-hidden /> : <Icon name="trash" />}
-                    </button>
+                    className={`vmap-legend-clear${armed ? " confirming" : ""}`}
+                    aria-label={armed ? `确认取消${c.label}的识别` : `取消${c.label}的识别`}
+                    title={armed ? `再次点击确认：将 ${c.count} 段回到未识别` : `取消${c.label}的识别归属`}
+                    disabled={clearingKey !== null}
+                    aria-busy={clearing}
+                    onClick={() => void clearLegendAttributions(c.key, c.label)}
+                  >
+                    {clearing ? (
+                      <span className="spinner" aria-hidden />
+                    ) : armed ? (
+                      <span className="vmap-legend-clear-x" aria-hidden>×</span>
+                    ) : (
+                      <Icon name="trash" />
+                    )}
+                  </button>
                   ) : null}
                 </li>
               );

@@ -121,24 +121,29 @@ describe("VoiceprintMap", () => {
     expect(spkItem.classList.contains("dimmed")).toBe(false);
   });
 
-  it("clears an assigned legend group back to 未识别 after confirmation", async () => {
+  it("arms an assigned legend group on first click and clears it on second click", async () => {
     const onClearAttributions = vi.fn().mockResolvedValue({ cleared: 2 });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<VoiceprintMap request={REQ} onClearAttributions={onClearAttributions} />);
     await screen.findByRole("list", { name: /图例/ });
 
     await userEvent.click(screen.getByRole("button", { name: /取消李雷的识别/ }));
+    expect(onClearAttributions).not.toHaveBeenCalled();
+    const confirmButton = screen.getByRole("button", { name: /确认取消李雷的识别/ });
+    expect(confirmButton).toHaveClass("confirming");
+    expect(confirmButton).toHaveTextContent("×");
+
+    await userEvent.click(confirmButton);
 
     await waitFor(() => expect(onClearAttributions).toHaveBeenCalledWith(["seg_1", "seg_2"]));
   });
 
   it("reports clear-attribution failures without replacing a valid projection", async () => {
     const onClearAttributions = vi.fn().mockRejectedValue(new Error("Not Found"));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<VoiceprintMap request={REQ} onClearAttributions={onClearAttributions} />);
     await screen.findByRole("list", { name: /图例/ });
 
     await userEvent.click(screen.getByRole("button", { name: /取消李雷的识别/ }));
+    await userEvent.click(screen.getByRole("button", { name: /确认取消李雷的识别/ }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("取消识别失败：Not Found");
     expect(screen.queryByText(/投影失败/)).not.toBeInTheDocument();
