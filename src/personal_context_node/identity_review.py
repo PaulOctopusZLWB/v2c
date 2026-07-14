@@ -64,6 +64,7 @@ def record_not_person(
         initialize(conn)
         if conn.execute("select 1 from persons where person_id = ?", (person_id,)).fetchone() is None:
             raise ValueError(f"unknown person_id: {person_id}")
+        cleared = 0
         for segment_id in unique_segment_ids:
             conn.execute(
                 """
@@ -78,10 +79,22 @@ def record_not_person(
                 """,
                 (segment_id, person_id, session_id, source, note, now),
             )
+            # "不是 X" is the most recent human verdict on this exact (segment, person) pair:
+            # the contradicted attribution goes too — manual included, the user just overrode
+            # their earlier label. auto_attribute consults the feedback, so it can't come back.
+            cur = conn.execute(
+                "delete from segment_person_overrides where segment_id = ? and person_id = ?",
+                (segment_id, person_id),
+            )
+            cleared += int(cur.rowcount)
         conn.commit()
-        return len(unique_segment_ids)
     finally:
         conn.close()
+    if cleared:
+        from personal_context_node.speaker_embeddings import clear_projection_results_cache
+
+        clear_projection_results_cache()  # attributions recolor points; fitted coords stay valid
+    return len(unique_segment_ids)
 
 
 def identity_review_for_session(*, config: AppConfig, session_id: str) -> dict[str, object]:

@@ -138,6 +138,56 @@ def prune_low_share_attributions(
     return {"pruned": pruned, "total_segments": total}
 
 
+def clear_person_session_attributions(*, config: AppConfig, session_id: str, person_id: str) -> int:
+    """Delete one person's ``source='voiceprint'`` attributions inside a session.
+
+    The identity-review cascade for "本场没出现": inferred attributions to an absent person are
+    by definition wrong for this session. Manual labels are NOT touched here — a manual label
+    contradicting an absent mark is a conflict the reviewer must see, not silent data loss.
+    Returns the number of rows cleared.
+    """
+    scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id)
+    if not scope_ids:
+        return 0
+    cleared = 0
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        for start in range(0, len(scope_ids), _SQL_CHUNK):
+            chunk = scope_ids[start : start + _SQL_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            cur = conn.execute(
+                f"delete from segment_person_overrides "
+                f"where source = 'voiceprint' and person_id = ? and segment_id in ({placeholders})",
+                (person_id, *chunk),
+            )
+            cleared += int(cur.rowcount)
+        conn.commit()
+    finally:
+        conn.close()
+    if cleared:
+        from personal_context_node.speaker_embeddings import clear_projection_results_cache
+
+        clear_projection_results_cache()  # attributions recolor points; fitted coords stay valid
+    return cleared
+
+
+def cascade_participant_update(*, config: AppConfig, session_id: str, person_id: str, status: str) -> dict:
+    """Turn an identity-review verdict into attribution changes (the review DRIVES the data).
+
+    - ``absent``: the person's voiceprint attributions in this session are cleared, then the
+      full identify pass re-runs — with the person now excluded — so their former segments get
+      re-matched to whoever else fits (or fall back to reviewable clusters).
+    - ``present`` / ``uncertain``: no destructive action (present is an endorsement, not new
+      evidence; summary release is handled by the caller who owns the task queue).
+    """
+    if status != "absent":
+        return {"cascade": "none"}
+    cleared = clear_person_session_attributions(config=config, session_id=session_id, person_id=person_id)
+    identify = identify_session_speakers(config=config, session_id=session_id)
+    return {"cascade": "absent", "cleared": cleared, "identify": identify}
+
+
 def identify_session_speakers(*, config: AppConfig, session_id: str) -> dict:
     """Run the full automatic identify pass for one session (match → prune → smooth → cluster).
 

@@ -12,6 +12,8 @@ from personal_context_node.speaker_embeddings import (
 )
 from personal_context_node.speaker_identify import (
     absent_person_ids,
+    cascade_participant_update,
+    clear_person_session_attributions,
     identify_session_speakers,
     prune_low_share_attributions,
 )
@@ -239,6 +241,62 @@ def test_identify_cold_start_without_exemplars_still_clusters(tmp_path: Path) ->
     # Session-scoped clustering still ran (20 segments >= identify_min_cluster_size=15 allows
     # the scope; whether HDBSCAN finds clusters is data-dependent — the key is it returns).
     assert "clusters" in result["clusters"] or result["clusters"]["clusters"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# identity-review cascade
+# ---------------------------------------------------------------------------
+
+
+def test_cascade_absent_clears_and_reidentifies(tmp_path: Path) -> None:
+    config = _seed_session(tmp_path, n=12)
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+    _write_override(config.database_path, segment_id="seg_00", person_id="per_a", source="manual")
+    # per_b currently "owns" the odd-axis voice via inferred attributions + one manual anchor
+    # on seg_01 (manual must survive the cascade as a visible conflict, not silent loss).
+    _write_override(config.database_path, segment_id="seg_01", person_id="per_b", source="manual")
+    for i in (3, 5, 7):
+        _write_override(config.database_path, segment_id=f"seg_{i:02d}", person_id="per_b", source="voiceprint")
+
+    _mark_participant(config.database_path, session_id="ses_test", person_id="per_b", status="absent")
+    result = cascade_participant_update(config=config, session_id="ses_test", person_id="per_b", status="absent")
+
+    assert result["cascade"] == "absent"
+    assert result["cleared"] == 3  # the three inferred rows went; the manual anchor did not
+    overrides = _override_map(config.database_path)
+    assert overrides["seg_01"] == ("per_b", "manual")
+    voiceprint_people = {pid for pid, source in overrides.values() if source == "voiceprint"}
+    assert "per_b" not in voiceprint_people  # re-identify ran WITH per_b excluded
+
+
+def test_cascade_present_is_non_destructive(tmp_path: Path) -> None:
+    config = _seed_session(tmp_path, n=8)
+    _insert_persons(config.database_path, {"per_a": "Alice"})
+    _write_override(config.database_path, segment_id="seg_02", person_id="per_a", source="voiceprint")
+
+    result = cascade_participant_update(config=config, session_id="ses_test", person_id="per_a", status="present")
+
+    assert result == {"cascade": "none"}
+    assert _override_map(config.database_path)["seg_02"] == ("per_a", "voiceprint")
+
+
+def test_clear_person_session_attributions_scopes_to_session(tmp_path: Path) -> None:
+    config = _seed_session(tmp_path, n=6)
+    _insert_persons(config.database_path, {"per_a": "Alice"})
+    # A second session whose attribution must be untouched by the ses_test cascade.
+    _insert_session_with_segments(
+        config.database_path, ["other_1"], session_id="ses_other", audio_file_id="aud_other", date_key="2087-05-11"
+    )
+    put_embeddings_bulk(config=config, items=[("other_1", _unit_axis(0, noise=0.05))])
+    _write_override(config.database_path, segment_id="seg_00", person_id="per_a", source="voiceprint")
+    _write_override(config.database_path, segment_id="other_1", person_id="per_a", source="voiceprint")
+
+    cleared = clear_person_session_attributions(config=config, session_id="ses_test", person_id="per_a")
+
+    assert cleared == 1
+    overrides = _override_map(config.database_path)
+    assert "seg_00" not in overrides
+    assert overrides["other_1"] == ("per_a", "voiceprint")
 
 
 def test_identify_respects_absent_participants(tmp_path: Path) -> None:
