@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import threading
 from collections.abc import Callable, Sequence
@@ -38,6 +39,9 @@ def put_embedding(*, config: AppConfig, segment_id: str, vector: Sequence[float]
         conn.commit()
     finally:
         conn.close()
+    # Payloads must refresh; coords are content-addressed and self-invalidate, and keeping them
+    # means a background ingest can't scramble the layout of a scope whose vectors didn't change.
+    clear_projection_results_cache()
 
 
 def put_embeddings_bulk(*, config: AppConfig, items: list[tuple[str, Sequence[float]]], model: str = "cam++") -> int:
@@ -67,6 +71,9 @@ def put_embeddings_bulk(*, config: AppConfig, items: list[tuple[str, Sequence[fl
         conn.commit()
     finally:
         conn.close()
+    # Payloads must refresh; coords are content-addressed and self-invalidate, and keeping them
+    # means a background ingest can't scramble the layout of a scope whose vectors didn't change.
+    clear_projection_results_cache()
     return len(rows)
 
 
@@ -289,7 +296,7 @@ def recluster_by_anchors(
     finally:
         conn.close()
 
-    clear_projection_cache()  # attributions changed -> any cached 2D projection is now stale
+    clear_projection_results_cache()  # attributions recolor points; fitted coords stay valid
     return {
         "assigned": assigned,
         "unassigned": unassigned,
@@ -332,7 +339,7 @@ def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: 
         conn.commit()
     finally:
         conn.close()
-    clear_projection_cache()  # attributions changed -> any cached 2D projection is now stale
+    clear_projection_results_cache()  # attributions recolor points; fitted coords stay valid
     # Re-enroll from the just-written manual labels so the person's voiceprint is current.
     try:
         enroll_person(config=config, person_id=person_id)
@@ -369,7 +376,7 @@ def clear_segment_person_attributions(*, config: AppConfig, segment_ids: list[st
         conn.close()
 
     if cleared:
-        clear_projection_cache()
+        clear_projection_results_cache()  # attributions recolor points; fitted coords stay valid
     return {"cleared": cleared}
 
 
@@ -531,7 +538,7 @@ def apply_neighbor_corrections(
         conn.close()
 
     if applied:
-        clear_projection_cache()
+        clear_projection_results_cache()  # attributions recolor points; fitted coords stay valid
     preview["applied"] = applied
     return preview
 
@@ -842,7 +849,7 @@ def auto_attribute_enrolled(
     finally:
         conn.close()
 
-    clear_projection_cache()  # attributions changed -> any cached 2D projection is now stale
+    clear_projection_results_cache()  # attributions recolor points; fitted coords stay valid
     return {
         "assigned": assigned,
         "unassigned": unassigned,
@@ -1080,20 +1087,197 @@ def _segment_speakers(*, config: AppConfig, segment_ids: list[str]) -> dict[str,
     return result
 
 
-# Projection results are deterministic for a given (database, scope, method, size), so cache them:
-# a UMAP fit is a multi-second warmup and the scatter map is hit repeatedly as the UI re-renders.
+# Projection state is memoized at two levels:
+#
+#  - Result caches: the full JSON-ready payload (points + per-segment speaker/person metadata).
+#    _PROJECTION_CACHE serves the single-scope map, _MULTI_PROJECTION_CACHE the multi-scope
+#    tunable projection (different key shapes). Stale after ANY write that changes what the map
+#    shows — attribution writes AND embedding writes.
+#  - _COORDS_CACHE: the fitted, normalized 2D coordinates, CONTENT-ADDRESSED: the key is a
+#    blake2b digest of the segment ids + the actual vector bytes + the reducer params that apply
+#    to the chosen method. A vector change changes the key, so entries can never go stale and no
+#    write path needs to clear this layer — which is what keeps a background ingest from
+#    scrambling the (unseeded, parallel) UMAP layout a user is currently lasso-labelling.
+#    Bounded FIFO; guarded by _COORDS_LOCK (FastAPI serves projections on multiple threads).
 _PROJECTION_CACHE: dict[tuple, dict] = {}
-
-# The multi-scope, tunable projection (project_embeddings) keyed by its full parameter tuple.
-# Kept separate from _PROJECTION_CACHE (different key shape) but cleared together so an attribution
-# / embedding write invalidates BOTH the single-scope map and any cross-session projection.
 _MULTI_PROJECTION_CACHE: dict[tuple, dict] = {}
+_COORDS_CACHE: dict[tuple, tuple[np.ndarray, str]] = {}
+_COORDS_CACHE_MAX = 64  # FIFO bound; one entry is ~64 KB at the default 4k-point cap
+_COORDS_LOCK = threading.Lock()  # guards _COORDS_CACHE get/store/evict/clear
 
 
 def clear_projection_cache() -> None:
-    """Drop all memoized projection results (call between tests / after re-embedding a scope)."""
+    """Drop ALL memoized projection state, coordinates included (full reset, e.g. between tests).
+
+    Coordinate entries are content-addressed and can't go stale, so dropping them is about
+    memory/test hygiene, not correctness.
+    """
     _PROJECTION_CACHE.clear()
     _MULTI_PROJECTION_CACHE.clear()
+    with _COORDS_LOCK:
+        _COORDS_CACHE.clear()
+
+
+def clear_projection_results_cache() -> None:
+    """Drop memoized projection payloads but KEEP fitted 2D coordinates.
+
+    For any write that changes what the map shows (attribution writes AND embedding writes):
+    payloads must refresh, but coordinates are content-addressed — a scope whose vectors are
+    unchanged keeps its layout, a changed scope simply misses the cache and refits.
+    """
+    _PROJECTION_CACHE.clear()
+    _MULTI_PROJECTION_CACHE.clear()
+
+
+def _umap_speed_kwargs(n_points: int) -> dict:
+    """Shared UMAP performance tuning for the map projection and the pre-HDBSCAN reduction.
+
+    Below 4096 points umap silently switches to an exact pairwise-kNN path that is ~10x slower
+    than its NN-descent default here; force NN-descent once n is large enough for the
+    approximation to be both safe and worthwhile. 500 epochs (umap's small-data default) refines
+    little over 200 (its large-data default) on voiceprint clusters but costs 2.5x the layout time.
+    """
+    return {
+        "force_approximation_algorithm": n_points >= 1024,
+        "n_epochs": 500 if n_points < 1024 else 200,
+    }
+
+
+def _unit_matrix(ids: list[str], embeddings: dict[str, np.ndarray]) -> np.ndarray:
+    """Stack the vectors for ``ids`` into an L2-row-normalized float32 matrix (cosine geometry).
+
+    float32 on purpose: umap works in float32 internally, float64 input just forces an extra copy.
+    """
+    matrix = np.vstack([embeddings[sid] for sid in ids]).astype(np.float32)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms[norms == 0.0] = 1.0
+    return matrix / norms
+
+
+def _fit_coords_2d(
+    X: np.ndarray,
+    *,
+    db_path: str,
+    ids: list[str],
+    method: str,
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    perplexity: int = 30,
+    pca_x: int = 0,
+    pca_y: int = 1,
+) -> tuple[np.ndarray, str]:
+    """Reduce unit-normalized voiceprints to ``[0, 1]^2`` coords, memoized on content + params.
+
+    UMAP runs UNSEEDED: a fixed ``random_state`` forces numba down to one thread (measured 6-35x
+    slower on real voiceprints). Layout stability across re-renders and any write that leaves the
+    scope's vectors unchanged comes from ``_COORDS_CACHE`` instead. PCA stays seed-free and
+    deterministic by construction; t-SNE keeps its fixed seed (sklearn's Barnes-Hut gains nothing
+    from threads).
+    """
+    # Content-addressed key: ids + vector bytes + only the params the chosen method actually
+    # reads (so e.g. nudging the tsne-only perplexity slider while in umap mode is a cache hit,
+    # not a refit that scrambles the layout). blake2b makes cross-scope collisions a non-issue.
+    if method == "umap":
+        params: tuple = ("umap", n_neighbors, float(min_dist))
+    elif method == "tsne":
+        params = ("tsne", perplexity)
+    else:
+        params = ("pca", pca_x, pca_y)
+    digest = hashlib.blake2b("\x00".join(ids).encode(), digest_size=16)
+    digest.update(np.ascontiguousarray(X).tobytes())
+    cache_key = (db_path, digest.hexdigest(), params)
+    with _COORDS_LOCK:
+        cached = _COORDS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    used_method = "pca"
+    coords: np.ndarray | None = None
+    if method == "umap" and len(X) >= 5:
+        try:
+            import umap  # type: ignore
+
+            reducer = umap.UMAP(
+                n_components=2,
+                n_neighbors=min(max(2, n_neighbors), len(X) - 1),
+                min_dist=float(min_dist),
+                metric="cosine",
+                **_umap_speed_kwargs(len(X)),
+            )
+            with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two at once
+                coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
+            used_method = "umap"
+        except Exception:
+            coords = None  # any import/runtime failure -> deterministic PCA fallback below
+    elif method == "tsne" and len(X) >= 10:
+        try:
+            from sklearn.decomposition import PCA
+            from sklearn.manifold import TSNE
+
+            # PCA-reduce first (standard t-SNE preconditioning) then embed.
+            pre_dim = min(50, X.shape[1], len(X) - 1)
+            with _UMAP_LOCK:  # serialize all heavy embeddings ops (numba/BLAS thread safety)
+                reduced = PCA(n_components=pre_dim, random_state=42).fit_transform(X) if pre_dim >= 2 else X
+                perp = min(max(5, perplexity), (len(X) - 1) // 3 or 5)
+                tsne = TSNE(n_components=2, perplexity=perp, init="pca", random_state=42)
+                coords = np.asarray(tsne.fit_transform(reduced), dtype=np.float64)
+            used_method = "tsne"
+        except Exception:
+            coords = None  # any failure -> deterministic PCA fallback
+
+    if coords is None:
+        coords = _pca_components(X, pca_x=pca_x, pca_y=pca_y)
+        used_method = "pca"
+
+    # Normalize coords to [0, 1]^2 for a stable scatter viewport.
+    lo = coords.min(axis=0)
+    span = coords.max(axis=0) - lo
+    norm_coords = (coords - lo) / (span + 1e-9)
+
+    # Cache only when the requested reducer actually ran: a PCA fallback is ~free to recompute,
+    # and caching it under the umap/tsne key would pin a transient failure for the process life.
+    if used_method == method:
+        with _COORDS_LOCK:
+            if len(_COORDS_CACHE) >= _COORDS_CACHE_MAX:
+                _COORDS_CACHE.pop(next(iter(_COORDS_CACHE)))
+            _COORDS_CACHE[cache_key] = (norm_coords, used_method)
+    return norm_coords, used_method
+
+
+def warm_projection_engine() -> threading.Thread:
+    """Pre-compile the UMAP/numba stack in a background daemon thread.
+
+    A cold process pays ~2s of ``import umap`` plus several seconds of numba JIT on the first
+    projection request; fitting two throwaway datasets — one under umap's 4096-point exact-kNN
+    cutoff and one on the forced NN-descent path — compiles both code paths up front. Best-effort:
+    any failure is swallowed (a real request would then fall back to PCA anyway).
+    """
+
+    def _warm() -> None:
+        try:
+            import umap  # type: ignore
+
+            rng = np.random.default_rng(0)
+            # Take the lock once per fit, not across both: a real projection request that
+            # arrives mid-warmup can interleave instead of queueing behind the whole warmup.
+            with _UMAP_LOCK:
+                umap.UMAP(n_components=2, n_neighbors=5, metric="cosine").fit_transform(
+                    rng.random((64, 8), dtype=np.float32)
+                )
+            with _UMAP_LOCK:
+                umap.UMAP(
+                    n_components=2,
+                    n_neighbors=5,
+                    metric="cosine",
+                    force_approximation_algorithm=True,
+                    n_epochs=200,
+                ).fit_transform(rng.random((1100, 8), dtype=np.float32))
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_warm, name="umap-warmup", daemon=True)
+    thread.start()
+    return thread
 
 
 def embedding_projection(
@@ -1109,9 +1293,10 @@ def embedding_projection(
     its ``segment_id``, normalized ``x``/``y`` in ``[0, 1]``, ``speaker``, person attribution
     (``person_id``/``person_label``, null when unlabeled) and a truncated ``text`` preview.
 
-    UMAP (cosine metric, fixed seed) gives the best cluster separation but needs >=5 points and a
-    multi-second warmup; PCA (numpy SVD on centered, L2-normalized vectors) is the deterministic
-    fallback for small/instant cases and on any UMAP import/runtime failure. Results are memoized.
+    UMAP (cosine metric, unseeded/parallel — see ``_fit_coords_2d``) gives the best cluster
+    separation but needs >=5 points; PCA (numpy SVD on centered, L2-normalized vectors) is the
+    deterministic fallback for small/instant cases and on any UMAP import/runtime failure.
+    Results are memoized (payloads per scope, fitted coordinates per vector set).
     """
     scope_ids = scoped_embedding_segment_ids(config=config, session_id=session_id, day=day)
     cache_key = (str(config.database_path), session_id, day, method, len(scope_ids))
@@ -1132,38 +1317,8 @@ def embedding_projection(
         _PROJECTION_CACHE[cache_key] = result
         return result
 
-    matrix = np.vstack([embeddings[sid] for sid in ids]).astype(np.float64)
-    # L2-normalize rows so PCA/UMAP both see unit voiceprints (cosine geometry).
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    norms[norms == 0.0] = 1.0
-    X = matrix / norms
-
-    used_method = "pca"
-    coords: np.ndarray | None = None
-    if method == "umap" and len(X) >= 5:
-        try:
-            import umap  # type: ignore
-
-            reducer = umap.UMAP(
-                n_components=2,
-                n_neighbors=min(15, len(X) - 1),
-                min_dist=0.1,
-                metric="cosine",
-                random_state=42,
-            )
-            with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two UMAPs at once
-                coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
-            used_method = "umap"
-        except Exception:
-            coords = None  # any import/runtime failure -> deterministic PCA fallback below
-    if coords is None:
-        coords = _pca_2d(X)
-        used_method = "pca"
-
-    # Normalize coords to [0, 1]^2 for a stable scatter viewport.
-    lo = coords.min(axis=0)
-    span = coords.max(axis=0) - lo
-    norm_coords = (coords - lo) / (span + 1e-9)
+    X = _unit_matrix(ids, embeddings)
+    norm_coords, used_method = _fit_coords_2d(X, db_path=str(config.database_path), ids=ids, method=method)
 
     metadata = _projection_metadata(config=config, segment_ids=ids)
     points = []
@@ -1265,54 +1420,18 @@ def project_embeddings(
         _MULTI_PROJECTION_CACHE[cache_key] = result
         return result
 
-    matrix = np.vstack([embeddings[sid] for sid in ids]).astype(np.float64)
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    norms[norms == 0.0] = 1.0
-    X = matrix / norms
-
-    used_method = "pca"
-    coords: np.ndarray | None = None
-
-    if method == "umap" and len(X) >= 5:
-        try:
-            import umap  # type: ignore
-
-            reducer = umap.UMAP(
-                n_components=2,
-                n_neighbors=min(max(2, n_neighbors), len(X) - 1),
-                min_dist=float(min_dist),
-                metric="cosine",
-                random_state=42,
-            )
-            with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two at once
-                coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
-            used_method = "umap"
-        except Exception:
-            coords = None  # any import/runtime failure -> deterministic PCA fallback
-    elif method == "tsne" and len(X) >= 10:
-        try:
-            from sklearn.decomposition import PCA
-            from sklearn.manifold import TSNE
-
-            # PCA-reduce first (standard t-SNE preconditioning) then embed.
-            pre_dim = min(50, X.shape[1], len(X) - 1)
-            with _UMAP_LOCK:  # serialize all heavy embeddings ops (numba/BLAS thread safety)
-                reduced = PCA(n_components=pre_dim, random_state=42).fit_transform(X) if pre_dim >= 2 else X
-                perp = min(max(5, perplexity), (len(X) - 1) // 3 or 5)
-                tsne = TSNE(n_components=2, perplexity=perp, init="pca", random_state=42)
-                coords = np.asarray(tsne.fit_transform(reduced), dtype=np.float64)
-            used_method = "tsne"
-        except Exception:
-            coords = None  # any failure -> deterministic PCA fallback
-
-    if coords is None:
-        coords = _pca_components(X, pca_x=pca_x, pca_y=pca_y)
-        used_method = "pca"
-
-    # Normalize coords to [0, 1]^2 for a stable scatter viewport.
-    lo = coords.min(axis=0)
-    span = coords.max(axis=0) - lo
-    norm_coords = (coords - lo) / (span + 1e-9)
+    X = _unit_matrix(ids, embeddings)
+    norm_coords, used_method = _fit_coords_2d(
+        X,
+        db_path=str(config.database_path),
+        ids=ids,
+        method=method,
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        perplexity=perplexity,
+        pca_x=pca_x,
+        pca_y=pca_y,
+    )
 
     metadata = _projection_metadata(config=config, segment_ids=ids)
     points = []
@@ -1358,18 +1477,6 @@ def _pca_components(X: np.ndarray, *, pca_x: int, pca_y: int) -> np.ndarray:
     components = vt[[ax, ay]] if n_components >= 2 else vt[[ax]]
     coords = centered @ components.T
     if coords.shape[1] < 2:  # degenerate (single component): pad the missing axis.
-        coords = np.hstack([coords, np.zeros((coords.shape[0], 2 - coords.shape[1]))])
-    return coords
-
-
-def _pca_2d(X: np.ndarray) -> np.ndarray:
-    """Deterministic top-2 principal-component coordinates via SVD on centered rows."""
-    centered = X - X.mean(axis=0, keepdims=True)
-    # full_matrices=False keeps this cheap for the wide (n x 192) voiceprint matrix.
-    _u, _s, vt = np.linalg.svd(centered, full_matrices=False)
-    components = vt[:2]  # may be (1, d) when n == 1
-    coords = centered @ components.T
-    if coords.shape[1] < 2:  # degenerate (single point / single component): pad the missing axis.
         coords = np.hstack([coords, np.zeros((coords.shape[0], 2 - coords.shape[1]))])
     return coords
 
@@ -1628,7 +1735,7 @@ def extract_pending_embeddings(
             model=model, batch_size=batch_size, tick=_tick,
         )
         if result["embedded"]:
-            clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
+            clear_projection_results_cache()  # new voiceprints -> payloads refresh; coords self-invalidate
         return result
 
     # Lazy import: transcription.py pulls in heavier deps and may import this module transitively.
@@ -1672,7 +1779,7 @@ def extract_pending_embeddings(
         # Flush whatever was buffered even if an unexpected error escaped the loop.
         flush()
     if embedded:
-        clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
+        clear_projection_results_cache()  # new voiceprints -> payloads refresh; coords self-invalidate
     return {"embedded": embedded, "skipped_missing_audio": skipped, "failed": failed, "total": total}
 
 
@@ -1782,7 +1889,7 @@ def extract_pending_embeddings_and_emotions(
         if errors:
             raise errors[0]
         if results.get("embedding", {}).get("embedded"):
-            clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
+            clear_projection_results_cache()  # new voiceprints -> payloads refresh; coords self-invalidate
         return {"embedding": results["embedding"], "emotion": results["emotion"]}
 
     pending_embed_ids = set(
@@ -1863,7 +1970,7 @@ def extract_pending_embeddings_and_emotions(
         flush_emotion()
 
     if embedded:
-        clear_projection_cache()  # new voiceprints -> any cached 2D projection is now stale
+        clear_projection_results_cache()  # new voiceprints -> payloads refresh; coords self-invalidate
 
     return {
         "embedding": {
@@ -1939,10 +2046,7 @@ def cluster_voiceprints(
         ids = [i for i in ids if i in embs]
         if len(ids) < max(min_cluster_size, 2):
             return {"clusters": 0, "assigned": 0, "unassigned": 0, "scope_segments": len(ids)}
-        matrix = np.stack([np.asarray(embs[i], dtype=np.float64) for i in ids])
-        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-        norms[norms == 0.0] = 1.0
-        X = matrix / norms  # L2-normalize -> euclidean distance is monotone in cosine
+        X = _unit_matrix(ids, embs)  # unit rows -> euclidean distance is monotone in cosine
         # Reduce with UMAP before HDBSCAN: density clustering on the raw ~192-d voiceprints fails
         # (distances concentrate -> one giant cluster + mostly noise). UMAP (cosine) gives the
         # clean, density-friendly geometry the voiceprint map already shows. Raw fallback if UMAP
@@ -1957,7 +2061,11 @@ def cluster_voiceprints(
                     n_neighbors=min(15, len(X) - 1),
                     min_dist=0.0,
                     metric="cosine",
+                    # Seeded ON PURPOSE (unlike the map projection): cluster ids are persisted to
+                    # transcript_segments, and this function promises deterministic re-runs. The
+                    # seed costs parallelism, so claw the time back on the algorithm choice.
                     random_state=42,
+                    **_umap_speed_kwargs(len(X)),
                 )
                 with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two UMAPs at once
                     space = np.asarray(reducer.fit_transform(X), dtype=np.float64)

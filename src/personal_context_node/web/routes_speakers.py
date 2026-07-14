@@ -12,7 +12,7 @@ from personal_context_node.speaker_embeddings import (
     apply_neighbor_corrections,
     auto_attribute_enrolled,
     assign_cluster_to_person,
-    clear_projection_cache,
+    clear_projection_results_cache,
     clear_segment_person_attributions,
     cluster_voiceprints,
     embedding_projection,
@@ -211,7 +211,7 @@ def delete_person_route(request: Request, person_id: str) -> dict[str, bool]:
         conn.commit()
     finally:
         conn.close()
-    clear_projection_cache()  # a person's segments lose their color -> any cached projection is stale
+    clear_projection_results_cache()  # segments lose their color; fitted coords stay valid
     return {"deleted": True}
 
 
@@ -248,7 +248,7 @@ def merge_people_route(request: Request, payload: MergePeopleRequest) -> dict[st
         conn.commit()
     finally:
         conn.close()
-    clear_projection_cache()  # the merged person's segments recolor -> any cached projection is stale
+    clear_projection_results_cache()  # the merged person's segments recolor; fitted coords stay valid
     return {"moved": moved}
 
 
