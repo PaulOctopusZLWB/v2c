@@ -50,8 +50,8 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <span className="sidebar-logo-mark" aria-hidden>P</span>
-        <span className="sidebar-logo-name">个人上下文节点</span>
+        <span className="sidebar-logo-mark" aria-hidden>知</span>
+        <span className="sidebar-logo-name">知迹</span>
       </div>
 
       <button type="button" className="sidebar-search" onClick={onOpenPalette}>

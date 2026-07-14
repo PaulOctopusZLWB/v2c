@@ -319,6 +319,43 @@ class PipelineWorker:
     def _run(self, *, max_steps: int) -> None:
         self._last_result = self._drain_to_completion(max_steps=max_steps)
 
+    def _identify_after_extraction(self, *, session_id: str | None, day: str | None) -> None:
+        """Run the automatic identify pass for every session the extraction touched.
+
+        UI-triggered extractions bypass the pipeline's extract_features→identify_speakers edge,
+        so close the same loop here: "提取声纹" always ends in identified sessions regardless of
+        which entry point ran it. Best-effort per session — an identify failure must never mark
+        the extraction itself as failed (mirrors the leaf's gates-nothing philosophy).
+        """
+        from personal_context_node.speaker_identify import identify_session_speakers
+        from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+
+        conn = connect(self._config.database_path)
+        try:
+            initialize(conn)
+            if session_id is not None:
+                session_ids = [session_id]
+            else:
+                where = "where s.date_key = ?" if day is not None else ""
+                rows = fetch_all(
+                    conn,
+                    f"""
+                    select distinct s.session_id
+                    from sessions s
+                    join transcript_segments ts on ts.session_id = s.session_id
+                    join segment_embeddings se on se.segment_id = ts.segment_id
+                    {where}
+                    order by s.started_at
+                    """,
+                    (day,) if day is not None else (),
+                )
+                session_ids = [str(row["session_id"]) for row in rows]
+        finally:
+            conn.close()
+        for sid in session_ids:
+            with contextlib.suppress(Exception):
+                identify_session_speakers(config=self._config, session_id=sid)
+
     def _extract_embeddings(self, *, session_id: str | None, day: str | None, factory) -> None:
         from personal_context_node.speaker_embeddings import extract_pending_embeddings
 
@@ -326,6 +363,7 @@ class PipelineWorker:
             self._embedding = {"active": True, "done": done, "total": total}
 
         adapter = factory()
+        succeeded = False
         try:
             result = extract_pending_embeddings(
                 config=self._config, embed_fn=adapter.embed,
@@ -340,6 +378,7 @@ class PipelineWorker:
                 "done": int(result.get("total", 0)),
                 "total": int(result.get("total", 0)),
             }
+            succeeded = True
         finally:
             # ALWAYS release the resident model subprocess, even if extraction raised.
             with contextlib.suppress(Exception):
@@ -349,6 +388,10 @@ class PipelineWorker:
                 state = dict(self._embedding)
                 state["active"] = False
                 self._embedding = state
+        if succeeded:
+            # After the adapter is released: identify is CPU/sqlite work and must not extend the
+            # resident MPS subprocess's lifetime.
+            self._identify_after_extraction(session_id=session_id, day=day)
 
     def _extract_emotions(self, *, session_id: str | None, day: str | None, factory) -> None:
         from personal_context_node.segment_emotions import extract_pending_emotions
@@ -396,6 +439,7 @@ class PipelineWorker:
 
         embed_adapter = None
         classify_adapter = None
+        succeeded = False
         try:
             embed_adapter = embed_factory()
             classify_adapter = classify_factory()
@@ -424,6 +468,7 @@ class PipelineWorker:
                 "done": int(emotion_result.get("total", 0)),
                 "total": int(emotion_result.get("total", 0)),
             }
+            succeeded = True
         finally:
             # ALWAYS release BOTH resident model subprocesses, even if extraction (or building
             # either factory) raised -- two models are resident at once here, so neither must leak.
@@ -442,6 +487,9 @@ class PipelineWorker:
                 state = dict(self._emotion)
                 state["active"] = False
                 self._emotion = state
+        if succeeded:
+            # After BOTH adapters are released (identify must not extend MPS residency).
+            self._identify_after_extraction(session_id=session_id, day=day)
 
     def _import_then_drain(self, *, source_dir: str) -> None:
         from personal_context_node import settings as _settings

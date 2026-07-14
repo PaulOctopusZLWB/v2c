@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentityReview, LabelSegment, NeighborCorrectionPreview, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, Health, HomeOverview, IdentifySessionResult, IdentityReview, LabelSegment, NeighborCorrectionPreview, ParticipantCascade, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -162,11 +162,18 @@ export const api = {
     request<AutoAttributeResult>("/api/people/auto-attribute", { method: "POST", body: JSON.stringify(params) }),
   identityReview: (sessionId: string) =>
     request<IdentityReview>(`/api/sessions/${sessionId}/identity-review`),
+  // Full automatic identify pass (match → prune <1% → smooth → cluster leftovers) under the
+  // CURRENT review constraints — the review panel's 重新识别 button.
+  identifySession: (sessionId: string) =>
+    request<IdentifySessionResult>(`/api/sessions/${sessionId}/identify`, { method: "POST" }),
   setSessionParticipant: (sessionId: string, person_id: string, status: ParticipantStatus) =>
-    request<{ person_id: string; display_name: string; status: ParticipantStatus }>(
-      `/api/sessions/${sessionId}/participants`,
-      { method: "POST", body: JSON.stringify({ person_id, status }) }
-    ),
+    request<{
+      person_id: string;
+      display_name: string;
+      status: ParticipantStatus;
+      cascade?: ParticipantCascade;
+      summary_enqueued?: boolean;
+    }>(`/api/sessions/${sessionId}/participants`, { method: "POST", body: JSON.stringify({ person_id, status }) }),
   notPerson: (body: { session_id: string; segment_ids: string[]; person_id: string; note?: string | null }) =>
     request<{ recorded: number }>("/api/identity/not-person", { method: "POST", body: JSON.stringify(body) }),
   confirmIdentityCandidate: (body: { session_id: string; action: "known_person" | "new_person" | "noise" | "unknown"; person_id?: string | null; display_name?: string | null; segment_ids?: string[] }) =>

@@ -140,12 +140,23 @@ export function App() {
   // plus a key that, when bumped, remounts the voiceprint map so it refetches recoloured points.
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [mapKey, setMapKey] = useState(0);
-  // 声纹 projection — fully decoupled from 审核: a multi-day/session scope + tunable params, and
-  // the applied request that the map actually fetches. Param edits update projParams but DON'T
-  // refetch; method/scope changes auto-apply, while slider drags wait for the 投射 button.
+  // 声纹 projection — a multi-day/session scope + tunable params, and the applied request that
+  // the map actually fetches. Param edits update projParams but DON'T refetch; method/scope
+  // changes auto-apply, while slider drags wait for the 投射 button.
   const [scope, setScope] = useState<Scope>({ session_ids: [], days: [] });
   const [projParams, setProjParams] = useState<ProjParams>({ ...PROJ_DEFAULTS });
   const [appliedRequest, setAppliedRequest] = useState<ProjectionRequest | null>(null);
+  // 会话上下文统一:审核里选中的会话自动成为地图的默认范围,直到用户手动定制范围为止
+  // (手动定制后跟随停止,避免覆盖刻意搭建的跨会话对比 scope)。
+  const scopeFollowsSession = useRef(true);
+  useEffect(() => {
+    if (!selectedSessionId || !scopeFollowsSession.current) return;
+    if (scope.session_ids.length === 1 && scope.session_ids[0] === selectedSessionId && scope.days.length === 0) return;
+    const next: Scope = { session_ids: [selectedSessionId], days: [] };
+    setScope(next);
+    setAppliedRequest(buildRequest(next, projParams));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- projParams is read, not followed
+  }, [selectedSessionId, scope]);
   const [voiceprintProjectionState, setVoiceprintProjectionState] = useState<VoiceprintMapState>({ status: "idle" });
   const [voiceprintSelectedCount, setVoiceprintSelectedCount] = useState(0);
   const [lastAutoAttributeCount, setLastAutoAttributeCount] = useState<number | null>(null);
@@ -251,7 +262,6 @@ export function App() {
   useEffect(() => {
     bootstrappedRef.current = bootstrapped;
   }, [bootstrapped]);
-  const autoMatchedSessionIds = useRef(new Set<string>());
   // Mirror tasksOpen into a ref so the mount-time poll closure re-reads the latest value.
   const tasksOpenRef = useRef(false);
   useEffect(() => {
@@ -583,35 +593,21 @@ export function App() {
     setQueueVersion((v) => v + 1);
   }
 
+  // 后端管道现在自动完成"提取→匹配→剔除→聚类"(identify_speakers 叶子任务),前端不再
+  // 静默补跑匹配;这里只保留手动重触发,跑的是完整识别通道而不只是匹配。
   async function handleMatchCurrentSession() {
     if (!session) return;
-    const res = await api.autoAttribute({ session_id: session.session_id });
-    setLastAutoAttributeCount(res.assigned);
-    push("已按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`, "success");
+    const res = await api.identifySession(session.session_id);
+    setLastAutoAttributeCount(res.attributed.assigned);
+    const prunedCount = Object.values(res.pruned.pruned).reduce((a, b) => a + b, 0);
+    push(
+      "已重新识别当前会话",
+      `归属 ${res.attributed.assigned}/${res.attributed.total} 段 · 剔除 ${prunedCount} · 纠偏 ${res.corrections_applied}`,
+      "success"
+    );
     onPeopleChanged();
     await reloadSession();
   }
-
-  // New review sessions should not require the user to jump back into the 声纹 tab just to apply
-  // an already-enrolled voiceprint library. Run once per opened session, only when there is an
-  // enrolled speaker and at least one segment has not been attributed yet.
-  useEffect(() => {
-    if (!session) return;
-    if (autoMatchedSessionIds.current.has(session.session_id)) return;
-    const hasVoiceprintLibrary = (people ?? []).some((p) => p.person_type !== "non_speaker" && p.enrolled);
-    const hasUnattributedSegments = session.segments.some((seg) => !seg.person_id);
-    if (!hasVoiceprintLibrary || !hasUnattributedSegments) return;
-    autoMatchedSessionIds.current.add(session.session_id);
-    void guard(async () => {
-      const res = await api.autoAttribute({ session_id: session.session_id });
-      setLastAutoAttributeCount(res.assigned);
-      if (res.assigned > 0) {
-        push("已自动按声纹库匹配当前会话", `归属 ${res.assigned}/${res.total} 段`, "success");
-        onPeopleChanged();
-        await reloadSession();
-      }
-    })();
-  }, [session?.session_id, people]);
 
   function highlightEvidence(candidateId: string) {
     const candidate = (llm?.memory_candidates ?? []).find((c) => c.candidate_id === candidateId);
@@ -979,6 +975,8 @@ export function App() {
               activeSessionId={selectedSessionId}
               onInspectSession={(sessionId, day) => void guard(inspectIdentitySession)(sessionId, day)}
               onChange={(next) => {
+                // A manual scope edit ends the "follow the reviewed session" default.
+                scopeFollowsSession.current = false;
                 setScope(next);
                 // A scope change auto-applies (re-projects with the current params).
                 setAppliedRequest(buildRequest(next, projParams));

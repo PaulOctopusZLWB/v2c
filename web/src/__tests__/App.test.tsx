@@ -682,9 +682,16 @@ describe("App container", () => {
           }]
         }), { status: 200 });
       }
-      if (url === "/api/people/auto-attribute") {
+      if (url === "/api/sessions/ses_1/identify") {
         matched = true;
-        return new Response(JSON.stringify({ assigned: 1, unassigned: 0, total: 1, per_person: { per_paul: 1 }, threshold: 0.6 }), { status: 200 });
+        return new Response(JSON.stringify({
+          session_id: "ses_1",
+          excluded_absent: [],
+          attributed: { assigned: 1, unassigned: 0, total: 1, per_person: { per_paul: 1 }, threshold: 0.5 },
+          pruned: { pruned: {}, total_segments: 1 },
+          corrections_applied: 0,
+          clusters: { clusters: 0, assigned: 0, unassigned: 0, scope_segments: 1 }
+        }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
     });
@@ -698,15 +705,17 @@ describe("App container", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /匹配当前会话/ }));
 
+    // The manual button now runs the FULL identify pass (match→prune→smooth→cluster), not a
+    // bare auto-attribute.
     await waitFor(() => {
-      const call = calls.find((c) => c.url === "/api/people/auto-attribute");
+      const call = calls.find((c) => c.url === "/api/sessions/ses_1/identify");
       expect(call).toBeTruthy();
-      expect(JSON.parse(String(call!.init?.body))).toMatchObject({ session_id: "ses_1" });
+      expect(call!.init?.method).toBe("POST");
     });
     expect(await screen.findByRole("button", { name: /接受 Paul 全部/ })).toBeInTheDocument();
   });
 
-  it("auto-matches a newly opened review session when an enrolled voiceprint library exists", async () => {
+  it("does NOT silently auto-match when a review session opens (the backend pipeline owns it)", async () => {
     let matched = false;
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
@@ -750,12 +759,11 @@ describe("App container", () => {
     const rail = await inDayRail();
     await userEvent.click(rail.getByRole("button", { name: /2087-05-10/ }));
     await userEvent.click(await rail.findByRole("button", { name: /ses_1/ }));
+    expect(await screen.findByText("你好")).toBeInTheDocument();
 
-    await waitFor(() => {
-      const call = calls.find((c) => c.url === "/api/people/auto-attribute");
-      expect(call).toBeTruthy();
-      expect(JSON.parse(String(call!.init?.body))).toMatchObject({ session_id: "ses_1" });
-    });
-    expect(await screen.findByRole("button", { name: /接受 Paul 全部/ })).toBeInTheDocument();
+    // The old frontend glue fired /api/people/auto-attribute on session open. The pipeline's
+    // identify_speakers leaf owns that now — opening a session must stay read-only.
+    expect(calls.some((c) => c.url === "/api/people/auto-attribute")).toBe(false);
+    expect(calls.some((c) => c.url.endsWith("/identify"))).toBe(false);
   });
 });

@@ -116,9 +116,10 @@ describe("VoiceprintPanel", () => {
     expect(calls.some((u) => u.startsWith("/api/speakers/segments"))).toBe(false);
   });
 
-  it("auto-matches to existing people once extraction completes (toast + refresh)", async () => {
-    // The poll re-reads embedding-status as pending 0 so the extraction pass resolves and the
-    // auto-match fires exactly once. fireEvent (not userEvent) avoids fake-timer/click deadlocks.
+  it("does not fire a frontend auto-match after extraction (the worker identifies server-side)", async () => {
+    // The poll re-reads embedding-status as pending 0 so the extraction pass resolves. The old
+    // behavior chained /api/people/auto-attribute here; the worker's post-extraction identify
+    // pass owns that now, so the panel only signals onMatched for a UI refresh.
     vi.stubGlobal("fetch", mockFetch({ "embedding-status": { total: 3, embedded: 3, pending: 0 } }));
     vi.useFakeTimers();
     const push = vi.fn();
@@ -127,18 +128,12 @@ describe("VoiceprintPanel", () => {
       render(<VoiceprintPanel sessionId="ses_1" persons={persons} push={push} onMatched={onMatched} />);
 
       fireEvent.click(screen.getByRole("button", { name: /提取声纹/ }));
-      // Flush the extract POST microtask, then advance past the 2s poll so the pass resolves and
-      // triggers auto-match; flush its microtasks too.
       await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
 
       const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
       const auto = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith("/api/people/auto-attribute"));
-      expect(auto.length).toBe(1);
-      expect(auto[0][1]?.method).toBe("POST");
-      expect(JSON.parse(String(auto[0][1]?.body)).session_id).toBe("ses_1");
-
+      expect(auto.length).toBe(0);
       expect(onMatched).toHaveBeenCalled();
-      expect(push).toHaveBeenCalledWith(expect.stringMatching(/已自动匹配\s*5\s*\/\s*6.*未定\s*1/), undefined, "success");
     } finally {
       vi.useRealTimers();
     }

@@ -428,6 +428,23 @@ export interface AutoAttributeResult {
   threshold: number;
 }
 
+/** Outcome of the automatic per-session identify pass (match → prune → smooth → cluster). */
+export interface IdentifySessionResult {
+  session_id: string;
+  excluded_absent: string[];
+  attributed: AutoAttributeResult & { skipped?: boolean };
+  pruned: { pruned: Record<string, number>; total_segments: number };
+  corrections_applied: number;
+  clusters: { clusters: number; assigned: number; unassigned: number; scope_segments: number };
+}
+
+/** The absent-verdict cascade attached to a participant write. */
+export interface ParticipantCascade {
+  cascade: "none" | "absent";
+  cleared?: number;
+  identify?: IdentifySessionResult;
+}
+
 /** A candidate segment to label as an anchor (voiceprint flow). */
 export interface LabelSegment {
   segment_id: string;

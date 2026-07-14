@@ -299,6 +299,21 @@ def test_clear_person_session_attributions_scopes_to_session(tmp_path: Path) -> 
     assert overrides["other_1"] == ("per_a", "voiceprint")
 
 
+def test_worker_runs_identify_after_extraction(tmp_path: Path) -> None:
+    from personal_context_node.web.worker import PipelineWorker
+
+    config = _seed_session(tmp_path, n=12)
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+    _write_override(config.database_path, segment_id="seg_00", person_id="per_a", source="manual")
+    _write_override(config.database_path, segment_id="seg_01", person_id="per_b", source="manual")
+
+    # UI-triggered extraction paths call this hook (day scope here) instead of the pipeline edge.
+    PipelineWorker(config=config)._identify_after_extraction(session_id=None, day="2087-05-10")
+
+    voiceprint_people = {pid for pid, source in _override_map(config.database_path).values() if source == "voiceprint"}
+    assert voiceprint_people, "the post-extraction identify pass attributed the session"
+
+
 def test_identify_respects_absent_participants(tmp_path: Path) -> None:
     config = _seed_session(tmp_path, n=12)
     _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})

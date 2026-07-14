@@ -53,11 +53,37 @@ export function IdentityReviewPanel({
     if (!sessionId || !candidate.person_id) return;
     setBusy(true);
     try {
-      await api.setSessionParticipant(sessionId, candidate.person_id, status);
+      const res = await api.setSessionParticipant(sessionId, candidate.person_id, status);
+      // 审核结论直接驱动数据:absent 会级联清归属并重新识别;首个 present 自动排队总结。
+      if (res.cascade?.cascade === "absent") {
+        const cleared = res.cascade.cleared ?? 0;
+        push(`已排除 ${candidate.display_name}`, cleared > 0 ? `清除 ${cleared} 段推断归属并已重新识别本场` : "已重新识别本场");
+      } else if (res.summary_enqueued) {
+        push("总结已自动排队", "首位出席确认后,本场总结在后台生成");
+      }
       await load();
       onChanged();
     } catch (err) {
       push("身份标记失败", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reidentify = async () => {
+    if (!sessionId) return;
+    setBusy(true);
+    try {
+      const res = await api.identifySession(sessionId);
+      const prunedCount = Object.values(res.pruned.pruned).reduce((a, b) => a + b, 0);
+      push(
+        "已重新识别本场",
+        `归属 ${res.attributed.assigned}/${res.attributed.total} 段 · 剔除 ${prunedCount} · 纠偏 ${res.corrections_applied}`
+      );
+      await load();
+      onChanged();
+    } catch (err) {
+      push("重新识别失败", err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -129,6 +155,15 @@ export function IdentityReviewPanel({
           </span>
           <strong>{gateText}</strong>
           <span>{present.length} 位已确认 · {review.negative_feedback_count} 条负反馈</span>
+          <button
+            type="button"
+            className="ghost identity-inline-action"
+            disabled={busy}
+            onClick={() => void reidentify()}
+            title="按当前审核约束重跑自动识别(匹配→剔除→纠偏→聚类);已排除的人不会被再次匹配"
+          >
+            重新识别
+          </button>
         </div>
       </div>
 

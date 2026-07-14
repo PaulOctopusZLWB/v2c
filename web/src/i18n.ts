@@ -1,7 +1,7 @@
 export const STAGE_LABELS = ["设备", "导入", "转写", "审核", "观点", "发布"] as const;
 
 export const t = {
-  app: { title: "个人上下文节点", running: "运行中", idle: "空闲" },
+  app: { title: "知迹", running: "运行中", idle: "空闲" },
   nav: { days: "日期", sessions: "会话", tasks: "任务", device: "设备" },
   day: { processing: "处理中", ready: "可审", empty: "无转写" },
   device: { detected: "已接入", known: "已知源", newAudio: "个新录音", import: "导入", refresh: "自动刷新", none: "未检测到设备" },

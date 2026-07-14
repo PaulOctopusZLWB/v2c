@@ -60,10 +60,9 @@ export function VoiceprintPanel({
   // Stop polling on unmount or scope change.
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, [sessionId, day]);
 
-  // --- auto-match new voiceprints to existing people ---
-  // After embeddings exist, attribute every in-scope (non-manual) segment to the nearest enrolled
-  // person voiceprint ≥ threshold. Shared by the post-extract automatic pass and the manual button.
-  // Resolved once per extraction (guarded by being awaited inside extract.run, not the poll tick).
+  // --- manual re-match against the voiceprint library ---
+  // The worker now runs the full identify pass (匹配→剔除→纠偏→聚类) automatically after every
+  // extraction, so this is a repair button only, not part of the extract flow.
   async function runAutoMatch() {
     try {
       const res = await api.autoAttribute(matchScope);
@@ -102,8 +101,9 @@ export function VoiceprintPanel({
         }
       }, 2000);
     });
-    // The extraction pass finished — run the auto-match ONCE (we're past the poll, not on a tick).
-    await runAutoMatch();
+    // Matching/pruning/clustering now runs inside the worker right after extraction — the panel
+    // only needs to tell the rest of the UI that attributions likely changed.
+    onMatched?.();
   });
 
   // --- 2. anchors ---
