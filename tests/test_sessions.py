@@ -315,6 +315,114 @@ def test_derive_sessions_splits_segments_by_absolute_gap_across_audio_files(tmp_
     assert [row["segment_count"] for row in rows] == [1, 1]
 
 
+def test_derive_sessions_preserves_finalized_session_and_derives_only_new_audio(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_record(
+        config.database_path,
+        audio_file_id="aud_anchor",
+        recorded_at="2087-05-10T08:00:00+08:00",
+        duration_ms=60_000,
+    )
+    _insert_segment(config.database_path, "seg_anchor", 0, 10_000, audio_file_id="aud_anchor")
+    derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    conn = connect(config.database_path)
+    try:
+        anchor_id = str(conn.execute("select session_id from sessions").fetchone()["session_id"])
+        conn.execute(
+            """
+            insert into session_finalizations (
+              session_id, finalized_at, export_md_path, export_json_path, present_count, segment_count
+            ) values (?, ?, ?, ?, ?, ?)
+            """,
+            (anchor_id, "2087-05-10T09:00:00Z", "/export.md", "/export.json", 1, 1),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _insert_audio_record(
+        config.database_path,
+        audio_file_id="aud_new",
+        recorded_at="2087-05-10T09:00:00+08:00",
+        duration_ms=60_000,
+    )
+    _insert_segment(config.database_path, "seg_new", 0, 10_000, audio_file_id="aud_new")
+
+    result = derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    assert result.sessions_derived == 1
+    conn = connect(config.database_path)
+    try:
+        rows = fetch_all(conn, "select session_id, segment_count from sessions order by started_at")
+        finalized = fetch_all(conn, "select session_id from session_finalizations")
+    finally:
+        conn.close()
+    assert rows[0] == {"session_id": anchor_id, "segment_count": 1}
+    assert len(rows) == 2
+    assert finalized == [{"session_id": anchor_id}]
+
+
+def test_derive_sessions_splits_overlapping_recordings_from_same_configured_device(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_record(
+        config.database_path,
+        audio_file_id="aud_dji",
+        recorded_at="2087-05-10T08:00:00+08:00",
+        duration_ms=30 * 60 * 1000,
+    )
+    _insert_audio_record(
+        config.database_path,
+        audio_file_id="aud_phone",
+        recorded_at="2087-05-10T08:10:00+08:00",
+        duration_ms=60 * 60 * 1000,
+    )
+    _insert_segment(
+        config.database_path,
+        "seg_dji",
+        29 * 60 * 1000,
+        29 * 60 * 1000 + 10_000,
+        audio_file_id="aud_dji",
+    )
+    _insert_segment(config.database_path, "seg_phone", 0, 10_000, audio_file_id="aud_phone")
+
+    result = derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    assert result.sessions_derived == 2
+    assert [row["segment_count"] for row in _session_rows(config.database_path)] == [1, 1]
+
+
+def test_derive_sessions_ignores_explicit_duplicate_recording_source(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _insert_audio_record(
+        config.database_path,
+        audio_file_id="aud_primary",
+        recorded_at="2087-05-10T08:00:00+08:00",
+        duration_ms=60_000,
+    )
+    _insert_audio_record(
+        config.database_path,
+        audio_file_id="aud_duplicate",
+        recorded_at="2087-05-10T08:00:00+08:00",
+        duration_ms=60_000,
+        exclude_from_sessions=1,
+    )
+    _insert_segment(config.database_path, "seg_primary", 0, 10_000, audio_file_id="aud_primary")
+    _insert_segment(config.database_path, "seg_duplicate", 0, 10_000, audio_file_id="aud_duplicate")
+
+    result = derive_sessions_for_day(config=config, day="2087-05-10", session_gap_minutes=20)
+
+    assert result.sessions_derived == 1
+    conn = connect(config.database_path)
+    try:
+        duplicate = conn.execute(
+            "select session_id from transcript_segments where segment_id = 'seg_duplicate'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert duplicate["session_id"] is None
+
+
 def _insert_audio_and_segments(database_path: Path) -> None:
     conn = connect(database_path)
     try:
@@ -365,6 +473,42 @@ def _insert_audio_and_segments(database_path: Path) -> None:
                     "test",
                 ),
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _insert_audio_record(
+    database_path: Path,
+    *,
+    audio_file_id: str,
+    recorded_at: str,
+    duration_ms: int,
+    exclude_from_sessions: int = 0,
+) -> None:
+    conn = connect(database_path)
+    try:
+        initialize(conn)
+        conn.execute(
+            """
+            insert into audio_files (
+              audio_file_id, source_device, source_path, local_raw_path, sha256,
+              duration_ms, recorded_at, imported_at, status, exclude_from_sessions
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                audio_file_id,
+                "DJI Mic 3",
+                f"/source/{audio_file_id}.wav",
+                f"/local/{audio_file_id}.wav",
+                f"sha256:{audio_file_id}",
+                duration_ms,
+                recorded_at,
+                "2087-05-10T10:00:00+08:00",
+                "imported",
+                exclude_from_sessions,
+            ),
+        )
         conn.commit()
     finally:
         conn.close()

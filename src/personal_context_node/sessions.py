@@ -8,6 +8,9 @@ from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
+_TRACK_JOIN_TOLERANCE_MS = 2_000
+
+
 @dataclass(frozen=True)
 class DeriveSessionsResult:
     sessions_derived: int
@@ -35,16 +38,19 @@ def derive_sessions_for_day(
               ts.end_ms,
               af.recorded_at,
               af.source_device,
+              af.duration_ms,
+              ts.session_id,
               attr.person_id
             from transcript_segments ts
             join audio_files af on af.audio_file_id = ts.audio_file_id
             left join v_segment_attribution attr on attr.segment_id = ts.segment_id
-            where substr(af.recorded_at, 1, 10) = ? and ts.is_active = 1
-            order by af.source_device, af.recorded_at, ts.start_ms, ts.segment_id
+            where substr(af.recorded_at, 1, 10) = ?
+              and ts.is_active = 1
+              and af.exclude_from_sessions = 0
+            order by af.recorded_at, ts.start_ms, ts.segment_id
             """,
             (day,),
         )
-        groups = _group_segments(segments, gap_ms=session_gap_minutes * 60 * 1000)
         now = datetime.now(timezone.utc).isoformat()
         # Key the existing-session lookup and delete by the FILE recorded-day (the unit
         # being re-derived), not by date_key — a cross-midnight session is attributed to
@@ -52,7 +58,19 @@ def derive_sessions_for_day(
         existing_rows = fetch_all(
             conn,
             """
-            select s.first_segment_id, s.session_id, s.exclude_from_memory, ts.chunk_id as first_chunk_id
+            select
+              s.first_segment_id, s.session_id, s.exclude_from_memory,
+              ts.chunk_id as first_chunk_id,
+              (
+                s.name is not null
+                or exists (select 1 from session_finalizations f where f.session_id = s.session_id)
+                or exists (select 1 from session_participants p where p.session_id = s.session_id)
+                or exists (select 1 from session_viewpoint_state v where v.session_id = s.session_id)
+                or exists (
+                  select 1 from summaries sm
+                  where sm.target_type = 'session' and sm.target_id = s.session_id
+                )
+              ) as is_pinned
             from sessions s
             join transcript_segments ts on ts.segment_id = s.first_segment_id
             join audio_files af on af.audio_file_id = ts.audio_file_id
@@ -60,35 +78,48 @@ def derive_sessions_for_day(
             """,
             (day,),
         )
-        existing_by_first_segment = {str(row["first_segment_id"]): row for row in existing_rows}
+        pinned_session_ids = {
+            str(row["session_id"]) for row in existing_rows if int(row["is_pinned"])
+        }
+        mutable_rows = [row for row in existing_rows if not int(row["is_pinned"])]
+        groups = _group_segments(
+            [row for row in segments if str(row.get("session_id") or "") not in pinned_session_ids],
+            gap_ms=session_gap_minutes * 60 * 1000,
+        )
+        existing_by_first_segment = {str(row["first_segment_id"]): row for row in mutable_rows}
         # Anchor reuse on the first segment's CHUNK too: an ASR re-run replaces every
         # segment id (old ones go is_active=0), so first-segment containment can't match;
         # but chunks are stable, so the regrouped session's first chunk identifies the
         # same session and its id stays stable (§26.2.7, §36.2.6).
         existing_by_first_chunk = {
-            str(row["first_chunk_id"]): row for row in existing_rows if row["first_chunk_id"] is not None
+            str(row["first_chunk_id"]): row for row in mutable_rows if row["first_chunk_id"] is not None
         }
+        # Rebuild only machine-owned sessions. A named/reviewed/summarized/finalized session is a
+        # user artifact and therefore an immutable anchor; clearing or deleting it caused the live
+        # FOREIGN KEY failure and could invalidate exported evidence.
+        mutable_session_ids = [str(row["session_id"]) for row in mutable_rows]
+        if mutable_session_ids:
+            placeholders = ",".join("?" for _ in mutable_session_ids)
+            conn.execute(
+                f"update transcript_segments set session_id = null where session_id in ({placeholders})",
+                mutable_session_ids,
+            )
+            conn.execute(
+                f"delete from sessions where session_id in ({placeholders})",
+                mutable_session_ids,
+            )
+        # Explicitly excluded duplicate sources must also lose any stale machine assignment.
         conn.execute(
             """
             update transcript_segments
             set session_id = null
             where audio_file_id in (
-              select audio_file_id
-              from audio_files
-              where substr(recorded_at, 1, 10) = ?
+              select audio_file_id from audio_files
+              where substr(recorded_at, 1, 10) = ? and exclude_from_sessions = 1
             )
-            """,
-            (day,),
-        )
-        conn.execute(
-            """
-            delete from sessions where session_id in (
-              select s.session_id
-              from sessions s
-              join transcript_segments ts on ts.segment_id = s.first_segment_id
-              join audio_files af on af.audio_file_id = ts.audio_file_id
-              where substr(af.recorded_at, 1, 10) = ?
-            )
+              and (session_id is null or session_id not in (
+                select session_id from session_finalizations
+              ))
             """,
             (day,),
         )
@@ -121,7 +152,7 @@ def derive_sessions_for_day(
             group_chunk_ids = {str(row["chunk_id"]) for row in group}
             exclude_from_memory = 1 if any(
                 int(row["exclude_from_memory"])
-                for row in existing_rows
+                for row in mutable_rows
                 if str(row["first_segment_id"]) in group_segment_ids
                 or str(row["first_chunk_id"]) in group_chunk_ids
             ) else 0
@@ -168,26 +199,83 @@ def derive_sessions_for_day(
 
 
 def _group_segments(rows: list[dict[str, object]], *, gap_ms: int) -> list[list[dict[str, object]]]:
+    tracked_rows = _with_recording_tracks(rows)
     groups: list[list[dict[str, object]]] = []
     current: list[dict[str, object]] = []
     previous_end: int | None = None
-    previous_device: object = None
-    for row in rows:
+    previous_track: object = None
+    for row in tracked_rows:
         start_ms = _absolute_epoch_ms(row, offset_field="start_ms")
-        device = row.get("source_device")
-        # Only same-device, same-day segments within the gap threshold share a session
-        # (rule 26.2.1): a device change always starts a new session.
+        track = row.get("recording_track")
+        # A gap splits a single recorder timeline. A track change always splits, including
+        # overlapping recordings that happen to share the same configured source_device.
         gap_break = current and previous_end is not None and start_ms - previous_end > gap_ms
-        device_break = current and device != previous_device
-        if gap_break or device_break:
+        track_break = current and track != previous_track
+        if gap_break or track_break:
             groups.append(current)
             current = []
         current.append(row)
         previous_end = _absolute_epoch_ms(row, offset_field="end_ms")
-        previous_device = device
+        previous_track = track
     if current:
         groups.append(current)
     return groups
+
+
+def _with_recording_tracks(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Assign overlapping files from one configured device to separate physical timelines.
+
+    DJI's 30-minute split files join the closest track whose previous file has ended. A phone
+    recording that starts while that track is still active opens another track instead of being
+    interleaved into one giant session.
+    """
+    files: dict[str, dict[str, object]] = {}
+    for row in rows:
+        files.setdefault(str(row["audio_file_id"]), row)
+
+    track_by_audio: dict[str, tuple[str, int]] = {}
+    by_device: dict[str, list[dict[str, object]]] = {}
+    for row in files.values():
+        by_device.setdefault(str(row.get("source_device") or ""), []).append(row)
+
+    for device, device_files in by_device.items():
+        track_ends: list[int] = []
+        ordered = sorted(
+            device_files,
+            key=lambda row: (
+                _absolute_epoch_ms(row, offset_field="start_ms") - int(row["start_ms"]),
+                str(row["audio_file_id"]),
+            ),
+        )
+        for row in ordered:
+            recorded_at_ms = _absolute_epoch_ms(row, offset_field="start_ms") - int(row["start_ms"])
+            eligible = [
+                index
+                for index, end_ms in enumerate(track_ends)
+                if end_ms <= recorded_at_ms + _TRACK_JOIN_TOLERANCE_MS
+            ]
+            if eligible:
+                track_index = max(eligible, key=lambda index: track_ends[index])
+            else:
+                track_index = len(track_ends)
+                track_ends.append(recorded_at_ms)
+            track_ends[track_index] = max(
+                track_ends[track_index], recorded_at_ms + int(row.get("duration_ms") or 0)
+            )
+            track_by_audio[str(row["audio_file_id"])] = (device, track_index)
+
+    annotated = [
+        {**row, "recording_track": track_by_audio[str(row["audio_file_id"])]}
+        for row in rows
+    ]
+    return sorted(
+        annotated,
+        key=lambda row: (
+            row["recording_track"],
+            _absolute_epoch_ms(row, offset_field="start_ms"),
+            str(row["segment_id"]),
+        ),
+    )
 
 
 def _absolute_epoch_ms(row: dict[str, object], *, offset_field: str) -> int:

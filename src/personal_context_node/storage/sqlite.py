@@ -24,6 +24,8 @@ create table if not exists audio_files (
   recorded_at text not null,
   imported_at text not null,
   status text not null,
+  exclude_from_sessions integer not null default 0,
+  session_exclusion_reason text,
   unique(source_path, source_size_bytes, source_mtime_ns, sha256)
 );
 
@@ -584,6 +586,11 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _ensure_column(conn, "audio_files", "source_size_bytes", "integer not null default 0")
     _ensure_column(conn, "audio_files", "source_mtime_ns", "integer not null default 0")
+    # Session-level dedupe is distinct from exact-file import dedupe. Concurrent recorders can
+    # capture the same meeting with different bytes and very different ASR text; only an explicit
+    # user/system decision may suppress such a source from session derivation.
+    _ensure_column(conn, "audio_files", "exclude_from_sessions", "integer not null default 0")
+    _ensure_column(conn, "audio_files", "session_exclusion_reason", "text")
     _relax_audio_files_source_identity(conn)
     conn.execute("drop index if exists idx_audio_files_source_identity")
     conn.execute(
@@ -878,6 +885,8 @@ def _relax_audio_files_source_identity(conn: sqlite3.Connection) -> None:
           recorded_at text not null,
           imported_at text not null,
           status text not null,
+          exclude_from_sessions integer not null default 0,
+          session_exclusion_reason text,
           unique(source_path, source_size_bytes, source_mtime_ns, sha256)
         )
         """
@@ -886,11 +895,13 @@ def _relax_audio_files_source_identity(conn: sqlite3.Connection) -> None:
         """
         insert into audio_files (
           audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
-          local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+          local_raw_path, sha256, duration_ms, recorded_at, imported_at, status,
+          exclude_from_sessions, session_exclusion_reason
         )
         select
           audio_file_id, source_device, source_path, source_size_bytes, source_mtime_ns,
-          local_raw_path, sha256, duration_ms, recorded_at, imported_at, status
+          local_raw_path, sha256, duration_ms, recorded_at, imported_at, status,
+          exclude_from_sessions, session_exclusion_reason
         from audio_files_legacy_identity
         """
     )
