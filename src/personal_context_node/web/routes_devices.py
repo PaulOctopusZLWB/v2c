@@ -11,7 +11,6 @@ router = APIRouter(prefix="/api")
 
 @router.get("/devices")
 def devices(request: Request) -> dict[str, object]:
-    # audio_count is "files present on the source" — it is not de-duplicated
-    # against already-imported files (DB cross-check is out of scope for v1).
+    # audio_count is the number of source snapshots not yet present in audio_files.
     config: AppConfig = request.app.state.config
     return {"sources": discover_import_sources(config=config)}

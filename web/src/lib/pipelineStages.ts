@@ -1,6 +1,6 @@
 import type { ImportProgress, StatusSummary } from "../api/types";
 
-/* 管道六阶段(导入/VAD/转写/切分/摘要/发布)的共享推导:今日横条(spine)与
+/* 管道阶段(导入/VAD/转写/声纹情绪/切分/摘要/发布)的共享推导:今日横条(spine)与
  * 管道页阶段栈都从 status.summary 聚合出同一组状态。 */
 
 export type PipelineStageState = "done" | "running" | "pending";
@@ -20,7 +20,8 @@ function pct(part: number, whole: number): number {
 
 const GROUPS: Array<{ label: string; types: string[] }> = [
   { label: "VAD", types: ["vad"] },
-  { label: "转写", types: ["asr"] },
+  { label: "转写", types: ["asr", "transcribe_diarize"] },
+  { label: "声纹/情绪", types: ["extract_features", "identify_speakers"] },
   { label: "切分", types: ["session_derive"] },
   { label: "摘要", types: ["summarize_session", "daily_generate"] },
   { label: "发布", types: ["obsidian_publish", "archive"] }

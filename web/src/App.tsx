@@ -58,11 +58,19 @@ function stageBreakdownFromSummary(
 ): Array<{ label: string; done: number; total: number }> {
   if (!stageCounts) return [];
   // Only show stages that still have unfinished work, ordered by the pipeline DAG.
-  const order = ["vad", "asr", "session_derive", "summarize_session", "daily_generate", "obsidian_publish", "archive"];
+  const order = ["vad", "asr", "transcribe_diarize", "extract_features", "identify_speakers", "session_derive", "summarize_session", "daily_generate", "obsidian_publish", "archive"];
   return Object.entries(stageCounts)
     .filter(([, c]) => c.done < c.total)
     .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
     .map(([type, c]) => ({ label: taskTypeZh(type), done: c.done, total: c.total }));
+}
+
+function elapsedZh(seconds: number): string {
+  const value = Math.max(0, Math.floor(seconds));
+  if (value < 60) return `${value} 秒`;
+  const minutes = Math.floor(value / 60);
+  const remainder = value % 60;
+  return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分`;
 }
 
 /** Build the multi-scope projection request from the 声纹 scope + tuning params, keeping only
@@ -650,19 +658,29 @@ export function App() {
   // Live progress: import phase first (copying files), then transcription/processing
   // driven by the compact summary counts. At idle / 100% the bar disappears.
   const inFlight = worker_running || inFlightCount > 0;
+  const featureProgress = !importing && summary?.feature_progress?.active ? summary.feature_progress : null;
   const current: Stage = summary?.active_stage ? stageForTaskType(summary.active_stage) : "device";
-  const total = importing ? import_progress!.total : inFlight ? summaryTotal : 0;
-  const done = importing ? import_progress!.done : doneCount;
+  const total = importing ? import_progress!.total : featureProgress?.total ?? (inFlight ? summaryTotal : 0);
+  const done = importing ? import_progress!.done : featureProgress?.done ?? doneCount;
   const progressLabel = importing
-    ? `导入 ${import_progress!.current || "…"}`
+    ? import_progress?.phase === "scanning"
+      ? "扫描源文件"
+      : `导入新增 ${import_progress!.done}/${import_progress!.total}${import_progress!.current ? ` · ${import_progress!.current}` : ""}`
+    : featureProgress
+      ? `声纹/情绪提取 · ${featureProgress.current || featureProgress.target_id} · 已运行 ${elapsedZh(featureProgress.elapsed_seconds)}`
     : summary?.active_stage
       ? taskTypeZh(summary.active_stage)
       : STAGES.find((s) => s.id === current)?.label;
 
   // Per-stage breakdown + ETA need the full task list (durations live there, not in the
   // summary), so they show in the always-visible header without the heavy task fetch.
-  const stageBreakdown = stageBreakdownFromSummary(summary?.stage_counts);
-  const etaSeconds = summary?.eta_seconds ?? null;
+  const stageBreakdown = featureProgress
+    ? [
+        { label: "声纹", done: featureProgress.embedded, total: featureProgress.total_segments },
+        { label: "情绪", done: featureProgress.emoted, total: featureProgress.total_segments }
+      ]
+    : stageBreakdownFromSummary(summary?.stage_counts);
+  const etaSeconds = importing ? import_progress?.eta_seconds ?? null : summary?.eta_seconds ?? null;
   // The summary's failed_total counts terminal + retry-exhausted failures (matching the
   // backend's "done" semantics); the task-list fallback over-counts retryable failures that
   // still have attempts left, but only applies when the summary hasn't arrived yet.
@@ -782,7 +800,8 @@ export function App() {
               total={total}
               label={progressLabel}
               stages={importing ? undefined : stageBreakdown}
-              etaSeconds={importing ? null : etaSeconds}
+              etaSeconds={etaSeconds}
+              etaConfidence={importing ? undefined : summary?.eta_confidence}
             />
           ) : null
         }

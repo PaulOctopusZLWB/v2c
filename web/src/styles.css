@@ -1890,6 +1890,24 @@ button.today-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--
 .pipe-feed-col { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; min-height: 0; }
 .pipe-feed-head { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
 .pipe-live { font-size: var(--fs-sm); color: var(--accent); letter-spacing: .06em; }
+.import-manifest {
+  display: grid; gap: var(--s3); padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--r2); background: var(--panel-2);
+}
+.import-manifest.is-scanning { display: flex; align-items: center; gap: var(--s3); }
+.import-manifest.is-scanning > div { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
+.import-manifest-head { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-xs); }
+.import-manifest-head > :last-child { margin-left: auto; }
+.import-manifest-head .is-live { color: var(--accent); }
+.import-manifest-ledger { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.import-manifest-ledger > span { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); padding: 9px 10px; background: var(--panel); }
+.import-manifest-ledger small { color: var(--text-dim); font-size: 11px; }
+.import-manifest-ledger b { color: var(--text); font-size: var(--fs-base); }
+.import-manifest-ledger .is-duplicate b { color: var(--text-2); }
+.import-manifest-ledger .is-new b { color: var(--accent); }
+.import-manifest p { margin: 0; font-size: 11.5px; }
+.progress-eta-basis { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+@media (max-width: 720px) { .import-manifest-ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* 列表底对齐:新段从底部进入,越旧越透明(inline opacity)。 */
 .pipe-feed {
   flex: 1 1 auto;

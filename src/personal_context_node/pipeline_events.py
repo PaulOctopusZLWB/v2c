@@ -15,13 +15,17 @@ polls into the richer event set the 管道控制室 consumes:
 from __future__ import annotations
 
 import sqlite3
+import statistics
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 # 每 tick 最多下发的新段数(防止批量回填时把浏览器打爆;多出的下一 tick 继续)。
 MAX_SEGMENTS_PER_TICK = 50
+_GPU_TASK_TYPES = frozenset({"vad", "transcribe_diarize", "asr", "extract_features"})
 
 
 @dataclass
@@ -90,6 +94,125 @@ def fetch_new_segments(
     return events, cursor
 
 
+def active_feature_progress(
+    *, config: AppConfig, conn: sqlite3.Connection | None = None
+) -> dict[str, object] | None:
+    """Live artifact coverage for the active per-file feature extraction task.
+
+    ``tasks`` only changes when the whole file finishes, which made a 5-20 minute
+    extract_features task look frozen. The artifact tables commit every completed batch,
+    so their coverage is a cheap, durable progress signal that also survives reconnects.
+    ``elapsed_seconds`` acts as a heartbeat between batch commits.
+    """
+    owns_conn = conn is None
+    if conn is None:
+        conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        row = conn.execute(
+            """
+            select
+              t.target_id,
+              t.started_at,
+              af.source_path,
+              count(ts.segment_id) as total_segments,
+              count(se.segment_id) as embedded,
+              count(em.segment_id) as emoted
+            from tasks t
+            join audio_files af on af.audio_file_id = t.target_id
+            left join transcript_segments ts
+              on ts.audio_file_id = t.target_id and ts.is_active = 1
+            left join segment_embeddings se on se.segment_id = ts.segment_id
+            left join segment_emotions em on em.segment_id = ts.segment_id
+            where t.task_type = 'extract_features'
+              and t.status in ('claimed', 'running')
+            group by t.task_id, t.target_id, t.started_at, af.source_path
+            order by t.started_at
+            limit 1
+            """
+        ).fetchone()
+    finally:
+        if owns_conn:
+            conn.close()
+    if row is None:
+        return None
+
+    total_segments = int(row["total_segments"] or 0)
+    embedded = int(row["embedded"] or 0)
+    emoted = int(row["emoted"] or 0)
+    elapsed_seconds = 0
+    started_at = str(row["started_at"] or "")
+    if started_at:
+        try:
+            started = datetime.fromisoformat(started_at)
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            elapsed_seconds = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+        except ValueError:
+            pass
+    return {
+        "active": True,
+        "target_id": str(row["target_id"]),
+        "current": Path(str(row["source_path"])).name,
+        "total_segments": total_segments,
+        "embedded": embedded,
+        "emoted": emoted,
+        "done": embedded + emoted,
+        "total": total_segments * 2,
+        "elapsed_seconds": elapsed_seconds,
+    }
+
+
+def estimate_pipeline_eta(
+    *, rows: list[dict[str, object]], feature_progress: dict[str, object] | None
+) -> tuple[int | None, str]:
+    """Estimate queue ETA by task type and execution lane, not raw task count."""
+    durations_by_type: dict[str, list[int]] = {}
+    for row in rows:
+        duration = row.get("duration_ms")
+        if duration is not None:
+            durations_by_type.setdefault(str(row["task_type"]), []).append(int(duration))
+
+    lane_ms = {"gpu": 0.0, "cpu": 0.0}
+    estimated_tasks = 0
+    unknown_tasks = 0
+    used_live_progress = False
+    for row in rows:
+        status = str(row["status"])
+        if status not in {"pending", "claimed", "running", "failed_retryable"}:
+            continue
+        if status == "failed_retryable" and int(row.get("retry_count") or 0) >= int(row.get("max_retries") or 0):
+            continue
+        task_type = str(row["task_type"])
+        samples = durations_by_type.get(task_type, [])
+        if not samples:
+            unknown_tasks += 1
+            continue
+        estimate_ms = float(statistics.median(samples))
+        if (
+            task_type == "extract_features"
+            and status in {"claimed", "running"}
+            and feature_progress
+            and int(feature_progress.get("total") or 0) > 0
+        ):
+            total = int(feature_progress["total"])
+            done = min(total, int(feature_progress.get("done") or 0))
+            remaining_ratio = max(0.0, (total - done) / total)
+            historical_remaining = estimate_ms * remaining_ratio
+            elapsed_ms = int(feature_progress.get("elapsed_seconds") or 0) * 1000
+            live_remaining = (elapsed_ms * (total - done) / done) if done > 0 else 0.0
+            estimate_ms = max(historical_remaining, live_remaining)
+            used_live_progress = done > 0
+        lane = "gpu" if task_type in _GPU_TASK_TYPES else "cpu"
+        lane_ms[lane] += estimate_ms
+        estimated_tasks += 1
+
+    if estimated_tasks == 0:
+        return (None, "learning" if unknown_tasks else "none")
+    confidence = "live" if used_live_progress and unknown_tasks == 0 else "historical" if unknown_tasks == 0 else "partial"
+    return (max(1, round(max(lane_ms.values()) / 1000.0)), confidence)
+
+
 def derive_tick_events(
     *,
     cursor: EventCursor,
@@ -145,6 +268,7 @@ def derive_tick_events(
                     "done_total": summary.get("done_total"),
                     "total": summary.get("total"),
                     "eta_seconds": summary.get("eta_seconds"),
+                    "feature_progress": summary.get("feature_progress"),
                 },
             )
         )

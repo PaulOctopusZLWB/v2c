@@ -140,10 +140,11 @@ describe("HomePanel (今日)", () => {
 });
 
 describe("spineStages", () => {
-  it("maps import/summary counts to the six-stage spine", () => {
+  it("maps import/summary counts to the pipeline spine including feature extraction", () => {
     const stages = spineStages(null, { active: true, done: 1, total: 4, current: "a.wav" });
     expect(stages[0]).toMatchObject({ label: "导入", state: "running", pct: 25, done: 1, total: 4 });
-    expect(stages).toHaveLength(6);
+    expect(stages).toHaveLength(7);
+    expect(stages.some((stage) => stage.label === "声纹/情绪")).toBe(true);
     expect(stages.slice(1).every((s) => s.state === "pending")).toBe(true);
   });
 });

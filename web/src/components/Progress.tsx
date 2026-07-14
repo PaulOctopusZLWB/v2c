@@ -25,13 +25,15 @@ export function Progress({
   total,
   label,
   stages,
-  etaSeconds
+  etaSeconds,
+  etaConfidence
 }: {
   done: number;
   total: number;
   label?: string;
   stages?: StageCount[];
   etaSeconds?: number | null;
+  etaConfidence?: "live" | "historical" | "partial" | "learning" | "none";
 }) {
   if (total === 0) return null;
   const ratio = Math.max(0, Math.min(1, done / total));
@@ -43,6 +45,11 @@ export function Progress({
         {label ? <> · {label}</> : null}
         <span className="num progress-pct"> {pct}%</span>
         {etaSeconds != null ? <span className="progress-eta"> · {etaLabel(etaSeconds)}</span> : null}
+        {etaSeconds != null && etaConfidence && etaConfidence !== "none" ? (
+          <span className="progress-eta-basis">
+            {etaConfidence === "live" ? "实时估算" : etaConfidence === "historical" ? "按历史耗时" : etaConfidence === "partial" ? "粗略估算" : "正在学习"}
+          </span>
+        ) : null}
       </span>
       <div
         className="progress-track"

@@ -3,10 +3,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
+from dataclasses import asdict
 from pathlib import Path
 
 from personal_context_node.config import AppConfig
-from personal_context_node.ingest import import_audio_files
+from personal_context_node.ingest import IngestProgressUpdate, import_audio_files
 from personal_context_node.pipeline_adapters import build_pipeline_adapters
 from personal_context_node.process_runner import DrainResult, drain_process_queue
 
@@ -306,7 +307,20 @@ class PipelineWorker:
             if self.is_running():
                 return False
             self._stop.clear()
-            self._import = {"active": True, "done": 0, "total": 0, "current": ""}
+            self._import = {
+                "active": True,
+                "phase": "scanning",
+                "scanned_files": 0,
+                "duplicate_files": 0,
+                "new_files": 0,
+                "imported_files": 0,
+                "done": 0,
+                "total": 0,
+                "current": "",
+                "bytes_done": 0,
+                "bytes_total": 0,
+                "eta_seconds": None,
+            }
             self._thread = threading.Thread(
                 target=self._import_then_drain, kwargs={"source_dir": source_dir}, daemon=True
             )
@@ -494,8 +508,8 @@ class PipelineWorker:
     def _import_then_drain(self, *, source_dir: str) -> None:
         from personal_context_node import settings as _settings
 
-        def _cb(done: int, total: int, name: str) -> None:
-            self._import = {"active": True, "done": done, "total": total, "current": name}
+        def _cb(update: IngestProgressUpdate) -> None:
+            self._import = {"active": True, **asdict(update)}
 
         try:
             try:
@@ -509,10 +523,12 @@ class PipelineWorker:
             finally:
                 # Mark import phase inactive (even on error) before draining; the SSE
                 # bar reads active=False as "import done, now transcribing".
-                final = self._import or {"done": 0, "total": 0}
-                total = int(final.get("total", 0))
-                done = int(final.get("done", total))
-                self._import = {"active": False, "done": done, "total": total, "current": ""}
+                final = dict(self._import or {"done": 0, "total": 0})
+                final["active"] = False
+                final["phase"] = "complete"
+                final["current"] = ""
+                final["eta_seconds"] = None
+                self._import = final
             self._last_result = self._drain_to_completion()
         finally:
             # Guard against an import that raised before the inner finally set active=False.

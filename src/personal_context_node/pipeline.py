@@ -44,7 +44,7 @@ def run_first_milestone(
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        imported = import_audio_files_in_conn(conn, config=config, source_dir=source_dir)
+        import_result = import_audio_files_in_conn(conn, config=config, source_dir=source_dir)
         conn.commit()
         _mock_transcribe(conn)
         days = _transcript_days(conn)
@@ -55,7 +55,7 @@ def run_first_milestone(
             _confirm_first_candidate(conn, config)
         _publish_daily_notes(conn, config)
         return FirstMilestoneResult(
-            imported_files=imported,
+            imported_files=import_result.imported_files,
             transcript_segments=_count(conn, "transcript_segments"),
             memory_candidates=_count(conn, "memory_candidates"),
             signed_events=_count(conn, "signed_events"),

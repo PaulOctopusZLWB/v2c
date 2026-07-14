@@ -130,6 +130,106 @@ describe("App container", () => {
     expect((await screen.findByRole("button", { name: /转写中 · a1/ })).textContent).toMatch(/转写中/);
   });
 
+  it("streams per-file voiceprint and emotion progress for extract_features", async () => {
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: { succeeded: 20, running: 1, pending: 2 },
+          total: 23,
+          done_total: 20,
+          active_stage: "extract_features",
+          current_target: "aud_1",
+          feature_progress: {
+            active: true,
+            target_id: "aud_1",
+            current: "meeting.wav",
+            total_segments: 100,
+            embedded: 40,
+            emoted: 100,
+            done: 140,
+            total: 200,
+            elapsed_seconds: 372
+          },
+          import_progress: null,
+          worker_running: true
+        })
+      })
+    );
+
+    expect(await screen.findByRole("button", { name: /声纹\/情绪提取 · meeting.wav 70%/ })).toBeInTheDocument();
+    await gotoTab("管道");
+    const bar = await screen.findByRole("progressbar", { name: /声纹\/情绪提取/ });
+    expect(bar).toHaveAttribute("aria-valuenow", "140");
+    expect(bar).toHaveAttribute("aria-valuemax", "200");
+    expect(screen.getByText("声纹").closest(".progress-stage")).toHaveTextContent("40/100");
+    expect(screen.getByText("情绪").closest(".progress-stage")).toHaveTextContent("100/100");
+    expect(screen.getByText(/已运行 6 分 12 秒/)).toBeInTheDocument();
+  });
+
+  it("separates scanned duplicates from the new-file import denominator", async () => {
+    let summaryListener: ((event: { data: string }) => void) | null = null;
+    vi.stubGlobal("EventSource", class {
+      addEventListener(type: string, cb: (event: { data: string }) => void) {
+        if (type === "status.summary") summaryListener = cb;
+      }
+      close() {}
+    } as unknown as typeof EventSource);
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+
+    renderApp();
+    await waitFor(() => expect(summaryListener).not.toBeNull());
+    act(() =>
+      summaryListener!({
+        data: JSON.stringify({
+          status_counts: {},
+          total: 0,
+          active_stage: null,
+          current_target: null,
+          import_progress: {
+            active: true,
+            phase: "importing",
+            scanned_files: 212,
+            duplicate_files: 197,
+            new_files: 15,
+            imported_files: 0,
+            done: 0,
+            total: 15,
+            current: "new-01.wav",
+            eta_seconds: 120
+          },
+          worker_running: true
+        })
+      })
+    );
+
+    await gotoTab("管道");
+    const manifest = await screen.findByRole("region", { name: "本次导入判定" });
+    expect(manifest).toHaveTextContent("扫描212");
+    expect(manifest).toHaveTextContent("已存在197");
+    expect(manifest).toHaveTextContent("新增15");
+    expect(manifest).toHaveTextContent("197 个已存在文件已跳过，不进入导入百分比与 ETA");
+    const bar = screen.getByRole("progressbar", { name: /导入新增 0\/15/ });
+    expect(bar).toHaveAttribute("aria-valuenow", "0");
+    expect(bar).toHaveAttribute("aria-valuemax", "15");
+  });
+
   it("does not show the live progress bar for idle pending tasks", async () => {
     let summaryListener: ((event: { data: string }) => void) | null = null;
     vi.stubGlobal("EventSource", class {

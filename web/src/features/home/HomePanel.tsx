@@ -163,7 +163,7 @@ export function HomePanel({
           <span className="today-card-label">管道</span>
           <span className={spineLive ? "today-spine-target" : "today-spine-target dim"}>
             {spineLive
-              ? `${importProgress?.active ? importProgress.current || "导入中" : summary?.current_target ?? ""} 处理中`
+              ? `${importProgress?.active ? importProgress.phase === "scanning" ? "扫描源文件" : `导入新增 ${importProgress.done}/${importProgress.total}` : summary?.feature_progress?.current ?? summary?.current_target ?? ""} 处理中`
               : "管道空闲"}
           </span>
           <span className="today-spine-more dim">在管道页查看 →</span>

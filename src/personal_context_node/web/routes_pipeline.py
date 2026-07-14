@@ -10,7 +10,14 @@ from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
 from personal_context_node.ingest import import_audio_files
-from personal_context_node.pipeline_events import EventCursor, derive_tick_events, fetch_new_segments, max_segment_rowid
+from personal_context_node.pipeline_events import (
+    EventCursor,
+    active_feature_progress,
+    derive_tick_events,
+    estimate_pipeline_eta,
+    fetch_new_segments,
+    max_segment_rowid,
+)
 from personal_context_node.storage.sqlite import connect
 from personal_context_node.tasks import process_status_rows, retry_failed_tasks, retry_task, task_metrics
 
@@ -39,7 +46,13 @@ def import_stage(request: Request, payload: ImportRequest) -> dict[str, object]:
     from personal_context_node import settings as _settings
 
     result = import_audio_files(config=_settings.effective_config(config), source_dir=Path(payload.source_dir))
-    response: dict[str, object] = {"imported_files": result.imported_files, "queued": True}
+    response: dict[str, object] = {
+        "imported_files": result.imported_files,
+        "scanned_files": result.scanned_files,
+        "duplicate_files": result.duplicate_files,
+        "new_files": result.new_files,
+        "queued": True,
+    }
     drain = worker.drain_now()
     response["drain"] = {
         "status": drain.status,
@@ -152,9 +165,6 @@ async def events_stream(request: Request) -> StreamingResponse:
                         done_total += 1
                         if _is_failed(r):
                             failed_total += 1
-                durations = [int(r["duration_ms"]) for r in rows if r["duration_ms"] is not None]
-                remaining = total - done_total
-                eta_seconds = round(remaining * (sum(durations) / len(durations)) / 1000.0) if durations and remaining > 0 else None
                 # Determine the active stage and current target from the first running/claimed task.
                 active_stage: str | None = None
                 current_target: str | None = None
@@ -163,6 +173,8 @@ async def events_stream(request: Request) -> StreamingResponse:
                         active_stage = str(r["task_type"])
                         current_target = str(r["target_id"])
                         break
+                feature_progress = active_feature_progress(config=config, conn=stream_conn)
+                eta_seconds, eta_confidence = estimate_pipeline_eta(rows=rows, feature_progress=feature_progress)
 
                 # Compact change-signature: every field that the rendered payload shows must be
                 # part of it, or a transition that changes only that field (e.g. the worker going
@@ -170,7 +182,16 @@ async def events_stream(request: Request) -> StreamingResponse:
                 # silently dropped and the UI would freeze on a stale frame. Still tiny — counts,
                 # not per-task detail.
                 signature = json.dumps(
-                    (sorted(status_counts.items()), worker_running, active_stage, current_target, import_progress),
+                    (
+                        sorted(status_counts.items()),
+                        worker_running,
+                        active_stage,
+                        current_target,
+                        import_progress,
+                        feature_progress,
+                        eta_seconds,
+                        eta_confidence,
+                    ),
                     sort_keys=True,
                     default=str,
                 )
@@ -181,9 +202,11 @@ async def events_stream(request: Request) -> StreamingResponse:
                     "done_total": done_total,
                     "failed_total": failed_total,
                     "eta_seconds": eta_seconds,
+                    "eta_confidence": eta_confidence,
                     "active_stage": active_stage,
                     "current_target": current_target,
                     "import_progress": import_progress,
+                    "feature_progress": feature_progress,
                     "worker_running": worker_running,
                 }
                 summary_changed = signature != last_signature

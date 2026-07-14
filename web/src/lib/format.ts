@@ -38,7 +38,10 @@ export function taskStatusZh(status: string): string {
 const TASK_TYPE_ZH: Record<string, string> = {
   vad: "预处理",
   asr: "转写",
+  transcribe_diarize: "转写分离",
   session_derive: "会话归并",
+  extract_features: "声纹/情绪提取",
+  identify_speakers: "说话人识别",
   summarize_session: "会话摘要",
   daily_generate: "日报生成",
   obsidian_publish: "发布",

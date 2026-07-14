@@ -468,6 +468,55 @@ def test_ingest_import_does_not_duplicate_repaired_source_snapshot(tmp_path: Pat
     assert rows == [{"n": 1}]
 
 
+def test_ingest_progress_only_counts_new_source_snapshots(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "sample_data"
+    old_a = source / "TX02_MIC001_20250610_173550_orig.wav"
+    old_b = source / "TX02_MIC002_20250610_174010_orig.wav"
+    new_file = source / "TX02_MIC003_20250610_175000_orig.wav"
+    _write_tiny_wav(old_a)
+    _write_tiny_wav(old_b)
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    assert import_audio_files(config=config, source_dir=source).imported_files == 2
+    _write_tiny_wav(new_file)
+
+    stability_checks: list[Path] = []
+    original_is_file_stable = ingest_module.is_file_stable
+
+    def recording_is_file_stable(path: Path, *, settle_seconds: float = 0.1) -> bool:
+        stability_checks.append(path)
+        return original_is_file_stable(path, settle_seconds=settle_seconds)
+
+    monkeypatch.setattr(ingest_module, "is_file_stable", recording_is_file_stable)
+    ticks: list[tuple[int, int, str]] = []
+
+    result = import_audio_files(
+        config=config,
+        source_dir=source,
+        progress=lambda update: ticks.append((update.done, update.total, update.current)),
+    )
+
+    assert result.imported_files == 1
+    assert result.scanned_files == 3
+    assert result.duplicate_files == 2
+    assert result.new_files == 1
+    assert stability_checks == [new_file]
+    assert ticks == [(0, 1, new_file.name), (1, 1, "")]
+
+    stability_checks.clear()
+    ticks.clear()
+    repeated = import_audio_files(
+        config=config,
+        source_dir=source,
+        progress=lambda update: ticks.append((update.done, update.total, update.current)),
+    )
+    assert repeated.imported_files == 0
+    assert repeated.scanned_files == 3
+    assert repeated.duplicate_files == 3
+    assert repeated.new_files == 0
+    assert stability_checks == []
+    assert ticks == [(0, 0, "")]
+
+
 def test_ingest_import_accepts_ieee_float_wav_duration(tmp_path: Path) -> None:
     source = tmp_path / "sample_data"
     source_audio = source / "TX02_MIC013_20250611_190910_orig.wav"

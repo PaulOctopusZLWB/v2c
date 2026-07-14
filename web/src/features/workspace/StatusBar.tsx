@@ -34,15 +34,22 @@ export function StatusBar({
   onToggleTheme: () => void;
 }) {
   const importing = !!importProgress?.active;
-  const total = importing ? importProgress!.total : summary?.total ?? 0;
-  const done = importing ? importProgress!.done : summary?.done_total ?? 0;
+  const featureProgress = summary?.feature_progress?.active ? summary.feature_progress : null;
+  const total = importing ? importProgress!.total : featureProgress?.total ?? summary?.total ?? 0;
+  const done = importing ? importProgress!.done : featureProgress?.done ?? summary?.done_total ?? 0;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   // 数字/ID 一律走 .num(mono + tabular-nums),百分比逐秒变化时胶囊不抖。
   let pillContent: ReactNode;
   if (importing) {
+    pillContent = importProgress?.phase === "scanning"
+      ? <>正在扫描源文件</>
+      : <>导入新增 · <span className="num">{importProgress!.done}/{importProgress!.total} {pct}%</span></>;
+  } else if (running && featureProgress) {
     pillContent = (
-      <>导入中 · <span className="num">{importProgress!.current || "…"} {pct}%</span></>
+      <>
+        声纹/情绪提取 · <span className="num">{featureProgress.current || featureProgress.target_id} {pct}%</span>
+      </>
     );
   } else if (running && summary?.active_stage) {
     pillContent = (

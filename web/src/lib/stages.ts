@@ -12,7 +12,8 @@ export const STAGES: Array<{ id: Stage; label: string }> = [
 ];
 
 export function stageForTaskType(taskType: string): Stage {
-  if (taskType === "vad" || taskType === "asr") return "asr";
+  if (taskType === "vad" || taskType === "asr" || taskType === "transcribe_diarize") return "asr";
+  if (taskType === "extract_features" || taskType === "identify_speakers") return "review";
   if (taskType === "session_derive" || taskType === "summarize_session" || taskType === "daily_generate") return "llm";
   if (taskType === "obsidian_publish" || taskType === "archive") return "publish";
   return "import";

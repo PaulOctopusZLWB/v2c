@@ -13,6 +13,42 @@ import { StageDurationsPanel } from "./StageDurationsPanel";
 
 export const AUTO_REVIEW_KEY = "pcn-auto-review";
 
+function ImportBatchManifest({ progress }: { progress?: ImportProgress | null }) {
+  // A running pre-upgrade backend may briefly serve the legacy progress shape.
+  // Hide the ledger until the backend can provide a truthful duplicate/new split.
+  if (!progress?.phase) return null;
+  const scanning = progress.active && progress.phase === "scanning";
+  if (scanning) {
+    return (
+      <section className="import-manifest is-scanning" aria-label="本次导入判定">
+        <span className="breathe-dot" aria-hidden />
+        <div><b>正在扫描源文件</b><span className="dim">建立清单后再计算新增量，暂不显示百分比。</span></div>
+      </section>
+    );
+  }
+  const scanned = progress.scanned_files ?? (progress.duplicate_files ?? 0) + (progress.new_files ?? progress.total);
+  const duplicates = progress.duplicate_files ?? Math.max(0, scanned - (progress.new_files ?? progress.total));
+  const newFiles = progress.new_files ?? progress.total;
+  const imported = progress.imported_files ?? progress.done;
+  return (
+    <section className="import-manifest" aria-label="本次导入判定">
+      <div className="import-manifest-head">
+        <span className="today-card-label">本次导入</span>
+        <span className={progress.active ? "is-live" : "ok"}>
+          {progress.active ? `正在导入新增 ${progress.done}/${newFiles}` : "扫描与去重完成"}
+        </span>
+      </div>
+      <div className="import-manifest-ledger">
+        <span><small>扫描</small><b className="num">{scanned}</b></span>
+        <span className="is-duplicate"><small>已存在</small><b className="num">{duplicates}</b></span>
+        <span className="is-new"><small>新增</small><b className="num">{newFiles}</b></span>
+        <span><small>已入库</small><b className="num">{imported}/{newFiles}</b></span>
+      </div>
+      <p className="dim"><span className="num">{duplicates}</span> 个已存在文件已跳过，不进入导入百分比与 ETA。</p>
+    </section>
+  );
+}
+
 export function readAutoReview(): boolean {
   try {
     return localStorage.getItem(AUTO_REVIEW_KEY) === "1";
@@ -98,6 +134,7 @@ export function PipelinePanel({
           </span>
           {progress}
         </div>
+        <ImportBatchManifest progress={importProgress} />
         <div className="pipe-feed panel-scroll" ref={feedRef}>
           {segments.length === 0 ? (
             <p className="pipe-feed-empty dim">

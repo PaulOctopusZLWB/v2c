@@ -30,6 +30,24 @@ class IngestScanResult:
 @dataclass(frozen=True)
 class IngestImportResult:
     imported_files: int
+    scanned_files: int = 0
+    duplicate_files: int = 0
+    new_files: int = 0
+
+
+@dataclass(frozen=True)
+class IngestProgressUpdate:
+    phase: str
+    scanned_files: int
+    duplicate_files: int
+    new_files: int
+    imported_files: int
+    done: int
+    total: int
+    current: str
+    bytes_done: int
+    bytes_total: int
+    eta_seconds: int | None
 
 
 @dataclass(frozen=True)
@@ -76,14 +94,14 @@ def import_audio_files(
     *,
     config: AppConfig,
     source_dir: Path,
-    progress: "Callable[[int, int, str], None] | None" = None,
+    progress: "Callable[[IngestProgressUpdate], None] | None" = None,
 ) -> IngestImportResult:
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        imported = import_audio_files_in_conn(conn, config=config, source_dir=source_dir, progress=progress)
+        result = import_audio_files_in_conn(conn, config=config, source_dir=source_dir, progress=progress)
         conn.commit()
-        return IngestImportResult(imported_files=imported)
+        return result
     finally:
         conn.close()
 
@@ -104,28 +122,62 @@ def import_audio_files_in_conn(
     *,
     config: AppConfig,
     source_dir: Path,
-    progress: "Callable[[int, int, str], None] | None" = None,
-) -> int:
+    progress: "Callable[[IngestProgressUpdate], None] | None" = None,
+) -> IngestImportResult:
     imported = 0
-    files = scan_audio_files(source_dir=source_dir).files
+    scanned_files = scan_audio_files(source_dir=source_dir).files
+    files = _unimported_audio_paths(
+        scanned_files,
+        imported_snapshots=imported_source_snapshots_in_conn(conn),
+    )
     total = len(files)
+    duplicate_files = len(scanned_files) - total
+    planned_sizes = {path: path.stat().st_size for path in files}
+    bytes_total = sum(planned_sizes.values())
+    bytes_done = 0
     done = 0
+    started = time.monotonic()
+
+    def emit(current: str) -> None:
+        if progress is None:
+            return
+        elapsed = time.monotonic() - started
+        eta_seconds = None
+        if done > 0 and done < total and elapsed > 0:
+            eta_seconds = max(1, round((elapsed / done) * (total - done)))
+        progress(
+            IngestProgressUpdate(
+                phase="importing" if done < total else "complete",
+                scanned_files=len(scanned_files),
+                duplicate_files=duplicate_files,
+                new_files=total,
+                imported_files=imported,
+                done=done,
+                total=total,
+                current=current,
+                bytes_done=bytes_done,
+                bytes_total=bytes_total,
+                eta_seconds=eta_seconds,
+            )
+        )
+
+    if progress is not None:
+        # Publish the scan decision before the first slow copy. Duplicate snapshots are
+        # evidence in the batch manifest, but never inflate the import denominator.
+        emit(files[0].name if files else "")
     for source_path in files:
         try:
             if not is_file_stable(source_path):
                 continue
             source_stat = source_path.stat()
-            existing = conn.execute(
-                """
-                select 1
-                from audio_files
-                where source_path = ?
-                  and source_size_bytes = ?
-                  and source_mtime_ns = ?
-                """,
-                (str(source_path), source_stat.st_size, source_stat.st_mtime_ns),
-            ).fetchone()
-            if existing:
+            # Re-check after the stability wait. This covers a source that changed after
+            # the pre-filter and a concurrent importer that registered the same snapshot.
+            if source_snapshot_exists_in_conn(
+                conn,
+                source_path=source_path,
+                size_bytes=source_stat.st_size,
+                mtime_ns=source_stat.st_mtime_ns,
+            ):
                 continue
             recorded_at = _recorded_at_from_name(path=source_path)
             recorded_date = recorded_at[:10]
@@ -171,9 +223,14 @@ def import_audio_files_in_conn(
             imported += 1
         finally:
             done += 1
-            if progress is not None:
-                progress(done, total, source_path.name)
-    return imported
+            bytes_done += planned_sizes.get(source_path, 0)
+            emit(files[done].name if done < total else "")
+    return IngestImportResult(
+        imported_files=imported,
+        scanned_files=len(scanned_files),
+        duplicate_files=duplicate_files,
+        new_files=total,
+    )
 
 
 def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: AppConfig, importer: FileImportPort) -> int:
@@ -221,6 +278,21 @@ def import_audio_files_from_port_in_conn(conn: sqlite3.Connection, *, config: Ap
 
 
 def _source_audio_exists(conn: sqlite3.Connection, source: SourceAudioFile) -> bool:
+    return source_snapshot_exists_in_conn(
+        conn,
+        source_path=source.source_path,
+        size_bytes=source.size_bytes,
+        mtime_ns=source.mtime_ns,
+    )
+
+
+def source_snapshot_exists_in_conn(
+    conn: sqlite3.Connection,
+    *,
+    source_path: Path,
+    size_bytes: int,
+    mtime_ns: int,
+) -> bool:
     existing = conn.execute(
         """
         select 1
@@ -229,9 +301,38 @@ def _source_audio_exists(conn: sqlite3.Connection, source: SourceAudioFile) -> b
           and source_size_bytes = ?
           and source_mtime_ns = ?
         """,
-        (str(source.source_path), source.size_bytes, source.mtime_ns),
+        (str(source_path), size_bytes, mtime_ns),
     ).fetchone()
     return existing is not None
+
+
+def imported_source_snapshots_in_conn(conn: sqlite3.Connection) -> set[tuple[str, int, int]]:
+    """Return the cheap source identities used to avoid re-reading imported audio."""
+    rows = conn.execute(
+        "select source_path, source_size_bytes, source_mtime_ns from audio_files"
+    ).fetchall()
+    return {
+        (str(row["source_path"]), int(row["source_size_bytes"]), int(row["source_mtime_ns"]))
+        for row in rows
+    }
+
+
+def _unimported_audio_paths(
+    paths: list[Path],
+    *,
+    imported_snapshots: set[tuple[str, int, int]],
+) -> list[Path]:
+    pending: list[Path] = []
+    for path in paths:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            # Removable media can change between directory enumeration and stat.
+            continue
+        snapshot = (str(path), stat.st_size, stat.st_mtime_ns)
+        if snapshot not in imported_snapshots:
+            pending.append(path)
+    return pending
 
 
 def _raw_audio_exists(conn: sqlite3.Connection, raw_audio: ImportedRawAudio) -> bool:

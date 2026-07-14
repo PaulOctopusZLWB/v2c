@@ -192,9 +192,30 @@ export interface InboxSession {
 
 export interface ImportProgress {
   active: boolean;
+  phase?: "scanning" | "importing" | "complete";
+  scanned_files?: number;
+  duplicate_files?: number;
+  new_files?: number;
+  imported_files?: number;
   done: number;
   total: number;
   current: string;
+  bytes_done?: number;
+  bytes_total?: number;
+  eta_seconds?: number | null;
+}
+
+/** Live per-segment coverage for the active extract_features audio file. */
+export interface FeatureProgress {
+  active: boolean;
+  target_id: string;
+  current: string;
+  total_segments: number;
+  embedded: number;
+  emoted: number;
+  done: number;
+  total: number;
+  elapsed_seconds: number;
 }
 
 export interface StatusSnapshot {
@@ -217,9 +238,11 @@ export interface StatusSummary {
   /** Subset of done_total that ended in failure (terminal, or retryable with retries exhausted). */
   failed_total?: number;
   eta_seconds?: number | null;
+  eta_confidence?: "live" | "historical" | "partial" | "learning" | "none";
   active_stage: string | null;
   current_target: string | null;
   import_progress?: ImportProgress | null;
+  feature_progress?: FeatureProgress | null;
   worker_running: boolean;
 }
 
