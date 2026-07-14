@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { InboxSession } from "../api/types";
 import { InboxPanel } from "../features/inbox/InboxPanel";
 
-const INBOX = {
+const INBOX: { pending: number; sessions: InboxSession[] } = {
   pending: 1,
   sessions: [
     {
@@ -58,12 +59,12 @@ const REVIEW = {
   negative_feedback_count: 0
 };
 
-function mockFetch() {
+function mockFetch(inbox = INBOX) {
   const calls: Array<{ url: string; body?: unknown }> = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (url.startsWith("/api/inbox")) return new Response(JSON.stringify(INBOX), { status: 200 });
+    if (url.startsWith("/api/inbox")) return new Response(JSON.stringify(inbox), { status: 200 });
     if (url === "/api/sessions/ses_1/identity-review") return new Response(JSON.stringify(REVIEW), { status: 200 });
     if (url === "/api/sessions/ses_1/finalize") {
       return new Response(JSON.stringify({
@@ -89,7 +90,8 @@ describe("InboxPanel", () => {
 
     // Newest un-finalized card auto-expands and shows its candidates.
     expect(await screen.findByText("Bob")).toBeInTheDocument();
-    expect(screen.getByText("1 场待定稿")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("收件箱统计")).getByText("1")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "待处理会话" })).toBeInTheDocument();
     // Machine labels are not part of the inbox vocabulary.
     expect(screen.queryByText(/vp_003/)).not.toBeInTheDocument();
 
@@ -101,12 +103,22 @@ describe("InboxPanel", () => {
     expect(push).toHaveBeenCalledWith("已定稿并导出", expect.stringContaining("ses_1.md"), "success");
   });
 
-  it("keeps finalized sessions in a collapsed done section", async () => {
-    mockFetch();
+  it("keeps an all-finalized inbox useful by selecting the newest session", async () => {
+    mockFetch({
+      pending: 0,
+      sessions: INBOX.sessions.map((session) => ({
+        ...session,
+        finalized: session.finalized ?? { finalized_at: "now", export_md_path: `/data/${session.session_id}.md` }
+      }))
+    });
     render(<InboxPanel push={vi.fn()} />);
 
-    await screen.findByText("Bob");
-    expect(screen.getByText("已定稿 1 场")).toBeInTheDocument();
+    expect(await screen.findByLabelText("14:00 会话详情")).toBeInTheDocument();
+    expect(screen.getByText("没有等待确认的会话")).toBeInTheDocument();
+    const archive = screen.getByRole("region", { name: "已定稿会话" });
+    expect(within(archive).getAllByRole("button")).toHaveLength(2);
+    await userEvent.click(within(archive).getByRole("button", { name: /晨会/ }));
+    expect(await screen.findByLabelText("晨会详情")).toBeInTheDocument();
   });
 
   it("unknown voices offer the workbench drill-down", async () => {
