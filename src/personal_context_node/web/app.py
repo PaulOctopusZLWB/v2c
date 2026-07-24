@@ -30,8 +30,8 @@ def create_app(*, config: AppConfig) -> FastAPI:
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
         yield
-        # The worker keeps model adapters (funasr_server subprocess) resident across
-        # drains; release them when the app stops so no orphan model process lingers.
+        # Drains release model subprocesses when the queue becomes idle. Keep shutdown cleanup
+        # as an idempotent safety net for an interrupted in-flight drain.
         app.state.worker.request_stop()
         app.state.worker.close_adapters()
 

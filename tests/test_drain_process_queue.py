@@ -117,11 +117,10 @@ def test_web_worker_import_failure_still_drains_existing_queue(tmp_path: Path, m
     assert worker._last_result.tasks_succeeded == 1
 
 
-def test_drain_keeps_resident_asr_adapter_until_close_adapters(tmp_path: Path, monkeypatch) -> None:
-    # A funasr_server drain owns a resident model subprocess. It intentionally SURVIVES the
-    # drain (reloading the model per drain costs seconds-to-tens-of-seconds), and is reaped
-    # by close_adapters() — which the web app shutdown hook calls — so nothing leaks past the
-    # worker's lifetime. We prove both halves against the real subprocess.
+def test_drain_releases_resident_asr_adapter_when_queue_becomes_idle(tmp_path: Path, monkeypatch) -> None:
+    # A funasr_server model stays resident while one queue drain is active, but an empty queue
+    # must reap it immediately rather than pinning PyTorch/MPS unified memory until app shutdown.
+    # The next run rebuilds adapters on demand.
     import personal_context_node.web.worker as _worker_module
 
     server = tmp_path / "resident.py"
@@ -140,19 +139,17 @@ def test_drain_keeps_resident_asr_adapter_until_close_adapters(tmp_path: Path, m
 
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     worker = PipelineWorker(config=config)
-    result = worker.drain_now()  # empty queue -> returns immediately, adapter stays resident
+    result = worker.drain_now()  # empty queue -> returns immediately and unloads the model
 
     assert result.status == "complete"
-    assert adapter._proc is not None  # model subprocess survives the drain (resident cache)
-    assert proc.poll() is None
+    assert adapter._proc is None
+    assert proc.poll() is not None
 
-    second = worker.drain_now()  # second drain reuses the cached adapters — no rebuild
+    second = worker.drain_now()  # next drain builds a fresh adapter set on demand
     assert second.status == "complete"
-    assert build_calls["n"] == 1
-
-    worker.close_adapters()  # the app-shutdown path
-    assert adapter._proc is None  # adapter forgot its process (close() ran)
-    assert proc.poll() is not None  # the resident subprocess was actually terminated/reaped
+    assert build_calls["n"] == 2
+    assert worker._adapters is None
+    assert worker._feature_adapters is None
 
 
 def test_start_combined_extraction_runs_both_and_releases_both_adapters(tmp_path: Path, monkeypatch) -> None:

@@ -37,11 +37,13 @@ class PipelineWorker:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._last_result: DrainResult | None = None
-        # Resident pipeline adapters, cached across drains so the funasr_server model
-        # subprocess survives between runs (reloading the model per drain costs seconds
-        # to tens of seconds). Keyed by the effective config (+ adapter factory identity,
-        # so a test-monkeypatched build_pipeline_adapters is never served a stale cache);
-        # a web settings change rebuilds on the next drain, same as before.
+        # Pipeline adapters are cached for the lifetime of ONE queue drain. That keeps the
+        # funasr_server model subprocess resident while a backlog is being processed without
+        # letting an empty web worker pin PyTorch/MPS unified memory indefinitely. The cache is
+        # released in _drain_to_completion() and rebuilt lazily for the next run.
+        #
+        # Keyed by the effective config (+ adapter factory identity, so a test-monkeypatched
+        # build_pipeline_adapters is never served a stale cache).
         self._adapters = None
         self._adapters_key: str | None = None
         self._import: dict | None = None
@@ -63,8 +65,8 @@ class PipelineWorker:
         # emotion2vec model is loaded. Default builds a resident PersistentCommandEmotionAdapter.
         self._emotion_factory = self._default_emotion_factory
         # Resident (embed, emotion) adapter pair for the pipeline's extract_features task,
-        # cached across drains like self._adapters so the CAM++/emotion2vec subprocesses
-        # survive between runs. Built from the SAME factories the manual extraction routes use.
+        # cached within a drain like self._adapters. Built from the SAME factories the manual
+        # extraction routes use and released as soon as the queue drain ends.
         self._feature_adapters: tuple[object, object] | None = None
         self._feature_adapters_key: str | None = None
 
@@ -199,9 +201,11 @@ class PipelineWorker:
             return True
 
     def _resident_adapters(self, effective):
-        """Return cached pipeline adapters, rebuilding only when the effective config (or the
-        adapter factory, under test monkeypatching) changed since the last drain. Keeping the
-        adapters resident keeps the funasr_server model loaded across drains."""
+        """Return the current drain's cached pipeline adapters.
+
+        Rebuild when the effective config (or the adapter factory under test monkeypatching)
+        changes. _drain_to_completion() closes the cache when the queue becomes idle.
+        """
         key = f"{id(build_pipeline_adapters)}:{effective.model_dump_json()}"
         if self._adapters is None or key != self._adapters_key:
             self.close_adapters()
@@ -210,7 +214,11 @@ class PipelineWorker:
         return self._adapters
 
     def close_adapters(self) -> None:
-        """Release any resident adapter subprocess (config change, app shutdown)."""
+        """Release every model subprocess owned by this worker.
+
+        Closing the subprocesses, rather than only calling torch.mps.empty_cache(), is what
+        releases model weights as well as allocator/inference caches from unified memory.
+        """
         if self._adapters is not None:
             _close_adapters(self._adapters)
             self._adapters = None
@@ -240,8 +248,11 @@ class PipelineWorker:
 
     def _drain_to_completion(self, *, max_steps: int = 200) -> DrainResult:
         """Loop drain_process_queue in batches of max_steps until the queue is empty (status
-        'complete') or a stop is requested. Adapters stay resident across drains (see
-        _resident_adapters); close_adapters() releases them on config change or shutdown."""
+        'complete') or a stop is requested.
+
+        Models stay resident across batches in this single drain, then are always unloaded when
+        the drain finishes or raises. The next run rebuilds lazy adapters on demand.
+        """
         # Re-read DB-backed runtime overrides each drain so web config changes take effect on the
         # NEXT drain without a restart. ASR overrides go through model_copy; GLM_* overrides are
         # exported to os.environ, which the glm_llm_wrapper subprocess inherits (no env= is passed).
@@ -251,34 +262,42 @@ class PipelineWorker:
         effective = _settings.effective_config(self._config)
         # apply_glm_env reverts a cleared override to the launch baseline (not the last-applied value).
         _settings.apply_glm_env(overrides)
-        adapters = self._resident_adapters(effective)
-        workers = max(1, int(getattr(effective, "pipeline_workers", 1) or 1))
-        total_steps = 0
-        total_succeeded = 0
-        total_failed = 0
-        last_status = "complete"
-        # The adapter objects are lazy (subprocess spawns on first use), so passing the resident
-        # pair into every drain costs nothing until an extract_features task actually runs.
-        feature_embed, feature_emotion = self._resident_feature_adapters(effective)
-        while not self._stop.is_set():
-            result = drain_process_queue(
-                config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
-                embed=feature_embed, emotion=feature_emotion,
-                max_steps=max_steps, should_stop=self._stop.is_set, job_name="web.drain",
-                workers=workers,
+        try:
+            adapters = self._resident_adapters(effective)
+            workers = max(1, int(getattr(effective, "pipeline_workers", 1) or 1))
+            total_steps = 0
+            total_succeeded = 0
+            total_failed = 0
+            last_status = "complete"
+            # The adapter objects are lazy (subprocess spawns on first use), so passing the
+            # drain-scoped pair into every batch costs nothing until an extract_features task
+            # actually runs.
+            feature_embed, feature_emotion = self._resident_feature_adapters(effective)
+            while not self._stop.is_set():
+                result = drain_process_queue(
+                    config=self._config, vad=adapters.vad, asr=adapters.asr, llm=adapters.llm,
+                    embed=feature_embed, emotion=feature_emotion,
+                    max_steps=max_steps, should_stop=self._stop.is_set, job_name="web.drain",
+                    workers=workers,
+                )
+                total_steps += result.process_steps
+                total_succeeded += result.tasks_succeeded
+                total_failed += result.tasks_failed
+                last_status = result.status
+                if result.status in ("complete", "stopped"):
+                    break
+            return DrainResult(
+                process_steps=total_steps,
+                tasks_succeeded=total_succeeded,
+                tasks_failed=total_failed,
+                status=last_status if not self._stop.is_set() else "stopped",
             )
-            total_steps += result.process_steps
-            total_succeeded += result.tasks_succeeded
-            total_failed += result.tasks_failed
-            last_status = result.status
-            if result.status in ("complete", "stopped"):
-                break
-        return DrainResult(
-            process_steps=total_steps,
-            tasks_succeeded=total_succeeded,
-            tasks_failed=total_failed,
-            status=last_status if not self._stop.is_set() else "stopped",
-        )
+        finally:
+            # A resident Python/FunASR process owns both model weights and PyTorch's MPS
+            # allocator cache. Reaping it releases the whole unified-memory allocation after
+            # an empty/stopped/failed drain; empty_cache() alone cannot release referenced
+            # model weights.
+            self.close_adapters()
 
     def drain_now(self, *, max_steps: int = 200) -> DrainResult:
         """Synchronous drain (used in request handlers and tests). Fully drains the queue."""
