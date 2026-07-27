@@ -5,15 +5,31 @@ services:
       args:
         PCN_INSTALL_FUNASR: ${PCN_INSTALL_FUNASR:-false}
     command:
-      - run-first-milestone
-      - --source-dir
-      - /input
-      - --data-dir
-      - /data
-      - --obsidian-vault
-      - /obsidian
-      - --confirm-first-candidate
+      - web
+      - --config
+      - /app/config/deploy.toml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+    restart: unless-stopped
+    init: true
+    ports:
+      # Deliberately host-loopback only: PCN has no HTTP authentication.
+      - "127.0.0.1:${PCN_WEB_PORT:-8765}:8765"
     volumes:
-      - ./sample_data:/input:ro
-      - ./data:/data
-      - /Users/paul/Documents/Obsidian/PersonalContext:/obsidian
+      - ${PCN_CONFIG_FILE:-./config/remote.example.toml}:/app/config/deploy.toml:ro
+      - ${PCN_INPUT_DIR:-./runtime/input}:/input:ro
+      - ${PCN_DATA_DIR:-./runtime/data}:/data
+      - ${PCN_OBSIDIAN_DIR:-./runtime/obsidian}:/obsidian
+      - ${PCN_ARCHIVE_DIR:-./runtime/archive}:/archive
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

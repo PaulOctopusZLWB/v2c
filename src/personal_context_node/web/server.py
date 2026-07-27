@@ -17,8 +17,8 @@ def run_web_server(
     host: str = "127.0.0.1",
     port: int = 8765,
 ) -> None:
-    if host != "127.0.0.1":
-        raise ValueError("web server v1 must bind to 127.0.0.1")
+    if host not in {"127.0.0.1", "0.0.0.0"}:
+        raise ValueError("web server host must be 127.0.0.1 or 0.0.0.0")
     config = load_web_config(config_path=config_path, data_dir=data_dir, obsidian_vault=obsidian_vault)
     # Pre-JIT the UMAP/numba stack while uvicorn boots so the first voiceprint-map request
     # doesn't pay the ~10s import + compile cost. Daemon thread; only the real server does this

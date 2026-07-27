@@ -16,7 +16,7 @@
 - [启用真实 ASR（FunASR / SenseVoice）](#启用真实-asrfunasr--sensevoice)
 - [使用指南](#使用指南)
 - [定时运行（macOS launchd）](#定时运行macos-launchd)
-- [Docker 部署](#docker-部署)
+- [Docker 远程部署](#docker-远程部署)
 - [配置说明](#配置说明)
 - [数据、隐私与安全](#数据隐私与安全)
 - [开发与测试](#开发与测试)
@@ -224,19 +224,112 @@ uv run pcn launchd-uninstall
 
 ---
 
-## Docker 部署
+## Docker 远程部署
+
+这一节是一条可直接复制执行的 Linux 服务器部署路径。默认使用 mock ASR + 本地规则摘要，目的是先验证服务、持久化和远程访问；它不会产生真实转写。真实模型见后文。
+
+### 1. 服务器准备
+
+- 一台 Linux 服务器（建议 4 核 / 8 GB 内存 / 20 GB 可用磁盘起步；真实 ASR 需要更多内存和模型空间）
+- Git
+- Docker Engine 24+ 与 Docker Compose v2
+- 本机能通过 SSH 登录服务器
+
+服务器上执行：
 
 ```bash
-# 默认镜像轻量（mock/规则后端，不装 FunASR）
-docker compose build
-docker compose run --rm personal-context-node
+git clone https://github.com/PaulOctopusZLWB/v2c.git
+cd v2c
 
-# 需要真实 ASR 时显式开启 FunASR
-PCN_INSTALL_FUNASR=true docker compose build
-PCN_INSTALL_FUNASR=true docker compose run --rm personal-context-node doctor --config config/funasr.example.toml
+# 这些目录持久化保存输入、数据库/密钥、Obsidian Markdown 和归档。
+mkdir -p runtime/{input,data,obsidian,archive}
+
+# 构建并后台启动；首次构建会安装前后端依赖。
+docker compose up -d --build
+
+# 等待 health=healthy，并检查 API。
+docker compose ps
+curl --fail http://127.0.0.1:8765/api/health
 ```
 
-compose 默认挂载：`./sample_data`（只读输入）、`./data`（SQLite/原始音频输出）、Obsidian vault 路径。`.dockerignore` 已排除本地运行数据与密钥（不会把数据库/密钥打进镜像）。
+`compose.yaml` 默认只把端口发布到服务器的 `127.0.0.1`，不会直接暴露到公网。PCN 当前没有 HTTP 登录认证，**不要**把端口改成 `0.0.0.0:8765:8765`。
+
+### 2. 从本机安全访问
+
+在你自己的电脑上建立 SSH 隧道（保持此终端运行）：
+
+```bash
+ssh -N -L 8765:127.0.0.1:8765 <服务器用户>@<服务器地址>
+```
+
+然后打开 [http://127.0.0.1:8765/app/](http://127.0.0.1:8765/app/)。若本机 8765 已占用，可用 `-L 18765:127.0.0.1:8765`，再访问 `http://127.0.0.1:18765/app/`。
+
+### 3. 放入音频与查看数据
+
+默认目录映射如下：
+
+| 服务器目录 | 容器路径 | 用途 |
+| --- | --- | --- |
+| `runtime/input/` | `/input`（只读） | 待导入 WAV/M4A |
+| `runtime/data/` | `/data` | SQLite、原始/工作音频、身份私钥、日志 |
+| `runtime/obsidian/` | `/obsidian` | PCN 专用 Obsidian vault |
+| `runtime/archive/` | `/archive` | 已校验归档 |
+
+把音频上传到服务器的 `runtime/input/` 后，在 Web 控制台「导入」页执行导入。也可在服务器上运行诊断：
+
+```bash
+docker compose exec personal-context-node \
+  uv run --frozen --no-dev pcn doctor \
+  --config /app/config/deploy.toml \
+  --source-dir /input \
+  --archive-root /archive
+```
+
+如数据目录不在仓库旁边，新建一个 `.env`（不要提交）：
+
+```dotenv
+PCN_WEB_PORT=8765
+PCN_CONFIG_FILE=./config/remote.example.toml
+PCN_INPUT_DIR=/srv/pcn/input
+PCN_DATA_DIR=/srv/pcn/data
+PCN_OBSIDIAN_DIR=/srv/pcn/obsidian
+PCN_ARCHIVE_DIR=/srv/pcn/archive
+```
+
+这些宿主机目录必须预先创建，并保证 Docker 有读写权限；输入目录只需读权限。
+
+### 4. 启用真实 ASR
+
+默认远程配置 [`config/remote.example.toml`](config/remote.example.toml) 使用 mock 后端。要在服务器上启用 FunASR：
+
+```bash
+PCN_INSTALL_FUNASR=true docker compose build personal-context-node
+docker compose run --rm personal-context-node \
+  doctor --config config/funasr.example.toml
+```
+
+然后复制 `config/funasr.example.toml` 为 `config/deploy.toml`，将 Linux 服务器的 `[asr].device` 从 `mps` 改为 `cpu`（NVIDIA/CUDA 部署需按宿主机驱动另行配置），并在 `.env` 设置 `PCN_CONFIG_FILE=./config/deploy.toml`。该文件已被 `.gitignore` 排除。模型首次启动会下载；生产环境建议额外挂载持久化模型缓存。任何云端 LLM key 都只通过服务器环境变量注入，不写进 TOML、镜像或 Git。
+
+### 5. 更新、日志、备份和回滚
+
+```bash
+# 更新到 GitHub main
+git pull --ff-only
+docker compose up -d --build
+
+# 日志与停止
+docker compose logs -f --tail=200
+docker compose down
+
+# 备份（先停写，再备份整个持久化目录）
+docker compose stop
+tar -czf "pcn-backup-$(date +%F).tgz" runtime/data runtime/obsidian runtime/archive
+docker compose start
+```
+
+回滚时切回已知可用的 Git commit，再执行 `docker compose up -d --build`。代码回滚不会自动回滚 SQLite；重大升级前必须先备份 `runtime/data/`。
+
+`.dockerignore` 排除了本地运行数据、密钥、缓存和本机构建产物；镜像会在独立构建阶段生成 Web 控制台，因此远程机器无需单独安装 Node.js。
 
 ---
 
@@ -298,7 +391,7 @@ uv run pytest -q
 cd web && npm install && npm test && npm run build
 ```
 
-后端 540+ 用例、前端 27+ 用例。Web 端到端走真实后端的冒烟用例为 `tests/test_web_e2e.py`（`uv run pytest -q tests/test_web_e2e.py`）。
+后端 1100+ 用例、前端 300+ 用例。Web 端到端走真实后端的冒烟用例为 `tests/test_web_e2e.py`（`uv run pytest -q tests/test_web_e2e.py`）。
 
 ---
 

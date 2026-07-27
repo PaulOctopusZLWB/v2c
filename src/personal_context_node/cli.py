@@ -181,7 +181,10 @@ def web_cmd(
     config_path: Path | None = typer.Option(None, "--config", help="Path to config/local.toml."),
     data_dir: Path | None = typer.Option(None, help="Local data directory."),
     obsidian_vault: Path | None = typer.Option(None, help="Dedicated PersonalContext Obsidian vault path."),
-    host: str = typer.Option("127.0.0.1", help="Bind host. v1 only allows 127.0.0.1."),
+    host: str = typer.Option(
+        "127.0.0.1",
+        help="Bind host (127.0.0.1, or 0.0.0.0 inside a protected container/network only).",
+    ),
     port: int = typer.Option(8765, min=1, max=65535, help="Bind port."),
 ) -> None:
     try:

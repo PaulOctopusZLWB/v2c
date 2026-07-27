@@ -1,0 +1,59 @@
+[paths]
+data_dir = "/data"
+raw_audio_dir = "/data/audio/raw"
+work_audio_dir = "/data/audio/work"
+sqlite_path = "/data/db/personal_context.sqlite"
+obsidian_vault = "/obsidian"
+nas_archive_root = "/archive"
+identity_dir = "/data/identity"
+
+[device.dji_mic_3]
+enabled = true
+root_path = "/input"
+audio_globs = ["**/*.WAV", "**/*.wav", "**/*.M4A", "**/*.m4a"]
+stable_seconds = 10
+
+[audio]
+target_sample_rate_hz = 16000
+target_channels = 1
+target_sample_format = "s16"
+
+[vad]
+backend = "mock"
+threshold = 0.03
+model_id = "fsmn-vad"
+min_speech_ms = 300
+merge_gap_ms = 800
+max_chunk_ms = 120000
+chunk_overlap_ms = 1000
+
+[session]
+session_gap_minutes = 20
+cross_midnight_policy = "start_date"
+
+[asr]
+backend = "mock"
+language = "zh"
+model_name = "sensevoice"
+model_id = "iic/SenseVoiceSmall"
+model_version = "funasr-sensevoice-local"
+
+[llm]
+backend = "rule_based"
+send_person_names = true
+send_speaker_labels = true
+max_chunk_tokens = 6000
+
+[obsidian]
+edit_grace_seconds = 120
+
+[tasks]
+lease_seconds = 1800
+max_retries = 3
+
+[logging]
+log_dir = "/data/logs"
+level = "INFO"
+
+[archive]
+backend = "filesystem"

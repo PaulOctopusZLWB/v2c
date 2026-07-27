@@ -24,6 +24,9 @@ def test_dockerfile_includes_wrapper_scripts() -> None:
 
     assert "COPY scripts ./scripts" in dockerfile
     assert "COPY config ./config" in dockerfile
+    assert "COPY --from=web-build /app/web/dist ./web/dist" in dockerfile
+    assert "npm ci" in dockerfile
+    assert "npm run build" in dockerfile
 
 
 def test_dockerfile_can_optionally_install_funasr_runtime() -> None:
@@ -50,6 +53,27 @@ def test_compose_exposes_funasr_build_arg() -> None:
     compose = Path("compose.yaml").read_text(encoding="utf-8")
 
     assert "PCN_INSTALL_FUNASR: ${PCN_INSTALL_FUNASR:-false}" in compose
+
+
+def test_compose_runs_web_with_persistent_portable_mounts() -> None:
+    compose = Path("compose.yaml").read_text(encoding="utf-8")
+
+    assert "/app/config/deploy.toml" in compose
+    assert "${PCN_CONFIG_FILE:-./config/remote.example.toml}:/app/config/deploy.toml:ro" in compose
+    assert '"127.0.0.1:${PCN_WEB_PORT:-8765}:8765"' in compose
+    assert "${PCN_INPUT_DIR:-./runtime/input}:/input:ro" in compose
+    assert "${PCN_DATA_DIR:-./runtime/data}:/data" in compose
+    assert "/Users/" not in compose
+
+
+def test_remote_example_uses_container_paths_and_safe_defaults() -> None:
+    config = Path("config/remote.example.toml").read_text(encoding="utf-8")
+
+    assert 'data_dir = "/data"' in config
+    assert 'obsidian_vault = "/obsidian"' in config
+    assert 'root_path = "/input"' in config
+    assert '[asr]\nbackend = "mock"' in config
+    assert '[llm]\nbackend = "rule_based"' in config
 
 
 def test_funasr_example_config_enables_real_model_backends() -> None:

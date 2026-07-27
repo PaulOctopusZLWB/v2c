@@ -6,6 +6,7 @@
 .smoke-launchd/
 .smoke-config.toml
 data/
+runtime/
 build/
 __pycache__/
 *.py[cod]
@@ -30,6 +31,7 @@ web/shot*.mjs
 
 # Machine-specific runtime config (absolute paths) — keep local
 config/local.toml
+config/deploy.toml
 
 # Personal scratch dir at repo root — never commit
 tmp/
