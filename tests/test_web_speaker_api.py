@@ -967,8 +967,14 @@ def test_neighbor_correction_preview_and_apply_routes(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _seed_neighbor_correction_route_fixture(config)
     client = TestClient(create_app(config=config))
+    projection = client.post(
+        "/api/speakers/projection",
+        json={"session_ids": ["ses_test"], "method": "pca"},
+    )
+    assert projection.status_code == 200
     payload = {
         "session_ids": ["ses_test"],
+        "projection_id": projection.json()["projection_id"],
         "k": 5,
         "min_neighbours": 3,
         "majority_ratio": 0.6,
@@ -979,8 +985,12 @@ def test_neighbor_correction_preview_and_apply_routes(tmp_path: Path) -> None:
 
     assert preview.status_code == 200
     assert preview.json()["changed"] == 1
+    assert preview.json()["algorithm"] == "projection-hybrid-v2"
 
-    applied = client.post("/api/people/neighbor-correction/apply", json=payload)
+    applied = client.post(
+        "/api/people/neighbor-correction/apply",
+        json={**payload, "preview_token": preview.json()["preview_token"]},
+    )
 
     assert applied.status_code == 200
     assert applied.json()["changed"] == 1

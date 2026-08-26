@@ -12,7 +12,9 @@ const points: ProjectionPoint[] = [
   { segment_id: "seg_4", x: 0.9, y: 0.8, speaker: "spk_1", person_id: null, person_label: null, text: "第四段", session_id: "ses_2" }
 ];
 
-const projection: ProjectionResult = { points, method: "umap", n: 4 };
+const projection = { points, method: "umap", n: 4, projection_id: "proj_test" } as ProjectionResult & {
+  projection_id: string;
+};
 
 /** A request scoped to one session, default UMAP — the parent passes this in. */
 const REQ: ProjectionRequest = { session_ids: ["ses_1"], days: [], method: "umap" };
@@ -156,6 +158,7 @@ describe("VoiceprintMap", () => {
       total_before_cap: 4,
       changed: 1,
       skipped_manual: 0,
+      preview_token: "preview_test",
       params: { k: 15, min_neighbours: 8, majority_ratio: 0.75, similarity_floor: 0.35, max_points: 4000 },
       groups: [
         {
@@ -183,9 +186,24 @@ describe("VoiceprintMap", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /邻域纠偏/ }));
 
-    await waitFor(() => expect(onPreviewNeighborCorrection).toHaveBeenCalledWith(REQ));
+    await waitFor(() =>
+      expect(onPreviewNeighborCorrection).toHaveBeenCalledWith({
+        ...REQ,
+        projection_id: "proj_test",
+        exclude_person_ids: [],
+        viewport_aspect: 640 / 420
+      })
+    );
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("Bob -> Alice: 1"));
-    await waitFor(() => expect(onApplyNeighborCorrection).toHaveBeenCalledWith(REQ));
+    await waitFor(() =>
+      expect(onApplyNeighborCorrection).toHaveBeenCalledWith({
+        ...REQ,
+        projection_id: "proj_test",
+        exclude_person_ids: [],
+        viewport_aspect: 640 / 420,
+        preview_token: "preview_test"
+      })
+    );
   });
 
   it("reports when neighbour correction preview has no changes", async () => {
