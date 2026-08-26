@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import secrets
 import threading
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
@@ -92,20 +94,25 @@ def get_embeddings(*, config: AppConfig, segment_ids: list[str]) -> dict[str, np
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        for start in range(0, len(segment_ids), _SQL_CHUNK):
-            chunk = segment_ids[start : start + _SQL_CHUNK]
-            placeholders = ", ".join("?" for _ in chunk)
-            rows = fetch_all(
-                conn,
-                f"select segment_id, dim, vector from segment_embeddings where segment_id in ({placeholders})",
-                tuple(chunk),
-            )
-            for row in rows:
-                array = np.frombuffer(row["vector"], dtype=np.float32)
-                # frombuffer is read-only and shares the bytes buffer; copy to a standalone (dim,) array.
-                result[str(row["segment_id"])] = array.reshape(int(row["dim"])).copy()
+        result = _get_embeddings_from_conn(conn, segment_ids)
     finally:
         conn.close()
+    return result
+
+
+def _get_embeddings_from_conn(conn: object, segment_ids: list[str]) -> dict[str, np.ndarray]:
+    result: dict[str, np.ndarray] = {}
+    for start in range(0, len(segment_ids), _SQL_CHUNK):
+        chunk = segment_ids[start : start + _SQL_CHUNK]
+        placeholders = ", ".join("?" for _ in chunk)
+        rows = fetch_all(
+            conn,
+            f"select segment_id, dim, vector from segment_embeddings where segment_id in ({placeholders})",
+            tuple(chunk),
+        )
+        for row in rows:
+            array = np.frombuffer(row["vector"], dtype=np.float32)
+            result[str(row["segment_id"])] = array.reshape(int(row["dim"])).copy()
     return result
 
 
@@ -391,24 +398,44 @@ def preview_neighbor_corrections(
     similarity_floor: float = 0.35,
     max_points: int = 4000,
     exclude_person_ids: set[str] | None = None,
+    projection_id: str | None = None,
+    viewport_aspect: float = 1.0,
 ) -> dict:
     """Preview local-neighbour person attribution corrections for the current map scope.
 
-    This is a conservative smoothing pass for "one wrong colour inside a strong cluster". It reads
-    current overrides, votes over nearest in-scope embedding neighbours, and returns a dry-run plan.
-    Manual overrides can vote as neighbours but are never mutation candidates.
+    This is a conservative smoothing pass for "one wrong colour inside a strong cluster". When
+    ``projection_id`` is provided, the primary vote uses the exact displayed 2D layout and a second,
+    independent raw-CAM++ vote vetoes projection artefacts. Without it, the legacy embedding-only
+    behaviour remains available for non-map callers. Manual overrides vote but are never candidates.
 
     ``exclude_person_ids`` blocks corrections TOWARD those persons (the identity-review cascade:
     someone marked absent still has manual labels in scope that would otherwise pull their
     neighbours back to them).
     """
     params = _neighbor_params(k=k, min_neighbours=min_neighbours, majority_ratio=majority_ratio, similarity_floor=similarity_floor, max_points=max_points)
-    scope_ids, total_before_cap = _correction_scope_segment_ids(
-        config=config,
-        session_ids=session_ids,
-        days=days,
-        max_points=params["max_points"],
-    )
+    if not np.isfinite(viewport_aspect) or not (0.1 <= viewport_aspect <= 10.0):
+        raise ValueError("viewport_aspect must be finite and in [0.1, 10]")
+    projection_coords: np.ndarray | None = None
+    if projection_id is not None:
+        snapshot = _projection_snapshot(config=config, projection_id=projection_id)
+        scope_ids = list(snapshot["segment_ids"])
+        projection_coords = np.asarray(snapshot["coords"], dtype=np.float64)
+        total_before_cap = int(snapshot["total_in_scope"])
+        current_scope_ids, current_total = _correction_scope_segment_ids(
+            config=config,
+            session_ids=list(snapshot["session_ids"]),
+            days=list(snapshot["days"]),
+            max_points=int(snapshot["max_points"]),
+        )
+        if current_scope_ids != scope_ids or current_total != total_before_cap:
+            raise ValueError("projection scope changed; re-project before previewing corrections")
+    else:
+        scope_ids, total_before_cap = _correction_scope_segment_ids(
+            config=config,
+            session_ids=session_ids,
+            days=days,
+            max_points=params["max_points"],
+        )
     if not scope_ids:
         return _empty_neighbor_preview(total=0, total_before_cap=0, params=params)
 
@@ -417,7 +444,29 @@ def preview_neighbor_corrections(
     if not usable_ids:
         raise ValueError("no usable embeddings in correction scope")
 
+    if projection_coords is not None:
+        if snapshot.get("embedding_token") != _embedding_token(segment_ids=usable_ids, embeddings=embeddings):
+            raise ValueError("projection voiceprints changed; re-project before previewing corrections")
+        coord_by_id = {sid: projection_coords[index] for index, sid in enumerate(scope_ids)}
+        projection_coords = np.vstack([coord_by_id[sid] for sid in usable_ids])
+
     attributions = _segment_override_attributions(config=config, segment_ids=usable_ids)
+    negative = _negative_person_ids_by_segment(config=config, segment_ids=usable_ids)
+    embedding_token = _embedding_token(segment_ids=usable_ids, embeddings=embeddings)
+    state_token = _correction_state_token(
+        segment_ids=usable_ids,
+        attributions=attributions,
+        negative=negative,
+        embedding_token=embedding_token,
+    )
+    if projection_id is not None:
+        snapshot_attributions = snapshot.get("attributions")
+        snapshot_state_token = snapshot.get("attribution_token")
+        current_attribution_token = _correction_state_token(segment_ids=usable_ids, attributions=attributions, negative={})
+        if snapshot_attributions is None or snapshot_state_token != current_attribution_token:
+            raise ValueError("projection labels changed; re-project before previewing corrections")
+        # Vote on the labels that produced the visible colors, after proving they still match DB state.
+        attributions = {sid: dict(snapshot_attributions[sid]) for sid in usable_ids}
     skipped_manual = sum(1 for sid in usable_ids if attributions.get(sid, {}).get("source") == "manual")
     corrections: list[dict[str, object]] = []
 
@@ -427,25 +476,64 @@ def preview_neighbor_corrections(
     if k_eff == 0:
         return _empty_neighbor_preview(total=len(usable_ids), total_before_cap=total_before_cap, params=params, skipped_manual=skipped_manual)
 
+    projection_local_radii: np.ndarray | None = None
+    if projection_coords is not None:
+        # A smaller density neighbourhood detects islands/outliers even when vote-k is as large as
+        # the whole labelled island (where every island point's kth neighbour could be the outlier).
+        density_k = min(max(2, params["min_neighbours"] // 2), len(usable_ids) - 1)
+        projection_local_radii = np.empty(len(usable_ids), dtype=np.float64)
+        for index in range(len(usable_ids)):
+            deltas = projection_coords - projection_coords[index]
+            deltas[:, 0] *= viewport_aspect
+            distances = np.sum(deltas ** 2, axis=1)
+            distances[index] = np.inf
+            projection_local_radii[index] = float(np.sqrt(np.partition(distances, density_k - 1)[density_k - 1]))
+
     for row_idx, segment_id in enumerate(usable_ids):
         current = attributions.get(segment_id, {})
         if current.get("source") == "manual":
             continue
         current_person = current.get("person_id")
-        top_idx = np.argsort(-sims[row_idx])[:k_eff]
-        neighbours: list[tuple[str | None, float]] = []
-        for idx in top_idx:
-            sim = float(sims[row_idx, idx])
-            if not np.isfinite(sim) or sim < params["similarity_floor"]:
+        raw_confidence: float | None = None
+        raw_neighbor_count: int | None = None
+        raw_support_count: int | None = None
+        if projection_coords is None:
+            top_idx = np.argsort(-sims[row_idx])[:k_eff]
+            neighbours: list[tuple[str | None, float]] = []
+            for idx in top_idx:
+                sim = float(sims[row_idx, idx])
+                if not np.isfinite(sim) or sim < params["similarity_floor"]:
+                    continue
+                neighbour_attr = attributions.get(usable_ids[int(idx)], {})
+                neighbours.append((neighbour_attr.get("person_id"), sim))
+            if len(neighbours) < params["min_neighbours"]:
                 continue
-            neighbour_attr = attributions.get(usable_ids[int(idx)], {})
-            neighbours.append((neighbour_attr.get("person_id"), sim))
-        if len(neighbours) < params["min_neighbours"]:
-            continue
-
-        vote_people = [person_id for person_id, _sim in neighbours if person_id is not None]
-        if current_person is not None and len(vote_people) < len(neighbours):
-            vote_people.extend([None] * (len(neighbours) - len(vote_people)))
+            vote_people = [person_id for person_id, _sim in neighbours if person_id is not None]
+            if current_person is not None and len(vote_people) < len(neighbours):
+                vote_people.extend([None] * (len(neighbours) - len(vote_people)))
+        else:
+            # Follow what is actually on screen. The kNN set is chosen from ALL displayed points;
+            # otherwise a far isolated point could search past its real (unknown) neighbourhood
+            # until it found k arbitrarily distant labelled anchors.
+            deltas = projection_coords - projection_coords[row_idx]
+            deltas[:, 0] *= viewport_aspect
+            distances = np.sum(deltas ** 2, axis=1)
+            distances[row_idx] = np.inf
+            nearest_indices = [int(idx) for idx in np.argsort(distances)[:k_eff]]
+            assert projection_local_radii is not None
+            candidate_radius = float(projection_local_radii[row_idx])
+            local_limit = max(1e-6, candidate_radius * 3.0)
+            projected_indices = [idx for idx in nearest_indices if float(np.sqrt(distances[idx])) <= local_limit]
+            vote_people = [
+                attributions.get(usable_ids[idx], {}).get("person_id")
+                for idx in projected_indices
+            ]
+            if len(projected_indices) < params["min_neighbours"]:
+                continue
+            reference_radii = projection_local_radii[projected_indices]
+            reference_radius = float(np.median(reference_radii))
+            if candidate_radius > max(1e-6, reference_radius * 3.0):
+                continue
         if len(vote_people) < params["min_neighbours"]:
             continue
 
@@ -461,6 +549,43 @@ def preview_neighbor_corrections(
             continue
         if target_person is not None and exclude_person_ids and target_person in exclude_person_ids:
             continue  # never smooth segments TOWARD an excluded (e.g. review-absent) person
+        if target_person is not None and target_person in negative.get(segment_id, set()):
+            continue
+
+        if projection_coords is not None:
+            # UMAP/t-SNE can create false visual neighbours. The raw voice space must independently
+            # choose the same target. Its threshold is deliberately weaker (50% weighted support)
+            # so it acts as a safety veto instead of recreating the 2D majority decision.
+            raw_neighbours: list[tuple[str | None, float]] = []
+            for idx in np.argsort(-sims[row_idx])[:k_eff]:
+                sim = float(sims[row_idx, idx])
+                if not np.isfinite(sim) or sim < params["similarity_floor"]:
+                    continue
+                person_id = attributions.get(usable_ids[int(idx)], {}).get("person_id")
+                raw_neighbours.append((str(person_id) if person_id is not None else None, sim))
+            raw_min = max(2, min(params["min_neighbours"], (params["min_neighbours"] + 1) // 2))
+            if len(raw_neighbours) < raw_min:
+                continue
+            raw_weights: dict[str | None, float] = {}
+            raw_counts: dict[str | None, int] = {}
+            for person_id, sim in raw_neighbours:
+                raw_weights[person_id] = raw_weights.get(person_id, 0.0) + sim
+                raw_counts[person_id] = raw_counts.get(person_id, 0) + 1
+            raw_ranked = sorted(raw_weights.items(), key=lambda item: (-item[1], "" if item[0] is None else item[0]))
+            if not raw_ranked or raw_ranked[0][0] != target_person:
+                continue
+            if len(raw_ranked) > 1 and np.isclose(raw_ranked[0][1], raw_ranked[1][1]):
+                continue
+            raw_total_weight = float(sum(raw_weights.values()))
+            raw_confidence = raw_ranked[0][1] / raw_total_weight if raw_total_weight > 0 else 0.0
+            if raw_confidence < 0.5:
+                continue
+            raw_neighbor_count = len(raw_neighbours)
+            raw_support_count = raw_counts.get(str(target_person) if target_person is not None else None, 0)
+            target_similarities = [sim for person_id, sim in raw_neighbours if person_id == target_person]
+            strong_floor = min(1.0, max(0.45, float(params["similarity_floor"]) + 0.1))
+            if not target_similarities or max(target_similarities) < strong_floor:
+                continue
 
         target_label = _attribution_label(attributions=attributions, person_id=target_person)
         corrections.append(
@@ -473,6 +598,10 @@ def preview_neighbor_corrections(
                 "neighbor_count": len(vote_people),
                 "majority_count": winning_count,
                 "confidence": round(confidence, 4),
+                "projection_confidence": round(confidence, 4) if projection_coords is not None else None,
+                "raw_neighbor_count": raw_neighbor_count,
+                "raw_support_count": raw_support_count,
+                "raw_confidence": round(raw_confidence, 4) if raw_confidence is not None else None,
             }
         )
 
@@ -484,6 +613,20 @@ def preview_neighbor_corrections(
         "groups": _neighbor_correction_groups(corrections),
         "corrections": corrections,
         "params": params,
+        "algorithm": "projection-hybrid-v2" if projection_coords is not None else "embedding-knn-v1",
+        "projection_id": projection_id,
+        "scope_ids": list(usable_ids),
+        "scope_session_ids": list(snapshot["session_ids"]) if projection_id is not None else list(session_ids or []),
+        "scope_days": list(snapshot["days"]) if projection_id is not None else list(days or []),
+        "state_token": state_token,
+        "preview_token": _correction_preview_token(
+            projection_id=projection_id,
+            params=params,
+            exclude_person_ids=exclude_person_ids or set(),
+            viewport_aspect=viewport_aspect,
+            state_token=state_token,
+            corrections=corrections,
+        ),
     }
 
 
@@ -498,6 +641,9 @@ def apply_neighbor_corrections(
     similarity_floor: float = 0.35,
     max_points: int = 4000,
     exclude_person_ids: set[str] | None = None,
+    projection_id: str | None = None,
+    viewport_aspect: float = 1.0,
+    preview_token: str | None = None,
 ) -> dict:
     """Apply the previewed neighbour corrections as voiceprint-sourced overrides."""
     preview = preview_neighbor_corrections(
@@ -510,7 +656,12 @@ def apply_neighbor_corrections(
         similarity_floor=similarity_floor,
         max_points=max_points,
         exclude_person_ids=exclude_person_ids,
+        projection_id=projection_id,
+        viewport_aspect=viewport_aspect,
     )
+    if projection_id is not None:
+        if not preview_token or preview_token != preview.get("preview_token"):
+            raise ValueError("correction preview changed or expired; preview again before applying")
     corrections = list(preview.get("corrections", []))
     if not corrections:
         preview["applied"] = 0
@@ -523,6 +674,27 @@ def apply_neighbor_corrections(
     applied = 0
     try:
         initialize(conn)
+        conn.execute("begin immediate")
+        locked_scope_ids, locked_total = _correction_scope_segment_ids_from_conn(
+            conn,
+            session_ids=[str(value) for value in preview.get("scope_session_ids", [])],
+            days=[str(value) for value in preview.get("scope_days", [])],
+            max_points=int(preview.get("params", {}).get("max_points", max_points)),
+        )
+        preview_scope_ids = [str(sid) for sid in preview.get("scope_ids", [])]
+        if locked_scope_ids != preview_scope_ids or locked_total != int(preview.get("total_before_cap", 0)):
+            raise ValueError("correction scope changed after preview; preview again before applying")
+        locked_attributions = _segment_override_attributions_from_conn(conn, preview_scope_ids)
+        locked_negative = _negative_person_ids_by_segment_from_conn(conn, preview_scope_ids)
+        locked_embeddings = _get_embeddings_from_conn(conn, preview_scope_ids)
+        locked_state_token = _correction_state_token(
+            segment_ids=preview_scope_ids,
+            attributions=locked_attributions,
+            negative=locked_negative,
+            embedding_token=_embedding_token(segment_ids=preview_scope_ids, embeddings=locked_embeddings),
+        )
+        if locked_state_token != preview.get("state_token"):
+            raise ValueError("correction data changed after preview; preview again before applying")
         for correction in corrections:
             segment_id = str(correction["segment_id"])
             to_person_id = correction.get("to_person_id")
@@ -907,22 +1079,25 @@ def _negative_person_ids_by_segment(*, config: AppConfig, segment_ids: list[str]
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        for start in range(0, len(segment_ids), _SQL_CHUNK):
-            chunk = segment_ids[start : start + _SQL_CHUNK]
-            placeholders = ", ".join("?" for _ in chunk)
-            rows = fetch_all(
-                conn,
-                f"""
-                select segment_id, person_id
-                from segment_identity_negative_feedback
-                where segment_id in ({placeholders})
-                """,
-                tuple(chunk),
-            )
-            for row in rows:
-                result.setdefault(str(row["segment_id"]), set()).add(str(row["person_id"]))
+        result = _negative_person_ids_by_segment_from_conn(conn, segment_ids)
     finally:
         conn.close()
+    return result
+
+
+def _negative_person_ids_by_segment_from_conn(conn: object, segment_ids: list[str]) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    for start in range(0, len(segment_ids), _SQL_CHUNK):
+        chunk = segment_ids[start : start + _SQL_CHUNK]
+        placeholders = ", ".join("?" for _ in chunk)
+        rows = fetch_all(
+            conn,
+            f"select segment_id, person_id from segment_identity_negative_feedback "
+            f"where segment_id in ({placeholders})",
+            tuple(chunk),
+        )
+        for row in rows:
+            result.setdefault(str(row["segment_id"]), set()).add(str(row["person_id"]))
     return result
 
 
@@ -953,25 +1128,45 @@ def _correction_scope_segment_ids(
     days: list[str] | None,
     max_points: int,
 ) -> tuple[list[str], int]:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        return _correction_scope_segment_ids_from_conn(
+            conn,
+            session_ids=session_ids,
+            days=days,
+            max_points=max_points,
+        )
+    finally:
+        conn.close()
+
+
+def _correction_scope_segment_ids_from_conn(
+    conn: object,
+    *,
+    session_ids: list[str] | None,
+    days: list[str] | None,
+    max_points: int,
+) -> tuple[list[str], int]:
     scope_ids: list[str] = []
     seen: set[str] = set()
     requested_sessions = list(session_ids or [])
     requested_days = list(days or [])
 
     if not requested_sessions and not requested_days:
-        requested = scoped_embedding_segment_ids(config=config)
+        requested = _scoped_embedding_segment_ids_from_conn(conn)
         for sid in requested:
             if sid not in seen:
                 seen.add(sid)
                 scope_ids.append(sid)
     else:
         for session_id in requested_sessions:
-            for sid in scoped_embedding_segment_ids(config=config, session_id=session_id):
+            for sid in _scoped_embedding_segment_ids_from_conn(conn, session_id=session_id):
                 if sid not in seen:
                     seen.add(sid)
                     scope_ids.append(sid)
         for day in requested_days:
-            for sid in scoped_embedding_segment_ids(config=config, day=day):
+            for sid in _scoped_embedding_segment_ids_from_conn(conn, day=day):
                 if sid not in seen:
                     seen.add(sid)
                     scope_ids.append(sid)
@@ -981,6 +1176,34 @@ def _correction_scope_segment_ids(
         stride = total_before_cap / float(max_points)
         scope_ids = [scope_ids[int(i * stride)] for i in range(max_points)]
     return scope_ids, total_before_cap
+
+
+def _scoped_embedding_segment_ids_from_conn(
+    conn: object,
+    *,
+    session_id: str | None = None,
+    day: str | None = None,
+) -> list[str]:
+    where = [
+        "ts.is_active = 1",
+        "exists (select 1 from segment_embeddings se where se.segment_id = ts.segment_id)",
+    ]
+    params: list[object] = []
+    join = ""
+    if session_id is not None:
+        where.append("ts.session_id = ?")
+        params.append(session_id)
+    if day is not None:
+        join = "join sessions s on s.session_id = ts.session_id"
+        where.append("s.date_key = ?")
+        params.append(day)
+    rows = fetch_all(
+        conn,
+        f"select ts.segment_id from transcript_segments ts {join} "
+        f"where {' and '.join(where)} order by ts.absolute_start_at, ts.segment_id",
+        tuple(params),
+    )
+    return [str(row["segment_id"]) for row in rows]
 
 
 def _normalized_scope_matrix(*, scope_ids: list[str], embeddings: dict[str, np.ndarray]) -> tuple[list[str], np.ndarray]:
@@ -1006,29 +1229,86 @@ def _normalized_scope_matrix(*, scope_ids: list[str], embeddings: dict[str, np.n
 
 
 def _segment_override_attributions(*, config: AppConfig, segment_ids: list[str]) -> dict[str, dict[str, str | None]]:
-    result: dict[str, dict[str, str | None]] = {sid: {"person_id": None, "person_label": None, "source": None} for sid in segment_ids}
-    if not segment_ids:
-        return result
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        for start in range(0, len(segment_ids), _SQL_CHUNK):
-            chunk = segment_ids[start : start + _SQL_CHUNK]
-            placeholders = ", ".join("?" for _ in chunk)
-            rows = fetch_all(
-                conn,
-                f"select segment_id, person_id, person_label, source from segment_person_overrides where segment_id in ({placeholders})",
-                tuple(chunk),
-            )
-            for row in rows:
-                result[str(row["segment_id"])] = {
-                    "person_id": row["person_id"],
-                    "person_label": row["person_label"],
-                    "source": row["source"],
-                }
+        result = _segment_override_attributions_from_conn(conn, segment_ids)
     finally:
         conn.close()
     return result
+
+
+def _segment_override_attributions_from_conn(conn: object, segment_ids: list[str]) -> dict[str, dict[str, str | None]]:
+    result: dict[str, dict[str, str | None]] = {sid: {"person_id": None, "person_label": None, "source": None} for sid in segment_ids}
+    for start in range(0, len(segment_ids), _SQL_CHUNK):
+        chunk = segment_ids[start : start + _SQL_CHUNK]
+        placeholders = ", ".join("?" for _ in chunk)
+        rows = fetch_all(
+            conn,
+            f"select segment_id, person_id, person_label, source from segment_person_overrides where segment_id in ({placeholders})",
+            tuple(chunk),
+        )
+        for row in rows:
+            result[str(row["segment_id"])] = {
+                "person_id": row["person_id"],
+                "person_label": row["person_label"],
+                "source": row["source"],
+            }
+    return result
+
+
+def _correction_state_token(
+    *,
+    segment_ids: list[str],
+    attributions: dict[str, dict[str, str | None]],
+    negative: dict[str, set[str]],
+    embedding_token: str = "",
+) -> str:
+    state = [
+        (
+            sid,
+            attributions.get(sid, {}).get("person_id"),
+            attributions.get(sid, {}).get("person_label"),
+            attributions.get(sid, {}).get("source"),
+            sorted(negative.get(sid, set())),
+        )
+        for sid in segment_ids
+    ]
+    payload = {"segments": state, "embedding_token": embedding_token}
+    digest = hashlib.blake2b(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), digest_size=16)
+    return f"state_{digest.hexdigest()}"
+
+
+def _embedding_token(*, segment_ids: list[str], embeddings: dict[str, np.ndarray]) -> str:
+    digest = hashlib.blake2b(digest_size=16)
+    for segment_id in segment_ids:
+        digest.update(b"\0")
+        digest.update(segment_id.encode("utf-8"))
+        vector = embeddings.get(segment_id)
+        if vector is not None:
+            digest.update(np.ascontiguousarray(vector, dtype=np.float32).tobytes())
+    return f"embedding_{digest.hexdigest()}"
+
+
+def _correction_preview_token(
+    *,
+    projection_id: str | None,
+    params: dict[str, int | float],
+    exclude_person_ids: set[str],
+    viewport_aspect: float,
+    state_token: str,
+    corrections: list[dict[str, object]],
+) -> str:
+    plan = {
+        "projection_id": projection_id,
+        "params": params,
+        "exclude_person_ids": sorted(exclude_person_ids),
+        "viewport_aspect": round(float(viewport_aspect), 6),
+        "state_token": state_token,
+        "corrections": corrections,
+    }
+    digest = hashlib.blake2b(json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"), digest_size=16)
+    return f"preview_{digest.hexdigest()}"
 
 
 def _attribution_label(*, attributions: dict[str, dict[str, str | None]], person_id: str | None) -> str:
@@ -1077,7 +1357,17 @@ def _empty_neighbor_preview(
         "groups": [],
         "corrections": [],
         "params": params,
+        "algorithm": "embedding-knn-v1",
+        "projection_id": None,
     }
+
+
+def _projection_snapshot(*, config: AppConfig, projection_id: str) -> dict[str, object]:
+    with _COORDS_LOCK:
+        snapshot = _PROJECTION_SNAPSHOTS.get(projection_id)
+    if snapshot is None or snapshot.get("database_path") != str(config.database_path):
+        raise ValueError("projection is unknown or expired; re-project the current scope")
+    return snapshot
 
 
 def _segment_speakers(*, config: AppConfig, segment_ids: list[str]) -> dict[str, str]:
@@ -1118,7 +1408,9 @@ def _segment_speakers(*, config: AppConfig, segment_ids: list[str]) -> dict[str,
 _PROJECTION_CACHE: dict[tuple, dict] = {}
 _MULTI_PROJECTION_CACHE: dict[tuple, dict] = {}
 _COORDS_CACHE: dict[tuple, tuple[np.ndarray, str]] = {}
+_PROJECTION_SNAPSHOTS: dict[str, dict[str, object]] = {}
 _COORDS_CACHE_MAX = 64  # FIFO bound; one entry is ~64 KB at the default 4k-point cap
+_PROJECTION_SNAPSHOTS_MAX = 16  # exact displayed layouts available to neighbour correction
 _COORDS_LOCK = threading.Lock()  # guards _COORDS_CACHE get/store/evict/clear
 
 
@@ -1132,6 +1424,7 @@ def clear_projection_cache() -> None:
     _MULTI_PROJECTION_CACHE.clear()
     with _COORDS_LOCK:
         _COORDS_CACHE.clear()
+        _PROJECTION_SNAPSHOTS.clear()
 
 
 def clear_projection_results_cache() -> None:
@@ -1143,6 +1436,8 @@ def clear_projection_results_cache() -> None:
     """
     _PROJECTION_CACHE.clear()
     _MULTI_PROJECTION_CACHE.clear()
+    with _COORDS_LOCK:
+        _PROJECTION_SNAPSHOTS.clear()
 
 
 def _umap_speed_kwargs(n_points: int) -> dict:
@@ -1422,7 +1717,16 @@ def project_embeddings(
     )
     cached = _MULTI_PROJECTION_CACHE.get(cache_key)
     if cached is not None:
-        return cached
+        cached_projection_id = cached.get("projection_id")
+        if cached_projection_id is None:
+            return cached
+        with _COORDS_LOCK:
+            snapshot_available = cached_projection_id in _PROJECTION_SNAPSHOTS
+        if snapshot_available:
+            return cached
+        # The bounded snapshot cache may evict an old layout before the result cache. Refit (normally
+        # a cheap coordinate-cache hit) so the UI never receives a projection_id it cannot correct.
+        _MULTI_PROJECTION_CACHE.pop(cache_key, None)
 
     if not scope_ids:
         result = {"points": [], "method": method, "n": 0, "capped": False}
@@ -1450,8 +1754,9 @@ def project_embeddings(
     )
 
     metadata = _projection_metadata(config=config, segment_ids=ids)
+    display_coords = np.round(np.asarray(norm_coords, dtype=np.float64), 4)
     points = []
-    for sid, (x, y) in zip(ids, norm_coords):
+    for sid, (x, y) in zip(ids, display_coords):
         meta = metadata.get(sid, {})
         points.append(
             {
@@ -1466,12 +1771,38 @@ def project_embeddings(
             }
         )
 
+    # A projection id is an opaque one-time generation id, not a content hash. Reusing the same id
+    # after an attribution write could let an old browser view accidentally address a new snapshot.
+    projection_id = f"proj_{secrets.token_hex(12)}"
+    snapshot_attributions = _segment_override_attributions(config=config, segment_ids=ids)
+    snapshot = {
+        "database_path": str(config.database_path),
+        "segment_ids": tuple(ids),
+        "coords": display_coords.copy(),
+        "total_in_scope": total_in_scope,
+        "session_ids": tuple(session_ids),
+        "days": tuple(days),
+        "max_points": max_points,
+        "embedding_token": _embedding_token(segment_ids=ids, embeddings=embeddings),
+        "attributions": snapshot_attributions,
+        "attribution_token": _correction_state_token(
+            segment_ids=ids,
+            attributions=snapshot_attributions,
+            negative={},
+        ),
+    }
+    with _COORDS_LOCK:
+        _PROJECTION_SNAPSHOTS[projection_id] = snapshot
+        while len(_PROJECTION_SNAPSHOTS) > _PROJECTION_SNAPSHOTS_MAX:
+            _PROJECTION_SNAPSHOTS.pop(next(iter(_PROJECTION_SNAPSHOTS)))
+
     result = {
         "points": points,
         "method": used_method,
         "n": len(points),
         "capped": capped,
         "total_in_scope": total_in_scope,
+        "projection_id": projection_id,
     }
     _MULTI_PROJECTION_CACHE[cache_key] = result
     return result

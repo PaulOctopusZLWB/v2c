@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
-import type { NeighborCorrectionPreview, PersonRow, ProjectionPoint, ProjectionRequest } from "../../api/types";
+import type { NeighborCorrectionPreview, PersonRow, ProjectionPoint, ProjectionRequest, ProjectionResult } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
 import { emotionColor, emotionMeta } from "../../lib/emotionColors";
 import { Select } from "../../components/ui/Select";
@@ -8,6 +8,12 @@ import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 
 type ColorMode = "person" | "session" | "emotion";
+type NeighborCorrectionMapRequest = ProjectionRequest & {
+  projection_id: string;
+  exclude_person_ids: string[];
+  viewport_aspect: number;
+  preview_token?: string;
+};
 
 export type VoiceprintMapState =
   | { status: "idle" }
@@ -115,9 +121,9 @@ export function VoiceprintMap({
   /** Clear selected person attributions back to 未识别 without deleting the person. */
   onClearAttributions?: (segmentIds: string[]) => Promise<{ cleared?: number } | unknown> | void;
   /** Preview automatic neighbour-based correction before applying it. */
-  onPreviewNeighborCorrection?: (request: ProjectionRequest) => Promise<NeighborCorrectionPreview>;
+  onPreviewNeighborCorrection?: (request: NeighborCorrectionMapRequest) => Promise<NeighborCorrectionPreview>;
   /** Apply automatic neighbour-based correction after user confirmation. */
-  onApplyNeighborCorrection?: (request: ProjectionRequest) => Promise<NeighborCorrectionPreview>;
+  onApplyNeighborCorrection?: (request: NeighborCorrectionMapRequest) => Promise<NeighborCorrectionPreview>;
   /** Notify the parent after a successful label (e.g. to reload the People panel). */
   onChanged?: () => void;
   /** Person ids marked absent/excluded for the currently inspected single session. */
@@ -125,6 +131,7 @@ export function VoiceprintMap({
 }) {
   const audio = useSegmentAudio();
   const [points, setPoints] = useState<ProjectionPoint[] | null>(null);
+  const [projectionId, setProjectionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Subsampling note from the last result (the scope had more points than max_points).
@@ -149,6 +156,7 @@ export function VoiceprintMap({
     const pts = res.points ?? [];
     const pointCount = res.n ?? pts.length;
     const total = res.total_in_scope ?? 0;
+    setProjectionId((res as ProjectionResult & { projection_id?: string }).projection_id ?? null);
     setPoints(pts);
     setCapped(res.capped ? { n: pointCount, total } : null);
     onResultRef.current?.({ capped: !!res.capped, n: pointCount, total });
@@ -232,6 +240,7 @@ export function VoiceprintMap({
     viewRef.current = { ...IDENTITY };
     if (!request) {
       setPoints(null);
+      setProjectionId(null);
       setError(null);
       setCapped(null);
       onResultRef.current?.(null);
@@ -250,6 +259,7 @@ export function VoiceprintMap({
         const pts = res.points ?? [];
         const n = res.n ?? pts.length;
         const total = res.total_in_scope ?? 0;
+        setProjectionId((res as ProjectionResult & { projection_id?: string }).projection_id ?? null);
         setSelectedIds(new Set());
         setPoints(pts);
         setCapped(res.capped ? { n, total } : null);
@@ -263,6 +273,7 @@ export function VoiceprintMap({
         const message = err instanceof Error ? err.message : "投影失败";
         setError(message);
         setPoints([]);
+        setProjectionId(null);
         setCapped(null);
         onResultRef.current?.(null);
         setLoading(false);
@@ -706,14 +717,21 @@ export function VoiceprintMap({
     }
   }, [armedClearKey, onClearAttributions, onChanged, refetchProjection, segmentIdsForPersonKey]);
 
-  const canRunNeighborCorrection = !!request && !!onPreviewNeighborCorrection && !!onApplyNeighborCorrection;
+  const canRunNeighborCorrection =
+    !!request && !!projectionId && !!onPreviewNeighborCorrection && !!onApplyNeighborCorrection;
   const runNeighborCorrection = useCallback(async () => {
-    if (!request || !onPreviewNeighborCorrection || !onApplyNeighborCorrection) return;
+    if (!request || !projectionId || !onPreviewNeighborCorrection || !onApplyNeighborCorrection) return;
     setCorrecting(true);
     setActionError(null);
     setCorrectionNote(null);
     try {
-      const preview = await onPreviewNeighborCorrection(request);
+      const correctionRequest = {
+        ...request,
+        projection_id: projectionId,
+        exclude_person_ids: sessionExcludedPersonIds ?? [],
+        viewport_aspect: sizeRef.current.h > 0 ? sizeRef.current.w / sizeRef.current.h : 1
+      };
+      const preview = await onPreviewNeighborCorrection(correctionRequest);
       if (preview.changed === 0) {
         setCorrectionNote("没有发现可安全纠正的声纹标注。");
         return;
@@ -721,7 +739,10 @@ export function VoiceprintMap({
       const summary = correctionSummary(preview) || `将纠正 ${preview.changed} 段`;
       const ok = window.confirm(`将应用邻域纠偏 ${preview.changed} 段：\n${summary}\n继续？`);
       if (!ok) return;
-      const result = await onApplyNeighborCorrection(request);
+      const result = await onApplyNeighborCorrection({
+        ...correctionRequest,
+        preview_token: (preview as NeighborCorrectionPreview & { preview_token?: string }).preview_token
+      });
       setCorrectionNote(`已邻域纠偏 ${result.applied ?? result.changed} 段。`);
       await refetchProjection();
       onChanged?.();
@@ -731,7 +752,15 @@ export function VoiceprintMap({
     } finally {
       setCorrecting(false);
     }
-  }, [onApplyNeighborCorrection, onChanged, onPreviewNeighborCorrection, refetchProjection, request]);
+  }, [
+    onApplyNeighborCorrection,
+    onChanged,
+    onPreviewNeighborCorrection,
+    projectionId,
+    refetchProjection,
+    request,
+    sessionExcludedPersonIds
+  ]);
 
   const n = points?.length ?? 0;
   const showSelectToolbar = canLabel && selectMode;

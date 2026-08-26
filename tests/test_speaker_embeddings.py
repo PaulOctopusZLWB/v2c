@@ -489,6 +489,266 @@ def test_preview_neighbor_corrections_fixes_isolated_voiceprint_mislabel(tmp_pat
     assert preview["corrections"][0]["segment_id"] == "a_wrong"
 
 
+def test_projection_hybrid_correction_reuses_exact_displayed_projection(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config)
+    clear_projection_cache()
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+
+    preview = preview_neighbor_corrections(
+        config=config,
+        projection_id=projection["projection_id"],
+        k=5,
+        min_neighbours=3,
+        majority_ratio=0.6,
+        similarity_floor=0.3,
+    )
+
+    assert preview["algorithm"] == "projection-hybrid-v2"
+    assert preview["projection_id"] == projection["projection_id"]
+    assert preview["changed"] == 1
+    correction = preview["corrections"][0]
+    assert correction["segment_id"] == "a_wrong"
+    assert correction["projection_confidence"] >= 0.6
+    assert correction["raw_confidence"] >= 0.5
+
+
+def test_projection_hybrid_rejects_visual_neighbourhood_when_raw_voice_disagrees(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config)
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update segment_person_overrides set source = 'voiceprint' where segment_id = 'b_1'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Force the displayed projection to put Bob's b_1 inside Alice's island. A projection-only
+    # smoother would relabel it; the raw CAM++ safety vote must veto that visual artefact.
+    import personal_context_node.speaker_embeddings as speaker_embeddings
+
+    displayed = np.asarray(
+        [
+            [0.00, 0.00],  # a_1
+            [0.02, 0.00],  # a_2
+            [0.04, 0.00],  # a_3
+            [0.06, 0.00],  # a_wrong
+            [0.03, 0.01],  # b_1: visually inside Alice
+            [1.00, 1.00],  # b_2
+        ],
+        dtype=np.float64,
+    )
+    monkeypatch.setattr(
+        speaker_embeddings,
+        "_fit_coords_2d",
+        lambda *_args, **_kwargs: (displayed, "pca"),
+    )
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+
+    preview = preview_neighbor_corrections(
+        config=config,
+        projection_id=projection["projection_id"],
+        k=4,
+        min_neighbours=3,
+        majority_ratio=0.6,
+        similarity_floor=0.3,
+    )
+
+    assert all(item["segment_id"] != "b_1" for item in preview["corrections"])
+
+
+def test_projection_hybrid_rejects_unknown_or_expired_projection(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config)
+
+    try:
+        preview_neighbor_corrections(config=config, projection_id="proj_missing")
+    except ValueError as exc:
+        assert "projection" in str(exc).lower()
+    else:
+        raise AssertionError("expected an unknown projection_id to fail closed")
+
+
+def test_projection_hybrid_does_not_absorb_a_far_isolated_unknown(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    anchor_ids = [f"anchor_{index}" for index in range(8)]
+    segment_ids = [*anchor_ids, "isolated"]
+    _insert_session_with_segments(config.database_path, segment_ids)
+    _insert_persons(config.database_path, {"per_a": "Alice"})
+    weak_query = [0.36, float(np.sqrt(1.0 - 0.36**2)), 0.0]
+    put_embeddings_bulk(
+        config=config,
+        items=[*( (sid, [1.0, 0.0, 0.0]) for sid in anchor_ids ), ("isolated", weak_query)],
+    )
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=anchor_ids)
+
+    import personal_context_node.speaker_embeddings as speaker_embeddings
+
+    displayed = np.asarray(
+        [*([0.001 * index, 0.0] for index in range(8)), [1.0, 1.0]],
+        dtype=np.float64,
+    )
+    monkeypatch.setattr(
+        speaker_embeddings,
+        "_fit_coords_2d",
+        lambda *_args, **_kwargs: (displayed, "pca"),
+    )
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+
+    preview = preview_neighbor_corrections(
+        config=config,
+        projection_id=projection["projection_id"],
+        k=8,
+        min_neighbours=8,
+        majority_ratio=0.75,
+        similarity_floor=0.35,
+    )
+
+    assert all(item["segment_id"] != "isolated" for item in preview["corrections"])
+
+
+def test_projection_hybrid_does_not_merge_two_distant_dense_islands(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    anchor_ids = [f"anchor_{index}" for index in range(8)]
+    unknown_ids = [f"unknown_{index}" for index in range(8)]
+    _insert_session_with_segments(config.database_path, [*anchor_ids, *unknown_ids])
+    _insert_persons(config.database_path, {"per_a": "Alice"})
+    unknown_vector = [0.46, float(np.sqrt(1.0 - 0.46**2)), 0.0]
+    put_embeddings_bulk(
+        config=config,
+        items=[*((sid, [1.0, 0.0, 0.0]) for sid in anchor_ids), *((sid, unknown_vector) for sid in unknown_ids)],
+    )
+    label_segments_as_person(config=config, person_id="per_a", segment_ids=anchor_ids)
+
+    import personal_context_node.speaker_embeddings as speaker_embeddings
+
+    displayed = np.asarray(
+        [*([0.001 * index, 0.0] for index in range(8)), *([1.0 - 0.001 * index, 1.0] for index in range(8))],
+        dtype=np.float64,
+    )
+    monkeypatch.setattr(speaker_embeddings, "_fit_coords_2d", lambda *_args, **_kwargs: (displayed, "pca"))
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+
+    preview = preview_neighbor_corrections(config=config, projection_id=projection["projection_id"])
+
+    assert preview["changed"] == 0
+
+
+def test_projection_hybrid_can_clear_wrong_voiceprint_inside_unknown_island(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    unknown_ids = [f"unknown_{index}" for index in range(8)]
+    segment_ids = ["wrong", *unknown_ids]
+    _insert_session_with_segments(config.database_path, segment_ids)
+    _insert_persons(config.database_path, {"per_a": "Alice"})
+    put_embeddings_bulk(config=config, items=[(sid, [1.0, 0.0, 0.0]) for sid in segment_ids])
+    conn = connect(config.database_path)
+    try:
+        conn.execute(
+            "insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source) values (?, ?, ?, ?, ?)",
+            ("wrong", "Alice", "2087-05-10T08:00:00+08:00", "per_a", "voiceprint"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    import personal_context_node.speaker_embeddings as speaker_embeddings
+
+    displayed = np.asarray([[0.001 * index, 0.0] for index in range(len(segment_ids))], dtype=np.float64)
+    monkeypatch.setattr(speaker_embeddings, "_fit_coords_2d", lambda *_args, **_kwargs: (displayed, "pca"))
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+
+    preview = preview_neighbor_corrections(config=config, projection_id=projection["projection_id"])
+
+    correction = next(item for item in preview["corrections"] if item["segment_id"] == "wrong")
+    assert correction["to_person_id"] is None
+
+
+def test_projection_preview_and_apply_fail_closed_when_state_or_plan_changes(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config)
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+    preview = preview_neighbor_corrections(
+        config=config, projection_id=projection["projection_id"], k=5, min_neighbours=3, majority_ratio=0.6, similarity_floor=0.3
+    )
+
+    try:
+        apply_neighbor_corrections(
+            config=config,
+            projection_id=projection["projection_id"],
+            k=5,
+            min_neighbours=3,
+            majority_ratio=0.6,
+            similarity_floor=0.3,
+            preview_token="preview_tampered",
+        )
+    except ValueError as exc:
+        assert "preview" in str(exc).lower()
+    else:
+        raise AssertionError("expected a changed preview token to fail closed")
+
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update segment_person_overrides set person_label = 'Alice changed' where segment_id = 'a_1'")
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        apply_neighbor_corrections(
+            config=config,
+            projection_id=projection["projection_id"],
+            k=5,
+            min_neighbours=3,
+            majority_ratio=0.6,
+            similarity_floor=0.3,
+            preview_token=str(preview["preview_token"]),
+        )
+    except ValueError as exc:
+        assert "projection labels changed" in str(exc)
+    else:
+        raise AssertionError("expected stale displayed labels to fail closed")
+
+
+def test_projection_preview_fails_closed_when_voiceprint_or_scope_changes(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config)
+    clear_projection_cache()
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+    conn = connect(config.database_path)
+    try:
+        changed_vector = np.asarray([0.0, 0.0, 1.0], dtype=np.float32)
+        conn.execute(
+            "update segment_embeddings set vector = ?, dim = ? where segment_id = 'a_wrong'",
+            (changed_vector.tobytes(), len(changed_vector)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        preview_neighbor_corrections(config=config, projection_id=projection["projection_id"])
+    except ValueError as exc:
+        assert "voiceprints changed" in str(exc)
+    else:
+        raise AssertionError("expected stale voiceprint evidence to fail closed")
+
+    clear_projection_cache()
+    projection = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update transcript_segments set is_active = 0 where segment_id = 'b_2'")
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        preview_neighbor_corrections(config=config, projection_id=projection["projection_id"])
+    except ValueError as exc:
+        assert "scope changed" in str(exc)
+    else:
+        raise AssertionError("expected stale active scope to fail closed")
+
+
 def test_apply_neighbor_corrections_preserves_manual_labels(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _seed_neighbor_correction_fixture(config, manual_wrong=True)
@@ -1409,7 +1669,10 @@ def test_project_embeddings_cache_and_clear(tmp_path: Path) -> None:
     clear_projection_cache()
     third = project_embeddings(config=config, session_ids=["ses_test"], method="pca")
     assert third is not first
-    assert third == first
+    assert third["projection_id"] != first["projection_id"]
+    assert {key: value for key, value in third.items() if key != "projection_id"} == {
+        key: value for key, value in first.items() if key != "projection_id"
+    }
 
 
 def test_project_embeddings_empty_scope(tmp_path: Path) -> None:

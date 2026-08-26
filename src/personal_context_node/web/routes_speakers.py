@@ -108,6 +108,10 @@ class NeighborCorrectionRequest(BaseModel):
     majority_ratio: float = 0.75
     similarity_floor: float = 0.35
     max_points: int = 4000
+    projection_id: str | None = None
+    exclude_person_ids: list[str] = []
+    viewport_aspect: float = 1.0
+    preview_token: str | None = None
 
 
 class MergePeopleRequest(BaseModel):
@@ -267,6 +271,7 @@ def assign_speaker_route(request: Request, speaker: str, payload: AssignPersonRe
         conn.commit()
     finally:
         conn.close()
+    clear_projection_results_cache()
     return {"speaker": speaker, "person_id": payload.person_id, "person_label": label}
 
 
@@ -337,6 +342,7 @@ def assign_person_bulk_route(request: Request, payload: AssignPersonBulkRequest)
         conn.commit()
     finally:
         conn.close()
+    clear_projection_results_cache()
     return {"assigned": len(payload.speakers)}
 
 
@@ -355,6 +361,7 @@ def segment_override_route(request: Request, segment_id: str, payload: AssignPer
         conn.commit()
     finally:
         conn.close()
+    clear_projection_results_cache()
     return {"segment_id": segment_id, "person_id": payload.person_id, "person_label": label}
 
 
@@ -660,6 +667,9 @@ def neighbor_correction_preview_route(request: Request, payload: NeighborCorrect
             majority_ratio=payload.majority_ratio,
             similarity_floor=payload.similarity_floor,
             max_points=payload.max_points,
+            exclude_person_ids=set(payload.exclude_person_ids),
+            projection_id=payload.projection_id,
+            viewport_aspect=payload.viewport_aspect,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -678,6 +688,10 @@ def neighbor_correction_apply_route(request: Request, payload: NeighborCorrectio
             majority_ratio=payload.majority_ratio,
             similarity_floor=payload.similarity_floor,
             max_points=payload.max_points,
+            exclude_person_ids=set(payload.exclude_person_ids),
+            projection_id=payload.projection_id,
+            viewport_aspect=payload.viewport_aspect,
+            preview_token=payload.preview_token,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
