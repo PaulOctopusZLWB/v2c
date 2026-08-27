@@ -152,7 +152,7 @@ describe("VoiceprintMap", () => {
     expect(screen.getByRole("list", { name: /图例/ })).toBeInTheDocument();
   });
 
-  it("previews and applies neighbour correction only after confirmation", async () => {
+  it("previews and applies neighbour correction only after in-page confirmation", async () => {
     const preview = {
       total: 4,
       total_before_cap: 4,
@@ -174,7 +174,6 @@ describe("VoiceprintMap", () => {
     };
     const onPreviewNeighborCorrection = vi.fn().mockResolvedValue(preview);
     const onApplyNeighborCorrection = vi.fn().mockResolvedValue(preview);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(
       <VoiceprintMap
         request={REQ}
@@ -194,7 +193,11 @@ describe("VoiceprintMap", () => {
         viewport_aspect: 640 / 420
       })
     );
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("Bob -> Alice: 1"));
+    expect(onApplyNeighborCorrection).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "确认邻域纠偏" });
+    expect(dialog).toHaveTextContent("Bob");
+    expect(dialog).toHaveTextContent("Alice");
+    await userEvent.click(screen.getByRole("button", { name: "确认纠偏" }));
     await waitFor(() =>
       expect(onApplyNeighborCorrection).toHaveBeenCalledWith({
         ...REQ,
@@ -204,6 +207,41 @@ describe("VoiceprintMap", () => {
         preview_token: "preview_test"
       })
     );
+  });
+
+  it("cancels an in-page neighbour correction preview without applying it", async () => {
+    const preview = {
+      total: 4,
+      total_before_cap: 4,
+      changed: 1,
+      skipped_manual: 0,
+      preview_token: "preview_test",
+      params: { k: 15, min_neighbours: 8, majority_ratio: 0.75, similarity_floor: 0.35, max_points: 4000 },
+      groups: [{
+        from_person_id: "per_b",
+        from_person_label: "Bob",
+        to_person_id: "per_a",
+        to_person_label: "Alice",
+        count: 1,
+        segment_ids: ["seg_2"]
+      }],
+      corrections: []
+    };
+    const onApplyNeighborCorrection = vi.fn();
+    render(
+      <VoiceprintMap
+        request={REQ}
+        onPreviewNeighborCorrection={vi.fn().mockResolvedValue(preview)}
+        onApplyNeighborCorrection={onApplyNeighborCorrection}
+      />
+    );
+    await screen.findByRole("list", { name: /图例/ });
+
+    await userEvent.click(screen.getByRole("button", { name: /邻域纠偏/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("dialog", { name: "确认邻域纠偏" })).not.toBeInTheDocument();
+    expect(onApplyNeighborCorrection).not.toHaveBeenCalled();
   });
 
   it("reports when neighbour correction preview has no changes", async () => {

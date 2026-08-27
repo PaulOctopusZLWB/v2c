@@ -67,15 +67,6 @@ function correctionPersonLabel(label: string | null, id: string | null): string 
   return label || id || "未识别";
 }
 
-function correctionSummary(preview: NeighborCorrectionPreview): string {
-  const lines = preview.groups.slice(0, 6).map((g) => (
-    `${correctionPersonLabel(g.from_person_label, g.from_person_id)} -> ${correctionPersonLabel(g.to_person_label, g.to_person_id)}: ${g.count}`
-  ));
-  const remaining = preview.groups.length - lines.length;
-  if (remaining > 0) lines.push(`还有 ${remaining} 组`);
-  return lines.join("\n");
-}
-
 interface View {
   scale: number;
   tx: number;
@@ -139,6 +130,10 @@ export function VoiceprintMap({
   const [clearingKey, setClearingKey] = useState<string | null>(null);
   const [armedClearKey, setArmedClearKey] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState(false);
+  const [pendingCorrection, setPendingCorrection] = useState<{
+    preview: NeighborCorrectionPreview;
+    request: NeighborCorrectionMapRequest;
+  } | null>(null);
   const [correctionNote, setCorrectionNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // Keep onResult out of the fetch effect's deps (it may change identity each render).
@@ -736,13 +731,30 @@ export function VoiceprintMap({
         setCorrectionNote("没有发现可安全纠正的声纹标注。");
         return;
       }
-      const summary = correctionSummary(preview) || `将纠正 ${preview.changed} 段`;
-      const ok = window.confirm(`将应用邻域纠偏 ${preview.changed} 段：\n${summary}\n继续？`);
-      if (!ok) return;
+      setPendingCorrection({ preview, request: correctionRequest });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setActionError(`邻域纠偏失败：${message}`);
+    } finally {
+      setCorrecting(false);
+    }
+  }, [
+    onPreviewNeighborCorrection,
+    projectionId,
+    request,
+    sessionExcludedPersonIds
+  ]);
+
+  const applyPendingCorrection = useCallback(async () => {
+    if (!pendingCorrection || !onApplyNeighborCorrection) return;
+    setCorrecting(true);
+    setActionError(null);
+    try {
       const result = await onApplyNeighborCorrection({
-        ...correctionRequest,
-        preview_token: (preview as NeighborCorrectionPreview & { preview_token?: string }).preview_token
+        ...pendingCorrection.request,
+        preview_token: (pendingCorrection.preview as NeighborCorrectionPreview & { preview_token?: string }).preview_token
       });
+      setPendingCorrection(null);
       setCorrectionNote(`已邻域纠偏 ${result.applied ?? result.changed} 段。`);
       await refetchProjection();
       onChanged?.();
@@ -752,15 +764,7 @@ export function VoiceprintMap({
     } finally {
       setCorrecting(false);
     }
-  }, [
-    onApplyNeighborCorrection,
-    onChanged,
-    onPreviewNeighborCorrection,
-    projectionId,
-    refetchProjection,
-    request,
-    sessionExcludedPersonIds
-  ]);
+  }, [onApplyNeighborCorrection, onChanged, pendingCorrection, refetchProjection]);
 
   const n = points?.length ?? 0;
   const showSelectToolbar = canLabel && selectMode;
@@ -824,7 +828,7 @@ export function VoiceprintMap({
               type="button"
               className="ghost"
               onClick={() => void runNeighborCorrection()}
-              disabled={correcting || loading}
+              disabled={correcting || loading || !!pendingCorrection}
               aria-busy={correcting}
               title="根据周围近邻预览并统一零星错误识别"
             >
@@ -839,6 +843,37 @@ export function VoiceprintMap({
       </div>
 
       <div className="vmap-stage" ref={boxRef}>
+        {pendingCorrection ? (
+          <div className="vmap-correction-confirm" role="dialog" aria-label="确认邻域纠偏">
+            <div className="vmap-correction-confirm-head">
+              <strong>确认邻域纠偏</strong>
+              <span className="num">{pendingCorrection.preview.changed} 段</span>
+            </div>
+            <p>系统只会应用下面预览过的零星标注变更。</p>
+            <ul>
+              {pendingCorrection.preview.groups.slice(0, 6).map((group) => (
+                <li key={`${group.from_person_id ?? "unknown"}-${group.to_person_id ?? "unknown"}`}>
+                  <span>{correctionPersonLabel(group.from_person_label, group.from_person_id)}</span>
+                  <span aria-hidden>→</span>
+                  <strong>{correctionPersonLabel(group.to_person_label, group.to_person_id)}</strong>
+                  <span className="num">{group.count}</span>
+                </li>
+              ))}
+            </ul>
+            {pendingCorrection.preview.groups.length > 6 ? (
+              <small>另有 {pendingCorrection.preview.groups.length - 6} 组</small>
+            ) : null}
+            <div className="vmap-correction-confirm-actions">
+              <button type="button" className="ghost" disabled={correcting} onClick={() => setPendingCorrection(null)}>
+                取消
+              </button>
+              <button type="button" className="primary" disabled={correcting} onClick={() => void applyPendingCorrection()}>
+                {correcting ? <span className="spinner" aria-hidden /> : null}
+                确认纠偏
+              </button>
+            </div>
+          </div>
+        ) : null}
         {showSelectToolbar ? (
           <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
             <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>

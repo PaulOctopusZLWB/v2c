@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "../../api/client";
-import type { IdentityCandidate, IdentityReview, InboxSession, TranscriptSegment } from "../../api/types";
+import type { IdentityCandidate, IdentityReview, InboxSession, Person, TranscriptSegment } from "../../api/types";
 import { Icon } from "../../components/Icon";
+import { speakerColor } from "../../lib/speakerColors";
 
 // 收件箱 — 默认页。左侧按录音时间轴浏览，右侧固定承载当前会话的
 // 出席确认(chips)→ 证据抽屉(按人分组的原文+试听)→ 定稿导出。
@@ -35,6 +36,28 @@ const sessionTitle = (session: InboxSession) => session.name || `${HHMM(session.
 
 type Push = (title: string, message?: string, tone?: "success" | "error") => void;
 
+const EVIDENCE_PAGE_SIZE = 40;
+const EVIDENCE_MAX_SEGMENTS_PER_TURN = 8;
+
+type EvidenceSegment = { label: string; segment: TranscriptSegment };
+type EvidenceTurn = { label: string; segments: TranscriptSegment[] };
+
+function markMatch(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const lower = text.toLocaleLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let match = lower.indexOf(query);
+  while (match >= 0) {
+    if (match > cursor) parts.push(text.slice(cursor, match));
+    parts.push(<mark key={`${match}-${parts.length}`}>{text.slice(match, match + query.length)}</mark>);
+    cursor = match + query.length;
+    match = lower.indexOf(query, cursor);
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts.length ? parts : text;
+}
+
 export function InboxPanel({
   push,
   onOpenWorkbench
@@ -46,6 +69,7 @@ export function InboxPanel({
   const [sessions, setSessions] = useState<InboxSession[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const load = async () => {
     const result = await api.inbox();
@@ -91,6 +115,22 @@ export function InboxPanel({
   const pendingSessions = sessions.filter((s) => !s.finalized);
   const doneSessions = sessions.filter((s) => s.finalized);
   const selectedSession = sessions.find((session) => session.session_id === selectedId) ?? sessions[0];
+  const finalizeReady = async () => {
+    setBatchBusy(true);
+    try {
+      const result = await api.finalizeReadySessions();
+      await load();
+      push(
+        result.finalized.length ? "已导出全部就绪会议" : "暂时没有可导出的会议",
+        `${result.finalized.length} 场已导出，${result.skipped.length} 场仍需身份确认`,
+        result.finalized.length ? "success" : undefined
+      );
+    } catch (err) {
+      push("批量导出失败", err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setBatchBusy(false);
+    }
+  };
 
   return (
     <div className="tab-page inbox-layout">
@@ -107,6 +147,11 @@ export function InboxPanel({
           <span>
             <b className="num">{sessions.length}</b><small>全部会话</small>
           </span>
+          {pendingSessions.length ? (
+            <button type="button" disabled={batchBusy} onClick={() => void finalizeReady()}>
+              {batchBusy ? "正在逐场导出…" : "导出全部已就绪"}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -206,10 +251,20 @@ function InboxSessionDetail({
   push: Push;
 }) {
   const [review, setReview] = useState<IdentityReview | null>(null);
+  const [persons, setPersons] = useState<Person[]>([]);
   const [busy, setBusy] = useState(false);
 
   const loadReview = async () => {
-    setReview(await api.identityReview(session.session_id));
+    const [nextReview, nextPersons] = await Promise.all([
+      api.identityReview(session.session_id),
+      api.persons()
+    ]);
+    setReview(nextReview);
+    setPersons(
+      (nextPersons.persons ?? []).filter(
+        (person) => person.person_type !== "non_speaker" && person.person_type !== "unknown_voice"
+      )
+    );
   };
 
   useEffect(() => {
@@ -255,10 +310,32 @@ function InboxSessionDetail({
     push("已定稿并导出", `${result.segment_count} 段 → ${result.export_md_path}`, "success");
   });
 
+  const assignCandidate = (
+    candidate: IdentityCandidate,
+    action: "known_person" | "new_person" | "noise" | "unknown",
+    options: { personId?: string; displayName?: string } = {}
+  ) =>
+    act(async () => {
+      const result = await api.confirmIdentityCandidate({
+        session_id: session.session_id,
+        action,
+        person_id: options.personId,
+        display_name: options.displayName,
+        segment_ids: candidate.segment_ids
+      });
+      const labels: Record<typeof action, string> = {
+        known_person: "已分配给人物",
+        new_person: "已创建人物并分配",
+        noise: "已标记为噪音/多人",
+        unknown: "已保留为未知声音"
+      };
+      push(labels[action], `${result.labeled} 段身份已固定`, "success");
+    })();
+
   const title = sessionTitle(session);
   const canFinalize = review?.can_finalize ?? false;
   const activeCandidates = (review?.candidates ?? []).filter(
-    (c) => c.status === "suggested" || c.status === "trusted"
+    (c) => c.eligible !== false && (c.status === "suggested" || c.status === "trusted")
   );
   const coverage = session.segment_count
     ? Math.round((session.attributed_count / session.segment_count) * 100)
@@ -319,15 +396,30 @@ function InboxSessionDetail({
                   </div>
                 ))}
                 {(review.new_person_candidates ?? []).map((candidate) => (
-                  <div className="inbox-candidate unknown" key={candidate.safe_label}>
-                    <span className="inbox-candidate-name"><strong>{candidate.safe_label}</strong><small>{candidate.segment_count} 段未识别</small></span>
-                    {onOpenWorkbench ? (
-                      <button type="button" onClick={() => onOpenWorkbench(session.session_id)}>
-                        去认人
-                      </button>
-                    ) : null}
-                  </div>
+                  <UnknownCandidateAssignment
+                    key={candidate.safe_label}
+                    candidate={candidate}
+                    persons={persons}
+                    busy={busy}
+                    onAssign={(action, options) => void assignCandidate(candidate, action, options)}
+                    onOpenWorkbench={onOpenWorkbench ? () => onOpenWorkbench(session.session_id) : undefined}
+                  />
                 ))}
+                {(review.incidental_candidates ?? []).length ? (
+                  <details className="inbox-incidental">
+                    <summary>
+                      已过滤 {review.incidental_candidates?.length} 个零散声音
+                      <small>保留原文和音频，不参与人物候选，也不阻塞导出</small>
+                    </summary>
+                    <div>
+                      {review.incidental_candidates?.map((candidate) => (
+                        <span key={`${candidate.person_id ?? candidate.speaker}-${candidate.safe_label}`}>
+                          {candidate.safe_label} · {candidate.segment_count} 段
+                        </span>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
                 {activeCandidates.length === 0 && (review.new_person_candidates ?? []).length === 0 ? (
                   <p className="inbox-identity-clear"><span aria-hidden>✓</span> 身份判断已收口</p>
                 ) : null}
@@ -348,7 +440,13 @@ function InboxSessionDetail({
         <button type="button" className="primary" disabled={busy || !canFinalize} onClick={() => void finalize()}>
           {session.finalized ? "重新定稿并导出" : "定稿并导出"}
         </button>
-        {!canFinalize ? <span className="dim">先确认至少一位出席者</span> : null}
+        {!canFinalize ? (
+          <span className="dim">
+            {(review?.gate?.present_count ?? 0) === 0
+              ? "先确认至少一位出席者"
+              : `还有 ${review?.gate?.unresolved_candidate_count ?? 0} 个有效声音需要分配角色`}
+          </span>
+        ) : null}
         {(review?.finalized?.export_md_path ?? session.finalized?.export_md_path) ? (
           <span className="inbox-export-path" title={review?.finalized?.export_md_path ?? session.finalized?.export_md_path}>
             <span className="ok">✓ 已写入本地</span>
@@ -360,6 +458,66 @@ function InboxSessionDetail({
   );
 }
 
+function UnknownCandidateAssignment({
+  candidate,
+  persons,
+  busy,
+  onAssign,
+  onOpenWorkbench
+}: {
+  candidate: IdentityCandidate;
+  persons: Person[];
+  busy: boolean;
+  onAssign: (
+    action: "known_person" | "new_person" | "noise" | "unknown",
+    options?: { personId?: string; displayName?: string }
+  ) => void;
+  onOpenWorkbench?: () => void;
+}) {
+  const [personId, setPersonId] = useState(persons[0]?.person_id ?? "");
+  const [newName, setNewName] = useState("");
+
+  useEffect(() => {
+    if (!personId && persons[0]) setPersonId(persons[0].person_id);
+  }, [persons, personId]);
+
+  return (
+    <div className="inbox-candidate unknown">
+      <span className="inbox-candidate-name">
+        <strong>{candidate.safe_label}</strong>
+        <small>
+          {candidate.segment_count} 段 · {Math.round((candidate.total_speech_ms ?? 0) / 1000)} 秒有效发言
+        </small>
+      </span>
+      <div className="inbox-role-assignment">
+        <span>
+          <select aria-label={`把${candidate.safe_label}分配给人物`} value={personId} onChange={(event) => setPersonId(event.target.value)}>
+            <option value="">选择已有人物</option>
+            {persons.map((person) => <option key={person.person_id} value={person.person_id}>{person.display_name}</option>)}
+          </select>
+          <button type="button" disabled={busy || !personId} onClick={() => onAssign("known_person", { personId })}>分配</button>
+        </span>
+        <span>
+          <input
+            aria-label={`${candidate.safe_label}的新人物姓名`}
+            value={newName}
+            placeholder="新人物姓名"
+            onChange={(event) => setNewName(event.target.value)}
+          />
+          <button type="button" disabled={busy || !newName.trim()} onClick={() => onAssign("new_person", { displayName: newName.trim() })}>
+            创建并分配
+          </button>
+        </span>
+        <span className="inbox-role-shortcuts">
+          <button type="button" disabled={busy} onClick={() => onAssign("noise")}>噪音/多人</button>
+          <button type="button" disabled={busy} onClick={() => onAssign("unknown")}>保留未知</button>
+          {onOpenWorkbench ? <button type="button" disabled={busy} onClick={onOpenWorkbench}>去认人</button> : null}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** 证据抽屉:按"人/声音"分组的原文,逐段可试听。逐字句不再是审核阶段,只是证据。 */
 function EvidenceDrawer({
   sessionId,
@@ -368,8 +526,10 @@ function EvidenceDrawer({
   sessionId: string;
   push: Push;
 }) {
-  const [groups, setGroups] = useState<Array<{ label: string; segments: TranscriptSegment[] }> | null>(null);
-  const [openLabel, setOpenLabel] = useState<string | null>(null);
+  const [segments, setSegments] = useState<EvidenceSegment[] | null>(null);
+  const [query, setQuery] = useState("");
+  const [speaker, setSpeaker] = useState("all");
+  const [page, setPage] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const load = async () => {
@@ -386,14 +546,38 @@ function EvidenceDrawer({
       }
       return voiceLabels.get(key)!;
     };
-    const byLabel = new Map<string, TranscriptSegment[]>();
-    for (const segment of session.segments) {
-      const label = labelOf(segment);
-      if (!byLabel.has(label)) byLabel.set(label, []);
-      byLabel.get(label)!.push(segment);
-    }
-    setGroups(Array.from(byLabel.entries()).map(([label, segments]) => ({ label, segments })));
+    setSegments(session.segments.map((segment) => ({ label: labelOf(segment), segment })));
   };
+
+  const speakerOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of segments ?? []) counts.set(item.label, (counts.get(item.label) ?? 0) + 1);
+    return Array.from(counts, ([label, count]) => ({ label, count }));
+  }, [segments]);
+
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const turns = useMemo(() => {
+    const all: EvidenceTurn[] = [];
+    for (const item of segments ?? []) {
+      const current = all[all.length - 1];
+      if (current?.label === item.label && current.segments.length < EVIDENCE_MAX_SEGMENTS_PER_TURN) {
+        current.segments.push(item.segment);
+      }
+      else all.push({ label: item.label, segments: [item.segment] });
+    }
+    return all.filter((turn) => {
+      if (speaker !== "all" && turn.label !== speaker) return false;
+      if (normalizedQuery && !turn.segments.some((segment) => segment.text.toLocaleLowerCase().includes(normalizedQuery))) return false;
+      return true;
+    });
+  }, [segments, speaker, normalizedQuery]);
+
+  const pageCount = Math.max(1, Math.ceil(turns.length / EVIDENCE_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageStart = safePage * EVIDENCE_PAGE_SIZE;
+  const visibleTurns = turns.slice(pageStart, pageStart + EVIDENCE_PAGE_SIZE);
+
+  useEffect(() => setPage(0), [speaker, normalizedQuery]);
 
   const play = (segmentId: string) => {
     if (audioRef.current) audioRef.current.pause();
@@ -408,42 +592,130 @@ function EvidenceDrawer({
     <details
       className="inbox-evidence"
       onToggle={(event) => {
-        if ((event.target as HTMLDetailsElement).open && groups === null) {
+        if ((event.target as HTMLDetailsElement).open && segments === null) {
           void load().catch((err) => push("原文读取失败", err instanceof Error ? err.message : undefined));
         }
       }}
     >
       <summary>
-        <Icon name="mic" /> 证据:原文与录音
+        <Icon name="mic" /> 浏览原文与录音
       </summary>
-      {groups === null ? (
+      {segments === null ? (
         <p className="dim">读取原文…</p>
       ) : (
-        groups.map((group) => (
-          <div className="inbox-evidence-group" key={group.label}>
+        <div className="inbox-evidence-browser">
+          <div className="inbox-evidence-tools">
+            <label className="inbox-evidence-search">
+              <Icon name="search" />
+              <span className="sr-only">搜索会话原文</span>
+              <input
+                type="search"
+                value={query}
+                placeholder="搜索这场会话…"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <span className="dim num">
+              {turns.length ? `${pageStart + 1}–${Math.min(pageStart + EVIDENCE_PAGE_SIZE, turns.length)} / ${turns.length} 轮` : "0 轮"}
+            </span>
+          </div>
+
+          <div className="inbox-evidence-speakers" aria-label="按说话人筛选原文">
             <button
               type="button"
-              className="inbox-evidence-label"
-              onClick={() => setOpenLabel(openLabel === group.label ? null : group.label)}
+              className={`inbox-evidence-speaker${speaker === "all" ? " active" : ""}`}
+              aria-pressed={speaker === "all"}
+              onClick={() => setSpeaker("all")}
             >
-              <strong>{group.label}</strong>
-              <span className="dim">{group.segments.length} 段</span>
+              全部 <span className="num">{segments.length}</span>
             </button>
-            {openLabel === group.label ? (
-              <ul className="inbox-evidence-list">
-                {group.segments.map((segment) => (
-                  <li key={segment.segment_id}>
-                    <button type="button" className="ghost" onClick={() => play(segment.segment_id)} aria-label="播放">
-                      ▶
-                    </button>
-                    <span className="dim">{HHMM(segment.absolute_start_at)}</span>
-                    <span>{segment.text}</span>
-                  </li>
-                ))}
-              </ul>
+            {speakerOptions.map((option) => (
+              <button
+                type="button"
+                key={option.label}
+                className={`inbox-evidence-speaker${speaker === option.label ? " active" : ""}`}
+                aria-pressed={speaker === option.label}
+                onClick={() => setSpeaker(option.label)}
+              >
+                <i style={{ background: speakerColor(option.label) }} aria-hidden />
+                {option.label} <span className="num">{option.count}</span>
+              </button>
+            ))}
+          </div>
+
+          {pageCount > 1 ? (
+            <div className="inbox-evidence-pages" aria-label="会话分段导航">
+              <span className="num">时间轴</span>
+              <div>
+                {Array.from({ length: pageCount }, (_, index) => {
+                  const first = turns[index * EVIDENCE_PAGE_SIZE];
+                  return (
+                    <button
+                      type="button"
+                      key={index}
+                      className={index === safePage ? "active" : ""}
+                      aria-label={`第 ${index + 1} 组，从 ${HHMM(first?.segments[0]?.absolute_start_at)} 开始`}
+                      aria-pressed={index === safePage}
+                      title={`${HHMM(first?.segments[0]?.absolute_start_at)} 开始`}
+                      onClick={() => setPage(index)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="inbox-evidence-turns" aria-live="polite">
+            {visibleTurns.map((turn) => (
+              <article className="inbox-evidence-turn" key={turn.segments[0].segment_id}>
+                <header>
+                  <span className="inbox-evidence-person">
+                    <i style={{ background: speakerColor(turn.label) }} aria-hidden />
+                    <strong>{turn.label}</strong>
+                  </span>
+                  <span className="dim num">{HHMM(turn.segments[0].absolute_start_at)} · {turn.segments.length} 段</span>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => play(turn.segments[0].segment_id)}
+                    aria-label={`播放 ${turn.label} ${HHMM(turn.segments[0].absolute_start_at)}`}
+                  >
+                    <Icon name="play" />
+                  </button>
+                </header>
+                <p>
+                  {turn.segments.map((segment, index) => (
+                    <span key={segment.segment_id}>
+                      {index ? " " : null}
+                      <button
+                        type="button"
+                        className="inbox-evidence-sentence"
+                        title={`${HHMM(segment.absolute_start_at)} · 点击播放`}
+                        onClick={() => play(segment.segment_id)}
+                      >
+                        {markMatch(segment.text, normalizedQuery)}
+                      </button>
+                    </span>
+                  ))}
+                </p>
+              </article>
+            ))}
+            {turns.length === 0 ? (
+              <div className="inbox-evidence-none">
+                没有符合当前条件的原文。
+                <button type="button" onClick={() => { setQuery(""); setSpeaker("all"); }}>清除筛选</button>
+              </div>
             ) : null}
           </div>
-        ))
+
+          {pageCount > 1 ? (
+            <footer className="inbox-evidence-pagination">
+              <button type="button" disabled={safePage === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>上一组</button>
+              <span className="num">第 {safePage + 1} / {pageCount} 组</span>
+              <button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>下一组</button>
+            </footer>
+          ) : null}
+        </div>
       )}
     </details>
   );

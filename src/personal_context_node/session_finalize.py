@@ -23,11 +23,21 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
 def finalize_session(*, config: AppConfig, session_id: str) -> dict:
-    """Freeze a session's facts into the export artifact pair; requires ≥1 present participant.
+    """Freeze a session's facts into the export artifact pair after the identity gate passes.
 
-    Raises ``ValueError`` when the session is unknown or nobody is confirmed present (the
-    reviewer's attendance verdict IS the finalization criterion — nothing else gates it).
+    Sparse, incidental voices remain in the evidence and export as 声音A/B, but a substantial
+    unresolved voice or an uncertain participant must be reviewed first.
     """
+    from personal_context_node.identity_review import identity_review_for_session
+
+    review = identity_review_for_session(config=config, session_id=session_id)
+    if not review["can_finalize"]:
+        gate = review.get("gate") or {}
+        if int(gate.get("present_count") or 0) == 0:
+            raise ValueError("cannot finalize: no participant confirmed present yet")
+        unresolved = int(gate.get("unresolved_candidate_count") or 0)
+        raise ValueError(f"cannot finalize: {unresolved} participant candidate(s) still unresolved")
+
     conn = connect(config.database_path)
     try:
         initialize(conn)

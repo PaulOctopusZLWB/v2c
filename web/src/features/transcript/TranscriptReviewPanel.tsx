@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "../../api/client";
 import type { Person, ReviewStatus, SessionTriage, TranscriptSession, TriageSegment } from "../../api/types";
 import type { PromptFn } from "../../components/ui/Dialog";
@@ -9,7 +9,7 @@ import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { useHotkeys } from "../command/useHotkeys";
 import { Icon } from "../../components/Icon";
-import { TurnBlock } from "./TurnBlock";
+import { TurnBlock, turnDecision } from "./TurnBlock";
 import { ShortcutSheet } from "./ShortcutSheet";
 
 /* AI 预审审核页(design handoff 1c):triage 把段分箱为 high/suspect/manual —
@@ -18,6 +18,10 @@ import { ShortcutSheet } from "./ShortcutSheet";
  * 退化为普通人工审(无横幅/折叠),审核功能不受影响。 */
 
 type TurnBin = "suspect" | "manual" | "high";
+type TurnOrder = "review" | "time";
+
+const INITIAL_TURN_LIMIT = 60;
+const TURN_PAGE_SIZE = 60;
 
 /** turn 的分箱:任一段可疑 → suspect;全部高置信 → high;其余(含无 triage 数据)→ manual。 */
 function turnBin(turn: Turn, byId: Map<string, TriageSegment>): TurnBin {
@@ -84,28 +88,54 @@ export function TranscriptReviewPanel({
   // ── Noise filters ────────────────────────────────────────────────────────
   const [hideFiller, setHideFiller] = useState(false);
   const [onlyPending, setOnlyPending] = useState(false);
+  const [query, setQuery] = useState("");
+  const [speakerFilter, setSpeakerFilter] = useState("all");
+  const [turnOrder, setTurnOrder] = useState<TurnOrder>("review");
+  const [visibleLimit, setVisibleLimit] = useState(INITIAL_TURN_LIMIT);
   // 折叠的高置信 turn 可随时展开复核。
   const [showHigh, setShowHigh] = useState(false);
 
-  const allTurns = groupIntoTurns(session.segments);
+  const allTurns = useMemo(() => groupIntoTurns(session.segments), [session.segments]);
   const binOf = useMemo(() => {
     const map = new Map<Turn, TurnBin>();
     for (const turn of allTurns) map.set(turn, triage ? turnBin(turn, triageById) : "manual");
     return map;
   }, [allTurns, triage, triageById]);
 
+  const speakerOptions = useMemo(() => {
+    const options = new Map<string, { key: string; label: string; count: number; color: string }>();
+    for (const turn of allTurns) {
+      const key = turn.personId ?? turn.speaker;
+      const current = options.get(key);
+      if (current) current.count += 1;
+      else options.set(key, { key, label: turn.label, count: 1, color: speakerColor(key) });
+    }
+    return Array.from(options.values());
+  }, [allTurns]);
+
+  const normalizedQuery = query.trim().toLocaleLowerCase();
   const filtered = allTurns.filter((turn) => {
     if (hideFiller && turn.segments.every((s) => s.text.trim().length <= 2)) return false;
     if (onlyPending && turn.segments.every((s) => s.review_status !== "pending_review")) return false;
+    if (speakerFilter !== "all" && (turn.personId ?? turn.speaker) !== speakerFilter) return false;
+    if (
+      normalizedQuery &&
+      !turn.label.toLocaleLowerCase().includes(normalizedQuery) &&
+      !turn.segments.some((s) => s.text.toLocaleLowerCase().includes(normalizedQuery))
+    ) return false;
     return true;
   });
   const highTurns = filtered.filter((t) => binOf.get(t) === "high");
-  // 可疑前置(组内保持时间序);高置信折叠,展开时排在最后。
-  const turns = [
-    ...filtered.filter((t) => binOf.get(t) === "suspect"),
-    ...filtered.filter((t) => binOf.get(t) === "manual"),
-    ...(showHigh ? highTurns : [])
-  ];
+  const chronologicalTurns = filtered.filter((t) => showHigh || binOf.get(t) !== "high");
+  // 审核顺序把可疑前置;对话顺序恢复原始时间线。高置信仍由同一个显隐开关控制。
+  const turns = turnOrder === "time"
+    ? chronologicalTurns
+    : [
+        ...filtered.filter((t) => binOf.get(t) === "suspect"),
+        ...filtered.filter((t) => binOf.get(t) === "manual"),
+        ...(showHigh ? highTurns : [])
+      ];
+  const visibleTurns = turns.slice(0, visibleLimit);
 
   // ── Live 预审计数(跟随乐观更新的 review_status)─────────────────────────
   const pendingHighIds = session.segments
@@ -160,13 +190,22 @@ export function TranscriptReviewPanel({
   const [focusedIdx, setFocusedIdx] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  useEffect(() => { setFocusedIdx(0); }, [session.session_id]);
+  useEffect(() => {
+    setFocusedIdx(0);
+    setVisibleLimit(INITIAL_TURN_LIMIT);
+  }, [session.session_id, normalizedQuery, speakerFilter, turnOrder, hideFiller, onlyPending, showHigh]);
   useEffect(() => {
     setFocusedIdx((i) => Math.min(Math.max(i, 0), Math.max(turns.length - 1, 0)));
   }, [turns.length]);
 
   const lastIdx = Math.max(turns.length - 1, 0);
-  const move = (delta: number) => setFocusedIdx((i) => Math.min(Math.max(i + delta, 0), lastIdx));
+  const move = (delta: number) => setFocusedIdx((i) => {
+    const next = Math.min(Math.max(i + delta, 0), lastIdx);
+    if (next >= visibleLimit - 5) {
+      setVisibleLimit((limit) => Math.min(turns.length, limit + TURN_PAGE_SIZE));
+    }
+    return next;
+  });
   const reviewFocused = (status: ReviewStatus) => {
     const turn = turns[focusedIdx];
     if (!turn) return;
@@ -319,19 +358,126 @@ export function TranscriptReviewPanel({
         </button>
       </div>
 
-      <div className="review-filters">
-        <label className="rf-toggle">
-          <input type="checkbox" checked={hideFiller} onChange={(e) => setHideFiller(e.target.checked)} />
-          <span>隐藏碎语 (≤2字)</span>
-        </label>
-        <label className="rf-toggle">
-          <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />
-          <span>仅未审</span>
-        </label>
+      <div className="conversation-navigator" aria-label="对话导航">
+        <div className="conversation-tools">
+          <label className="conversation-search">
+            <Icon name="search" />
+            <span className="sr-only">搜索对话</span>
+            <input
+              type="search"
+              value={query}
+              placeholder="搜索这场对话…"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query ? (
+              <button type="button" className="conversation-search-clear" aria-label="清除搜索" onClick={() => setQuery("")}>×</button>
+            ) : null}
+          </label>
+          <div className="conversation-order segmented" role="group" aria-label="对话排列顺序">
+            <button
+              type="button"
+              className={`segmented-btn${turnOrder === "review" ? " active" : ""}`}
+              aria-pressed={turnOrder === "review"}
+              onClick={() => setTurnOrder("review")}
+            >
+              审核顺序
+            </button>
+            <button
+              type="button"
+              className={`segmented-btn${turnOrder === "time" ? " active" : ""}`}
+              aria-pressed={turnOrder === "time"}
+              onClick={() => setTurnOrder("time")}
+            >
+              对话顺序
+            </button>
+          </div>
+          <span className="conversation-result num" aria-live="polite">
+            {turns.length === allTurns.length ? `${turns.length} 轮` : `${turns.length}/${allTurns.length} 轮`}
+          </span>
+        </div>
+
+        <div className="conversation-speakers" aria-label="按说话人筛选">
+          <button
+            type="button"
+            className={`speaker-filter${speakerFilter === "all" ? " active" : ""}`}
+            aria-pressed={speakerFilter === "all"}
+            onClick={() => setSpeakerFilter("all")}
+          >
+            全部
+          </button>
+          {speakerOptions.map((option) => (
+            <button
+              type="button"
+              key={option.key}
+              className={`speaker-filter${speakerFilter === option.key ? " active" : ""}`}
+              aria-pressed={speakerFilter === option.key}
+              onClick={() => setSpeakerFilter(option.key)}
+            >
+              <i style={{ background: option.color }} aria-hidden />
+              {option.label}
+              <span className="num">{option.count}</span>
+            </button>
+          ))}
+          <span className="conversation-filter-divider" aria-hidden />
+          <label className="rf-toggle">
+            <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />
+            <span>仅未审</span>
+          </label>
+          <label className="rf-toggle">
+            <input type="checkbox" checked={hideFiller} onChange={(e) => setHideFiller(e.target.checked)} />
+            <span>隐藏碎语</span>
+          </label>
+        </div>
+
+        {chronologicalTurns.length > 0 ? (
+          <div className="conversation-track-wrap">
+            <span className="conversation-track-label">时间线</span>
+            <div className="conversation-track" role="list" aria-label="整场对话缩略时间线">
+              {chronologicalTurns.map((turn) => {
+                const key = turn.segment_ids[0];
+                const index = turns.findIndex((candidate) => candidate.segment_ids[0] === key);
+                const decision = turnDecision(turn);
+                return (
+                  <button
+                    type="button"
+                    role="listitem"
+                    key={key}
+                    className={`conversation-track-turn is-${decision}${index === focusedIdx ? " active" : ""}`}
+                    style={{
+                      "--turn-color": speakerColor(turn.personId ?? turn.speaker),
+                      flexGrow: Math.min(turn.segment_ids.length, 6)
+                    } as CSSProperties}
+                    aria-label={`${turn.label}，${turn.segment_ids.length} 段`}
+                    title={`${turn.label} · ${turn.segment_ids.length} 段`}
+                    onClick={() => {
+                      setVisibleLimit((limit) => Math.max(limit, index + 1));
+                      setFocusedIdx(index);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="conversation-empty">
+            没有符合当前条件的对话。
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setSpeakerFilter("all");
+                setOnlyPending(false);
+                setHideFiller(false);
+              }}
+            >
+              清除筛选
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="turn-list">
-        {turns.map((turn, i) => (
+        {visibleTurns.map((turn, i) => (
           <TurnBlock
             key={turn.segment_ids[0]}
             turn={turn}
@@ -344,8 +490,20 @@ export function TranscriptReviewPanel({
             reasons={reasonsOf(turn)}
             suggestedSpeaker={suggestionOf(turn)}
             onAdoptSpeaker={onAdoptSpeaker}
+            highlightQuery={normalizedQuery}
           />
         ))}
+
+        {visibleTurns.length < turns.length ? (
+          <button
+            type="button"
+            className="turn-load-more"
+            onClick={() => setVisibleLimit((limit) => Math.min(turns.length, limit + TURN_PAGE_SIZE))}
+          >
+            继续显示 {Math.min(TURN_PAGE_SIZE, turns.length - visibleTurns.length)} 轮
+            <span className="num">{visibleTurns.length}/{turns.length}</span>
+          </button>
+        ) : null}
 
         {/* 完成态:无待审段时出 ok 卡。 */}
         {totalCount > 0 && pendingCount === 0 ? (

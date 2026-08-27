@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { Person, ReviewStatus, TranscriptSegment, TriageReason } from "../../api/types";
 import type { Turn } from "../../lib/turns";
 import { clockOfDay } from "../../lib/format";
@@ -10,6 +10,23 @@ import { Icon } from "../../components/Icon";
 /** turn 级审核状态:全部接受→accepted;有存疑→flagged;全部拒绝→rejected;
  *  还有待审段→pending;其余混合→mixed(已决策但不同类)。 */
 export type TurnDecision = "pending" | "accepted" | "rejected" | "flagged" | "mixed";
+
+/** Highlight every case-insensitive query hit without changing the transcript's source text. */
+function highlightedText(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const lower = text.toLocaleLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let match = lower.indexOf(query);
+  while (match >= 0) {
+    if (match > cursor) parts.push(text.slice(cursor, match));
+    parts.push(<mark key={`${match}-${parts.length}`}>{text.slice(match, match + query.length)}</mark>);
+    cursor = match + query.length;
+    match = lower.indexOf(query, cursor);
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts.length ? parts : text;
+}
 
 export function turnDecision(turn: Turn): TurnDecision {
   const statuses = turn.segments.map((s) => s.review_status);
@@ -42,7 +59,8 @@ export function TurnBlock({
   onFocus,
   reasons = [],
   suggestedSpeaker,
-  onAdoptSpeaker
+  onAdoptSpeaker,
+  highlightQuery = ""
 }: {
   turn: Turn;
   persons: Person[];
@@ -59,6 +77,8 @@ export function TurnBlock({
   suggestedSpeaker?: { person_id: string; person_label: string } | null;
   /** 采纳建议说话人并接受本段(面板/ App 负责 override + accept + 刷新)。 */
   onAdoptSpeaker?: (segmentIds: string[], personId: string) => Promise<unknown> | void;
+  /** Current navigator query; matching text is marked while retaining sentence audio clickability. */
+  highlightQuery?: string;
 }) {
   const audio = useSegmentAudio();
   // Bring the turn into view whenever it gains the keyboard focus ring (j/k navigation).
@@ -140,7 +160,7 @@ export function TurnBlock({
                 }
               }}
             >
-              {segment.text}
+              {highlightedText(segment.text, highlightQuery)}
             </span>
           </span>
         ))}

@@ -148,6 +148,78 @@ def test_finalize_labels_unidentified_voices_without_machine_ids(tmp_path: Path)
     assert "vp_007" not in text and "spk_02" not in text
 
 
+def test_sparse_voice_is_incidental_but_substantial_voice_blocks_until_assigned(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_api_identity_session(config.database_path)
+    conn = connect(config.database_path)
+    try:
+        # One fragment is preserved but filtered from the person queue.
+        conn.execute(
+            "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, is_active) "
+            "values ('seg_sparse', 'aud_1', 'chk_sparse', 'ses_1', 1000, 1800, '嗯', 'zh', 'spk_sparse', 'vp_sparse', 'ev_sparse', 1)"
+        )
+        # Eight content-bearing fragments are a real identity-review candidate.
+        for index in range(8):
+            conn.execute(
+                "insert into transcript_segments (segment_id, audio_file_id, chunk_id, session_id, start_ms, end_ms, text, language, speaker, speaker_cluster_id, evidence_id, is_active) "
+                "values (?, 'aud_1', ?, 'ses_1', ?, ?, ?, 'zh', 'spk_guest', 'vp_guest', ?, 1)",
+                (
+                    f"seg_guest_{index}",
+                    f"chk_guest_{index}",
+                    2_000 + index * 2_000,
+                    4_000 + index * 2_000,
+                    "这是一段有效的会议发言",
+                    f"ev_guest_{index}",
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    client = TestClient(create_app(config=config))
+    client.post("/api/sessions/ses_1/participants", json={"person_id": "per_a", "status": "present"})
+
+    review = client.get("/api/sessions/ses_1/identity-review").json()
+    assert review["can_finalize"] is False
+    assert review["gate"]["unresolved_candidate_count"] == 1
+    assert review["gate"]["incidental_candidate_count"] == 1
+    candidate = review["new_person_candidates"][0]
+    assert candidate["segment_count"] == 8
+    assert review["incidental_candidates"][0]["segment_count"] == 1
+
+    assigned = client.post(
+        "/api/identity/confirm-candidate",
+        json={
+            "session_id": "ses_1",
+            "action": "new_person",
+            "display_name": "Guest",
+            "segment_ids": candidate["segment_ids"],
+        },
+    )
+    assert assigned.status_code == 200, assigned.text
+    assert assigned.json()["labeled"] == 8
+    after = client.get("/api/sessions/ses_1/identity-review").json()
+    assert after["can_finalize"] is True
+    assert {person["display_name"] for person in after["participants"] if person["status"] == "present"} == {
+        "Alice",
+        "Guest",
+    }
+
+
+def test_batch_finalize_exports_only_identity_ready_sessions(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_api_identity_session(config.database_path)
+    client = TestClient(create_app(config=config))
+    client.post("/api/sessions/ses_1/participants", json={"person_id": "per_a", "status": "present"})
+
+    result = client.post("/api/inbox/finalize-ready")
+
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert [item["session_id"] for item in body["finalized"]] == ["ses_1"]
+    assert body["skipped"] == []
+    assert Path(body["finalized"][0]["export_md_path"]).exists()
+
+
 def _seed_api_identity_session(database_path: Path) -> None:
     conn = connect(database_path)
     try:

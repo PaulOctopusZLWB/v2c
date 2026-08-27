@@ -80,4 +80,12 @@ describe("TurnBlock", () => {
     await userEvent.click(screen.getByRole("button", { name: /^接受/ }));
     expect(onBatchReview).toHaveBeenCalledWith(["seg_1", "seg_2"], "accepted");
   });
+
+  it("marks matching transcript text while keeping the sentence interactive", () => {
+    render(<TurnBlock turn={turn} persons={[]} onBatchReview={vi.fn()} highlightQuery="本地" />);
+    const matches = screen.getAllByText("本地");
+    expect(matches).toHaveLength(1);
+    expect(matches.every((node) => node.tagName === "MARK")).toBe(true);
+    expect(matches[0].closest('[role="button"]')).toBeInTheDocument();
+  });
 });

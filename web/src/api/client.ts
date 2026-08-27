@@ -167,6 +167,8 @@ export const api = {
   // 定稿:把会话事实冻结成 exports/sessions/ 下的 md+json(codex 的输入)。
   finalizeSession: (sessionId: string) =>
     request<FinalizeResult>(`/api/sessions/${sessionId}/finalize`, { method: "POST" }),
+  finalizeReadySessions: () =>
+    request<import("./types").FinalizeReadyResult>("/api/inbox/finalize-ready", { method: "POST" }),
   // Full automatic identify pass (match → prune <1% → smooth → cluster leftovers) under the
   // CURRENT review constraints — the review panel's 重新识别 button.
   identifySession: (sessionId: string) =>
@@ -182,7 +184,7 @@ export const api = {
   notPerson: (body: { session_id: string; segment_ids: string[]; person_id: string; note?: string | null }) =>
     request<{ recorded: number }>("/api/identity/not-person", { method: "POST", body: JSON.stringify(body) }),
   confirmIdentityCandidate: (body: { session_id: string; action: "known_person" | "new_person" | "noise" | "unknown"; person_id?: string | null; display_name?: string | null; segment_ids?: string[] }) =>
-    request<{ accepted: boolean; action: string }>("/api/identity/confirm-candidate", { method: "POST", body: JSON.stringify(body) }),
+    request<{ accepted: boolean; action: string; person_id: string; labeled: number }>("/api/identity/confirm-candidate", { method: "POST", body: JSON.stringify(body) }),
   // settings (model/runtime overrides; take effect on the next run)
   settings: () => request<Settings>("/api/settings"),
   updateSettings: (body: Partial<Settings>) =>

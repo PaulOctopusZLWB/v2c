@@ -135,6 +135,10 @@ export interface IdentityCandidate {
   status: "trusted" | "suggested" | "excluded" | "unknown" | "noise";
   safe_label: string;
   segment_count: number;
+  total_speech_ms?: number;
+  text_chars?: number;
+  eligible?: boolean;
+  filter_reason?: string | null;
   segment_ids: string[];
   sample_text?: string | null;
   evidence_sources?: string[];
@@ -143,13 +147,22 @@ export interface IdentityCandidate {
 export interface IdentityReview {
   session_id: string;
   can_summarize: boolean;
-  /** 定稿门槛(与 can_summarize 同判据:至少一位确认出席)。 */
+  /** 定稿门槛:至少一位确认出席，且没有达到有效发言量的未决候选人。 */
   can_finalize?: boolean;
+  gate?: {
+    present_count: number;
+    unresolved_candidate_count: number;
+    incidental_candidate_count: number;
+    min_candidate_segments: number;
+    min_candidate_speech_ms: number;
+    min_candidate_text_chars: number;
+  };
   /** 已定稿时的导出状态;null/缺省 = 尚未定稿。 */
   finalized?: SessionFinalized | null;
   participants: IdentityParticipant[];
   candidates: IdentityCandidate[];
   new_person_candidates: IdentityCandidate[];
+  incidental_candidates?: IdentityCandidate[];
   mixed_clusters?: unknown[];
   excluded_people?: IdentityCandidate[];
   negative_feedback_count: number;
@@ -173,6 +186,11 @@ export interface FinalizeResult {
   present_count: number;
   segment_count: number;
   unidentified_voices: Array<{ label: string; segment_count: number }>;
+}
+
+export interface FinalizeReadyResult {
+  finalized: FinalizeResult[];
+  skipped: Array<{ session_id: string; gate?: IdentityReview["gate"] }>;
 }
 
 /** 收件箱里的一张会话卡(GET /api/inbox)。 */

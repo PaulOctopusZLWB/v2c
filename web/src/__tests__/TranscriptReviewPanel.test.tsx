@@ -149,4 +149,50 @@ describe("TranscriptReviewPanel", () => {
     expect(screen.queryByText("已经审过的一段")).not.toBeInTheDocument();
     expect(screen.getByText("还没审的一段")).toBeInTheDocument();
   });
+
+  it("searches within the current conversation and highlights the matching text", async () => {
+    render(<TranscriptReviewPanel session={session} persons={[]} onBatchReview={vi.fn()} onAcceptSession={vi.fn()} />);
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "搜索对话" }), "开始");
+
+    expect(screen.queryByText("你好")).not.toBeInTheDocument();
+    expect(screen.getByText("开始")).toBeInTheDocument();
+    expect(screen.getByText("开始").tagName).toBe("MARK");
+    expect(screen.getByText("1/2 轮")).toBeInTheDocument();
+  });
+
+  it("filters turns by speaker from the conversation navigator", async () => {
+    render(<TranscriptReviewPanel session={session} persons={[]} onBatchReview={vi.fn()} onAcceptSession={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "spk_2 1" }));
+
+    expect(screen.queryByText("你好")).not.toBeInTheDocument();
+    expect(screen.getByText("我们开始吧")).toBeInTheDocument();
+  });
+
+  it("renders long conversations in bounded batches and can reveal the next batch", async () => {
+    const longSession = {
+      session_id: "ses_long",
+      review_status: "pending_review" as const,
+      segments: Array.from({ length: 65 }, (_, i) => ({
+        segment_id: `seg_${i}`,
+        text: `第 ${i + 1} 轮`,
+        speaker: `spk_${i % 2}`,
+        start_ms: i * 1000,
+        end_ms: (i + 1) * 1000,
+        absolute_start_at: `2026-06-13T09:${String(i).padStart(2, "0")}:00+08:00`,
+        absolute_end_at: `2026-06-13T09:${String(i).padStart(2, "0")}:01+08:00`,
+        review_status: "pending_review" as const,
+        note: null,
+        person_id: null,
+        person_label: null
+      }))
+    };
+    render(<TranscriptReviewPanel session={longSession} persons={[]} onBatchReview={vi.fn()} onAcceptSession={vi.fn()} />);
+
+    expect(screen.getByText("第 60 轮")).toBeInTheDocument();
+    expect(screen.queryByText("第 61 轮")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /继续显示 5 轮/ }));
+    expect(screen.getByText("第 65 轮")).toBeInTheDocument();
+  });
 });

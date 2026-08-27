@@ -8,6 +8,11 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
 PARTICIPANT_STATUSES = {"present", "absent", "uncertain"}
+# Conservative candidate gate: a few diarization fragments remain in the transcript/audio
+# evidence, but do not become a person-review task or block finalization.
+MIN_CANDIDATE_SEGMENTS = 8
+MIN_CANDIDATE_SPEECH_MS = 15_000
+MIN_CANDIDATE_TEXT_CHARS = 80
 
 
 def set_session_participant(
@@ -123,7 +128,10 @@ def identity_review_for_session(*, config: AppConfig, session_id: str) -> dict[s
         display_name = row.get("person_label") or row.get("display_name")
         raw_label = str(row.get("speaker_cluster_id") or row.get("speaker") or segment_id)
         text = str(row.get("text") or "")
+        duration_ms = max(0, int(row.get("end_ms") or 0) - int(row.get("start_ms") or 0))
         if person_id is None:
+            if str(row.get("speaker") or "") == "self":
+                continue
             candidate = new_person_candidates.setdefault(
                 raw_label,
                 {
@@ -131,20 +139,27 @@ def identity_review_for_session(*, config: AppConfig, session_id: str) -> dict[s
                     "status": "unknown",
                     "safe_label": unknown_labels(raw_label),
                     "segment_count": 0,
+                    "total_speech_ms": 0,
+                    "text_chars": 0,
                     "segment_ids": [],
                     "sample_text": text,
                 },
             )
-            _add_candidate_segment(candidate, segment_id=segment_id, text=text)
+            _add_candidate_segment(candidate, segment_id=segment_id, text=text, duration_ms=duration_ms)
             continue
 
         pid = str(person_id)
+        person_type = str(row.get("person_type") or "contact")
         status = _candidate_status(
             person_id=pid,
             segment_ids=[segment_id],
             participant_status=participant_status,
             negative=negative,
         )
+        if person_type == "non_speaker":
+            status = "noise"
+        elif person_type == "unknown_voice":
+            status = "unknown"
         safe_label = str(display_name) if status == "trusted" else unknown_labels(pid)
         candidate = grouped.setdefault(
             pid,
@@ -152,14 +167,18 @@ def identity_review_for_session(*, config: AppConfig, session_id: str) -> dict[s
                 "person_id": pid,
                 "display_name": str(display_name or pid),
                 "status": status,
+                "person_type": person_type,
                 "safe_label": safe_label,
                 "segment_count": 0,
+                "total_speech_ms": 0,
+                "text_chars": 0,
                 "segment_ids": [],
                 "sample_text": text,
                 "evidence_sources": [],
+                "manually_attributed": False,
             },
         )
-        _add_candidate_segment(candidate, segment_id=segment_id, text=text)
+        _add_candidate_segment(candidate, segment_id=segment_id, text=text, duration_ms=duration_ms)
         if status == "excluded":
             candidate["status"] = "excluded"
             candidate["safe_label"] = safe_label
@@ -169,6 +188,27 @@ def identity_review_for_session(*, config: AppConfig, session_id: str) -> dict[s
         source = row.get("attribution_source")
         if source and source not in candidate["evidence_sources"]:
             candidate["evidence_sources"].append(source)
+        if row.get("override_source") == "manual":
+            candidate["manually_attributed"] = True
+
+    all_candidates = [*grouped.values(), *new_person_candidates.values()]
+    for candidate in all_candidates:
+        candidate["eligible"] = _is_review_candidate(candidate)
+        if not candidate["eligible"]:
+            candidate["filter_reason"] = (
+                f"零散声音：少于 {MIN_CANDIDATE_SEGMENTS} 段，且不足 "
+                f"{MIN_CANDIDATE_SPEECH_MS // 1000} 秒 / {MIN_CANDIDATE_TEXT_CHARS} 字"
+            )
+
+    eligible_unknown = [candidate for candidate in new_person_candidates.values() if candidate["eligible"]]
+    incidental = [candidate for candidate in all_candidates if not candidate["eligible"]]
+    unresolved_known = [
+        candidate
+        for candidate in grouped.values()
+        if candidate["eligible"] and candidate["status"] == "suggested"
+    ]
+    uncertain_count = sum(1 for row in participants if row["status"] == "uncertain")
+    blocker_count = len(unresolved_known) + len(eligible_unknown) + uncertain_count
 
     present_count = sum(1 for row in participants if row["status"] == "present")
     from personal_context_node.session_finalize import finalization_state
@@ -176,12 +216,22 @@ def identity_review_for_session(*, config: AppConfig, session_id: str) -> dict[s
     return {
         "session_id": session_id,
         "can_summarize": present_count > 0,
-        # 定稿即产品终点(codex 接手认知层):门槛与 can_summarize 相同——至少一位确认出席。
-        "can_finalize": present_count > 0,
+        "can_finalize": present_count > 0 and blocker_count == 0,
+        "gate": {
+            "present_count": present_count,
+            "unresolved_candidate_count": blocker_count,
+            "incidental_candidate_count": len(incidental),
+            "min_candidate_segments": MIN_CANDIDATE_SEGMENTS,
+            "min_candidate_speech_ms": MIN_CANDIDATE_SPEECH_MS,
+            "min_candidate_text_chars": MIN_CANDIDATE_TEXT_CHARS,
+        },
         "finalized": finalization_state(config=config, session_id=session_id),
         "participants": participants,
         "candidates": sorted(grouped.values(), key=lambda item: (str(item["status"]), str(item["display_name"]))),
-        "new_person_candidates": sorted(new_person_candidates.values(), key=lambda item: str(item["speaker"])),
+        "new_person_candidates": sorted(eligible_unknown, key=lambda item: str(item["speaker"])),
+        "incidental_candidates": sorted(
+            incidental, key=lambda item: (-int(item["segment_count"]), str(item.get("safe_label") or ""))
+        ),
         "mixed_clusters": [],
         "excluded_people": [item for item in grouped.values() if item["status"] == "excluded"],
         "negative_feedback_count": negative_count,
@@ -283,10 +333,12 @@ def _attribution_rows(conn, *, session_id: str) -> list[dict[str, object]]:
           ts.segment_id,
           ts.speaker,
           coalesce(ts.speaker_cluster_id, ts.speaker) as speaker_cluster_id,
-          ts.text,
+          ts.text, ts.start_ms, ts.end_ms,
           coalesce(o.person_id, m.person_id) as person_id,
           coalesce(o.person_label, m.person_label, p.display_name) as person_label,
           p.display_name as display_name,
+          p.person_type as person_type,
+          o.source as override_source,
           case
             when o.person_id is not null then 'segment_override'
             when m.person_id is not null then 'speaker_mapping'
@@ -321,13 +373,30 @@ def _candidate_status(
     return "suggested"
 
 
-def _add_candidate_segment(candidate: dict[str, object], *, segment_id: str, text: str) -> None:
+def _add_candidate_segment(
+    candidate: dict[str, object], *, segment_id: str, text: str, duration_ms: int
+) -> None:
     segment_ids = candidate["segment_ids"]
     if isinstance(segment_ids, list) and segment_id not in segment_ids:
         segment_ids.append(segment_id)
     candidate["segment_count"] = int(candidate["segment_count"]) + 1
+    candidate["total_speech_ms"] = int(candidate.get("total_speech_ms") or 0) + duration_ms
+    candidate["text_chars"] = int(candidate.get("text_chars") or 0) + len(text.strip())
     if not candidate.get("sample_text"):
         candidate["sample_text"] = text
+
+
+def _is_review_candidate(candidate: dict[str, object]) -> bool:
+    if candidate.get("manually_attributed"):
+        return True
+    if candidate.get("status") in {"trusted", "excluded", "noise"}:
+        return True
+    segment_count = int(candidate.get("segment_count") or 0)
+    enough_content = (
+        int(candidate.get("total_speech_ms") or 0) >= MIN_CANDIDATE_SPEECH_MS
+        or int(candidate.get("text_chars") or 0) >= MIN_CANDIDATE_TEXT_CHARS
+    )
+    return segment_count >= MIN_CANDIDATE_SEGMENTS and enough_content
 
 
 def _unknown_labeler():

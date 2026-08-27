@@ -59,13 +59,31 @@ const REVIEW = {
   negative_feedback_count: 0
 };
 
-function mockFetch(inbox = INBOX) {
+const TRANSCRIPT_SEGMENTS = [
+  { segment_id: "seg_1", text: "先讨论本地部署", speaker: "spk_1", start_ms: 0, end_ms: 1000, absolute_start_at: "2087-05-10T14:00:00+08:00", absolute_end_at: "2087-05-10T14:00:01+08:00", review_status: "accepted" as const, note: null, person_id: "per_b", person_label: "Bob" },
+  { segment_id: "seg_2", text: "再确认导出路径", speaker: "spk_1", start_ms: 1000, end_ms: 2000, absolute_start_at: "2087-05-10T14:00:01+08:00", absolute_end_at: "2087-05-10T14:00:02+08:00", review_status: "accepted" as const, note: null, person_id: "per_b", person_label: "Bob" },
+  { segment_id: "seg_3", text: "好的", speaker: "spk_2", start_ms: 2000, end_ms: 3000, absolute_start_at: "2087-05-10T14:00:02+08:00", absolute_end_at: "2087-05-10T14:00:03+08:00", review_status: "accepted" as const, note: null, person_id: null, person_label: null }
+];
+
+function mockFetch(inbox = INBOX, transcriptSegments = TRANSCRIPT_SEGMENTS) {
   const calls: Array<{ url: string; body?: unknown }> = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.startsWith("/api/inbox")) return new Response(JSON.stringify(inbox), { status: 200 });
+    if (url === "/api/persons") {
+      return new Response(JSON.stringify({
+        persons: [{ person_id: "per_b", display_name: "Bob", person_type: "contact", is_self: 0 }]
+      }), { status: 200 });
+    }
     if (url === "/api/sessions/ses_1/identity-review") return new Response(JSON.stringify(REVIEW), { status: 200 });
+    if (url === "/api/transcripts/sessions/ses_1") {
+      return new Response(JSON.stringify({
+        session_id: "ses_1",
+        review_status: "accepted",
+        segments: transcriptSegments
+      }), { status: 200 });
+    }
     if (url === "/api/sessions/ses_1/finalize") {
       return new Response(JSON.stringify({
         session_id: "ses_1", finalized_at: "now",
@@ -76,6 +94,12 @@ function mockFetch(inbox = INBOX) {
     }
     if (url === "/api/sessions/ses_1/participants") {
       return new Response(JSON.stringify({ person_id: "per_b", display_name: "Bob", status: "present", cascade: { cascade: "none" } }), { status: 200 });
+    }
+    if (url === "/api/identity/confirm-candidate") {
+      return new Response(JSON.stringify({ accepted: true, action: "noise", person_id: "per_noise", labeled: 4 }), { status: 200 });
+    }
+    if (url === "/api/inbox/finalize-ready") {
+      return new Response(JSON.stringify({ finalized: [], skipped: [{ session_id: "ses_1" }] }), { status: 200 });
     }
     return new Response(JSON.stringify({}), { status: 200 });
   });
@@ -89,7 +113,7 @@ describe("InboxPanel", () => {
     render(<InboxPanel push={push} />);
 
     // Newest un-finalized card auto-expands and shows its candidates.
-    expect(await screen.findByText("Bob")).toBeInTheDocument();
+    expect(await screen.findByText("Bob", { selector: "strong" })).toBeInTheDocument();
     expect(within(screen.getByLabelText("收件箱统计")).getByText("1")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "待处理会话" })).toBeInTheDocument();
     // Machine labels are not part of the inbox vocabulary.
@@ -128,5 +152,60 @@ describe("InboxPanel", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "去认人" }));
     expect(openWorkbench).toHaveBeenCalledWith("ses_1");
+  });
+
+  it("assigns an unknown voice role and can export all ready sessions", async () => {
+    const calls = mockFetch();
+    render(<InboxPanel push={vi.fn()} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "噪音/多人" }));
+    await waitFor(() => {
+      expect(calls).toContainEqual(expect.objectContaining({
+        url: "/api/identity/confirm-candidate",
+        body: expect.objectContaining({ action: "noise", session_id: "ses_1", segment_ids: ["seg_2"] })
+      }));
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "导出全部已就绪" }));
+    await waitFor(() => expect(calls.some((call) => call.url === "/api/inbox/finalize-ready")).toBe(true));
+  });
+
+  it("turns a large transcript into searchable speaker-filtered reading blocks", async () => {
+    mockFetch();
+    render(<InboxPanel push={vi.fn()} />);
+
+    await userEvent.click(await screen.findByText("浏览原文与录音"));
+    expect(await screen.findByRole("searchbox", { name: "搜索会话原文" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bob 2" })).toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "搜索会话原文" }), "导出");
+    // Keep the matching sentence's surrounding turn for context.
+    expect(screen.getByText("先讨论本地部署")).toBeInTheDocument();
+    expect(screen.getByText("导出").tagName).toBe("MARK");
+    expect(screen.getByText("1–1 / 1 轮")).toBeInTheDocument();
+  });
+
+  it("bounds huge evidence payloads to 40 reading blocks per page", async () => {
+    const longTranscript = Array.from({ length: 41 }, (_, i) => ({
+      segment_id: `seg_long_${i}`,
+      text: `证据片段 ${i + 1}`,
+      speaker: `spk_${i % 2}`,
+      start_ms: i * 1000,
+      end_ms: (i + 1) * 1000,
+      absolute_start_at: `2087-05-10T14:${String(i).padStart(2, "0")}:00+08:00`,
+      absolute_end_at: `2087-05-10T14:${String(i).padStart(2, "0")}:01+08:00`,
+      review_status: "accepted" as const,
+      note: null,
+      person_id: null,
+      person_label: null
+    }));
+    mockFetch(INBOX, longTranscript);
+    render(<InboxPanel push={vi.fn()} />);
+
+    await userEvent.click(await screen.findByText("浏览原文与录音"));
+    expect(await screen.findByText("证据片段 40")).toBeInTheDocument();
+    expect(screen.queryByText("证据片段 41")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "下一组" }));
+    expect(screen.getByText("证据片段 41")).toBeInTheDocument();
   });
 });
