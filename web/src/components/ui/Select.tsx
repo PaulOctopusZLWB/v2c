@@ -4,6 +4,7 @@ import { Portal } from "./Portal";
 export interface SelectOption {
   value: string;
   label: string;
+  searchText?: string;
 }
 
 /**
@@ -21,6 +22,7 @@ export function Select({
   placeholder = "请选择…",
   disabled,
   className,
+  searchable = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -29,14 +31,20 @@ export function Select({
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const selected = options.find((o) => o.value === value) ?? null;
+  const normalizedQuery = query.toLocaleLowerCase().replace(/\s+/g, "");
+  const filtered = options.filter((o) =>
+    !normalizedQuery || `${o.label} ${o.searchText ?? ""}`.toLocaleLowerCase().replace(/\s+/g, "").includes(normalizedQuery)
+  );
 
   const place = useCallback(() => {
     const t = triggerRef.current;
@@ -48,6 +56,7 @@ export function Select({
   const openMenu = useCallback(() => {
     if (disabled) return;
     place();
+    setQuery("");
     setActive(Math.max(0, options.findIndex((o) => o.value === value)));
     setOpen(true);
   }, [disabled, place, options, value]);
@@ -102,11 +111,11 @@ export function Select({
       return;
     }
     if (e.key === "Escape") { e.preventDefault(); close(); triggerRef.current?.focus(); }
-    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(options.length - 1, i + 1)); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(filtered.length - 1, i + 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(0, i - 1)); }
-    else if (e.key === "Home") { e.preventDefault(); setActive(0); }
-    else if (e.key === "End") { e.preventDefault(); setActive(options.length - 1); }
-    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const o = options[active]; if (o) choose(o.value); }
+    else if (e.key === "Home" && e.target === triggerRef.current) { e.preventDefault(); setActive(0); }
+    else if (e.key === "End" && e.target === triggerRef.current) { e.preventDefault(); setActive(filtered.length - 1); }
+    else if (e.key === "Enter" || (e.key === " " && e.target === triggerRef.current)) { e.preventDefault(); const o = filtered[active]; if (o) choose(o.value); }
   };
 
   return (
@@ -130,14 +139,21 @@ export function Select({
       </button>
       {open && rect ? (
         <Portal>
-          <ul
+          <div
             ref={menuRef}
-            role="listbox"
-            aria-label={ariaLabel}
             className="ui-select-menu"
             style={{ position: "fixed", top: rect.top, left: rect.left, minWidth: rect.width }}
           >
-            {options.map((o, i) => (
+            {searchable ? <input
+              autoFocus
+              aria-label={`${ariaLabel ?? "选项"}搜索`}
+              placeholder="姓名 / 拼音 / 首字母"
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setActive(0); }}
+              onKeyDown={(e) => { if (!e.nativeEvent.isComposing) onKeyDown(e); }}
+            /> : null}
+            <ul role="listbox" aria-label={ariaLabel} style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {filtered.map((o, i) => (
               <li
                 key={o.value}
                 role="option"
@@ -149,7 +165,9 @@ export function Select({
                 {o.label}
               </li>
             ))}
-          </ul>
+            </ul>
+            {!filtered.length ? <p role="status">没有匹配的人物</p> : null}
+          </div>
         </Portal>
       ) : null}
     </>

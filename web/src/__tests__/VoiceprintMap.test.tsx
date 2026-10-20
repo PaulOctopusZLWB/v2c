@@ -384,7 +384,10 @@ describe("VoiceprintMap", () => {
     const stage = container.querySelector(".vmap-stage");
     const toolbar = screen.getByRole("group", { name: "标注选中" });
     expect(toolbar).toBeInTheDocument();
-    expect(stage).toContainElement(toolbar);
+    expect(stage).not.toContainElement(toolbar);
+    expect(map).toContainElement(toolbar);
+    await userEvent.click(screen.getByRole("group", { name: "当前范围候选人物" }).querySelector("button")!);
+    expect(screen.getByRole("combobox", { name: "标注为" })).toHaveTextContent("李雷");
     const label = screen.getByRole("button", { name: /^标注$/ });
     expect(label).toBeDisabled();
     expect(screen.getByText(/已选 0 点/)).toBeInTheDocument();
@@ -397,6 +400,18 @@ describe("VoiceprintMap", () => {
     await screen.findByRole("list", { name: /图例/ });
 
     expect(selectedCounts).toContain(0);
+  });
+
+  it("offers confirmed participants without plotted points only for a session in scope", async () => {
+    const { rerender } = render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()}
+      sessionCandidates={{ session_id: "ses_1", person_ids: ["per_b"] }} />);
+    await screen.findByRole("list", { name: /图例/ });
+    await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+    const candidates = screen.getByRole("group", { name: "当前范围候选人物" });
+    expect(candidates).toHaveTextContent("韩文巧");
+    rerender(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()}
+      sessionCandidates={{ session_id: "other_session", person_ids: ["per_b"] }} />);
+    expect(candidates).not.toHaveTextContent("韩文巧");
   });
 
   it("dragging a rectangle in select mode selects the enclosed points and 标注 calls onLabel with their ids", async () => {

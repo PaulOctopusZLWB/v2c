@@ -4,6 +4,7 @@ import type { NeighborCorrectionPreview, PersonRow, ProjectionPoint, ProjectionR
 import { speakerColor } from "../../lib/speakerColors";
 import { emotionColor, emotionMeta } from "../../lib/emotionColors";
 import { Select } from "../../components/ui/Select";
+import { personOptions } from "../../lib/personSearch";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 
@@ -94,6 +95,7 @@ export function VoiceprintMap({
   onPreviewNeighborCorrection,
   onApplyNeighborCorrection,
   onChanged,
+  sessionCandidates,
   sessionExcludedPersonIds
 }: {
   /** The multi-scope, tunable projection to fetch + render. `null` → the pick/empty state.
@@ -119,6 +121,7 @@ export function VoiceprintMap({
   onChanged?: () => void;
   /** Person ids marked absent/excluded for the currently inspected single session. */
   sessionExcludedPersonIds?: string[];
+  sessionCandidates?: { session_id: string; person_ids: string[] };
 }) {
   const audio = useSegmentAudio();
   const [points, setPoints] = useState<ProjectionPoint[] | null>(null);
@@ -186,6 +189,15 @@ export function VoiceprintMap({
   useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
   useEffect(() => { onSelectionChangeRef.current?.(selectedIds.size); }, [selectedIds.size]);
   const [labelPersonId, setLabelPersonId] = useState("");
+  const labelOptions = useMemo(() => personOptions(people ?? []), [people]);
+  const quickPeople = useMemo(() => {
+    const ids = new Set((points ?? []).map((p) => p.person_id).filter(Boolean));
+    if (sessionCandidates && (request?.session_ids?.includes(sessionCandidates.session_id) ||
+      points?.some((p) => p.session_id === sessionCandidates.session_id))) {
+      sessionCandidates.person_ids.forEach((id) => ids.add(id));
+    }
+    return labelOptions.filter((p) => ids.has(p.value) && !excludedPersonIdSet.has(p.value));
+  }, [points, labelOptions, excludedPersonIdSet, sessionCandidates, request]);
   // Live rubber-band rectangle in canvas pixels while dragging a selection.
   const rectRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [rect, setRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -842,6 +854,51 @@ export function VoiceprintMap({
         </div>
       </div>
 
+        {showSelectToolbar ? (
+          <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
+            <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>
+            <Select
+              ariaLabel="标注为"
+              value={labelPersonId}
+              disabled={labeling}
+              placeholder="选择人物…"
+              searchable
+              options={labelOptions}
+              onChange={(v) => setLabelPersonId(v)}
+            />
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void commitLabel()}
+              disabled={labeling || selectedIds.size === 0 || !labelPersonId}
+              aria-busy={labeling}
+            >
+              {labeling ? <span className="spinner" aria-hidden /> : <Icon name="accept" />}
+              标注
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={clearSelection}
+              disabled={labeling || selectedIds.size === 0}
+            >
+              清除选择
+            </button>
+            <div className="vmap-quick-people" role="group" aria-label="当前范围候选人物">
+              <span>候选人物</span>
+              {quickPeople.map((p) => <button
+                key={p.value}
+                type="button"
+                className={`ghost${labelPersonId === p.value ? " active" : ""}`}
+                aria-pressed={labelPersonId === p.value}
+                disabled={labeling}
+                title={`选择${p.label}，框选后点标注`}
+                onClick={() => setLabelPersonId(p.value)}
+              >{p.label}</button>)}
+              {!quickPeople.length ? <small>暂无候选，可搜索选择人物</small> : null}
+            </div>
+          </div>
+        ) : null}
       <div className="vmap-stage" ref={boxRef}>
         {pendingCorrection ? (
           <div className="vmap-correction-confirm" role="dialog" aria-label="确认邻域纠偏">
@@ -872,40 +929,6 @@ export function VoiceprintMap({
                 确认纠偏
               </button>
             </div>
-          </div>
-        ) : null}
-        {showSelectToolbar ? (
-          <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
-            <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>
-            <Select
-              ariaLabel="标注为"
-              value={labelPersonId}
-              disabled={labeling}
-              placeholder="选择人物…"
-              options={(people ?? []).map((p) => ({
-                value: p.person_id,
-                label: p.person_type === "non_speaker" ? `非发言人 · ${p.display_name}` : p.display_name,
-              }))}
-              onChange={(v) => setLabelPersonId(v)}
-            />
-            <button
-              type="button"
-              className="primary"
-              onClick={() => void commitLabel()}
-              disabled={labeling || selectedIds.size === 0 || !labelPersonId}
-              aria-busy={labeling}
-            >
-              {labeling ? <span className="spinner" aria-hidden /> : <Icon name="accept" />}
-              标注
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={clearSelection}
-              disabled={labeling || selectedIds.size === 0}
-            >
-              清除选择
-            </button>
           </div>
         ) : null}
         <canvas

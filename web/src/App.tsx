@@ -1029,6 +1029,14 @@ export function App() {
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
               sessionExcludedPersonIds={sessionExcludedPersonIds}
+              sessionCandidates={identityReview ? {
+                session_id: identityReview.session_id,
+                person_ids: [
+                  ...identityReview.participants.filter((p) => p.status === "present").map((p) => p.person_id),
+                  ...identityReview.candidates.filter((p) => p.status === "suggested" || p.status === "trusted")
+                    .flatMap((p) => p.person_id ? [p.person_id] : []),
+                ],
+              } : undefined}
               onLabel={async (personId, segmentIds) => {
                 await api.labelSegments(personId, segmentIds);
                 push(`已标注 ${segmentIds.length} 段`, undefined, "success");
