@@ -48,13 +48,15 @@ class RenameSessionRequest(BaseModel):
 class MergeSessionsRequest(BaseModel):
     session_ids: list[str]
     reason: str
+    revise_finalized: bool = False
 
 
 @router.post("/sessions/merge")
 def merge_sessions_route(request: Request, payload: MergeSessionsRequest) -> dict[str, object]:
     from personal_context_node.session_merge import merge_sessions
     try:
-        return merge_sessions(config=request.app.state.config, session_ids=payload.session_ids, reason=payload.reason)
+        return merge_sessions(config=request.app.state.config, session_ids=payload.session_ids,
+                              reason=payload.reason, revise_finalized=payload.revise_finalized)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

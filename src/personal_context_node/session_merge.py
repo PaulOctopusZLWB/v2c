@@ -3,13 +3,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+from pathlib import Path
+import shutil
 from uuid import uuid4
 
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, initialize
 
 
-def merge_sessions(*, config: AppConfig, session_ids: list[str], reason: str) -> dict:
+def merge_sessions(*, config: AppConfig, session_ids: list[str], reason: str,
+                   revise_finalized: bool = False) -> dict:
     ids = list(dict.fromkeys(session_ids))
     if len(ids) < 2 or not reason.strip():
         raise ValueError("select at least two sessions and provide the confirmed merge reason")
@@ -28,7 +31,11 @@ def merge_sessions(*, config: AppConfig, session_ids: list[str], reason: str) ->
             raise ValueError("sessions must exist and belong to the same day")
         tables = {r[0] for r in conn.execute("select name from sqlite_master where type='table'")}
         # Published/edited artifacts need a separate revision workflow, never silently relocate them.
-        for table in ("session_finalizations", "session_viewpoint_state", "session_batch_results"):
+        finalizations = [dict(r) for r in conn.execute(
+            f"select * from session_finalizations where session_id in ({marks})", ids)]
+        if finalizations and not revise_finalized:
+            raise ValueError("merge blocked by existing session_finalizations artifacts")
+        for table in ("session_viewpoint_state", "session_batch_results"):
             if table in tables and conn.execute(
                 f"select 1 from {table} where session_id in ({marks}) limit 1", ids
             ).fetchone():
@@ -59,11 +66,26 @@ def merge_sessions(*, config: AppConfig, session_ids: list[str], reason: str) ->
         assignments = [dict(r) for r in conn.execute(
             f"select segment_id,session_id from transcript_segments where session_id in ({marks})", ids)]
         now = datetime.now(timezone.utc).isoformat()
+        merge_id = "merge_" + uuid4().hex
+        archived_exports = []
+        for finalization in finalizations:
+            for field in ("export_md_path", "export_json_path"):
+                original = Path(finalization[field])
+                if not original.is_file():
+                    raise ValueError(f"cannot preserve missing finalized export: {original}")
+                archive = config.data_dir / "exports" / "session-merge-history" / merge_id / (
+                    finalization["session_id"] + (".md" if field == "export_md_path" else ".json"))
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(original, archive)
+                archived_exports.append({"original": str(original), "snapshot": str(archive)})
         receipt = {"session_id": target, "source_session_ids": sources, "reason": reason.strip(),
                    "sessions_before": rows, "participants_before": participants,
-                   "assignments_before": assignments}
+                   "assignments_before": assignments, "finalizations_before": finalizations,
+                   "archived_exports": archived_exports}
         conn.execute("insert into session_merge_history values(?,?,?,?)",
-                     ("merge_" + uuid4().hex, target, json.dumps(receipt, ensure_ascii=False), now))
+                     (merge_id, target, json.dumps(receipt, ensure_ascii=False), now))
+        # A decision for a smaller source cannot finalize the newly combined meeting.
+        conn.execute(f"delete from session_finalizations where session_id in ({marks})", ids)
         for p in participants:
             conn.execute("""insert or ignore into session_participants
                 (session_id,person_id,status,source,note,updated_at) values(?,?,?,?,?,?)""",
