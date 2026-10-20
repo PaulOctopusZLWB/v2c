@@ -76,6 +76,14 @@ interface View {
 
 const IDENTITY: View = { scale: 1, tx: 0, ty: 0 };
 
+function projectPoint(p: ProjectionPoint, w: number, h: number, view: View) {
+  const padding = Math.min(12, w / 4, h / 4);
+  return {
+    px: (padding + p.x * (w - 2 * padding)) * view.scale + view.tx,
+    py: (padding + (1 - p.y) * (h - 2 * padding)) * view.scale + view.ty
+  };
+}
+
 /**
  * 声纹云图 — the flagship "voiceprint cluster map". Projects stored CAM++ embeddings to a 2D
  * scatter (UMAP default, PCA quick-preview) that visibly clusters by speaker/person. Pure
@@ -85,11 +93,15 @@ const IDENTITY: View = { scale: 1, tx: 0, ty: 0 };
  */
 export function VoiceprintMap({
   request,
+  refreshVersion = 0,
   onResult,
   onState,
   onSelectionChange,
   onPlaybackError,
   people,
+  peopleLoading = false,
+  peopleError,
+  onReloadPeople,
   onLabel,
   onClearAttributions,
   onPreviewNeighborCorrection,
@@ -102,6 +114,7 @@ export function VoiceprintMap({
    *  The parent rebuilds this only on 投射 / scope / method change, so dragging a slider in
    *  ProjectionControls never refetches here. */
   request: ProjectionRequest | null;
+  refreshVersion?: number;
   /** Report each result's subsample state up (lets the parent's controls show the capped note). */
   onResult?: (r: { capped: boolean; n: number; total: number } | null) => void;
   onState?: (state: VoiceprintMapState) => void;
@@ -109,6 +122,9 @@ export function VoiceprintMap({
   onPlaybackError?: (message: string) => void;
   /** When provided alongside onLabel, enables a 框选 (lasso) → 标注 teaching toolbar. */
   people?: PersonRow[];
+  peopleLoading?: boolean;
+  peopleError?: string | null;
+  onReloadPeople?: () => void;
   /** Commit the selected segments to a person; resolve to refetch colours. */
   onLabel?: (personId: string, segmentIds: string[]) => Promise<unknown> | void;
   /** Clear selected person attributions back to 未识别 without deleting the person. */
@@ -148,9 +164,16 @@ export function VoiceprintMap({
     onStateRef.current?.(state);
   }, []);
 
+  const currentRequest = useRef(request);
+  const projectionGeneration = useRef(0);
+  currentRequest.current = request;
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const refetchProjection = useCallback(async () => {
     if (!request) return null;
+    const generation = projectionGeneration.current;
     const res = await api.projection(request);
+    if (!mounted.current || currentRequest.current !== request || generation !== projectionGeneration.current) return null;
     const pts = res.points ?? [];
     const pointCount = res.n ?? pts.length;
     const total = res.total_in_scope ?? 0;
@@ -189,7 +212,11 @@ export function VoiceprintMap({
   useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
   useEffect(() => { onSelectionChangeRef.current?.(selectedIds.size); }, [selectedIds.size]);
   const [labelPersonId, setLabelPersonId] = useState("");
+  const labelInFlight = useRef(false);
   const labelOptions = useMemo(() => personOptions(people ?? []), [people]);
+  useEffect(() => {
+    if (labelPersonId && people && !people.some((p) => p.person_id === labelPersonId)) setLabelPersonId("");
+  }, [people, labelPersonId]);
   const quickPeople = useMemo(() => {
     const ids = new Set((points ?? []).map((p) => p.person_id).filter(Boolean));
     if (sessionCandidates && (request?.session_ids?.includes(sessionCandidates.session_id) ||
@@ -232,10 +259,12 @@ export function VoiceprintMap({
     const d = [...(request.days ?? [])].sort();
     return `s:${s.join(",")}|d:${d.join(",")}`;
   }, [request]);
+  useEffect(() => { setLabelPersonId(""); }, [scopeKey]);
 
   // --- fetch the projection whenever the request changes (parent rebuilds it on 投射/scope/
   //     method — never on a slider drag, so this stays cheap). `null` → empty pick state. ---
   useEffect(() => {
+    projectionGeneration.current++;
     setHover(null);
     setFocusKey(null);
     setSelectedIds(new Set());
@@ -244,6 +273,9 @@ export function VoiceprintMap({
     setCorrectionNote(null);
     setActionError(null);
     setArmedClearKey(null);
+    setPendingCorrection(null);
+    setPoints(null);
+    setProjectionId(null);
     viewRef.current = { ...IDENTITY };
     if (!request) {
       setPoints(null);
@@ -287,7 +319,7 @@ export function VoiceprintMap({
         reportState({ status: "error", message });
       });
     return () => { cancelled = true; };
-  }, [request, reportState]);
+  }, [request, reportState, refreshVersion]);
 
   // --- fetch per-segment emotion labels when in 情绪 mode (lazily, on scope/mode change) ---
   // The labels endpoint is single-scope, so over a multi-scope request we fetch per session +
@@ -398,10 +430,7 @@ export function VoiceprintMap({
     ctx.restore();
 
     // map a normalized point [0,1] to view-space pixels (flip Y), with the {scale,tx,ty} transform.
-    const project = (p: ProjectionPoint) => ({
-      px: p.x * w * view.scale + view.tx,
-      py: (1 - p.y) * h * view.scale + view.ty
-    });
+    const project = (p: ProjectionPoint) => projectPoint(p, w, h, view);
 
     const selected = selectedIdsRef.current;
     const mode = colorModeRef.current;
@@ -529,8 +558,7 @@ export function VoiceprintMap({
     let bestD = 10 * 10; // within ~10px
     for (const p of pts) {
       if (focus !== null && keyOf(p) !== focus) continue;
-      const px = p.x * w * view.scale + view.tx;
-      const py = (1 - p.y) * h * view.scale + view.ty;
+      const { px, py } = projectPoint(p, w, h, view);
       const d = (px - cx) * (px - cx) + (py - cy) * (py - cy);
       if (d < bestD) { bestD = d; best = p; }
     }
@@ -549,8 +577,7 @@ export function VoiceprintMap({
     const ids: string[] = [];
     for (const p of points ?? []) {
       if (focus !== null && keyOf(p) !== focus) continue; // respect an active focus
-      const px = p.x * w * view.scale + view.tx;
-      const py = (1 - p.y) * h * view.scale + view.ty;
+      const { px, py } = projectPoint(p, w, h, view);
       if (px >= minX && px <= maxX && py >= minY && py <= maxY) ids.push(p.segment_id);
     }
     return ids;
@@ -581,6 +608,7 @@ export function VoiceprintMap({
   }, [draw, hitTest]);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (loading || error || labelInFlight.current) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const cx = e.clientX - rect.left;
@@ -607,7 +635,7 @@ export function VoiceprintMap({
     }
     dragRef.current = { x: cx, y: cy };
     canvasRef.current?.setPointerCapture?.(e.pointerId);
-  }, [audio, hitTest, onPlaybackError]);
+  }, [audio, hitTest, onPlaybackError, loading, error]);
 
   const endDrag = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     // Select mode: commit the rectangle to a selection, then clear the rubber-band.
@@ -680,18 +708,26 @@ export function VoiceprintMap({
 
   const [labeling, setLabeling] = useState(false);
   const commitLabel = useCallback(async () => {
-    if (!onLabel || !labelPersonId || selectedIds.size === 0) return;
+    if (!onLabel || !labelPersonId || selectedIds.size === 0 || labelInFlight.current || loading || peopleLoading) return;
+    labelInFlight.current = true;
     setLabeling(true);
+    setActionError(null);
+    let saved = false;
     try {
       await onLabel(labelPersonId, Array.from(selectedIds));
-      clearSelection();
+      saved = true;
+      if (currentRequest.current === request) clearSelection();
       // Refetch the projection so the just-labelled points recolour to the person.
       await refetchProjection();
-      onChanged?.();
+    } catch (err) {
+      if (mounted.current && currentRequest.current === request)
+        setActionError(`${saved ? "标注已保存，但云图刷新失败" : "标注失败，请重试"}：${err instanceof Error ? err.message : String(err)}`);
     } finally {
+      if (saved) onChanged?.();
+      labelInFlight.current = false;
       setLabeling(false);
     }
-  }, [onLabel, labelPersonId, selectedIds, clearSelection, refetchProjection, onChanged]);
+  }, [onLabel, labelPersonId, selectedIds, clearSelection, refetchProjection, onChanged, labeling, loading, peopleLoading, request]);
 
   const segmentIdsForPersonKey = useCallback((key: string): string[] => {
     return (points ?? []).filter((p) => clusterKey(p) === key).map((p) => p.segment_id);
@@ -732,13 +768,16 @@ export function VoiceprintMap({
     setActionError(null);
     setCorrectionNote(null);
     try {
+      const padding = Math.min(12, sizeRef.current.w / 4, sizeRef.current.h / 4);
       const correctionRequest = {
         ...request,
         projection_id: projectionId,
         exclude_person_ids: sessionExcludedPersonIds ?? [],
-        viewport_aspect: sizeRef.current.h > 0 ? sizeRef.current.w / sizeRef.current.h : 1
+        viewport_aspect: sizeRef.current.h > 2 * padding ?
+          (sizeRef.current.w - 2 * padding) / (sizeRef.current.h - 2 * padding) : 1
       };
       const preview = await onPreviewNeighborCorrection(correctionRequest);
+      if (!mounted.current || currentRequest.current !== request) return;
       if (preview.changed === 0) {
         setCorrectionNote("没有发现可安全纠正的声纹标注。");
         return;
@@ -856,12 +895,16 @@ export function VoiceprintMap({
 
         {showSelectToolbar ? (
           <div className="vmap-select-toolbar" role="group" aria-label="标注选中">
+            {peopleError ? <div role="alert">人物名单读取失败：{peopleError}
+              <button type="button" className="ghost" onClick={onReloadPeople}>重试读取人物</button>
+            </div> : null}
+            {peopleLoading ? <span role="status">正在读取人物名单…</span> : null}
             <span className="vmap-select-count num">{`已选 ${selectedIds.size} 点`}</span>
             <Select
               ariaLabel="标注为"
               value={labelPersonId}
-              disabled={labeling}
-              placeholder="选择人物…"
+              disabled={labeling || peopleLoading || (!!peopleError && !labelOptions.length)}
+              placeholder={peopleLoading ? "正在读取人物…" : "选择人物…"}
               searchable
               options={labelOptions}
               onChange={(v) => setLabelPersonId(v)}
@@ -870,7 +913,7 @@ export function VoiceprintMap({
               type="button"
               className="primary"
               onClick={() => void commitLabel()}
-              disabled={labeling || selectedIds.size === 0 || !labelPersonId}
+              disabled={labeling || loading || peopleLoading || selectedIds.size === 0 || !labelPersonId}
               aria-busy={labeling}
             >
               {labeling ? <span className="spinner" aria-hidden /> : <Icon name="accept" />}
@@ -891,11 +934,11 @@ export function VoiceprintMap({
                 type="button"
                 className={`ghost${labelPersonId === p.value ? " active" : ""}`}
                 aria-pressed={labelPersonId === p.value}
-                disabled={labeling}
+                disabled={labeling || peopleLoading}
                 title={`选择${p.label}，框选后点标注`}
                 onClick={() => setLabelPersonId(p.value)}
               >{p.label}</button>)}
-              {!quickPeople.length ? <small>暂无候选，可搜索选择人物</small> : null}
+              {!quickPeople.length && !peopleLoading && !peopleError ? <small>暂无候选，可搜索选择人物</small> : null}
             </div>
           </div>
         ) : null}
@@ -1000,7 +1043,7 @@ export function VoiceprintMap({
         <>
           {colorMode === "person" ? (
             <p className="vmap-legend-note">
-              图例是当前投射范围的全局归属,不是本场参与人; 修本场名单用「会话身份」,修错色/错人用「候选簇」或框选。
+              图例显示当前范围的全局归属。框选标注实名后，会同步确认其在所选片段所属会话出现；其他会话的名单不变。
               {excludedPersonIdSet.size ? ` 已把 ${excludedPersonIdSet.size} 个本场未出现的人折叠为「本场已排除」。` : ""}
             </p>
           ) : null}

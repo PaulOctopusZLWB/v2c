@@ -72,6 +72,31 @@ describe("App container", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  it("recovers the labeling picker after the initial people request fails", async () => {
+    let peopleCalls = 0;
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME));
+      if (url === "/api/people") {
+        peopleCalls++;
+        if (peopleCalls === 1) return new Response('{"detail":"人物请求失败"}', { status: 503 });
+        return new Response(JSON.stringify({ people: [
+          { person_id: "wang", display_name: "王方平", person_type: "contact", is_self: 0,
+            enrolled: false, manual_count: 0, attributed_count: 0 }
+        ] }));
+      }
+      return new Response("{}");
+    });
+    renderApp();
+    await gotoTab("人物");
+    await userEvent.click(await screen.findByRole("button", { name: "框选" }));
+    await userEvent.click(await screen.findByRole("button", { name: "重试读取人物" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "标注为" })).not.toBeDisabled());
+    await userEvent.click(screen.getByRole("combobox", { name: "标注为" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "标注为搜索" }), "wfp");
+    expect(await screen.findByRole("option", { name: "王方平" })).toBeInTheDocument();
+    expect(peopleCalls).toBe(2);
+  });
+
   it("imports a detected device then starts a run", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });

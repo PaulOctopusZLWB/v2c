@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import type { IdentityCandidate, IdentityReview } from "../../api/types";
 import { Icon } from "../../components/Icon";
@@ -16,6 +16,7 @@ const STATUS_ZH: Record<string, string> = {
 
 export function IdentityReviewPanel({
   sessionId,
+  refreshVersion = 0,
   onChanged,
   onReviewChange,
   onOpenClusters,
@@ -23,6 +24,7 @@ export function IdentityReviewPanel({
   push
 }: {
   sessionId?: string | null;
+  refreshVersion?: number;
   onChanged: () => void;
   onReviewChange?: (review: IdentityReview | null) => void;
   onOpenClusters?: () => void;
@@ -31,23 +33,41 @@ export function IdentityReviewPanel({
 }) {
   const [review, setReview] = useState<IdentityReview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const sequence = useRef(0);
+  const alive = useRef(false);
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
+  const onReviewRef = useRef(onReviewChange);
+  onReviewRef.current = onReviewChange;
 
-  const publishReview = (next: IdentityReview | null) => {
+  const publishReview = useCallback((next: IdentityReview | null) => {
     setReview(next);
-    onReviewChange?.(next);
-  };
+    onReviewRef.current?.(next);
+  }, []);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    if (!alive.current || currentSession.current !== sessionId) return;
+    const requestNumber = ++sequence.current;
+    setLoadError(null);
+    publishReview(null);
     if (!sessionId) {
-      publishReview(null);
       return;
     }
-    publishReview(await api.identityReview(sessionId));
-  };
+    try {
+      const next = await api.identityReview(sessionId);
+      if (requestNumber === sequence.current && currentSession.current === sessionId) publishReview(next);
+    } catch (err) {
+      if (requestNumber === sequence.current && currentSession.current === sessionId)
+        setLoadError(err instanceof Error ? err.message : "身份读取失败");
+    }
+  }, [sessionId, publishReview]);
 
   useEffect(() => {
+    alive.current = true;
     void load();
-  }, [sessionId]);
+    return () => { alive.current = false; sequence.current++; };
+  }, [load, refreshVersion]);
 
   const markParticipant = async (candidate: IdentityCandidate, status: "present" | "absent" | "uncertain") => {
     if (!sessionId || !candidate.person_id) return;
@@ -119,7 +139,11 @@ export function IdentityReviewPanel({
       </section>
     );
   }
-  if (!review) {
+  if (loadError) return <section className="card identity-review">
+    <p role="alert">身份读取失败：{loadError}</p>
+    <button type="button" onClick={() => void load()}>重新读取身份</button>
+  </section>;
+  if (!review || review.session_id !== sessionId) {
     return (
       <section className="card identity-review">
         <div className="identity-gate-head">

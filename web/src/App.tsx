@@ -146,8 +146,11 @@ export function App() {
   const [sessionsVersion, setSessionsVersion] = useState(0);
   const [persons, setPersons] = useState<Person[]>([]);
   // "People taught once": the enriched person roster (enrollment + attribution) for the 声纹 tab,
-  // plus a key that, when bumped, remounts the voiceprint map so it refetches recoloured points.
+  // plus a refresh version shared by the map, candidate list and roster.
   const [people, setPeople] = useState<PersonRow[]>([]);
+  const [peopleLoading, setPeopleLoading] = useState(true);
+  const [peopleError, setPeopleError] = useState<string | null>(null);
+  const peopleSequence = useRef(0);
   const [mapKey, setMapKey] = useState(0);
   // 声纹 projection — a multi-day/session scope + tunable params, and the applied request that
   // the map actually fetches. Param edits update projParams but DON'T refetch; method/scope
@@ -265,8 +268,16 @@ export function App() {
   }, [selectedSessionId, identityReview, appliedRequest]);
 
   useEffect(() => {
+    let stale = false;
     setIdentityReview(null);
-  }, [selectedSessionId]);
+    if (selectedSessionId) {
+      void api.identityReview(selectedSessionId).then((review) => {
+        if (!stale && review.session_id === selectedSessionId &&
+          Array.isArray(review.participants) && Array.isArray(review.candidates)) setIdentityReview(review);
+      }).catch(() => undefined);
+    }
+    return () => { stale = true; };
+  }, [selectedSessionId, mapKey]);
 
   useEffect(() => {
     bootstrappedRef.current = bootstrapped;
@@ -307,16 +318,21 @@ export function App() {
 
   // Reload the enriched person roster (enrollment + attribution counts) for the People panel.
   async function refreshPeople() {
+    const sequence = ++peopleSequence.current;
+    setPeopleLoading(true);
+    setPeopleError(null);
     try {
-      setPeople((await api.people()).people ?? []);
-    } catch {
-      /* keep last-known people on transient errors */
+      const result = await api.people();
+      if (sequence === peopleSequence.current) setPeople(result.people ?? []);
+    } catch (err) {
+      if (sequence === peopleSequence.current) setPeopleError(err instanceof Error ? err.message : "人物读取失败");
+    } finally {
+      if (sequence === peopleSequence.current) setPeopleLoading(false);
     }
   }
 
   // A teaching mutation (label/enroll/suggest/auto-attribute) landed: reload the People roster,
-  // refresh the base persons list (a new person may exist), and remount the map so it refetches
-  // the now-recoloured projection.
+  // refresh the base persons list and the recoloured projection without leaving selection mode.
   function onPeopleChanged() {
     void refreshPeople();
     void api.persons().then((r) => setPersons(r.persons ?? [])).catch(() => undefined);
@@ -343,13 +359,13 @@ export function App() {
   async function refreshBootstrap() {
     setBootstrapError(null);
     try {
-      const [personsResult, healthResult, daysResult, statusResult, devicesResult, peopleResult] = await Promise.all([
+      const [personsResult, healthResult, daysResult, statusResult, devicesResult] = await Promise.all([
         api.persons(),
         api.health(),
         api.days(),
         api.dayStatus().catch(() => ({ days: [] })),
         api.devices(),
-        api.people().catch(() => ({ people: [] as PersonRow[] }))
+        refreshPeople()
       ]);
       const statusDays = statusResult.days ?? [];
       setPersons(personsResult.persons ?? []);
@@ -357,7 +373,6 @@ export function App() {
       setDays(mergeDaysWithStatus(daysResult.days ?? [], statusDays));
       setDayStatus(statusDays);
       setSources(devicesResult.sources ?? []);
-      setPeople(peopleResult.people ?? []);
       setBootstrapped(true);
     } catch (err) {
       setBootstrapError(err instanceof Error ? err.message : "API bootstrap failed");
@@ -1021,13 +1036,16 @@ export function App() {
           </div>
           <div className="speakers-map">
             <VoiceprintMap
-              key={mapKey}
+              refreshVersion={mapKey}
               request={appliedRequest}
               onResult={(r) => setProjCapped(r)}
               onState={setVoiceprintProjectionState}
               onSelectionChange={setVoiceprintSelectedCount}
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
+              peopleLoading={peopleLoading}
+              peopleError={peopleError}
+              onReloadPeople={() => void refreshPeople()}
               sessionExcludedPersonIds={sessionExcludedPersonIds}
               sessionCandidates={identityReview ? {
                 session_id: identityReview.session_id,
@@ -1083,10 +1101,11 @@ export function App() {
               </button>
             </div>
             {rightTab === "clusters" ? (
-              <ClusterListPanel onChanged={onPeopleChanged} push={push} confirm={confirm} />
+              <ClusterListPanel refreshVersion={mapKey} onChanged={onPeopleChanged} push={push} confirm={confirm} />
             ) : rightTab === "identity" ? (
               <IdentityReviewPanel
                 sessionId={selectedSessionId}
+                refreshVersion={mapKey}
                 onChanged={onPeopleChanged}
                 onReviewChange={setIdentityReview}
                 onOpenClusters={() => setRightTab("clusters")}
@@ -1098,6 +1117,7 @@ export function App() {
               />
             ) : (
               <PeoplePanel
+                refreshVersion={mapKey}
                 sessionId={selectedSessionId}
                 day={inspectDay}
                 onChanged={onPeopleChanged}

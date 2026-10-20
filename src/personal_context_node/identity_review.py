@@ -15,6 +15,42 @@ MIN_CANDIDATE_SPEECH_MS = 15_000
 MIN_CANDIDATE_TEXT_CHARS = 80
 
 
+def confirm_labeled_segment_presence(
+    conn, *, person_id: str, segment_ids: list[str], now: str,
+) -> None:
+    """Reconcile an explicit human label with attendance in the same transaction.
+
+    Called by label actions, never by automatic voiceprint matching. Only active
+    selected evidence establishes attendance; unknown/noise labels are not people.
+    """
+    person = conn.execute("select person_type from persons where person_id=?", (person_id,)).fetchone()
+    if person is None or person["person_type"] not in {"contact", "self"}:
+        return
+    unique_ids = list(dict.fromkeys(segment_ids))
+    sessions = set()
+    for start in range(0, len(unique_ids), 500):
+        chunk = unique_ids[start:start + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"select segment_id,session_id from transcript_segments where is_active=1 and segment_id in ({placeholders})",
+            chunk,
+        ).fetchall()
+        for row in rows:
+            if row["session_id"] is not None:
+                sessions.add(row["session_id"])
+            # A later explicit positive verdict replaces only this exact negative pair.
+            conn.execute("delete from segment_identity_negative_feedback where segment_id=? and person_id=?", (row["segment_id"], person_id))
+    for session_id in sessions:
+        conn.execute(
+            """insert into session_participants(session_id,person_id,status,source,note,updated_at)
+               values(?,?,'present','manual','根据人工说话人标注同步出席',?)
+               on conflict(session_id,person_id) do update set status='present',source='manual',
+                 note=excluded.note,updated_at=excluded.updated_at
+               where session_participants.status!='present'""",
+            (session_id, person_id, now),
+        )
+
+
 def set_session_participant(
     *,
     config: AppConfig,

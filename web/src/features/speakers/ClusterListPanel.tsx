@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import type { ClusterSuggestion, Person, SpeakerCluster } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
@@ -7,6 +7,7 @@ import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
 import { InspectorPanel, StatusBadge } from "../../components/ui";
 import { Select } from "../../components/ui/Select";
+import { personOptions } from "../../lib/personSearch";
 import type { ConfirmFn } from "../../components/ui/Dialog";
 
 type ClusterFilter = "unassigned" | "all";
@@ -24,7 +25,9 @@ export function ClusterListPanel({
   onChanged,
   push,
   confirm,
+  refreshVersion = 0,
 }: {
+  refreshVersion?: number;
   onChanged: () => void;
   push: (title: string, message?: string, variant?: "success" | "error") => void;
   // App 的危险确认对话框(替代 window.confirm)。
@@ -33,6 +36,8 @@ export function ClusterListPanel({
   const [clusters, setClusters] = useState<SpeakerCluster[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const sequence = useRef(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ClusterFilter>("unassigned");
   // AI 猜测(design Phase 6):未分配聚类的最可能人选,懒取、失败静默。
@@ -40,19 +45,27 @@ export function ClusterListPanel({
   const audio = useSegmentAudio();
 
   const load = useCallback(async () => {
+    const requestNumber = ++sequence.current;
     setLoadError(null);
+    setLoading(true);
+    setClusters([]);
+    setSuggestions({});
     try {
       const [c, p] = await Promise.all([api.globalClusters(1), api.persons()]);
+      if (requestNumber !== sequence.current) return;
       setClusters(c.clusters ?? []);
       setPersons(p.persons ?? []);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "加载失败");
+      if (requestNumber === sequence.current) setLoadError(err instanceof Error ? err.message : "加载失败");
+    } finally {
+      if (requestNumber === sequence.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    return () => { sequence.current++; };
+  }, [load, refreshVersion]);
 
   // 为前 8 个未分配聚类懒取 AI 猜测(逐个请求;404/错误静默)。
   useEffect(() => {
@@ -178,9 +191,10 @@ export function ClusterListPanel({
 
       {loadError ? <p className="muted" role="alert">{loadError}</p> : null}
 
-      {clusters.length === 0 && !loadError ? (
+      {loading ? <p role="status">正在加载候选簇…</p> : null}
+      {clusters.length === 0 && !loadError && !loading ? (
         <p className="muted">还没有声纹分组。先在工具栏「提取声纹」,再点上方「自动聚类」生成全局分组。</p>
-      ) : visibleClusters.length === 0 && !loadError ? (
+      ) : visibleClusters.length === 0 && !loadError && !loading ? (
         <p className="muted">当前没有未分配聚类。切到「全部」可回看已处理分组。</p>
       ) : (
         <ul className="cluster-list" role="list">
@@ -231,7 +245,7 @@ export function ClusterListPanel({
                   <button
                     type="button"
                     className="cluster-adopt"
-                    disabled={busyId === c.speaker_cluster_id}
+                    disabled={busyId !== null || loading || !!loadError}
                     onClick={() => void assign(c, suggestions[c.speaker_cluster_id]!.person_id)}
                   >
                     采纳 → {suggestions[c.speaker_cluster_id]!.person_label}
@@ -242,9 +256,10 @@ export function ClusterListPanel({
                 ariaLabel={`分配 ${c.speaker_cluster_id}`}
                 className="cluster-assign"
                 value={c.person_id ?? ""}
-                disabled={busyId === c.speaker_cluster_id}
+                disabled={busyId !== null || loading || !!loadError}
                 placeholder="选择人物…"
-                options={persons.map((p) => ({ value: p.person_id, label: p.display_name }))}
+                searchable
+                options={personOptions(persons)}
                 onChange={(v) => void assign(c, v)}
               />
             </li>

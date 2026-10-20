@@ -353,11 +353,18 @@ def segment_override_route(request: Request, segment_id: str, payload: AssignPer
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        conn.execute("begin immediate")
         try:
             label = _person_label(conn, person_id=payload.person_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if conn.execute("select 1 from transcript_segments where segment_id=? and is_active=1",
+                        (segment_id,)).fetchone() is None:
+            raise HTTPException(status_code=404, detail="片段已更新或不存在，请刷新后标注")
         upsert_segment_person_override(conn, segment_id=segment_id, person_id=payload.person_id, person_label=label, now=now)
+        from personal_context_node.identity_review import confirm_labeled_segment_presence
+
+        confirm_labeled_segment_presence(conn, person_id=payload.person_id, segment_ids=[segment_id], now=now)
         conn.commit()
     finally:
         conn.close()

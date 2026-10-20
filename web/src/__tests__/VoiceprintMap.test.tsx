@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { api } from "../api/client";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VoiceprintMap } from "../features/viz/VoiceprintMap";
@@ -190,7 +191,7 @@ describe("VoiceprintMap", () => {
         ...REQ,
         projection_id: "proj_test",
         exclude_person_ids: [],
-        viewport_aspect: 640 / 420
+        viewport_aspect: 616 / 396
       })
     );
     expect(onApplyNeighborCorrection).not.toHaveBeenCalled();
@@ -203,7 +204,7 @@ describe("VoiceprintMap", () => {
         ...REQ,
         projection_id: "proj_test",
         exclude_person_ids: [],
-        viewport_aspect: 640 / 420,
+      viewport_aspect: 616 / 396,
         preview_token: "preview_test"
       })
     );
@@ -400,6 +401,77 @@ describe("VoiceprintMap", () => {
     await screen.findByRole("list", { name: /图例/ });
 
     expect(selectedCounts).toContain(0);
+  });
+
+  it("retains selected points on a failed label, supports retry, and keeps selection mode on refresh", async () => {
+    const onLabel = vi.fn().mockRejectedValueOnce(new Error("网络断开")).mockResolvedValue({});
+    const { container, rerender } = render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={onLabel} />);
+    await screen.findByRole("list", { name: /图例/ });
+    await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+    const canvas = container.querySelector(".vmap-canvas")!;
+    for (const [type, x, y] of [["pointerdown",430,50],["pointermove",600,200],["pointerup",600,200]] as const)
+      fireEvent(canvas, new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }));
+    await userEvent.click(screen.getByRole("combobox", { name: "标注为" }));
+    await userEvent.click(screen.getByRole("option", { name: "韩文巧" }));
+    await userEvent.click(screen.getByRole("button", { name: "标注" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("标注失败，请重试");
+    expect(screen.getByText("已选 2 点")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "标注" }));
+    await screen.findByText("已选 0 点");
+    expect(onLabel).toHaveBeenCalledTimes(2);
+    rerender(<VoiceprintMap request={REQ} refreshVersion={1} people={labelPeople} onLabel={onLabel} />);
+    await screen.findByRole("list", { name: /图例/ });
+    expect(screen.getByRole("group", { name: "标注选中" })).toBeInTheDocument();
+  });
+
+  it("removes old candidates and selections while the next scope loads", async () => {
+    const { container, rerender } = render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()} />);
+    await screen.findByRole("list", { name: /图例/ });
+    await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    rerender(<VoiceprintMap request={{ ...REQ, session_ids: ["another"] }} people={labelPeople} onLabel={vi.fn()} />);
+    expect(container.querySelector(".vmap-quick-people")).not.toHaveTextContent("李雷");
+    expect(screen.queryByRole("list", { name: /图例/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "标注" })).toBeDisabled();
+  });
+
+  it("keeps normalized boundary points inside the canvas for both hover and lasso", async () => {
+    vi.stubGlobal("fetch", mockFetch({ ...projection, n: 2,
+      points: [{ ...points[0], x: 0, y: 0 }, { ...points[1], x: 1, y: 1 }] }));
+    const { container } = render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={vi.fn()} />);
+    await screen.findByRole("list", { name: /图例/ });
+    const canvas = container.querySelector(".vmap-canvas")!;
+    fireEvent(canvas, new MouseEvent("pointermove", { clientX: 12, clientY: 408, bubbles: true }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("第一段");
+    await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+    for (const [type, x, y] of [["pointerdown",2,2],["pointermove",638,418],["pointerup",638,418]] as const)
+      fireEvent(canvas, new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }));
+    expect(screen.getByText("已选 2 点")).toBeInTheDocument();
+  });
+
+  it("does not let a late post-label refresh replace a newly selected scope", async () => {
+    let finishOld!: (result: ProjectionResult) => void;
+    const spy = vi.spyOn(api, "projection").mockResolvedValueOnce(projection)
+      .mockImplementationOnce(() => new Promise<ProjectionResult>((resolve) => { finishOld = resolve; }))
+      .mockResolvedValueOnce({ ...projection, n: 1, points: [
+        { ...points[0], segment_id: "new", person_id: "new_person", person_label: "新范围人物", session_id: "new_session" }
+      ] });
+    const onLabel = vi.fn().mockResolvedValue({});
+    const { container, rerender } = render(<VoiceprintMap request={REQ} people={labelPeople} onLabel={onLabel} />);
+    await screen.findByRole("list", { name: /图例/ });
+    await userEvent.click(screen.getByRole("button", { name: /框选/ }));
+    const canvas = container.querySelector(".vmap-canvas")!;
+    for (const [type, x, y] of [["pointerdown",430,50],["pointermove",600,200],["pointerup",600,200]] as const)
+      fireEvent(canvas, new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }));
+    await userEvent.click(screen.getByRole("combobox", { name: "标注为" }));
+    await userEvent.click(screen.getByRole("option", { name: "韩文巧" }));
+    await userEvent.click(screen.getByRole("button", { name: "标注" }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    rerender(<VoiceprintMap request={{ ...REQ, session_ids: ["new_session"] }} people={labelPeople} onLabel={onLabel} />);
+    await screen.findByText("新范围人物");
+    await act(async () => { finishOld(projection); });
+    expect(screen.getByText("新范围人物")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "李雷 2" })).not.toBeInTheDocument();
   });
 
   it("offers confirmed participants without plotted points only for a session in scope", async () => {

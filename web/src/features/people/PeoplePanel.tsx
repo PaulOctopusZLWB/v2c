@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { matchesPerson, personOptions } from "../../lib/personSearch";
 import { api } from "../../api/client";
 import type { PersonRow, Suggestion } from "../../api/types";
 import { speakerColor } from "../../lib/speakerColors";
@@ -23,6 +24,7 @@ import type { ConfirmFn } from "../../components/ui/Dialog";
 export function PeoplePanel({
   sessionId,
   day,
+  refreshVersion = 0,
   onChanged,
   push,
   pushAction,
@@ -31,6 +33,7 @@ export function PeoplePanel({
 }: {
   sessionId?: string | null;
   day?: string | null;
+  refreshVersion?: number;
   onChanged: () => void;
   push: (title: string, message?: string, variant?: "success" | "error") => void;
   pushAction: (message: string, actionLabel: string, onAction: () => void) => void;
@@ -41,6 +44,7 @@ export function PeoplePanel({
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadSequence = useRef(0);
   const [newName, setNewName] = useState("");
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
@@ -51,20 +55,23 @@ export function PeoplePanel({
   const [noiseMs, setNoiseMs] = useState(300);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     setLoadError(null);
     setLoading(true);
     try {
-      setPeople((await api.people()).people ?? []);
+      const response = await api.people();
+      if (sequence === loadSequence.current) setPeople(response.people ?? []);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "加载失败");
+      if (sequence === loadSequence.current) setLoadError(err instanceof Error ? err.message : "加载失败");
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    return () => { loadSequence.current++; };
+  }, [load, refreshVersion]);
 
   // A mutation succeeded: reload the local roster AND let the parent refetch the map.
   const refresh = useCallback(async () => {
@@ -73,11 +80,16 @@ export function PeoplePanel({
   }, [load, onChanged]);
 
   const create = useAsyncAction(async (name: string) => {
-    await api.createPerson(name);
-    setNewName("");
+    if (!name.trim()) return;
+    try {
+      await api.createPerson(name.trim());
+      setNewName("");
     // refresh() (not just load()) so the parent's persons roster — and the assign-person
     // <select> fed by it — picks up the new person immediately, not just this panel's list.
-    await refresh();
+      await refresh();
+    } catch (err) {
+      push("新建人物失败", err instanceof Error ? err.message : String(err), "error");
+    }
   });
 
   // One-tap 噪音/多人 bucket: create a ready-to-use non_speaker person so the user can box-select
@@ -208,10 +220,10 @@ export function PeoplePanel({
   const speakers = people.filter((p) => p.person_type !== "non_speaker");
   const nonSpeakers = people.filter((p) => p.person_type === "non_speaker");
   const hasNonSpeaker = nonSpeakers.length > 0;
-  const normalizedQuery = query.trim().toLowerCase();
-  const visiblePeople = speakers.filter((p) =>
-    normalizedQuery.length === 0 ? true : p.display_name.toLowerCase().includes(normalizedQuery)
-  );
+  const sortedOptions = useMemo(() => personOptions(people), [people]);
+  const byId = new Map(speakers.map((p) => [p.person_id, p]));
+  const visiblePeople = sortedOptions.filter((p) => matchesPerson(p, query))
+    .flatMap((p) => byId.has(p.value) ? [byId.get(p.value)!] : []);
 
   // The delete affordance for a person (shared by both groups) — never offered for 本人 (is_self).
   const deleteButton = (p: PersonRow) =>
@@ -255,6 +267,7 @@ export function PeoplePanel({
           <input
             type="search"
             placeholder="搜索人物"
+            title="支持姓名、拼音和首字母"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -394,7 +407,7 @@ export function PeoplePanel({
         <button
           className="ghost"
           onClick={() => newName && void create.run(newName)}
-          disabled={create.pending || !newName}
+          disabled={create.pending || !newName.trim()}
           aria-busy={create.pending}
         >
           {create.pending ? <span className="spinner" aria-hidden /> : <Icon name="person" />}

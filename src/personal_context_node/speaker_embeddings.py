@@ -318,22 +318,34 @@ def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: 
 
     Resolves the person's label from ``persons.display_name`` (raising ``ValueError`` if the
     person is unknown) and upserts a ``segment_person_overrides`` row for every segment in ONE
-    transaction. These are GROUND TRUTH, so each row is written with ``source='manual'``. After the
-    labels commit, the person's voiceprint is re-enrolled so the centroid immediately reflects the
+    transaction. These are GROUND TRUTH, so each row is written with ``source='manual'``.
+    Active selected segments also confirm attendance in their own sessions and clear older
+    contradictory negative verdicts. After commit, the voiceprint is re-enrolled from the
     new labels. Empty input writes nothing and returns 0. Returns the count written.
     """
     if not segment_ids:
         return 0
+    segment_ids = list(dict.fromkeys(segment_ids))
     from personal_context_node.speaker_review import upsert_segment_person_override
 
     now = _now()
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        conn.execute("begin immediate")
         rows = fetch_all(conn, "select display_name from persons where person_id = ?", (person_id,))
         if not rows:
             raise ValueError(f"unknown person_id: {person_id}")
         person_label = str(rows[0]["display_name"])
+        for start in range(0, len(segment_ids), 500):
+            batch = segment_ids[start:start + 500]
+            marks = ",".join("?" for _ in batch)
+            count = conn.execute(
+                f"select count(*) from transcript_segments where is_active=1 and segment_id in ({marks})",
+                batch,
+            ).fetchone()[0]
+            if count != len(batch):
+                raise ValueError("片段已更新或不存在，请重新投射后标注")
         for segment_id in segment_ids:
             upsert_segment_person_override(
                 conn,
@@ -343,6 +355,9 @@ def label_segments_as_person(*, config: AppConfig, person_id: str, segment_ids: 
                 now=now,
                 source="manual",
             )
+        from personal_context_node.identity_review import confirm_labeled_segment_presence
+
+        confirm_labeled_segment_presence(conn, person_id=person_id, segment_ids=segment_ids, now=now)
         conn.commit()
     finally:
         conn.close()

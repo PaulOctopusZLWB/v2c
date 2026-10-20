@@ -50,6 +50,26 @@ describe("ClusterListPanel", () => {
     vi.restoreAllMocks();
   });
 
+  it("refreshes suggestions when external labeling changes the reference people", async () => {
+    let suggestions = 0;
+    const fallback = mockFetch();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith("/api/clusters/vp_001/suggestion")) {
+        suggestions++;
+        return new Response(JSON.stringify({ suggestion: {
+          person_id: "per_a", person_label: suggestions === 1 ? "旧建议" : "新建议", score: 0.71
+        } }));
+      }
+      return fallback(url, init);
+    }));
+    const { rerender } = render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} refreshVersion={0} />);
+    await screen.findByText(/AI 猜测:旧建议/);
+    rerender(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} refreshVersion={1} />);
+    expect(await screen.findByText(/AI 猜测:新建议/)).toBeInTheDocument();
+    expect(screen.queryByText(/AI 猜测:旧建议/)).not.toBeInTheDocument();
+    expect(suggestions).toBe(2);
+  });
+
   it("lists global clusters largest-first with sample, size and an assigned badge", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<ClusterListPanel onChanged={noop} push={noop} confirm={confirmYes} />);

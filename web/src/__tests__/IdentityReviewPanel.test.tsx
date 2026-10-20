@@ -26,6 +26,22 @@ function mockFetch() {
 }
 
 describe("IdentityReviewPanel", () => {
+  it("reloads attendance after an external map label changes the refresh version", async () => {
+    let status = "absent";
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({
+      session_id: "ses_1", can_summarize: false,
+      participants: [{ person_id: "per_a", display_name: "Alice", status }],
+      candidates: [], new_person_candidates: [], negative_feedback_count: 0
+    }), { status: 200 }));
+    const onReviewChange = vi.fn();
+    const props = { sessionId: "ses_1", onChanged: vi.fn(), onReviewChange, push: vi.fn() };
+    const { rerender } = render(<IdentityReviewPanel {...props} refreshVersion={0} />);
+    await waitFor(() => expect(onReviewChange).toHaveBeenLastCalledWith(expect.objectContaining({ participants: [expect.objectContaining({ status: "absent" })] })));
+    status = "present";
+    rerender(<IdentityReviewPanel {...props} refreshVersion={1} />);
+    await waitFor(() => expect(onReviewChange).toHaveBeenLastCalledWith(expect.objectContaining({ participants: [expect.objectContaining({ status: "present" })] })));
+  });
+
   it("shows participants and records not-person feedback", async () => {
     const calls = mockFetch();
     render(<IdentityReviewPanel sessionId="ses_1" onChanged={vi.fn()} onOpenClusters={vi.fn()} push={vi.fn()} />);
