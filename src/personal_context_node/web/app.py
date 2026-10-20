@@ -35,6 +35,8 @@ def create_app(*, config: AppConfig) -> FastAPI:
         initialize(conn)
     finally:
         conn.close()
+    from personal_context_node.tasks import reclaim_expired_tasks
+    reclaim_expired_tasks(config=config, lease_seconds=config.task_lease_seconds)
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):

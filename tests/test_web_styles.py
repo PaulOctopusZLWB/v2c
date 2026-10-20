@@ -11,14 +11,16 @@ def test_web_styles_define_responsive_breakpoints() -> None:
     assert "grid-template-columns: 1fr" in css
 
 
-def test_voiceprint_select_toolbar_floats_without_resizing_stage() -> None:
+def test_voiceprint_select_toolbar_stays_accessible_in_short_viewports() -> None:
     css = Path("web/src/styles.css").read_text(encoding="utf-8")
 
     assert "grid-template-rows: auto minmax(0, 1fr)" in css
-    assert "grid-template-rows: auto auto minmax(0, 1fr)" not in css
-    assert ".voiceprint-map.has-select-toolbar .vmap-stage" not in css
+    # Candidates must remain reachable above the canvas rather than being
+    # clipped by the stage. Pointer/selection behavior is covered in VoiceprintMap.test.tsx.
+    assert "grid-template-rows: auto auto minmax(180px, 1fr); overflow-y: auto;" in css
+    assert ".voiceprint-map.has-select-toolbar .vmap-stage { grid-row: 3; }" in css
     assert ".vmap-select-toolbar .ui-select" in css
-    assert ".vmap-select-toolbar {\n  position: absolute;" in css
+    assert ".vmap-select-toolbar {\n  position: relative;" in css
     assert ".speakers-main-proj > .speakers-map .vmap-stage { height: auto; min-height: 0; }" in css
 
 
