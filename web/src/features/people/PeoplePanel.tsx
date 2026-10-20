@@ -40,6 +40,7 @@ export function PeoplePanel({
 }) {
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
@@ -51,10 +52,13 @@ export function PeoplePanel({
 
   const load = useCallback(async () => {
     setLoadError(null);
+    setLoading(true);
     try {
       setPeople((await api.people()).people ?? []);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "加载失败");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -227,22 +231,25 @@ export function PeoplePanel({
   return (
     <InspectorPanel
       title="人物证据"
-      subtitle="名册、登记声纹与微调补漏(主路径在「聚类」)"
+      subtitle="查看人物名册、搜索人物与管理声纹"
       actions={
         <StatusBadge status="info">
-          <span className="num">{speakers.length}</span> 人
+          {loading ? "加载中…" : <><span className="num">{speakers.length}</span> 人</>}
         </StatusBadge>
       }
       className="people-panel"
     >
       <p className="people-explainer muted">
-        主路径在「聚类」逐组指认;这里按需展开名册与补漏工具。
+        在下方查看和搜索人物；新建、噪音分类等操作在「管理工具」中。
       </p>
 
-      {loadError ? <p className="muted" role="alert">{loadError}</p> : null}
+      {loadError ? <div role="alert"><p>人物加载失败：{loadError}</p>
+        <button type="button" className="ghost" onClick={() => void load()}>重新加载人物</button>
+      </div> : null}
 
-      <details className="people-roster">
-        <summary>人物 · <span className="num">{speakers.length}</span> 人</summary>
+      <details className="people-roster" open>
+        <summary><span>人物 · {loading ? "加载中…" : <><span className="num">{speakers.length}</span> 人</>}</span></summary>
+        {loading ? <p role="status">正在加载人物名单…</p> : null}
         <label className="people-search">
           <span className="sr-only">搜索人物</span>
           <input
@@ -285,8 +292,8 @@ export function PeoplePanel({
             {deleteButton(p)}
           </li>
         ))}
-        {people.length === 0 && !loadError ? <li className="muted">暂无人物</li> : null}
-        {people.length > 0 && visiblePeople.length === 0 ? <li className="muted">没有匹配人物</li> : null}
+        {people.length === 0 && !loadError && !loading ? <li className="muted">暂无人物</li> : null}
+        {people.length > 0 && visiblePeople.length === 0 && !loading ? <li className="muted">没有匹配人物</li> : null}
         </ul>
       </details>
 

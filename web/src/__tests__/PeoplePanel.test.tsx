@@ -55,15 +55,36 @@ describe("PeoplePanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("starts with the roster and management tools collapsed", async () => {
+  it("opens the roster immediately while keeping management tools collapsed", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
 
     expect(await screen.findByRole("complementary", { name: "人物证据" })).toBeInTheDocument();
-    expect(((await findSummary(/人物 ·/)).closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect(((await findSummary(/人物 ·/)).closest("details") as HTMLDetailsElement).open).toBe(true);
     expect(((await findSummary(/管理工具/)).closest("details") as HTMLDetailsElement).open).toBe(false);
-    expect((screen.getByRole("searchbox", { name: "搜索人物" }).closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect((screen.getByRole("searchbox", { name: "搜索人物" }).closest("details") as HTMLDetailsElement).open).toBe(true);
     expect((screen.getByRole("button", { name: /全局识别/ }).closest("details") as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("does not report an empty roster while the request is pending", async () => {
+    let resolve!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => { resolve = r; })));
+    render(<PeoplePanel onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
+    expect(screen.getByRole("status")).toHaveTextContent("正在加载人物名单");
+    expect(screen.queryByText("暂无人物")).not.toBeInTheDocument();
+    resolve(new Response(JSON.stringify({ people }), { status: 200 }));
+    expect(await screen.findByText("韩文巧")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("offers a working retry when loading fails", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockRejectedValueOnce(new Error("network unavailable"))
+      .mockResolvedValue(new Response(JSON.stringify({ people }), { status: 200 })));
+    render(<PeoplePanel onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
+    await userEvent.click(await screen.findByRole("button", { name: "重新加载人物" }));
+    expect(await screen.findByText("韩文巧")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders people with an enrolled badge plus manual + attributed counts", async () => {

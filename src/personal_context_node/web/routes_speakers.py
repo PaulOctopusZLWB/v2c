@@ -732,9 +732,15 @@ def list_people_route(request: Request) -> dict[str, object]:
               p.person_type,
               p.is_self,
               exists (select 1 from person_voiceprints vp where vp.person_id = p.person_id) as enrolled,
-              (select count(*) from segment_person_overrides o where o.person_id = p.person_id) as attributed_count,
-              (select count(*) from segment_person_overrides o where o.person_id = p.person_id and o.source = 'manual') as manual_count
+              coalesce(counts.attributed_count, 0) as attributed_count,
+              coalesce(counts.manual_count, 0) as manual_count
             from persons p
+            left join (
+              select person_id, count(*) as attributed_count,
+                sum(case when source = 'manual' then 1 else 0 end) as manual_count
+              from segment_person_overrides
+              group by person_id
+            ) counts on counts.person_id = p.person_id
             order by p.is_self desc, p.display_name
             """,
         )
