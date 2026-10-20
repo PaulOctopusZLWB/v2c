@@ -27,6 +27,7 @@ def derive_sessions_for_day(
     try:
         initialize(conn)
         _ensure_session_columns(conn)
+        conn.execute("begin immediate")
         segments = fetch_all(
             conn,
             """
@@ -78,10 +79,14 @@ def derive_sessions_for_day(
             """,
             (day,),
         )
+        referenced_session_ids = _referenced_session_ids(conn)
         pinned_session_ids = {
-            str(row["session_id"]) for row in existing_rows if int(row["is_pinned"])
+            str(row["session_id"]) for row in existing_rows
+            if int(row["is_pinned"]) or str(row["session_id"]) in referenced_session_ids
         }
-        mutable_rows = [row for row in existing_rows if not int(row["is_pinned"])]
+        mutable_rows = [
+            row for row in existing_rows if str(row["session_id"]) not in pinned_session_ids
+        ]
         groups = _group_segments(
             [row for row in segments if str(row.get("session_id") or "") not in pinned_session_ids],
             gap_ms=session_gap_minutes * 60 * 1000,
@@ -196,6 +201,27 @@ def derive_sessions_for_day(
         return DeriveSessionsResult(sessions_derived=len(groups), segments_assigned=assigned)
     finally:
         conn.close()
+
+
+def _referenced_session_ids(conn) -> set[str]:
+    """Preserve sessions owned by any installed artifact table, including newer modules.
+
+    Optional modules can add foreign keys without changing the core schema. A
+    re-derive must not delete those anchors or cascade away their reviewed work.
+    """
+    referenced: set[str] = set()
+    def quote(value: str) -> str:
+        return '"' + value.replace('"', '""') + '"'
+    tables = [row[0] for row in conn.execute("select name from sqlite_master where type='table'")]
+    for table in tables:
+        for fk in conn.execute(f"pragma foreign_key_list({quote(table)})"):
+            if fk["table"] != "sessions" or fk["to"] not in ("session_id", None):
+                continue
+            column = quote(fk["from"])
+            referenced.update(str(row[0]) for row in conn.execute(
+                f"select distinct {column} from {quote(table)} where {column} is not null"
+            ))
+    return referenced
 
 
 def _group_segments(rows: list[dict[str, object]], *, gap_ms: int) -> list[list[dict[str, object]]]:
