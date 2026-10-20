@@ -27,6 +27,15 @@ from personal_context_node.web.worker import PipelineWorker
 
 
 def create_app(*, config: AppConfig) -> FastAPI:
+    # Prepare the database before serving requests; read-only endpoints should
+    # not rerun schema migrations for every page visit.
+    from personal_context_node.storage.sqlite import connect, initialize
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+    finally:
+        conn.close()
+
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
         yield

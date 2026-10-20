@@ -10,6 +10,14 @@ from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 from personal_context_node.web.app import create_app
 
 
+def test_people_roster_on_fresh_database(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    client = TestClient(create_app(config=config))
+    response = client.get("/api/people")
+    assert response.status_code == 200
+    assert response.json() == {"people": []}
+
+
 def test_assign_speaker_to_person(tmp_path: Path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _insert_person_and_segment(config.database_path)

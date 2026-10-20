@@ -722,7 +722,6 @@ def list_people_route(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     conn = connect(config.database_path)
     try:
-        initialize(conn)
         rows = fetch_all(
             conn,
             """

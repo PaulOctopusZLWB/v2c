@@ -585,6 +585,12 @@ def _duration_ms(*, started_at: object, finished_at: object) -> int | None:
         return None
     started = datetime.fromisoformat(str(started_at))
     finished = datetime.fromisoformat(str(finished_at))
+    # SQLite CURRENT_TIMESTAMP is UTC without an offset; older repair records
+    # can coexist with the normal timezone-aware ISO timestamps.
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=timezone.utc)
     return int((finished - started).total_seconds() * 1000)
 
 

@@ -92,6 +92,14 @@ def test_process_status_rows_include_task_duration_ms(tmp_path) -> None:
     assert rows[0]["duration_ms"] == 2500
 
 
+def test_duration_supports_sqlite_utc_timestamps_mixed_with_iso_offsets():
+    from personal_context_node.tasks import _duration_ms
+    assert _duration_ms(started_at="2026-10-20T13:00:00+08:00",
+                        finished_at="2026-10-20 05:00:02") == 2000
+    assert _duration_ms(started_at="2026-10-20 05:00:00",
+                        finished_at="2026-10-20T13:00:02+08:00") == 2000
+
+
 def test_process_status_rows_include_asr_model_version(tmp_path) -> None:
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     conn = connect(config.database_path)
