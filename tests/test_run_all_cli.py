@@ -134,6 +134,10 @@ def test_run_all_cli_continues_past_a_task_failure(tmp_path: Path, monkeypatch) 
 data_dir = "{data_dir}"
 obsidian_vault = "{vault}"
 
+[device.dji_mic_3]
+root_path = "{source_dir}"
+stable_seconds = 0
+
 [vad]
 backend = "energy"
 

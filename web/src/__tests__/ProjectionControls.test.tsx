@@ -1,79 +1,44 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ProjectionControls } from "../features/viz/ProjectionControls";
-import type { ProjectionRequest } from "../api/types";
-
-/** The tunable param subset ProjectionControls owns (method + per-method params). */
-type Params = Pick<
-  ProjectionRequest,
-  "method" | "n_neighbors" | "min_dist" | "pca_x" | "pca_y" | "perplexity"
->;
-
-const UMAP: Params = { method: "umap", n_neighbors: 15, min_dist: 0.1 };
+import { ProjectionControls, PROJ_DEFAULTS } from "../features/viz/ProjectionControls";
 
 describe("ProjectionControls", () => {
-  it("UMAP shows n_neighbors + min_dist sliders", () => {
-    render(<ProjectionControls value={UMAP} onChange={vi.fn()} onApply={vi.fn()} />);
-    expect(screen.getByLabelText(/n_neighbors/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/min_dist/i)).toBeInTheDocument();
-    // No PCA / t-SNE params while UMAP is active.
-    expect(screen.queryByLabelText(/主成分 X/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/perplexity/i)).not.toBeInTheDocument();
-  });
-
-  it("switching to PCA shows the 主成分 X / Y dropdowns", async () => {
-    const onChange = vi.fn();
-    const { rerender } = render(<ProjectionControls value={UMAP} onChange={onChange} onApply={vi.fn()} />);
-
-    await userEvent.click(screen.getByRole("button", { name: /^PCA$/ }));
-    // Method change flows up.
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ method: "pca" }));
-
-    // Re-render in PCA mode (the parent applied the method change) to show its conditional params.
-    rerender(<ProjectionControls value={{ method: "pca", pca_x: 0, pca_y: 1 }} onChange={onChange} onApply={vi.fn()} />);
-    expect(screen.getByLabelText(/主成分 X/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/主成分 Y/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/n_neighbors/i)).not.toBeInTheDocument();
-  });
-
-  it("t-SNE shows a perplexity slider and a 较慢 hint", async () => {
-    const onChange = vi.fn();
-    const { rerender } = render(<ProjectionControls value={UMAP} onChange={onChange} onApply={vi.fn()} />);
-
-    await userEvent.click(screen.getByRole("button", { name: /t-SNE/i }));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ method: "tsne" }));
-
-    rerender(<ProjectionControls value={{ method: "tsne", perplexity: 30 }} onChange={onChange} onApply={vi.fn()} />);
-    expect(screen.getByLabelText(/perplexity/i)).toBeInTheDocument();
-    expect(screen.getByText(/较慢/)).toBeInTheDocument();
-  });
-
-  it("dragging a slider updates params but does NOT auto-apply", async () => {
+  it("only exposes UMAP and preserves tunable parameters", async () => {
     const onChange = vi.fn();
     const onApply = vi.fn();
-    render(<ProjectionControls value={UMAP} onChange={onChange} onApply={onApply} />);
-
-    fireEvent.change(screen.getByLabelText(/n_neighbors/i), { target: { value: "30" } });
-    // The change flows to the parent state...
+    render(<ProjectionControls value={PROJ_DEFAULTS} onChange={onChange} onApply={onApply}
+      scopeStatus={{ total: 100, embedded: 99, pending: 1, limit: 16000 }} />);
+    expect(screen.queryByRole("button", { name: /PCA|t-SNE/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/另有 1 段待提取/)).toBeInTheDocument();
+    await userEvent.click(screen.getByText("UMAP 参数"));
+    fireEvent.change(screen.getByLabelText("n_neighbors"), { target: { value: "30" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ n_neighbors: 30 }));
-    // ...but no refetch is triggered.
     expect(onApply).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /生成云图/ }));
+    expect(onApply).toHaveBeenCalledOnce();
   });
 
-  it("clicking 投射 calls onApply", async () => {
-    const onApply = vi.fn();
-    render(<ProjectionControls value={UMAP} onChange={vi.fn()} onApply={onApply} />);
-
-    await userEvent.click(screen.getByRole("button", { name: /投射/ }));
-    expect(onApply).toHaveBeenCalledTimes(1);
+  it("permits 16,000 points and blocks 16,001 without sampling", () => {
+    const props = { value: PROJ_DEFAULTS, onChange: vi.fn(), onApply: vi.fn() };
+    const { rerender } = render(<ProjectionControls {...props} scopeStatus={{ total: 16000, embedded: 16000, pending: 0, limit: 16000 }} />);
+    expect(screen.getByRole("button", { name: /生成云图/ })).toBeEnabled();
+    rerender(<ProjectionControls {...props} processing scopeStatus={{ total: 16000, embedded: 16000, pending: 0, limit: 16000 }} />);
+    expect(screen.getByRole("button", { name: /正在生成/ })).toBeDisabled();
+    rerender(<ProjectionControls {...props} scopeStatus={{ total: 16001, embedded: 16001, pending: 0, limit: 16000 }} />);
+    expect(screen.getByRole("button", { name: /生成云图/ })).toBeDisabled();
+    expect(screen.getByText(/超过上限 1 段/)).toBeInTheDocument();
+    expect(screen.queryByText(/采样/)).not.toBeInTheDocument();
   });
 
-  it("shows a capped note when last result was subsampled", () => {
-    render(
-      <ProjectionControls value={UMAP} onChange={vi.fn()} onApply={vi.fn()} capped n={2000} total={5000} />
-    );
-    expect(screen.getByText(/已采样/)).toHaveTextContent("2000");
-    expect(screen.getByText(/已采样/)).toHaveTextContent("5000");
+  it("blocks empty, too-small, pending and failed counts", () => {
+    const props = { value: PROJ_DEFAULTS, onChange: vi.fn(), onApply: vi.fn() };
+    const { rerender } = render(<ProjectionControls {...props} scopeStatus={{ total: 4, embedded: 4, pending: 0, limit: 16000 }} />);
+    expect(screen.getByRole("button", { name: /生成云图/ })).toBeDisabled();
+    expect(screen.getByText(/至少需要 5 段/)).toBeInTheDocument();
+    rerender(<ProjectionControls {...props} counting />);
+    expect(screen.getByRole("button", { name: /生成云图/ })).toBeDisabled();
+    rerender(<ProjectionControls {...props} scopeError="无法读取" />);
+    expect(screen.getByRole("button", { name: /生成云图/ })).toBeDisabled();
   });
 });

@@ -217,6 +217,12 @@ def upsert_segment_person_override(
     guesses (``'voiceprint'``). Defaults to ``'manual'`` so existing callers keep writing ground
     truth; the global identify loop passes ``'voiceprint'`` for its nearest-centroid assignments.
     """
+    if source not in {"manual", "reviewed"}:
+        existing = conn.execute(
+            "select source from segment_person_overrides where segment_id = ?", (segment_id,)
+        ).fetchone()
+        if existing is not None and existing["source"] in {"manual", "reviewed"}:
+            return
     conn.execute(
         """
         insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source)

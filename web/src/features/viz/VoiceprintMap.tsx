@@ -4,6 +4,7 @@ import type { NeighborCorrectionPreview, PersonRow, ProjectionPoint, ProjectionR
 import { speakerColor } from "../../lib/speakerColors";
 import { emotionColor, emotionMeta } from "../../lib/emotionColors";
 import { Select } from "../../components/ui/Select";
+import { Portal } from "../../components/ui/Portal";
 import { personOptions } from "../../lib/personSearch";
 import { useSegmentAudio } from "../../hooks/useSegmentAudio";
 import { Icon } from "../../components/Icon";
@@ -108,12 +109,14 @@ export function VoiceprintMap({
   onApplyNeighborCorrection,
   onChanged,
   sessionCandidates,
-  sessionExcludedPersonIds
+  sessionExcludedPersonIds,
+  stale = false
 }: {
   /** The multi-scope, tunable projection to fetch + render. `null` → the pick/empty state.
    *  The parent rebuilds this only on 投射 / scope / method change, so dragging a slider in
    *  ProjectionControls never refetches here. */
   request: ProjectionRequest | null;
+  stale?: boolean;
   refreshVersion?: number;
   /** Report each result's subsample state up (lets the parent's controls show the capped note). */
   onResult?: (r: { capped: boolean; n: number; total: number } | null) => void;
@@ -143,6 +146,7 @@ export function VoiceprintMap({
   const [points, setPoints] = useState<ProjectionPoint[] | null>(null);
   const [projectionId, setProjectionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [projectionCancelled, setProjectionCancelled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Subsampling note from the last result (the scope had more points than max_points).
   const [capped, setCapped] = useState<{ n: number; total: number } | null>(null);
@@ -153,6 +157,28 @@ export function VoiceprintMap({
     preview: NeighborCorrectionPreview;
     request: NeighborCorrectionMapRequest;
   } | null>(null);
+  const correctionDialogRef = useRef<HTMLDivElement | null>(null);
+  const correctingRef = useRef(correcting);
+  correctingRef.current = correcting;
+  useEffect(() => {
+    if (!pendingCorrection) return;
+    const previous = document.activeElement as HTMLElement | null;
+    correctionDialogRef.current?.focus({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !correctingRef.current) {
+        event.preventDefault(); event.stopPropagation(); setPendingCorrection(null);
+      } else if (event.key === "Tab") {
+        const buttons = [...(correctionDialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+        if (!buttons.length) return;
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        if ((event.shiftKey && index <= 0) || (!event.shiftKey && index === buttons.length - 1)) {
+          event.preventDefault(); buttons[event.shiftKey ? buttons.length - 1 : 0].focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => { window.removeEventListener("keydown", onKey, true); if (previous?.isConnected) previous.focus(); };
+  }, [!!pendingCorrection]);
   const [correctionNote, setCorrectionNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // Keep onResult out of the fetch effect's deps (it may change identity each render).
@@ -163,8 +189,24 @@ export function VoiceprintMap({
   const reportState = useCallback((state: VoiceprintMapState) => {
     onStateRef.current?.(state);
   }, []);
+  const activeProjection = useRef<{ id: string; controller: AbortController; cancelled: boolean } | null>(null);
+  const cancelProjection = useCallback(() => {
+    const active = activeProjection.current;
+    if (!active) return;
+    active.cancelled = true;
+    activeProjection.current = null;
+    active.controller.abort();
+    void api.cancelProjection(active.id).catch(() => setActionError("取消请求未送达，后台计算可能尚未结束。"));
+    setLoading(false);
+    setProjectionCancelled(true);
+    setPoints(null);
+    setProjectionId(null);
+    reportState({ status: "idle" });
+  }, [reportState]);
 
   const currentRequest = useRef(request);
+  const staleRef = useRef(stale);
+  staleRef.current = stale;
   const projectionGeneration = useRef(0);
   currentRequest.current = request;
   const mounted = useRef(true);
@@ -200,12 +242,21 @@ export function VoiceprintMap({
   useEffect(() => { excludedPersonIdSetRef.current = excludedPersonIdSet; }, [excludedPersonIdSet]);
 
   // Lasso-to-label is only offered when the parent wires both people + onLabel.
-  const canLabel = !!people && !!onLabel;
+  const canLabel = !stale && !!people && !!onLabel;
   const [selectMode, setSelectMode] = useState(false);
   const selectModeRef = useRef(false);
   useEffect(() => { selectModeRef.current = selectMode; }, [selectMode]);
   // The committed selection (segment ids) drives the toolbar + a highlight in draw().
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (stale) {
+      cancelProjection();
+      setPendingCorrection(null);
+      setSelectMode(false);
+      setSelectedIds(new Set());
+      setArmedClearKey(null);
+    }
+  }, [stale, cancelProjection]);
   const selectedIdsRef = useRef<Set<string>>(selectedIds);
   useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
   const onSelectionChangeRef = useRef(onSelectionChange);
@@ -287,14 +338,18 @@ export function VoiceprintMap({
       reportState({ status: "idle" });
       return;
     }
-    let cancelled = false;
+    const id = globalThis.crypto?.randomUUID?.() ?? `projection_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const active = { id, controller: new AbortController(), cancelled: false };
+    activeProjection.current = active;
     setLoading(true);
+    setProjectionCancelled(false);
     setError(null);
     reportState({ status: "loading" });
     api
-      .projection(request)
+      .projection({ ...request, projection_job_id: id }, active.controller.signal)
       .then((res) => {
-        if (cancelled) return;
+        if (active.cancelled) return;
+        if (activeProjection.current === active) activeProjection.current = null;
         const pts = res.points ?? [];
         const n = res.n ?? pts.length;
         const total = res.total_in_scope ?? 0;
@@ -308,7 +363,8 @@ export function VoiceprintMap({
         else reportState({ status: "ready", pointCount: pts.length, capped: !!res.capped, total });
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (active.cancelled) return;
+        if (activeProjection.current === active) activeProjection.current = null;
         const message = err instanceof Error ? err.message : "投影失败";
         setError(message);
         setPoints([]);
@@ -318,7 +374,14 @@ export function VoiceprintMap({
         setLoading(false);
         reportState({ status: "error", message });
       });
-    return () => { cancelled = true; };
+    return () => {
+      active.cancelled = true;
+      if (activeProjection.current === active) {
+        activeProjection.current = null;
+        active.controller.abort();
+        void api.cancelProjection(active.id).catch(() => undefined);
+      }
+    };
   }, [request, reportState, refreshVersion]);
 
   // --- fetch per-segment emotion labels when in 情绪 mode (lazily, on scope/mode change) ---
@@ -763,7 +826,7 @@ export function VoiceprintMap({
   const canRunNeighborCorrection =
     !!request && !!projectionId && !!onPreviewNeighborCorrection && !!onApplyNeighborCorrection;
   const runNeighborCorrection = useCallback(async () => {
-    if (!request || !projectionId || !onPreviewNeighborCorrection || !onApplyNeighborCorrection) return;
+    if (stale || !request || !projectionId || !onPreviewNeighborCorrection || !onApplyNeighborCorrection) return;
     setCorrecting(true);
     setActionError(null);
     setCorrectionNote(null);
@@ -774,11 +837,11 @@ export function VoiceprintMap({
         projection_id: projectionId,
         exclude_person_ids: sessionExcludedPersonIds ?? [],
         viewport_aspect: sizeRef.current.h > 2 * padding ?
-          (sizeRef.current.w - 2 * padding) / (sizeRef.current.h - 2 * padding) : 1
+          Math.min(10, Math.max(0.1, (sizeRef.current.w - 2 * padding) / (sizeRef.current.h - 2 * padding))) : 1
       };
       const preview = await onPreviewNeighborCorrection(correctionRequest);
-      if (!mounted.current || currentRequest.current !== request) return;
-      if (preview.changed === 0) {
+      if (!mounted.current || currentRequest.current !== request || staleRef.current) return;
+      if (preview.changed === 0 && !(preview.protected_conflicts?.length)) {
         setCorrectionNote("没有发现可安全纠正的声纹标注。");
         return;
       }
@@ -793,11 +856,12 @@ export function VoiceprintMap({
     onPreviewNeighborCorrection,
     projectionId,
     request,
-    sessionExcludedPersonIds
+    sessionExcludedPersonIds,
+    stale
   ]);
 
   const applyPendingCorrection = useCallback(async () => {
-    if (!pendingCorrection || !onApplyNeighborCorrection) return;
+    if (stale || !pendingCorrection || !onApplyNeighborCorrection) return;
     setCorrecting(true);
     setActionError(null);
     try {
@@ -815,7 +879,7 @@ export function VoiceprintMap({
     } finally {
       setCorrecting(false);
     }
-  }, [onApplyNeighborCorrection, onChanged, pendingCorrection, refetchProjection]);
+  }, [onApplyNeighborCorrection, onChanged, pendingCorrection, refetchProjection, stale]);
 
   const n = points?.length ?? 0;
   const showSelectToolbar = canLabel && selectMode;
@@ -879,7 +943,7 @@ export function VoiceprintMap({
               type="button"
               className="ghost"
               onClick={() => void runNeighborCorrection()}
-              disabled={correcting || loading || !!pendingCorrection}
+              disabled={stale || correcting || loading || !!pendingCorrection}
               aria-busy={correcting}
               title="根据周围近邻预览并统一零星错误识别"
             >
@@ -944,14 +1008,16 @@ export function VoiceprintMap({
         ) : null}
       <div className="vmap-stage" ref={boxRef}>
         {pendingCorrection ? (
-          <div className="vmap-correction-confirm" role="dialog" aria-label="确认邻域纠偏">
+          <Portal><div className="dialog-overlay" onMouseDown={() => { if (!correcting) setPendingCorrection(null); }}>
+          <div ref={correctionDialogRef} className="vmap-correction-confirm" role="dialog" aria-modal="true" aria-label="确认邻域纠偏" tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
             <div className="vmap-correction-confirm-head">
               <strong>确认邻域纠偏</strong>
               <span className="num">{pendingCorrection.preview.changed} 段</span>
             </div>
-            <p>系统只会应用下面预览过的零星标注变更。</p>
+            <p>已检测 {pendingCorrection.preview.total} 段；可应用 {pendingCorrection.preview.changed} 段，人工标签待核对 {pendingCorrection.preview.protected_conflicts?.length ?? 0} 段。</p>
+            {pendingCorrection.preview.no_suggestion !== undefined ? <p>其余 {pendingCorrection.preview.no_suggestion} 段未产生改归建议。</p> : null}
             <ul>
-              {pendingCorrection.preview.groups.slice(0, 6).map((group) => (
+              {pendingCorrection.preview.groups.map((group) => (
                 <li key={`${group.from_person_id ?? "unknown"}-${group.to_person_id ?? "unknown"}`}>
                   <span>{correctionPersonLabel(group.from_person_label, group.from_person_id)}</span>
                   <span aria-hidden>→</span>
@@ -960,19 +1026,27 @@ export function VoiceprintMap({
                 </li>
               ))}
             </ul>
-            {pendingCorrection.preview.groups.length > 6 ? (
-              <small>另有 {pendingCorrection.preview.groups.length - 6} 组</small>
+            {(pendingCorrection.preview.protected_groups?.length ?? 0) > 0 ? (
+              <div className="vmap-protected-conflicts">
+                <strong>人工标签待核对（不会自动修改）</strong>
+                <ul>{pendingCorrection.preview.protected_groups?.map((group) => (
+                  <li key={`${group.from_person_id ?? "unknown"}-${group.to_person_id ?? "unknown"}`}>
+                    <span>{correctionPersonLabel(group.from_person_label, group.from_person_id)}</span><span aria-hidden>→</span>
+                    <strong>{correctionPersonLabel(group.to_person_label, group.to_person_id)}</strong><span className="num">{group.count}</span>
+                  </li>
+                ))}</ul>
+              </div>
             ) : null}
             <div className="vmap-correction-confirm-actions">
               <button type="button" className="ghost" disabled={correcting} onClick={() => setPendingCorrection(null)}>
                 取消
               </button>
-              <button type="button" className="primary" disabled={correcting} onClick={() => void applyPendingCorrection()}>
+              <button type="button" className="primary" disabled={correcting || pendingCorrection.preview.changed === 0} onClick={() => void applyPendingCorrection()}>
                 {correcting ? <span className="spinner" aria-hidden /> : null}
                 确认纠偏
               </button>
             </div>
-          </div>
+          </div></div></Portal>
         ) : null}
         <canvas
           ref={canvasRef}
@@ -983,16 +1057,21 @@ export function VoiceprintMap({
           onPointerLeave={(e) => { endDrag(e); setHover(null); }}
         />
 
-        {loading ? (
-          <div className="vmap-overlay" role="status">
+        {stale ? (
+          <div className="vmap-overlay stale" role="status">范围或参数已变更，请重新生成云图</div>
+        ) : loading ? (
+          <div className="vmap-overlay loading" role="status">
             <span className="spinner" aria-hidden /> 正在投影声纹… 首次较慢
+            <button type="button" className="ghost" onClick={cancelProjection}>取消投射</button>
           </div>
         ) : error ? (
           <div className="vmap-overlay error" role="alert">投影失败:{error}</div>
+        ) : projectionCancelled ? (
+          <div className="vmap-overlay" role="status">已取消投射，可重新生成云图</div>
         ) : !request ? (
           <div className="vmap-overlay" role="status">选择日期/会话后点「投射」</div>
         ) : n === 0 ? (
-          <div className="vmap-overlay" role="status">该范围还没有声纹,请先在上方提取</div>
+          <div className="vmap-overlay" role="status">该范围还没有声纹，等待后台自动提取</div>
         ) : null}
 
         {capped && !loading ? (
@@ -1040,7 +1119,7 @@ export function VoiceprintMap({
       </div>
 
       {legend.length > 0 ? (
-        <>
+        <div className="vmap-legend-wrap">
           {colorMode === "person" ? (
             <p className="vmap-legend-note">
               图例显示当前范围的全局归属。框选标注实名后，会同步确认其在所选片段所属会话出现；其他会话的名单不变。
@@ -1055,7 +1134,7 @@ export function VoiceprintMap({
                 colorMode === "person" &&
                 c.key !== UNASSIGNED_KEY &&
                 c.key !== SESSION_EXCLUDED_KEY &&
-                !!onClearAttributions;
+                !!onClearAttributions && !stale;
               const clearing = clearingKey === c.key;
               const armed = armedClearKey === c.key;
               const personLegendTitle =
@@ -1101,7 +1180,7 @@ export function VoiceprintMap({
               );
             })}
           </ul>
-        </>
+        </div>
       ) : null}
     </section>
   );

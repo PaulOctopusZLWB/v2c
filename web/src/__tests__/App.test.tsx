@@ -712,7 +712,7 @@ describe("App container", () => {
     expect(screen.queryByLabelText("总结会话")).not.toBeInTheDocument();
   });
 
-  it("renders the voiceprint workflow path on the 声纹 tab", async () => {
+  it("shows automatic voiceprint status without retired manual controls", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
       if (url === "/api/health") return new Response(JSON.stringify({ require_accepted_transcripts: false }), { status: 200 });
@@ -734,12 +734,10 @@ describe("App container", () => {
     expect(toolbarCard.querySelector(".speakers-day")).not.toBeInTheDocument();
     expect(toolbarCard.querySelector('input[type="date"]')).not.toBeInTheDocument();
 
-    // Scope to the workflow section — these step labels also appear as buttons elsewhere on the tab.
-    const wf = (await screen.findByLabelText("声纹主路径")).closest(".voiceprint-workflow") as HTMLElement;
-    expect(wf).toHaveClass("voiceprint-workflow-rail");
-    expect(within(wf).getByText("提取声纹")).toBeInTheDocument();
-    expect(within(wf).getByText("自动聚类")).toBeInTheDocument();
-    expect(within(wf).getByText("确认")).toBeInTheDocument();
+    expect(within(toolbarCard).getByText(/声纹自动处理/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提取声纹" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "候选簇" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /全局识别/ })).not.toBeInTheDocument();
   });
 
   it("renders only the active tab and keeps the selected session across tab switches", async () => {
@@ -772,7 +770,7 @@ describe("App container", () => {
     // Switch to 声纹: the transcript panel unmounts (only the active tab renders), and the
     // VoiceprintPanel shows. The session stays selected (it's App-level state).
     await gotoTab("人物");
-    expect(await screen.findByText("声纹覆盖")).toBeInTheDocument();
+    expect(await screen.findByText(/声纹自动处理/)).toBeInTheDocument();
     expect(container.querySelector("#panel-transcript")).not.toBeInTheDocument();
     // The 对话分析 section is secondary — collapsed by default (not open).
     const analysis = container.querySelector("details.speakers-analysis") as HTMLDetailsElement;

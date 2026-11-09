@@ -753,6 +753,13 @@ def test_apply_neighbor_corrections_preserves_manual_labels(tmp_path: Path) -> N
     config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
     _seed_neighbor_correction_fixture(config, manual_wrong=True)
 
+    preview = preview_neighbor_corrections(
+        config=config, session_ids=["ses_test"], k=5, min_neighbours=3,
+        majority_ratio=0.6, similarity_floor=0.3,
+    )
+    assert any(item["segment_id"] == "a_wrong" for item in preview["protected_conflicts"])
+    assert all(item["segment_id"] != "a_wrong" for item in preview["corrections"])
+
     result = apply_neighbor_corrections(
         config=config,
         session_ids=["ses_test"],
@@ -765,6 +772,159 @@ def test_apply_neighbor_corrections_preserves_manual_labels(tmp_path: Path) -> N
     assert result["changed"] == 0
     rows = _override_rows(config.database_path)
     assert rows["a_wrong"]["person_id"] == "per_b"
+
+
+def test_reviewed_labels_are_checked_but_never_automatically_rewritten(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config, manual_wrong=True)
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update segment_person_overrides set source='reviewed' where segment_id='a_wrong'")
+        conn.commit()
+    finally:
+        conn.close()
+    preview = preview_neighbor_corrections(
+        config=config, session_ids=["ses_test"], k=5, min_neighbours=3,
+        majority_ratio=0.6, similarity_floor=0.3,
+    )
+    assert any(item["segment_id"] == "a_wrong" for item in preview["protected_conflicts"])
+    apply_neighbor_corrections(config=config, session_ids=["ses_test"], k=5, min_neighbours=3,
+                               majority_ratio=0.6, similarity_floor=0.3)
+    auto_attribute_enrolled(config=config, session_id="ses_test")
+    conn = connect(config.database_path)
+    try:
+        row = conn.execute("select person_id, source from segment_person_overrides where segment_id='a_wrong'").fetchone()
+        assert (row["person_id"], row["source"]) == ("per_b", "reviewed")
+    finally:
+        conn.close()
+
+
+def test_correction_uses_each_segments_own_session_exclusions(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    _seed_neighbor_correction_fixture(config)
+    _insert_session_with_segments(config.database_path, ["other_wrong"], session_id="ses_other", audio_file_id="aud_other")
+    put_embedding(config=config, segment_id="other_wrong", vector=[0.97, 0.03, 0.0])
+    conn = connect(config.database_path)
+    try:
+        conn.execute("insert into segment_person_overrides values (?,?,?,?,?)", ("other_wrong", "Bob", "2087-05-10", "per_b", "voiceprint"))
+        conn.execute("insert into session_participants (session_id,person_id,status,source,updated_at) values (?,?,?,?,?)", ("ses_test", "per_a", "absent", "manual", "2087-05-10"))
+        conn.commit()
+    finally:
+        conn.close()
+    preview = preview_neighbor_corrections(config=config, session_ids=["ses_test", "ses_other"],
+                                           k=5, min_neighbours=3, majority_ratio=0.6, similarity_floor=0.3)
+    changed = {item["segment_id"]: item["to_person_id"] for item in preview["corrections"]}
+    assert "a_wrong" not in changed
+    assert changed["other_wrong"] == "per_a"
+
+
+def test_chunked_neighbors_match_exact_cosine_top_k() -> None:
+    from personal_context_node.speaker_embeddings import _iter_raw_neighbors
+    rng = np.random.default_rng(122)
+    matrix = rng.normal(size=(300, 24))
+    matrix /= np.linalg.norm(matrix, axis=1)[:, None]
+    expected = matrix @ matrix.T
+    np.fill_diagonal(expected, -np.inf)
+    for row, (indices, scores) in enumerate(_iter_raw_neighbors(matrix, 15)):
+        reference = np.argsort(-expected[row])[:15]
+        np.testing.assert_array_equal(indices, reference)
+        np.testing.assert_allclose(scores, expected[row, reference], atol=1e-12)
+
+
+def test_auto_attribute_matches_across_multiple_bounded_blocks(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    a = [f"a_{i:03d}" for i in range(20)]
+    b = [f"b_{i:03d}" for i in range(20)]
+    candidates = [f"candidate_{i:03d}" for i in range(600)]
+    _insert_session_with_segments(config.database_path, a + b + candidates)
+    _insert_persons(config.database_path, {"per_a": "Alice", "per_b": "Bob"})
+    put_embeddings_bulk(config=config, items=[(sid, [1.0, 0.0]) for sid in a]
+                        + [(sid, [0.0, 1.0]) for sid in b]
+                        + [(sid, [1.0, 0.0] if i < 300 else [0.0, 1.0]) for i, sid in enumerate(candidates)])
+    conn = connect(config.database_path)
+    try:
+        conn.executemany("insert into segment_person_overrides values (?,?,?,?,?)",
+                         [(sid, "Alice", "2087-05-10", "per_a", "manual") for sid in a]
+                         + [(sid, "Bob", "2087-05-10", "per_b", "manual") for sid in b])
+        conn.commit()
+    finally:
+        conn.close()
+    result = auto_attribute_enrolled(config=config, session_id="ses_test")
+    assert result["assigned"] == 600
+    assert result["per_person"]["per_a"] == result["per_person"]["per_b"] == 300
+
+
+def test_automatic_clusters_do_not_share_ids_between_sessions(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+    import sklearn.cluster
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    a = [f"a_{i}" for i in range(8)]
+    b = [f"b_{i}" for i in range(8)]
+    _insert_session_with_segments(config.database_path, a)
+    _insert_session_with_segments(config.database_path, b, session_id="ses_other", audio_file_id="aud_other")
+    conn = connect(config.database_path)
+    try:
+        conn.execute("update transcript_segments set speaker='spk_01'")
+        conn.commit()
+    finally:
+        conn.close()
+    put_embeddings_bulk(config=config, items=[(sid, [1.0, 0.1]) for sid in a + b])
+    class Reducer:
+        def __init__(self, **kwargs): pass
+        def fit_transform(self, matrix): return matrix
+    class Cluster:
+        def __init__(self, **kwargs): pass
+        def fit_predict(self, matrix): return np.zeros(len(matrix), dtype=int)
+    monkeypatch.setitem(sys.modules, "umap", SimpleNamespace(UMAP=Reducer))
+    monkeypatch.setattr(sklearn.cluster, "HDBSCAN", Cluster)
+    cluster_voiceprints(config=config, scope_session_id="ses_test", min_cluster_size=2)
+    cluster_voiceprints(config=config, scope_session_id="ses_other", min_cluster_size=2)
+    first = _cluster_ids(config.database_path)
+    assert first[a[0]][1] != first[b[0]][1]
+    cluster_voiceprints(config=config, scope_session_id="ses_test", min_cluster_size=2)
+    assert _cluster_ids(config.database_path)[a[0]][1] == first[a[0]][1]
+
+
+def test_projection_api_enforces_16000_without_sampling_or_scope_double_count(tmp_path: Path, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+    import personal_context_node.speaker_embeddings as module
+    from personal_context_node.web.app import create_app
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    ids = [f"seg_{i:05d}" for i in range(16001)]
+    _insert_session_with_segments(config.database_path, ids)
+    put_embeddings_bulk(config=config, items=[(sid, [1.0, 0.1]) for sid in ids[:16000]])
+    monkeypatch.setattr(module, "_fit_coords_2d", lambda X, **kwargs: (np.zeros((len(X), 2)), "umap"))
+    client = TestClient(create_app(config=config))
+    scope = {"session_ids": ["ses_test"], "days": ["2087-05-10"]}
+    counts = client.post("/api/speakers/projection-scope", json=scope)
+    assert counts.json() == {"total": 16001, "embedded": 16000, "pending": 1, "limit": 16000}
+    response = client.post("/api/speakers/projection", json={**scope, "method": "umap", "max_points": 1})
+    assert response.status_code == 200
+    assert response.json()["n"] == 16000 and response.json()["capped"] is False
+    put_embedding(config=config, segment_id=ids[-1], vector=[1.0, 0.1])
+    too_many = client.post("/api/speakers/projection", json={**scope, "method": "umap", "max_points": 0})
+    assert too_many.status_code == 400
+    assert "16001" in too_many.json()["detail"] and "16000" in too_many.json()["detail"]
+    legacy = client.get("/api/speakers/embedding-projection", params={"session_id": "ses_test", "method": "pca"})
+    assert legacy.status_code == 400
+
+
+def test_user_umap_fails_instead_of_silently_falling_back(tmp_path: Path, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+    import personal_context_node.speaker_embeddings as module
+    from personal_context_node.web.app import create_app
+
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    ids = [f"seg_{i}" for i in range(5)]
+    _insert_session_with_segments(config.database_path, ids)
+    put_embeddings_bulk(config=config, items=[(sid, [1.0, 0.1]) for sid in ids])
+    monkeypatch.setattr(module, "_fit_coords_2d", lambda X, **kwargs: (np.zeros((len(X), 2)), "pca"))
+    client = TestClient(create_app(config=config))
+    response = client.post("/api/speakers/projection", json={"session_ids": ["ses_test"], "method": "umap"})
+    assert response.status_code == 400
+    assert "UMAP" in response.json()["detail"]
 
 
 def _setup_two_clusters(tmp_path: Path) -> AppConfig:

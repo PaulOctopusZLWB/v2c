@@ -429,6 +429,14 @@ export interface ProjectionRequest {
   perplexity?: number;
   /** Evenly subsample the scope down to this many points before projecting. */
   max_points?: number;
+  projection_job_id?: string;
+}
+
+export interface ProjectionScopeStatus {
+  total: number;
+  embedded: number;
+  pending: number;
+  limit: number;
 }
 
 export interface NeighborCorrectionGroup {
@@ -456,6 +464,10 @@ export interface NeighborCorrectionPreview {
   total_before_cap?: number;
   changed: number;
   skipped_manual: number;
+  protected_count?: number;
+  protected_conflicts?: NeighborCorrectionItem[];
+  protected_groups?: NeighborCorrectionGroup[];
+  no_suggestion?: number;
   groups: NeighborCorrectionGroup[];
   corrections: NeighborCorrectionItem[];
   params?: {

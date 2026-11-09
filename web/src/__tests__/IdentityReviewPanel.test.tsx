@@ -44,7 +44,7 @@ describe("IdentityReviewPanel", () => {
 
   it("shows participants and records not-person feedback", async () => {
     const calls = mockFetch();
-    render(<IdentityReviewPanel sessionId="ses_1" onChanged={vi.fn()} onOpenClusters={vi.fn()} push={vi.fn()} />);
+    render(<IdentityReviewPanel sessionId="ses_1" onChanged={vi.fn()} push={vi.fn()} />);
 
     expect(await screen.findByText("本场参与人")).toBeInTheDocument();
     expect(screen.getByText("Alice")).toBeInTheDocument();

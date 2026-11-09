@@ -9,16 +9,11 @@ import { Button, InspectorPanel, StatusBadge } from "../../components/ui";
 import type { ConfirmFn } from "../../components/ui/Dialog";
 
 /**
- * 人物 — the supervised-identity surface. The voiceprint (not the diarizer's unreliable spk_NN)
- * is the global identity signal, so the loop is: label a few segments as a person (ground truth) →
- * 全局识别 propagates that voiceprint to every segment in every session → each person stays
- * consistent across sessions, and the more you label, the sharper the boundary.
+ * 人物 — the supervised-identity surface. Automatic matching runs in the background.
  *  - 智能建议 (suggest): for the selected session, score each diarization cluster against the
  *    enrolled centroids; one tap (采用) labels that whole cluster's segments as the person.
  *  - 登记声纹 (enroll): mostly automatic now (labeling auto-enrolls). Re-freezes the centroid from
  *    a person's manual labels — disabled until they have at least one manual label.
- *  - 全局识别 (auto-attribute): re-enroll everyone from their manual labels, then assign every
- *    non-manual segment to the nearest person voiceprint ≥ threshold, never overwriting manuals.
  * Every mutation calls onChanged() so the map (and its colours) refetch.
  */
 export function PeoplePanel({
@@ -27,8 +22,6 @@ export function PeoplePanel({
   refreshVersion = 0,
   onChanged,
   push,
-  pushAction,
-  onAutoAttributed,
   confirm
 }: {
   sessionId?: string | null;
@@ -36,7 +29,7 @@ export function PeoplePanel({
   refreshVersion?: number;
   onChanged: () => void;
   push: (title: string, message?: string, variant?: "success" | "error") => void;
-  pushAction: (message: string, actionLabel: string, onAction: () => void) => void;
+  pushAction?: (message: string, actionLabel: string, onAction: () => void) => void;
   onAutoAttributed?: (count: number) => void;
   // App 的危险确认对话框(替代 window.confirm)。
   confirm: ConfirmFn;
@@ -48,8 +41,7 @@ export function PeoplePanel({
   const [newName, setNewName] = useState("");
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
-  const [threshold, setThreshold] = useState(0.6);
-  // Identity scope: 全部 (global, cross-session — the default and the whole point) vs 本会话.
+  // Noise tools retain their own scope after removing the global re-identification control.
   const [scope, setScope] = useState<"all" | "session">("all");
   // Auto-noise duration threshold (ms): segments shorter than this are bulk-marked noise.
   const [noiseMs, setNoiseMs] = useState(300);
@@ -184,34 +176,6 @@ export function PeoplePanel({
       await refresh();
     } catch (err) {
       push("采用失败", err instanceof Error ? err.message : undefined);
-    }
-  });
-
-  // 全局识别 — re-enroll everyone from their manual labels, then assign every non-manual segment
-  // to the nearest person voiceprint ≥ threshold (manual labels are never overwritten). Default
-  // scope 全部 runs over ALL sessions (the consistent cross-session identity); 本会话 scopes it.
-  const autoAttribute = useAsyncAction(async () => {
-    const useSession = scope === "session" && !!sessionId;
-    try {
-      const res = await api.autoAttribute({
-        session_id: useSession ? sessionId : null,
-        day: null,
-        threshold
-      });
-      const dist = Object.entries(res.per_person)
-        .map(([id, n]) => `${people.find((p) => p.person_id === id)?.display_name ?? id} ${n}`)
-        .join(" · ");
-      pushAction(
-        `已识别 ${res.assigned}/${res.total} 段(未定 ${res.unassigned})`,
-        "查看",
-        () => push("识别分布", dist || "无")
-      );
-      onAutoAttributed?.(res.assigned);
-      await refresh();
-    } catch (err) {
-      // The backend 400s with "no enrolled people" when nobody is enrolled — map to a friendly hint.
-      const msg = err instanceof Error ? err.message : undefined;
-      push("全局识别失败", msg?.includes("400") ? "请先标注并登记至少一个人物的声纹" : msg);
     }
   });
 
@@ -389,9 +353,11 @@ export function PeoplePanel({
               />
               <span className="muted">ms 以下</span>
             </span>
-            <span className="muted noise-scope-note">
-              范围:{scope === "session" && sessionId ? "本会话" : "全部"}
-            </span>
+            <label className="muted noise-scope-note">噪音处理范围:
+              <select aria-label="噪音处理范围" value={sessionId ? scope : "all"} onChange={(e) => setScope(e.target.value as "all" | "session")}>
+                <option value="all">{day ? "当天" : "全库"}</option><option value="session" disabled={!sessionId}>本会话</option>
+              </select>
+            </label>
           </div>
         ) : null}
       </div>
@@ -457,61 +423,6 @@ export function PeoplePanel({
         )}
       </div>
 
-      {/* 全局识别 — assign every segment to the nearest enrolled voiceprint, manual labels kept. */}
-      <div className="people-auto">
-        <div className="people-auto-head">
-          <span className="section-subtitle">微调 · 全局识别补漏</span>
-          <span className="people-auto-helper muted">聚类分配后,用它按声纹补齐剩余未识别片段(手动标注保留)</span>
-          <div className="people-scope" role="radiogroup" aria-label="识别范围">
-            <span className="muted">范围:</span>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={scope === "all"}
-              className={`scope-btn${scope === "all" ? " active" : ""}`}
-              onClick={() => setScope("all")}
-              title="对所有会话统一识别(跨会话一致)"
-            >
-              全部
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={scope === "session"}
-              className={`scope-btn${scope === "session" ? " active" : ""}`}
-              onClick={() => setScope("session")}
-              disabled={!sessionId}
-              title={sessionId ? "仅对当前选中的会话识别" : "请先选择一个会话"}
-            >
-              本会话
-            </button>
-          </div>
-        </div>
-        <div className="people-auto-controls">
-          <div className="people-threshold">
-            <label htmlFor="people-threshold">归人阈值</label>
-            <input
-              id="people-threshold"
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-            />
-            <span className="num">{threshold.toFixed(2)}</span>
-          </div>
-          <Button
-            variant="primary"
-            icon="refresh"
-            busy={autoAttribute.pending}
-            onClick={() => void autoAttribute.run()}
-            title="把每个片段归到声纹最相近的已登记人物(相似度需达阈值),你的手动标注始终保留"
-          >
-            全局识别(按声纹)
-          </Button>
-        </div>
-      </div>
         </div>
       </details>
     </InspectorPanel>

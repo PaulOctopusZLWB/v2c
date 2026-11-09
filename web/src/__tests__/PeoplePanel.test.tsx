@@ -63,7 +63,7 @@ describe("PeoplePanel", () => {
     expect(((await findSummary(/人物 ·/)).closest("details") as HTMLDetailsElement).open).toBe(true);
     expect(((await findSummary(/管理工具/)).closest("details") as HTMLDetailsElement).open).toBe(false);
     expect((screen.getByRole("searchbox", { name: "搜索人物" }).closest("details") as HTMLDetailsElement).open).toBe(true);
-    expect((screen.getByRole("button", { name: /全局识别/ }).closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect(screen.queryByRole("button", { name: /全局识别/ })).not.toBeInTheDocument();
   });
 
   it("does not report an empty roster while the request is pending", async () => {
@@ -208,77 +208,12 @@ describe("PeoplePanel", () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
-  it("全局识别 defaults to scope 全部 → calls auto-attribute with session_id null (global)", async () => {
-    vi.stubGlobal(
-      "fetch",
-      mockFetch({
-        "/api/people/auto-attribute": { assigned: 5, unassigned: 1, total: 6, per_person: { per_a: 5 }, threshold: 0.6 }
-      })
-    );
-    const onChanged = vi.fn();
-    // even with a session selected, the default scope is 全部 (cross-session identity).
-    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={onChanged} push={noop} pushAction={noop} confirm={confirmYes} />);
-
+  it("does not expose global re-identification in management tools", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PeoplePanel sessionId="ses_1" onChanged={noop} push={noop} confirm={confirmYes} />);
     await openManagement();
-    await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
-
-    await waitFor(() => {
-      const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
-      const auto = calls.find((c) => c.url === "/api/people/auto-attribute");
-      expect(auto).toBeTruthy();
-      const sent = JSON.parse(String(auto!.init!.body));
-      expect(sent.session_id).toBeNull();
-      expect(sent.day).toBeNull();
-    });
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
-  });
-
-  it("calls onAutoAttributed after global identification", async () => {
-    vi.stubGlobal(
-      "fetch",
-      mockFetch({
-        "/api/people/auto-attribute": { assigned: 5, unassigned: 1, total: 6, per_person: { per_a: 5 }, threshold: 0.6 }
-      })
-    );
-    const onAutoAttributed = vi.fn();
-    render(
-      <PeoplePanel
-        sessionId={null}
-        day="2087-05-10"
-        onChanged={noop}
-        push={noop}
-        pushAction={noop}
-        onAutoAttributed={onAutoAttributed}
-        confirm={confirmYes}
-      />
-    );
-
-    await openManagement();
-    await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
-
-    await waitFor(() => expect(onAutoAttributed).toHaveBeenCalledWith(5));
-  });
-
-  it("switching 全局识别 scope to 本会话 passes the selected session_id", async () => {
-    vi.stubGlobal(
-      "fetch",
-      mockFetch({
-        "/api/people/auto-attribute": { assigned: 5, unassigned: 1, total: 6, per_person: { per_a: 5 }, threshold: 0.6 }
-      })
-    );
-    render(<PeoplePanel sessionId="ses_1" day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
-
-    await openManagement();
-    // flip the scope to 本会话, then run.
-    await userEvent.click(screen.getByRole("radio", { name: /本会话/ }));
-    await userEvent.click(screen.getByRole("button", { name: /全局识别/ }));
-
-    await waitFor(() => {
-      const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => ({ url: String(c[0]), init: c[1] as RequestInit | undefined }));
-      const auto = calls.find((c) => c.url === "/api/people/auto-attribute");
-      expect(auto).toBeTruthy();
-      expect(JSON.parse(String(auto!.init!.body)).session_id).toBe("ses_1");
-    });
+    expect(screen.queryByRole("button", { name: /全局识别/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("归人阈值")).not.toBeInTheDocument();
   });
 
   it("删除 a person (dialog confirmed) calls deletePerson then reloads + onChanged", async () => {
@@ -347,14 +282,6 @@ describe("PeoplePanel", () => {
       expect(create).toBeTruthy();
       expect(JSON.parse(String(create!.init!.body)).display_name).toBe("王芳");
     });
-  });
-
-  it("the 全局识别 control carries a one-line '按声纹补齐' helper", async () => {
-    vi.stubGlobal("fetch", mockFetch());
-    render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);
-
-    await openManagement();
-    expect(screen.getByText(/按声纹补齐/)).toBeInTheDocument();
   });
 
   // --- 非发言人 (non_speaker / 噪音·多人) class ---

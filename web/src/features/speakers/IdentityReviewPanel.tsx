@@ -19,7 +19,6 @@ export function IdentityReviewPanel({
   refreshVersion = 0,
   onChanged,
   onReviewChange,
-  onOpenClusters,
   onOpenSummary,
   push
 }: {
@@ -27,7 +26,6 @@ export function IdentityReviewPanel({
   refreshVersion?: number;
   onChanged: () => void;
   onReviewChange?: (review: IdentityReview | null) => void;
-  onOpenClusters?: () => void;
   onOpenSummary?: () => void;
   push: (title: string, message?: string) => void;
 }) {
@@ -130,11 +128,6 @@ export function IdentityReviewPanel({
           <span className="identity-kicker">身份闸机</span>
           <h2>先选一个会话</h2>
           <p>在左侧展开日期，点击会话行的「审核身份」。选中后这里会显示本场参与人、候选归属和“不是 TA”的负反馈入口。</p>
-          {onOpenClusters ? (
-            <button type="button" className="ghost identity-inline-action" onClick={onOpenClusters}>
-              先看候选簇
-            </button>
-          ) : null}
         </div>
       </section>
     );
@@ -199,10 +192,6 @@ export function IdentityReviewPanel({
           <button type="button" className="primary identity-inline-action" onClick={onOpenSummary}>
             去总结
           </button>
-        ) : nextStep.action === "clusters" && onOpenClusters ? (
-          <button type="button" className="ghost identity-inline-action" onClick={onOpenClusters}>
-            打开候选簇
-          </button>
         ) : null}
       </div>
 
@@ -255,11 +244,6 @@ export function IdentityReviewPanel({
         )) : (
           <div className="identity-empty-block">
             <p className="identity-empty">没有待确认候选。被标为“本场没出现”的人已从本场白名单里排除，不会以真实姓名进入总结。</p>
-            {onOpenClusters ? (
-              <button type="button" className="ghost identity-inline-action" onClick={onOpenClusters}>
-                打开候选簇
-              </button>
-            ) : null}
           </div>
         )}
         {excludedCandidates.length ? (
@@ -292,7 +276,7 @@ function nextStepForReview({
   presentCount: number;
   absentCount: number;
   excludedCount: number;
-}): { title: string; detail: string; action: "summary" | "clusters" | null } {
+}): { title: string; detail: string; action: "summary" | null } {
   if (activeCandidateCount > 0 && presentCount === 0) {
     return {
       title: "继续确认谁出现了",
@@ -316,7 +300,7 @@ function nextStepForReview({
   }
   return {
     title: "还缺一个出现者",
-    detail: "你已经排除了候选，但本场还没有确认出现的人。去候选簇补一个归属，或在候选队列确认至少一位出现者。",
-    action: "clusters"
+    detail: "本场还没有确认出现的人。请在会话身份中检查待确认声音，或在云图中标注后再确认。",
+    action: null
   };
 }

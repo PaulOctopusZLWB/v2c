@@ -777,7 +777,7 @@
    on top of the shared .card base (kills the full re-declaration). */
 .voiceprint-map {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(220px, 1fr) auto;
   gap: var(--s4);
   min-height: 0;
   border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
@@ -804,6 +804,7 @@
 .vmap-colormode button.active { background: var(--accent-dim); color: var(--accent-2); font-weight: var(--fw-semibold); }
 .vmap-colormode-label { font-size: var(--fs-xs); color: var(--text-dim); padding-left: var(--s2); }
 .vmap-legend-emoji { font-size: var(--fs-base); line-height: 1; flex: none; }
+.vmap-legend-wrap { grid-row: 3; min-height: 0; max-height: 150px; overflow-y: auto; }
 
 /* the canvas stage: a bordered dark well with an inner glow */
 .vmap-stage {
@@ -832,6 +833,9 @@
   pointer-events: none;
 }
 .vmap-overlay.error { color: var(--err); }
+.vmap-overlay.loading { pointer-events: auto; }
+.vmap-overlay.stale { pointer-events: auto; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); }
+.vmap-protected-conflicts { margin-top: var(--s3); }
 
 /* floating tooltip: themed, follows the cursor, never blocks pointer events */
 .vmap-tooltip {
@@ -924,13 +928,11 @@
   color: var(--err);
 }
 .vmap-correction-confirm {
-  position: absolute;
-  z-index: calc(var(--z-canvas-overlay) + 1);
-  top: var(--s4);
-  left: 50%;
-  width: min(440px, calc(100% - var(--s4) * 2));
+  position: relative;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(75vh, 720px);
+  overflow-y: auto;
   padding: var(--s4);
-  transform: translateX(-50%);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--elev);
@@ -952,15 +954,16 @@
 .vmap-correction-confirm li strong { color: var(--text); }
 .vmap-correction-confirm li .num { margin-left: auto; color: var(--accent-2); }
 .vmap-correction-confirm > small { display: block; margin-top: var(--s2); color: var(--text-dim); }
-.vmap-correction-confirm-actions { justify-content: flex-end; margin-top: var(--s4); }
+.vmap-correction-confirm-actions { position: sticky; bottom: 0; background: var(--elev); justify-content: flex-end; margin-top: var(--s4); padding-top: var(--s2); }
 
 /* 框选 toggle uses the shared .ghost button; mark its on-state like the method toggle */
 .vmap-actions .ghost.active { background: var(--accent-dim); color: var(--accent-2); border-color: var(--accent); }
 .vmap-actions .ghost[aria-busy="true"] { opacity: .75; }
 
 /* Keep candidates outside the canvas so short windows never clip the controls. */
-.voiceprint-map.has-select-toolbar { grid-template-rows: auto auto minmax(180px, 1fr); overflow-y: auto; }
+.voiceprint-map.has-select-toolbar { grid-template-rows: auto auto minmax(220px, 1fr) auto; overflow-y: auto; }
 .voiceprint-map.has-select-toolbar .vmap-stage { grid-row: 3; }
+.voiceprint-map.has-select-toolbar .vmap-legend-wrap { grid-row: 4; }
 .vmap-select-toolbar {
   position: relative;
   grid-row: 2;
@@ -1185,9 +1188,9 @@
   .speakers-main-proj > .speakers-proj-rail,
   .speakers-main-proj > .speakers-people { min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
   /* Map fills its column (toolbar fixed + stage flexes) — never scrolls, never clips. */
-  .speakers-main-proj > .speakers-map { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .speakers-main-proj > .speakers-map { min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
   .speakers-main-proj > .speakers-map > .voiceprint-map { flex: 1 1 auto; min-height: 0; }
-  .speakers-main-proj > .speakers-map .vmap-stage { height: auto; min-height: 0; }
+  .speakers-main-proj > .speakers-map .vmap-stage { height: auto; min-height: 220px; }
   .speakers-analysis[open] .speakers-analysis-body { max-height: 45vh; overflow-y: auto; }
   /* Lift inner-list scrolls so they don't stack inside the column's single scroll. */
   .speakers-proj-rail .scope-list,
@@ -1211,6 +1214,9 @@
   list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1);
   max-height: 42vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
 }
+.scope-list > ul, .scope-history ul { list-style: none; padding: 0; margin: 0; }
+.scope-period, .scope-history summary { font-size: var(--fs-xs); color: var(--text-dim); padding: var(--s2); }
+.scope-history summary { cursor: pointer; }
 .scope-day { display: grid; gap: var(--s1); }
 /* .scope-day-row is a dense .list-row variant: keep it compact, share the hover. */
 .scope-day-row {
@@ -1271,6 +1277,10 @@
 
 /* ---- 投射方式 (ProjectionControls): segmented method toggle + per-method params ---- */
 .projection-controls { display: grid; gap: var(--s4); }
+.projection-scope-count { display: grid; gap: var(--s1); font-size: var(--fs-sm); }
+.projection-scope-over { color: var(--err); }
+.projection-advanced summary { cursor: pointer; color: var(--text-2); }
+.projection-advanced .proj-params { margin-top: var(--s3); }
 /* .proj-method adopts the segmented pill recipe. */
 .proj-method {
   display: inline-flex; gap: var(--s1); padding: var(--s1);

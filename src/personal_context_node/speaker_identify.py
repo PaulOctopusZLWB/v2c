@@ -218,7 +218,7 @@ def identify_session_speakers(*, config: AppConfig, session_id: str) -> dict:
 
     # The smoothing pass must honour the same exclusions as the matcher: an absent person's
     # in-session manual labels would otherwise vote their neighbours right back to them.
-    corrections = apply_neighbor_corrections(config=config, session_ids=[session_id], exclude_person_ids=absent)
+    corrections = apply_neighbor_corrections(config=config, session_ids=[session_id], exclude_person_ids=absent, max_points=0)
 
     clusters = cluster_voiceprints(
         config=config,

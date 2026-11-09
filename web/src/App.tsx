@@ -16,13 +16,10 @@ import { WorkspaceNav } from "./features/workspace/WorkspaceNav";
 import { ReviewQueue } from "./features/transcript/ReviewQueue";
 import { TranscriptReviewPanel } from "./features/transcript/TranscriptReviewPanel";
 import { SpeakerPanel } from "./features/speakers/SpeakerPanel";
-import { VoiceprintPanel } from "./features/speakers/VoiceprintPanel";
-import { ClusterListPanel } from "./features/speakers/ClusterListPanel";
 import { IdentityReviewPanel } from "./features/speakers/IdentityReviewPanel";
 import type { IdentificationStatus } from "./features/speakers/voiceprintWorkflow";
 import { PeoplePanel } from "./features/people/PeoplePanel";
-import { VoiceprintMap, type VoiceprintMapState } from "./features/viz/VoiceprintMap";
-import { VoiceprintWorkflowPanel } from "./features/speakers/VoiceprintWorkflowPanel";
+import { VoiceprintMap } from "./features/viz/VoiceprintMap";
 import { ScopeSelector, type Scope } from "./features/viz/ScopeSelector";
 import { ProjectionControls, PROJ_DEFAULTS, type ProjParams } from "./features/viz/ProjectionControls";
 import { DynamicsCharts } from "./features/viz/DynamicsCharts";
@@ -43,7 +40,7 @@ import { mergeDaysWithStatus } from "./lib/days";
 import type { Stage } from "./lib/stages";
 import { dayLabel, taskTypeZh } from "./lib/format";
 import { t } from "./i18n";
-import type { DailyLlmResult, DayStatusRow, Health, HomeOverview, IdentityReview, ImportSource, Person, PersonRow, ProjectionRequest, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
+import type { DailyLlmResult, DayStatusRow, Health, HomeOverview, IdentityReview, ImportSource, Person, PersonRow, ProjectionRequest, ProjectionScopeStatus, ReviewStatus, SearchResult, TaskRow, TranscriptSession } from "./api/types";
 
 /** 状态条左侧的当前页名(设计稿全局框架)。 */
 const PAGE_TITLES: Record<TabId, string> = { inbox: "收件箱", home: "今日", ingest: "管道", review: "审核", speakers: "人物", memory: "记忆", llm: "总结", settings: "设置" };
@@ -73,19 +70,10 @@ function elapsedZh(seconds: number): string {
   return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分`;
 }
 
-/** Build the multi-scope projection request from the 声纹 scope + tuning params, keeping only
- *  the params relevant to the chosen method. Returns null when nothing is selected (→ the map's
- *  pick/empty state) so we never fire an empty projection. */
+/** Build the UMAP request, or the empty map state when no scope is selected. */
 function buildRequest(scope: Scope, params: ProjParams): ProjectionRequest | null {
   if (scope.session_ids.length === 0 && scope.days.length === 0) return null;
-  const method = params.method ?? "umap";
-  // max_points: 0 = project everything (no subsample); omit when at the default so the backend
-  // applies its own cap.
-  const base: ProjectionRequest = { session_ids: scope.session_ids, days: scope.days, method };
-  if (params.max_points !== undefined) base.max_points = params.max_points;
-  if (method === "umap") return { ...base, n_neighbors: params.n_neighbors, min_dist: params.min_dist };
-  if (method === "pca") return { ...base, pca_x: params.pca_x, pca_y: params.pca_y };
-  return { ...base, perplexity: params.perplexity };
+  return { session_ids: scope.session_ids, days: scope.days, method: "umap", n_neighbors: params.n_neighbors, min_dist: params.min_dist };
 }
 
 /** Bold the (case-insensitive) first occurrence of `q` within `text` for a search snippet.
@@ -158,6 +146,7 @@ export function App() {
   const [scope, setScope] = useState<Scope>({ session_ids: [], days: [] });
   const [projParams, setProjParams] = useState<ProjParams>({ ...PROJ_DEFAULTS });
   const [appliedRequest, setAppliedRequest] = useState<ProjectionRequest | null>(null);
+  const [projectionRunning, setProjectionRunning] = useState(false);
   // 会话上下文统一:审核里选中的会话自动成为地图的默认范围,直到用户手动定制范围为止
   // (手动定制后跟随停止,避免覆盖刻意搭建的跨会话对比 scope)。
   const scopeFollowsSession = useRef(true);
@@ -166,16 +155,26 @@ export function App() {
     if (scope.session_ids.length === 1 && scope.session_ids[0] === selectedSessionId && scope.days.length === 0) return;
     const next: Scope = { session_ids: [selectedSessionId], days: [] };
     setScope(next);
-    setAppliedRequest(buildRequest(next, projParams));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projParams is read, not followed
   }, [selectedSessionId, scope]);
-  const [voiceprintProjectionState, setVoiceprintProjectionState] = useState<VoiceprintMapState>({ status: "idle" });
-  const [voiceprintSelectedCount, setVoiceprintSelectedCount] = useState(0);
-  const [lastAutoAttributeCount, setLastAutoAttributeCount] = useState<number | null>(null);
-  // Last projection outcome (subsample note) reported by the map, surfaced in ProjectionControls.
-  const [projCapped, setProjCapped] = useState<{ capped: boolean; n: number; total: number } | null>(null);
-  // Right column of the 身份 tab: 会话身份 (gate) → 候选簇 (cluster→person) → 人物库.
-  const [rightTab, setRightTab] = useState<"identity" | "clusters" | "people">("identity");
+  const [rightTab, setRightTab] = useState<"identity" | "people">("identity");
+  const scopeKey = JSON.stringify({ session_ids: [...scope.session_ids].sort(), days: [...scope.days].sort() });
+  const [scopeMeasure, setScopeMeasure] = useState<{ key: string; status: ProjectionScopeStatus | null; error: string | null }>({ key: "", status: null, error: null });
+  useEffect(() => {
+    let current = true;
+    if (!scope.session_ids.length && !scope.days.length) {
+      setScopeMeasure({ key: scopeKey, status: { total: 0, embedded: 0, pending: 0, limit: 16000 }, error: null });
+    } else {
+      setScopeMeasure({ key: "", status: null, error: null });
+      void api.projectionScope(scope).then((status) => {
+        if (current) setScopeMeasure({ key: scopeKey, status, error: null });
+      }).catch((error: unknown) => {
+        if (current) setScopeMeasure({ key: scopeKey, status: null, error: error instanceof Error ? error.message : "读取失败" });
+      });
+    }
+    return () => { current = false; };
+  }, [scopeKey, mapKey, worker_running, summary?.feature_progress?.active]);
+  const projectionStale = !!appliedRequest && JSON.stringify(appliedRequest) !== JSON.stringify(buildRequest(scope, projParams));
   const [identityReview, setIdentityReview] = useState<IdentityReview | null>(null);
   // Identification progress for the 声纹 gate row + stepper.
   const [idStatus, setIdStatus] = useState<IdentificationStatus | null>(null);
@@ -382,7 +381,7 @@ export function App() {
   // Refresh the identification progress (gate + stepper) whenever the 声纹 tab is opened.
   useEffect(() => {
     if (tab === "speakers") refreshIdStatus();
-  }, [tab, refreshIdStatus]);
+  }, [tab, refreshIdStatus, worker_running, summary?.feature_progress?.active]);
 
   useEffect(() => {
     void refreshBootstrap();
@@ -622,7 +621,6 @@ export function App() {
   async function handleMatchCurrentSession() {
     if (!session) return;
     const res = await api.identifySession(session.session_id);
-    setLastAutoAttributeCount(res.attributed.assigned);
     const prunedCount = Object.values(res.pruned.pruned).reduce((a, b) => a + b, 0);
     push(
       "已重新识别当前会话",
@@ -967,8 +965,7 @@ export function App() {
     );
   }
 
-  // 声纹 (speakers): the identity workflow is the hero — extract voiceprints, 框选+标注 on the
-  // map, then 全局识别. Layout: compact status/action rails above the 3-column work area.
+  // 声纹: automatic processing status above the scope, map and session-review workspace.
   function renderSpeakers() {
     // ONE inspected-day source of truth: the left projection scope/day rail drives the same day for
     // extraction and analytics; do not add a second date picker in the top action rail.
@@ -980,27 +977,19 @@ export function App() {
     );
     return (
       <div className="tab-page single speakers-layout">
-        {/* Toolbar: identity review first, voiceprint extraction as the evidence source. */}
+        {/* Voiceprint extraction is automatic; the pipeline remains the source of status. */}
         <section className="speakers-toolbar card">
           <div className="speakers-toolbar-title">
             <Icon name="mic" />
             <strong>身份审核</strong>
             <span className="dim">确认本场出现的人，再放行总结</span>
           </div>
-          <div className="speakers-extract">
-            <VoiceprintPanel
-              day={inspectDay}
-              sessionId={selectedSessionId}
-              persons={persons ?? []}
-              onCreatePerson={guard(async (name) => { await api.createPerson(name); setPersons((await api.persons()).persons ?? []); })}
-              onPlaybackError={(message) => push("音频播放失败", message)}
-              push={push}
-              onMatched={onPeopleChanged}
-            />
+          <div className="speakers-extract muted" role="status">
+            声纹自动处理{idStatus ? ` · 全库已提取 ${idStatus.embedded}/${idStatus.total}${idStatus.total > idStatus.embedded ? ` · 待提取 ${idStatus.total - idStatus.embedded}` : ""}` : ""}
+            {summary?.feature_progress?.active ? " · 正在提取" : ""}
+            {summary?.failed_total ? ` · 管道有 ${summary.failed_total} 项失败` : ""}
           </div>
         </section>
-
-        <VoiceprintWorkflowPanel status={idStatus} />
 
         {/* Main row: scope controls | voiceprint evidence map | session identity gate. */}
         <div className="speakers-main speakers-main-proj">
@@ -1008,39 +997,30 @@ export function App() {
             <ScopeSelector
               value={scope}
               activeSessionId={selectedSessionId}
+              activeSessionDay={inspectDay}
               onInspectSession={(sessionId, day) => void guard(inspectIdentitySession)(sessionId, day)}
               onChange={(next) => {
                 // A manual scope edit ends the "follow the reviewed session" default.
                 scopeFollowsSession.current = false;
                 setScope(next);
-                // A scope change auto-applies (re-projects with the current params).
-                setAppliedRequest(buildRequest(next, projParams));
-                setVoiceprintProjectionState({ status: "idle" });
-                setVoiceprintSelectedCount(0);
-                setLastAutoAttributeCount(null);
               }}
             />
             <ProjectionControls
               value={projParams}
-              onChange={(next, apply) => {
-                setProjParams(next);
-                // A method switch (or an explicit apply, e.g. 投射全部) applies immediately;
-                // pure param (slider/dropdown) edits wait for 投射.
-                if (apply || next.method !== projParams.method) setAppliedRequest(buildRequest(scope, next));
-              }}
+              onChange={setProjParams}
               onApply={() => setAppliedRequest(buildRequest(scope, projParams))}
-              capped={projCapped?.capped}
-              n={projCapped?.n}
-              total={projCapped?.total}
+              scopeStatus={scopeMeasure.key === scopeKey ? scopeMeasure.status : null}
+              counting={scopeMeasure.key !== scopeKey}
+              scopeError={scopeMeasure.key === scopeKey ? scopeMeasure.error : null}
+              processing={projectionRunning}
             />
           </div>
           <div className="speakers-map">
             <VoiceprintMap
               refreshVersion={mapKey}
               request={appliedRequest}
-              onResult={(r) => setProjCapped(r)}
-              onState={setVoiceprintProjectionState}
-              onSelectionChange={setVoiceprintSelectedCount}
+              stale={projectionStale}
+              onState={(state) => setProjectionRunning(state.status === "loading")}
               onPlaybackError={(message) => push("音频播放失败", message)}
               people={people ?? []}
               peopleLoading={peopleLoading}
@@ -1085,14 +1065,6 @@ export function App() {
               </button>
               <button
                 type="button"
-                className={rightTab === "clusters" ? "active" : ""}
-                aria-pressed={rightTab === "clusters"}
-                onClick={() => setRightTab("clusters")}
-              >
-                候选簇
-              </button>
-              <button
-                type="button"
                 className={rightTab === "people" ? "active" : ""}
                 aria-pressed={rightTab === "people"}
                 onClick={() => setRightTab("people")}
@@ -1100,15 +1072,12 @@ export function App() {
                 人物库
               </button>
             </div>
-            {rightTab === "clusters" ? (
-              <ClusterListPanel refreshVersion={mapKey} onChanged={onPeopleChanged} push={push} confirm={confirm} />
-            ) : rightTab === "identity" ? (
+            {rightTab === "identity" ? (
               <IdentityReviewPanel
                 sessionId={selectedSessionId}
                 refreshVersion={mapKey}
                 onChanged={onPeopleChanged}
                 onReviewChange={setIdentityReview}
-                onOpenClusters={() => setRightTab("clusters")}
                 onOpenSummary={() => {
                   setLlmMode("session");
                   setTab("llm");
@@ -1121,7 +1090,6 @@ export function App() {
                 sessionId={selectedSessionId}
                 day={inspectDay}
                 onChanged={onPeopleChanged}
-                onAutoAttributed={setLastAutoAttributeCount}
                 push={push}
                 pushAction={pushAction}
                 confirm={confirm}

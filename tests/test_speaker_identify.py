@@ -20,6 +20,22 @@ from personal_context_node.speaker_identify import (
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
+def test_automatic_identification_does_not_cap_neighbor_scope(tmp_path: Path, monkeypatch) -> None:
+    import personal_context_node.speaker_identify as module
+    config = AppConfig(data_dir=tmp_path / "data", obsidian_vault=tmp_path / "vault")
+    observed = {}
+    monkeypatch.setattr(module, "absent_person_ids", lambda **kwargs: set())
+    monkeypatch.setattr(module, "auto_attribute_enrolled", lambda **kwargs: {"assigned": 0})
+    monkeypatch.setattr(module, "prune_low_share_attributions", lambda **kwargs: {"pruned": {}})
+    monkeypatch.setattr(module, "cluster_voiceprints", lambda **kwargs: {"clusters": 0})
+    def correction(**kwargs):
+        observed.update(kwargs)
+        return {"applied": 0}
+    monkeypatch.setattr(module, "apply_neighbor_corrections", correction)
+    module.identify_session_speakers(config=config, session_id="ses_test")
+    assert observed["max_points"] == 0
+
+
 def _unit_axis(index: int, *, noise: float = 0.0, dim: int = 192) -> list[float]:
     vec = np.zeros(dim, dtype=np.float64)
     vec[index] = 1.0

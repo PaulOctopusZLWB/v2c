@@ -94,6 +94,21 @@ describe("VoiceprintMap", () => {
     expect(JSON.parse(call![1]!.body as string)).toMatchObject({ session_ids: ["ses_1"], method: "umap" });
   });
 
+  it("cancels an in-flight projection and tells the server to stop its worker", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      const path = String(url); calls.push(path);
+      if (path === "/api/speakers/projection") return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+      return Promise.resolve(new Response(JSON.stringify({ cancelled: true }), { status: 200 }));
+    }));
+    render(<VoiceprintMap request={REQ} />);
+    await userEvent.click(await screen.findByRole("button", { name: "取消投射" }));
+    expect(await screen.findByText(/已取消投射/)).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((url) => url.startsWith("/api/speakers/projection-cancel/"))).toBe(true));
+  });
+
   it("shows the empty state when the projection returns no points (n===0)", async () => {
     vi.stubGlobal("fetch", mockFetch({ points: [], method: "umap", n: 0 }));
     render(<VoiceprintMap request={REQ} />);
@@ -267,6 +282,33 @@ describe("VoiceprintMap", () => {
     await userEvent.click(screen.getByRole("button", { name: /邻域纠偏/ }));
 
     expect(await screen.findByText(/没有发现可安全纠正/)).toBeInTheDocument();
+  });
+
+  it("shows protected human conflicts without offering an automatic write", async () => {
+    const onApply = vi.fn();
+    const group = { from_person_id: "per_a", from_person_label: "Alice", to_person_id: "per_b", to_person_label: "Bob", count: 1, segment_ids: ["seg_1"] };
+    const preview = { total: 4, changed: 0, skipped_manual: 1, groups: [], corrections: [],
+      protected_groups: [group], protected_conflicts: [{ segment_id: "seg_1" }] };
+    render(<VoiceprintMap request={REQ} onPreviewNeighborCorrection={vi.fn().mockResolvedValue(preview)} onApplyNeighborCorrection={onApply} />);
+    await screen.findByRole("list", { name: /图例/ });
+    await userEvent.click(screen.getByRole("button", { name: /邻域纠偏/ }));
+    expect(await screen.findByText(/人工标签待核对（不会自动修改）/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认纠偏" })).toBeDisabled();
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
+  it("invalidates an open preview when the selected scope changes", async () => {
+    const preview = { total: 4, changed: 1, skipped_manual: 0, groups: [], corrections: [] };
+    const onApply = vi.fn();
+    const { rerender } = render(<VoiceprintMap request={REQ} onPreviewNeighborCorrection={vi.fn().mockResolvedValue(preview)} onApplyNeighborCorrection={onApply} />);
+    await screen.findByRole("list", { name: /图例/ });
+    await userEvent.click(screen.getByRole("button", { name: /邻域纠偏/ }));
+    expect(await screen.findByRole("dialog", { name: "确认邻域纠偏" })).toBeInTheDocument();
+    rerender(<VoiceprintMap request={REQ} stale onPreviewNeighborCorrection={vi.fn().mockResolvedValue(preview)} onApplyNeighborCorrection={onApply} />);
+    expect(screen.getByText(/范围或参数已变更/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认邻域纠偏" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /邻域纠偏/ })).toBeDisabled();
+    expect(onApply).not.toHaveBeenCalled();
   });
 
   it("renders an error state when the projection request fails", async () => {

@@ -18,6 +18,42 @@ _UMAP_LOCK = threading.Lock()
 from personal_context_node.config import AppConfig
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
+PROJECTION_SCOPE_LIMIT = 16_000
+
+
+def projection_scope_status(
+    *, config: AppConfig, session_ids: list[str] | None = None, days: list[str] | None = None
+) -> dict[str, int]:
+    """Count the union of active selected segments, without sampling or duplicate sessions."""
+    sessions = list(dict.fromkeys(session_ids or []))
+    dates = list(dict.fromkeys(days or []))
+    if not sessions and not dates:
+        return {"total": 0, "embedded": 0, "pending": 0, "limit": PROJECTION_SCOPE_LIMIT}
+    filters: list[str] = []
+    values: list[str] = []
+    if sessions:
+        filters.append(f"ts.session_id in ({', '.join('?' for _ in sessions)})")
+        values.extend(sessions)
+    if dates:
+        filters.append(f"s.date_key in ({', '.join('?' for _ in dates)})")
+        values.extend(dates)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        row = conn.execute(
+            "select count(*) as total, "
+            "sum(case when exists (select 1 from segment_embeddings e where e.segment_id=ts.segment_id) "
+            "then 1 else 0 end) as embedded "
+            "from transcript_segments ts left join sessions s on s.session_id=ts.session_id "
+            f"where ts.is_active=1 and ({' or '.join(filters)})",
+            values,
+        ).fetchone()
+        total = int(row["total"] or 0)
+        embedded = int(row["embedded"] or 0)
+        return {"total": total, "embedded": embedded, "pending": total - embedded, "limit": PROJECTION_SCOPE_LIMIT}
+    finally:
+        conn.close()
+
 
 def put_embedding(*, config: AppConfig, segment_id: str, vector: Sequence[float], model: str = "cam++") -> None:
     """Store one voiceprint for a segment, upserting on segment_id."""
@@ -411,7 +447,7 @@ def preview_neighbor_corrections(
     min_neighbours: int = 8,
     majority_ratio: float = 0.75,
     similarity_floor: float = 0.35,
-    max_points: int = 4000,
+    max_points: int = 0,
     exclude_person_ids: set[str] | None = None,
     projection_id: str | None = None,
     viewport_aspect: float = 1.0,
@@ -421,7 +457,8 @@ def preview_neighbor_corrections(
     This is a conservative smoothing pass for "one wrong colour inside a strong cluster". When
     ``projection_id`` is provided, the primary vote uses the exact displayed 2D layout and a second,
     independent raw-CAM++ vote vetoes projection artefacts. Without it, the legacy embedding-only
-    behaviour remains available for non-map callers. Manual overrides vote but are never candidates.
+    behaviour remains available for non-map callers. Human labels vote and are evaluated for
+    conflicts, but are returned separately and are never automatic writes.
 
     ``exclude_person_ids`` blocks corrections TOWARD those persons (the identity-review cascade:
     someone marked absent still has manual labels in scope that would otherwise pull their
@@ -436,6 +473,9 @@ def preview_neighbor_corrections(
         scope_ids = list(snapshot["segment_ids"])
         projection_coords = np.asarray(snapshot["coords"], dtype=np.float64)
         total_before_cap = int(snapshot["total_in_scope"])
+        params["max_points"] = int(snapshot["max_points"])
+        if total_before_cap > PROJECTION_SCOPE_LIMIT:
+            raise ValueError(f"投射范围超过上限 {PROJECTION_SCOPE_LIMIT} 段，请缩小范围")
         current_scope_ids, current_total = _correction_scope_segment_ids(
             config=config,
             session_ids=list(snapshot["session_ids"]),
@@ -466,7 +506,7 @@ def preview_neighbor_corrections(
         projection_coords = np.vstack([coord_by_id[sid] for sid in usable_ids])
 
     attributions = _segment_override_attributions(config=config, segment_ids=usable_ids)
-    negative = _negative_person_ids_by_segment(config=config, segment_ids=usable_ids)
+    negative = _correction_blocked_people(config=config, segment_ids=usable_ids)
     embedding_token = _embedding_token(segment_ids=usable_ids, embeddings=embeddings)
     state_token = _correction_state_token(
         segment_ids=usable_ids,
@@ -482,41 +522,48 @@ def preview_neighbor_corrections(
             raise ValueError("projection labels changed; re-project before previewing corrections")
         # Vote on the labels that produced the visible colors, after proving they still match DB state.
         attributions = {sid: dict(snapshot_attributions[sid]) for sid in usable_ids}
-    skipped_manual = sum(1 for sid in usable_ids if attributions.get(sid, {}).get("source") == "manual")
+    skipped_manual = sum(1 for sid in usable_ids if attributions.get(sid, {}).get("source") in {"manual", "reviewed"})
     corrections: list[dict[str, object]] = []
+    protected_conflicts: list[dict[str, object]] = []
+    labels_by_person: dict[str, str] = {}
+    for attr in attributions.values():
+        if attr.get("person_id") and attr.get("person_label"):
+            labels_by_person.setdefault(str(attr["person_id"]), str(attr["person_label"]))
 
-    sims = matrix @ matrix.T
-    np.fill_diagonal(sims, -np.inf)
     k_eff = min(params["k"], max(0, len(usable_ids) - 1))
     if k_eff == 0:
         return _empty_neighbor_preview(total=len(usable_ids), total_before_cap=total_before_cap, params=params, skipped_manual=skipped_manual)
 
     projection_local_radii: np.ndarray | None = None
+    projection_neighbors: list[list[tuple[int, float]]] | None = None
     if projection_coords is not None:
         # A smaller density neighbourhood detects islands/outliers even when vote-k is as large as
         # the whole labelled island (where every island point's kth neighbour could be the outlier).
         density_k = min(max(2, params["min_neighbours"] // 2), len(usable_ids) - 1)
-        projection_local_radii = np.empty(len(usable_ids), dtype=np.float64)
-        for index in range(len(usable_ids)):
-            deltas = projection_coords - projection_coords[index]
-            deltas[:, 0] *= viewport_aspect
-            distances = np.sum(deltas ** 2, axis=1)
-            distances[index] = np.inf
-            projection_local_radii[index] = float(np.sqrt(np.partition(distances, density_k - 1)[density_k - 1]))
+        from scipy.spatial import cKDTree
 
-    for row_idx, segment_id in enumerate(usable_ids):
+        scaled = projection_coords.copy()
+        scaled[:, 0] *= viewport_aspect
+        distances, indices = cKDTree(scaled).query(scaled, k=max(k_eff, density_k) + 1)
+        projection_neighbors = []
+        projection_local_radii = np.empty(len(usable_ids), dtype=np.float64)
+        for index, (row_indices, row_distances) in enumerate(zip(indices, distances)):
+            neighbors = [(int(idx), float(dist)) for idx, dist in zip(row_indices, row_distances) if int(idx) != index]
+            projection_local_radii[index] = neighbors[density_k - 1][1]
+            projection_neighbors.append(neighbors[:k_eff])
+
+    for row_idx, (top_idx, top_sims) in enumerate(_iter_raw_neighbors(matrix, k_eff)):
+        segment_id = usable_ids[row_idx]
         current = attributions.get(segment_id, {})
-        if current.get("source") == "manual":
-            continue
+        protected = current.get("source") in {"manual", "reviewed"}
         current_person = current.get("person_id")
         raw_confidence: float | None = None
         raw_neighbor_count: int | None = None
         raw_support_count: int | None = None
         if projection_coords is None:
-            top_idx = np.argsort(-sims[row_idx])[:k_eff]
             neighbours: list[tuple[str | None, float]] = []
-            for idx in top_idx:
-                sim = float(sims[row_idx, idx])
+            for idx, sim in zip(top_idx, top_sims):
+                sim = float(sim)
                 if not np.isfinite(sim) or sim < params["similarity_floor"]:
                     continue
                 neighbour_attr = attributions.get(usable_ids[int(idx)], {})
@@ -530,15 +577,11 @@ def preview_neighbor_corrections(
             # Follow what is actually on screen. The kNN set is chosen from ALL displayed points;
             # otherwise a far isolated point could search past its real (unknown) neighbourhood
             # until it found k arbitrarily distant labelled anchors.
-            deltas = projection_coords - projection_coords[row_idx]
-            deltas[:, 0] *= viewport_aspect
-            distances = np.sum(deltas ** 2, axis=1)
-            distances[row_idx] = np.inf
-            nearest_indices = [int(idx) for idx in np.argsort(distances)[:k_eff]]
             assert projection_local_radii is not None
+            assert projection_neighbors is not None
             candidate_radius = float(projection_local_radii[row_idx])
             local_limit = max(1e-6, candidate_radius * 3.0)
-            projected_indices = [idx for idx in nearest_indices if float(np.sqrt(distances[idx])) <= local_limit]
+            projected_indices = [idx for idx, distance in projection_neighbors[row_idx] if distance <= local_limit]
             vote_people = [
                 attributions.get(usable_ids[idx], {}).get("person_id")
                 for idx in projected_indices
@@ -572,8 +615,8 @@ def preview_neighbor_corrections(
             # choose the same target. Its threshold is deliberately weaker (50% weighted support)
             # so it acts as a safety veto instead of recreating the 2D majority decision.
             raw_neighbours: list[tuple[str | None, float]] = []
-            for idx in np.argsort(-sims[row_idx])[:k_eff]:
-                sim = float(sims[row_idx, idx])
+            for idx, sim in zip(top_idx, top_sims):
+                sim = float(sim)
                 if not np.isfinite(sim) or sim < params["similarity_floor"]:
                     continue
                 person_id = attributions.get(usable_ids[int(idx)], {}).get("person_id")
@@ -602,8 +645,8 @@ def preview_neighbor_corrections(
             if not target_similarities or max(target_similarities) < strong_floor:
                 continue
 
-        target_label = _attribution_label(attributions=attributions, person_id=target_person)
-        corrections.append(
+        target_label = "未识别" if target_person is None else labels_by_person.get(target_person, target_person)
+        (protected_conflicts if protected else corrections).append(
             {
                 "segment_id": segment_id,
                 "from_person_id": current_person,
@@ -625,6 +668,10 @@ def preview_neighbor_corrections(
         "total_before_cap": total_before_cap,
         "changed": len(corrections),
         "skipped_manual": skipped_manual,
+        "protected_count": skipped_manual,
+        "protected_conflicts": protected_conflicts,
+        "protected_groups": _neighbor_correction_groups(protected_conflicts),
+        "no_suggestion": len(usable_ids) - len(corrections) - len(protected_conflicts),
         "groups": _neighbor_correction_groups(corrections),
         "corrections": corrections,
         "params": params,
@@ -654,7 +701,7 @@ def apply_neighbor_corrections(
     min_neighbours: int = 8,
     majority_ratio: float = 0.75,
     similarity_floor: float = 0.35,
-    max_points: int = 4000,
+    max_points: int = 0,
     exclude_person_ids: set[str] | None = None,
     projection_id: str | None = None,
     viewport_aspect: float = 1.0,
@@ -674,7 +721,7 @@ def apply_neighbor_corrections(
         projection_id=projection_id,
         viewport_aspect=viewport_aspect,
     )
-    if projection_id is not None:
+    if projection_id is not None or preview_token is not None:
         if not preview_token or preview_token != preview.get("preview_token"):
             raise ValueError("correction preview changed or expired; preview again before applying")
     corrections = list(preview.get("corrections", []))
@@ -700,7 +747,7 @@ def apply_neighbor_corrections(
         if locked_scope_ids != preview_scope_ids or locked_total != int(preview.get("total_before_cap", 0)):
             raise ValueError("correction scope changed after preview; preview again before applying")
         locked_attributions = _segment_override_attributions_from_conn(conn, preview_scope_ids)
-        locked_negative = _negative_person_ids_by_segment_from_conn(conn, preview_scope_ids)
+        locked_negative = _correction_blocked_people_from_conn(conn, preview_scope_ids)
         locked_embeddings = _get_embeddings_from_conn(conn, preview_scope_ids)
         locked_state_token = _correction_state_token(
             segment_ids=preview_scope_ids,
@@ -983,41 +1030,43 @@ def auto_attribute_enrolled(
 
     if candidate_rows:
         S = np.vstack(candidate_rows)  # [N x dim], rows L2-normalized
-        sims = S @ L.T  # [N x num_labeled] cosine similarities
-        # Indices of the top-K labelled exemplars per row (unordered within the partition is fine —
-        # we sum over them and pick the winning person, order-independent).
-        if K < num_labeled:
-            top_idx = np.argpartition(-sims, K - 1, axis=1)[:, :K]
-        else:
-            top_idx = np.tile(np.arange(num_labeled), (sims.shape[0], 1))
+        # Bound the similarity block to ~64 MiB instead of materializing N x all
+        # exemplars (over 50 GiB at the observed personal-library size). Argpartition
+        # has additional block-sized temporaries; voting semantics are unchanged.
+        block_rows = max(1, min(512, (64 * 1024 * 1024) // max(1, num_labeled * 8)))
+        for offset in range(0, len(S), block_rows):
+            sims = S[offset:offset + block_rows] @ L.T
+            if K < num_labeled:
+                top_idx = np.argpartition(-sims, K - 1, axis=1)[:, :K]
+            else:
+                top_idx = np.tile(np.arange(num_labeled), (sims.shape[0], 1))
 
-        for row in range(S.shape[0]):
-            idx = top_idx[row]
-            top_sims = sims[row, idx]
-            top_people = labeled_person_arr[idx]
-            # Similarity-weighted vote: sum cosines per person among the top-K.
-            denom = float(top_sims.sum())
-            if not np.isfinite(denom) or denom <= 0.0:
-                continue
-            best_person: str | None = None
-            best_weight = -1.0
-            for pid in set(top_people.tolist()):
-                weight = float(top_sims[top_people == pid].sum())
-                if weight > best_weight:
-                    best_weight = weight
-                    best_person = pid
-            if best_person is None:
-                continue
-            confidence = best_weight / denom
-            # The winner's best single cosine must clear the floor (far-away isolated points stay out).
-            best_single = float(top_sims[top_people == best_person].max())
-            if confidence < threshold or best_single < _KNN_COSINE_FLOOR:
-                continue
-            if best_person in negative.get(candidate_ids[row], set()):
-                continue
-            writes.append((candidate_ids[row], best_person))
-            assigned += 1
-            per_person[best_person] = per_person.get(best_person, 0) + 1
+            for row in range(sims.shape[0]):
+                segment_id = candidate_ids[offset + row]
+                idx = top_idx[row]
+                top_sims = sims[row, idx]
+                top_people = labeled_person_arr[idx]
+                denom = float(top_sims.sum())
+                if not np.isfinite(denom) or denom <= 0.0:
+                    continue
+                best_person: str | None = None
+                best_weight = -1.0
+                for pid in set(top_people.tolist()):
+                    weight = float(top_sims[top_people == pid].sum())
+                    if weight > best_weight:
+                        best_weight = weight
+                        best_person = pid
+                if best_person is None:
+                    continue
+                confidence = best_weight / denom
+                best_single = float(top_sims[top_people == best_person].max())
+                if confidence < threshold or best_single < _KNN_COSINE_FLOOR:
+                    continue
+                if best_person in negative.get(segment_id, set()):
+                    continue
+                writes.append((segment_id, best_person))
+                assigned += 1
+                per_person[best_person] = per_person.get(best_person, 0) + 1
 
     total = len(scope_ids)
     unassigned = total - assigned
@@ -1076,7 +1125,7 @@ def _manual_override_segment_ids(*, config: AppConfig, segment_ids: list[str]) -
             rows = fetch_all(
                 conn,
                 f"select segment_id from segment_person_overrides "
-                f"where source = 'manual' and segment_id in ({placeholders})",
+                f"where source in ('manual', 'reviewed') and segment_id in ({placeholders})",
                 tuple(chunk),
             )
             for row in rows:
@@ -1114,6 +1163,50 @@ def _negative_person_ids_by_segment_from_conn(conn: object, segment_ids: list[st
         for row in rows:
             result.setdefault(str(row["segment_id"]), set()).add(str(row["person_id"]))
     return result
+
+
+def _correction_blocked_people_from_conn(conn: object, segment_ids: list[str]) -> dict[str, set[str]]:
+    """Apply negative feedback and attendance exclusions to each segment's own session."""
+    result = _negative_person_ids_by_segment_from_conn(conn, segment_ids)
+    for start in range(0, len(segment_ids), _SQL_CHUNK):
+        chunk = segment_ids[start : start + _SQL_CHUNK]
+        placeholders = ", ".join("?" for _ in chunk)
+        rows = fetch_all(
+            conn,
+            f"select ts.segment_id, sp.person_id from transcript_segments ts "
+            f"join session_participants sp on sp.session_id=ts.session_id and sp.status='absent' "
+            f"where ts.segment_id in ({placeholders})",
+            tuple(chunk),
+        )
+        for row in rows:
+            result.setdefault(str(row["segment_id"]), set()).add(str(row["person_id"]))
+    return result
+
+
+def _correction_blocked_people(*, config: AppConfig, segment_ids: list[str]) -> dict[str, set[str]]:
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        return _correction_blocked_people_from_conn(conn, segment_ids)
+    finally:
+        conn.close()
+
+
+def _iter_raw_neighbors(matrix: np.ndarray, k: int):
+    """Yield exact top-k cosine neighbors without materializing an N-by-N matrix."""
+    n = len(matrix)
+    block_rows = max(1, min(128, (32 * 1024 * 1024) // max(1, n * 8)))
+    for start in range(0, n, block_rows):
+        scores = matrix[start : start + block_rows] @ matrix.T
+        local = np.arange(len(scores))
+        scores[local, start + local] = -np.inf
+        indices = np.argpartition(-scores, k - 1, axis=1)[:, :k]
+        values = np.take_along_axis(scores, indices, axis=1)
+        order = np.argsort(-values, axis=1)
+        indices = np.take_along_axis(indices, order, axis=1)
+        values = np.take_along_axis(values, order, axis=1)
+        for idx, sim in zip(indices, values):
+            yield idx, sim
 
 
 def _neighbor_params(*, k: int, min_neighbours: int, majority_ratio: float, similarity_floor: float, max_points: int) -> dict[str, int | float]:
@@ -1369,6 +1462,10 @@ def _empty_neighbor_preview(
         "total_before_cap": total_before_cap,
         "changed": 0,
         "skipped_manual": skipped_manual,
+        "protected_count": skipped_manual,
+        "protected_conflicts": [],
+        "protected_groups": [],
+        "no_suggestion": total,
         "groups": [],
         "corrections": [],
         "params": params,
@@ -1491,6 +1588,7 @@ def _fit_coords_2d(
     perplexity: int = 30,
     pca_x: int = 0,
     pca_y: int = 1,
+    strict_umap: bool = False,
 ) -> tuple[np.ndarray, str]:
     """Reduce unit-normalized voiceprints to ``[0, 1]^2`` coords, memoized on content + params.
 
@@ -1533,8 +1631,10 @@ def _fit_coords_2d(
             with _UMAP_LOCK:  # numba workqueue is not threadsafe — never fit two at once
                 coords = np.asarray(reducer.fit_transform(X), dtype=np.float64)
             used_method = "umap"
-        except Exception:
-            coords = None  # any import/runtime failure -> deterministic PCA fallback below
+        except Exception as exc:
+            if strict_umap:
+                raise ValueError("UMAP 投射失败，请稍后重试") from exc
+            coords = None  # other callers retain the documented fallback
     elif method == "tsne" and len(X) >= 10:
         try:
             from sklearn.decomposition import PCA
@@ -1678,7 +1778,10 @@ def project_embeddings(
     pca_x: int = 0,
     pca_y: int = 1,
     perplexity: int = 30,
-    max_points: int = 4000,
+    max_points: int = 0,
+    hard_limit: int | None = None,
+    strict_umap: bool = False,
+    fit_coords: Callable[..., tuple[np.ndarray, str]] | None = None,
 ) -> dict:
     """Project stored CAM++ voiceprints across MULTIPLE sessions/days to 2D, tunable + responsive.
 
@@ -1709,6 +1812,9 @@ def project_embeddings(
 
     total_in_scope = len(scope_ids)
 
+    if hard_limit is not None and total_in_scope > hard_limit:
+        raise ValueError(f"投射范围有 {total_in_scope} 段，超过上限 {hard_limit} 段；请缩小范围")
+
     # Evenly subsample (deterministic stride) when the scope exceeds the cap, so heavy reducers
     # stay responsive and the result is consistent across methods/calls.
     capped = False
@@ -1728,6 +1834,7 @@ def project_embeddings(
         pca_y,
         perplexity,
         max_points,
+        strict_umap,
         total_in_scope,
     )
     cached = _MULTI_PROJECTION_CACHE.get(cache_key)
@@ -1750,13 +1857,21 @@ def project_embeddings(
 
     embeddings = get_embeddings(config=config, segment_ids=scope_ids)
     ids = [sid for sid in scope_ids if sid in embeddings]
+    if strict_umap and method == "umap":
+        if len(ids) != len(scope_ids):
+            raise ValueError("声纹数据已变化，请重新选择范围")
+        if len(ids) < 5:
+            raise ValueError("UMAP 至少需要 5 段已提取声纹")
+        dims = {embeddings[sid].shape for sid in ids}
+        if len(dims) != 1 or any(not np.all(np.isfinite(embeddings[sid])) or not np.any(embeddings[sid]) for sid in ids):
+            raise ValueError("范围内存在不可用的声纹，请检查后重试")
     if not ids:
         result = {"points": [], "method": method, "n": 0, "capped": False}
         _MULTI_PROJECTION_CACHE[cache_key] = result
         return result
 
     X = _unit_matrix(ids, embeddings)
-    norm_coords, used_method = _fit_coords_2d(
+    norm_coords, used_method = (fit_coords or _fit_coords_2d)(
         X,
         db_path=str(config.database_path),
         ids=ids,
@@ -1766,7 +1881,10 @@ def project_embeddings(
         perplexity=perplexity,
         pca_x=pca_x,
         pca_y=pca_y,
+        strict_umap=strict_umap,
     )
+    if strict_umap and method == "umap" and used_method != "umap":
+        raise ValueError("UMAP 投射失败，请稍后重试")
 
     metadata = _projection_metadata(config=config, segment_ids=ids)
     display_coords = np.round(np.asarray(norm_coords, dtype=np.float64), 4)
@@ -2364,16 +2482,13 @@ def cluster_voiceprints(
 ) -> dict:
     """Coarse unsupervised speaker grouping by voiceprint (HDBSCAN over CAM++ embeddings).
 
-    Overwrites ``transcript_segments.speaker_cluster_id`` with GLOBAL voiceprint cluster ids
-    ("vp_001", … by descending size) so the per-file, collision-prone diarize labels (spk_NN —
-    the same string reused across files for different people) are replaced by cross-file groups.
-    Assigning a vp_* cluster to a person then attributes that voice everywhere it occurs.
+    Overwrites ``transcript_segments.speaker_cluster_id`` with scope/version-specific vp_* ids.
+    These are voice groups, not global identities; independent sessions do not reuse the same ids.
 
     - ``speaker = 'self'`` segments are left untouched (the owner stays auto-identified).
     - The original per-file label is preserved in ``transcript_segments.speaker``, so this is
       reversible (``update transcript_segments set speaker_cluster_id = speaker``).
-    - Deterministic and re-runnable. HDBSCAN noise (-1) is bucketed as "vp_unassigned" for
-      manual cleanup.
+    - Deterministic and re-runnable. HDBSCAN noise (-1) is kept in the same scoped namespace.
 
     Returns ``{"clusters", "assigned", "unassigned", "scope_segments"}``.
     """
@@ -2434,16 +2549,21 @@ def cluster_voiceprints(
             except Exception:
                 space = X
         labels = HDBSCAN(min_cluster_size=min_cluster_size).fit_predict(space)
-        # Stable vp ids: largest cluster -> vp_001 (deterministic naming across re-runs).
+        # Scope/version the ranks so independently clustered sessions never share an identity.
         counts = Counter(int(label) for label in labels if label >= 0)
-        vp_of = {label: f"vp_{rank + 1:03d}" for rank, (label, _) in enumerate(counts.most_common())}
+        scope_token = hashlib.blake2b(digest_size=8)
+        scope_token.update(f"{scope_session_id}:{scope_day}:{model}:{min_cluster_size}".encode())
+        scope_token.update("\0".join(ids).encode())
+        scope_token.update(np.ascontiguousarray(X).tobytes())
+        prefix = f"vp_{scope_token.hexdigest()}_"
+        vp_of = {label: f"{prefix}{rank + 1:03d}" for rank, (label, _) in enumerate(counts.most_common())}
         updates: list[tuple[str, str]] = []
         assigned = 0
         unassigned = 0
         for segment_id, label in zip(ids, labels):
             label = int(label)
             if label < 0:
-                updates.append(("vp_unassigned", segment_id))
+                updates.append((prefix + "unassigned", segment_id))
                 unassigned += 1
             else:
                 updates.append((vp_of[label], segment_id))
@@ -2512,7 +2632,7 @@ def mark_noise_segments(
         # Never overwrite an existing MANUAL label to a different (real) person.
         where.append(
             "not exists (select 1 from segment_person_overrides o where o.segment_id = ts.segment_id "
-            "and o.source = 'manual' and o.person_id != ?)"
+            "and o.source in ('manual', 'reviewed') and o.person_id != ?)"
         )
         params.append(noise_person_id)
         rows = fetch_all(

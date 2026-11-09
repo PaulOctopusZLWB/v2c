@@ -22,12 +22,16 @@ from personal_context_node.speaker_embeddings import (
     enroll_person,
     label_segments_as_person,
     preview_neighbor_corrections,
+    projection_scope_status,
     project_embeddings,
+    PROJECTION_SCOPE_LIMIT,
+    scoped_embedding_segment_ids,
     recluster_by_anchors,
     suggest_people_for_session,
 )
 from personal_context_node.speaker_review import upsert_segment_person_override, upsert_speaker_mapping
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
+from personal_context_node.web import projection_cancellation
 
 
 router = APIRouter(prefix="/api")
@@ -107,7 +111,7 @@ class NeighborCorrectionRequest(BaseModel):
     min_neighbours: int = 8
     majority_ratio: float = 0.75
     similarity_floor: float = 0.35
-    max_points: int = 4000
+    max_points: int = 0
     projection_id: str | None = None
     exclude_person_ids: list[str] = []
     viewport_aspect: float = 1.0
@@ -128,7 +132,8 @@ class ProjectionRequest(BaseModel):
     pca_x: int = 0
     pca_y: int = 1
     perplexity: int = 30
-    max_points: int = 4000
+    max_points: int = 0
+    projection_job_id: str | None = None
 
 
 def _assign_speaker_to_person(conn, *, speaker: str, person_id: str, person_label: str, now: str) -> None:
@@ -415,6 +420,9 @@ def embedding_projection_route(
     if method not in {"umap", "pca"}:
         raise HTTPException(status_code=400, detail="method must be one of: umap, pca")
     config: AppConfig = request.app.state.config
+    count = len(scoped_embedding_segment_ids(config=config, session_id=session_id, day=day))
+    if count > PROJECTION_SCOPE_LIMIT:
+        raise HTTPException(status_code=400, detail=f"投射范围有 {count} 段，超过上限 {PROJECTION_SCOPE_LIMIT} 段")
     return embedding_projection(config=config, session_id=session_id, day=day, method=method)
 
 
@@ -422,24 +430,55 @@ def embedding_projection_route(
 def projection_route(request: Request, payload: ProjectionRequest) -> dict[str, object]:
     """Multi-scope, tunable 2D projection of in-scope CAM++ voiceprints (UMAP/PCA-components/t-SNE).
 
-    Projects the union of the given sessions + days together for cross-session comparison; over
-    ``max_points`` segments are evenly subsampled to stay responsive.
+    Projects the union of the given sessions + days together, without sampling. Requests above
+    the interactive scope limit are rejected before fitting the projection.
     """
     if payload.method not in {"umap", "pca", "tsne"}:
         raise HTTPException(status_code=400, detail="method must be one of: umap, pca, tsne")
     config: AppConfig = request.app.state.config
-    return project_embeddings(
-        config=config,
-        session_ids=payload.session_ids,
-        days=payload.days,
-        method=payload.method,
-        n_neighbors=payload.n_neighbors,
-        min_dist=payload.min_dist,
-        pca_x=payload.pca_x,
-        pca_y=payload.pca_y,
-        perplexity=payload.perplexity,
-        max_points=payload.max_points,
+    job = None
+    try:
+        if payload.projection_job_id:
+            job = projection_cancellation.register(payload.projection_job_id)
+        result = project_embeddings(
+            config=config,
+            session_ids=payload.session_ids,
+            days=payload.days,
+            method=payload.method,
+            n_neighbors=payload.n_neighbors,
+            min_dist=payload.min_dist,
+            pca_x=payload.pca_x,
+            pca_y=payload.pca_y,
+            perplexity=payload.perplexity,
+            max_points=0,
+            hard_limit=PROJECTION_SCOPE_LIMIT,
+            strict_umap=True,
+            fit_coords=(lambda matrix, **kwargs: projection_cancellation.fit(job, matrix, **kwargs)) if job else None,
+        )
+        if job and job.cancelled.is_set():
+            raise ValueError("投射已取消")
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if job and payload.projection_job_id:
+            projection_cancellation.finish(payload.projection_job_id, job)
+
+
+@router.post("/speakers/projection-scope")
+def projection_scope_route(request: Request, payload: ProjectionRequest) -> dict[str, int]:
+    return projection_scope_status(
+        config=request.app.state.config, session_ids=payload.session_ids, days=payload.days
     )
+
+
+@router.post("/speakers/projection-cancel/{job_id}")
+def projection_cancel_route(job_id: str) -> dict[str, bool]:
+    try:
+        projection_cancellation.cancel(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"cancelled": True}
 
 
 @router.post("/speakers/extract-embeddings")
@@ -665,6 +704,12 @@ def clear_segment_attributions_route(request: Request, payload: ClearSegmentAttr
 def neighbor_correction_preview_route(request: Request, payload: NeighborCorrectionRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     try:
+        if not payload.projection_id:
+            if not payload.session_ids and not payload.days:
+                raise ValueError("请选择投射范围")
+            status = projection_scope_status(config=config, session_ids=payload.session_ids, days=payload.days)
+            if status["embedded"] > PROJECTION_SCOPE_LIMIT:
+                raise ValueError(f"投射范围有 {status['embedded']} 段，超过上限 {PROJECTION_SCOPE_LIMIT} 段")
         return preview_neighbor_corrections(
             config=config,
             session_ids=payload.session_ids,
@@ -673,7 +718,7 @@ def neighbor_correction_preview_route(request: Request, payload: NeighborCorrect
             min_neighbours=payload.min_neighbours,
             majority_ratio=payload.majority_ratio,
             similarity_floor=payload.similarity_floor,
-            max_points=payload.max_points,
+            max_points=0,
             exclude_person_ids=set(payload.exclude_person_ids),
             projection_id=payload.projection_id,
             viewport_aspect=payload.viewport_aspect,
@@ -686,6 +731,14 @@ def neighbor_correction_preview_route(request: Request, payload: NeighborCorrect
 def neighbor_correction_apply_route(request: Request, payload: NeighborCorrectionRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     try:
+        if not payload.preview_token:
+            raise ValueError("请先预览邻域纠偏")
+        if not payload.projection_id:
+            if not payload.session_ids and not payload.days:
+                raise ValueError("请选择投射范围")
+            status = projection_scope_status(config=config, session_ids=payload.session_ids, days=payload.days)
+            if status["embedded"] > PROJECTION_SCOPE_LIMIT:
+                raise ValueError(f"投射范围有 {status['embedded']} 段，超过上限 {PROJECTION_SCOPE_LIMIT} 段")
         return apply_neighbor_corrections(
             config=config,
             session_ids=payload.session_ids,
@@ -694,7 +747,7 @@ def neighbor_correction_apply_route(request: Request, payload: NeighborCorrectio
             min_neighbours=payload.min_neighbours,
             majority_ratio=payload.majority_ratio,
             similarity_floor=payload.similarity_floor,
-            max_points=payload.max_points,
+            max_points=0,
             exclude_person_ids=set(payload.exclude_person_ids),
             projection_id=payload.projection_id,
             viewport_aspect=payload.viewport_aspect,

@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, FinalizeResult, Health, HomeOverview, IdentifySessionResult, IdentityReview, InboxSession, LabelSegment, NeighborCorrectionPreview, ParticipantCascade, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, FinalizeResult, Health, HomeOverview, IdentifySessionResult, IdentityReview, InboxSession, LabelSegment, NeighborCorrectionPreview, ParticipantCascade, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ProjectionScopeStatus, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -141,8 +141,12 @@ export const api = {
     request<ProjectionResult>(`/api/speakers/embedding-projection${query(params)}`),
   // Multi-scope, tunable voiceprint projection: project a union of sessions + days together
   // (UMAP / PCA-component selection / t-SNE) with a perf cap for cross-session comparison.
-  projection: (body: ProjectionRequest) =>
-    request<ProjectionResult>("/api/speakers/projection", { method: "POST", body: JSON.stringify(body) }),
+  projection: (body: ProjectionRequest, signal?: AbortSignal) =>
+    request<ProjectionResult>("/api/speakers/projection", { method: "POST", body: JSON.stringify(body), signal }),
+  cancelProjection: (jobId: string) =>
+    request<{ cancelled: boolean }>(`/api/speakers/projection-cancel/${encodeURIComponent(jobId)}`, { method: "POST" }),
+  projectionScope: (body: ProjectionRequest) =>
+    request<ProjectionScopeStatus>("/api/speakers/projection-scope", { method: "POST", body: JSON.stringify(body) }),
   // "People taught once": enroll a voiceprint, then suggest/auto-attribute everywhere; plus the
   // lasso-to-label bulk primitive (label a set of segments as one person).
   people: () => request<{ people: PersonRow[] }>("/api/people"),
