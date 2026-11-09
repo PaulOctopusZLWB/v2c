@@ -985,7 +985,7 @@ export function App() {
             <span className="dim">确认本场出现的人，再放行总结</span>
           </div>
           <div className="speakers-extract muted" role="status">
-            声纹自动处理{idStatus ? ` · 全库已提取 ${idStatus.embedded}/${idStatus.total}${idStatus.total > idStatus.embedded ? ` · 待提取 ${idStatus.total - idStatus.embedded}` : ""}` : ""}
+            声纹自动处理{idStatus ? ` · 全库已提取 ${idStatus.embedded}/${idStatus.total}${idStatus.total > idStatus.embedded ? ` · 未提取 ${idStatus.total - idStatus.embedded}` : ""}` : ""}
             {summary?.feature_progress?.active ? " · 正在提取" : ""}
             {summary?.failed_total ? ` · 管道有 ${summary.failed_total} 项失败` : ""}
           </div>

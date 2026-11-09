@@ -1071,7 +1071,7 @@ export function VoiceprintMap({
         ) : !request ? (
           <div className="vmap-overlay" role="status">选择日期/会话后点「投射」</div>
         ) : n === 0 ? (
-          <div className="vmap-overlay" role="status">该范围还没有声纹，等待后台自动提取</div>
+          <div className="vmap-overlay" role="status">该范围没有可投射的声纹</div>
         ) : null}
 
         {capped && !loading ? (

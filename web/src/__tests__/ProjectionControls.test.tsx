@@ -10,7 +10,7 @@ describe("ProjectionControls", () => {
     render(<ProjectionControls value={PROJ_DEFAULTS} onChange={onChange} onApply={onApply}
       scopeStatus={{ total: 100, embedded: 99, pending: 1, limit: 16000 }} />);
     expect(screen.queryByRole("button", { name: /PCA|t-SNE/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/另有 1 段待提取/)).toBeInTheDocument();
+    expect(screen.getByText(/另有 1 段未提取/)).toBeInTheDocument();
     await userEvent.click(screen.getByText("UMAP 参数"));
     fireEvent.change(screen.getByLabelText("n_neighbors"), { target: { value: "30" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ n_neighbors: 30 }));

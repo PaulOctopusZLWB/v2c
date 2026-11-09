@@ -23,7 +23,7 @@ export function ProjectionControls({ value, onChange, onApply, scopeStatus, coun
         {counting ? "正在计算范围…" : scopeError ? <span role="alert">范围读取失败：{scopeError}</span> : (
           <>
             <div>已选可投射 <strong className="num">{n.toLocaleString()} / {limit.toLocaleString()}</strong></div>
-            {scopeStatus && scopeStatus.pending > 0 ? <div className="muted">另有 {scopeStatus.pending.toLocaleString()} 段待提取</div> : null}
+            {scopeStatus && scopeStatus.pending > 0 ? <div className="muted">另有 {scopeStatus.pending.toLocaleString()} 段未提取</div> : null}
             {over ? <div className="projection-scope-over">超过上限 {(n - limit).toLocaleString()} 段，请缩小范围。</div> : null}
             {n > 0 && n < 5 ? <div className="muted">UMAP 至少需要 5 段已提取声纹。</div> : null}
           </>

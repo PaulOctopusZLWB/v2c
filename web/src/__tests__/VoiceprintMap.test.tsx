@@ -113,7 +113,7 @@ describe("VoiceprintMap", () => {
     vi.stubGlobal("fetch", mockFetch({ points: [], method: "umap", n: 0 }));
     render(<VoiceprintMap request={REQ} />);
 
-    expect(await screen.findByText(/该范围还没有声纹/)).toBeInTheDocument();
+    expect(await screen.findByText(/该范围没有可投射的声纹/)).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: /图例/ })).not.toBeInTheDocument();
   });
 
@@ -339,7 +339,7 @@ describe("VoiceprintMap", () => {
     const states: string[] = [];
     render(<VoiceprintMap request={REQ} onState={(state) => states.push(state.status)} />);
 
-    await screen.findByText(/该范围还没有声纹/);
+    await screen.findByText(/该范围没有可投射的声纹/);
 
     expect(states).toContain("empty");
   });
