@@ -88,6 +88,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(person_type ? { display_name, person_type } : { display_name }),
     }),
+  renamePerson: (id: string, display_name: string, expected_display_name: string) =>
+    request<Person>(`/api/persons/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name, expected_display_name }),
+    }),
   // Remove an accidental duplicate person (cascades across every referencing table).
   deletePerson: (id: string) =>
     request<{ deleted: boolean }>(`/api/persons/${id}`, { method: "DELETE" }),

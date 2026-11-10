@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
+from personal_context_node.person_names import (
+    DuplicatePersonName, PersonNameChanged, PersonNotFound, create_person_record, rename_person_record,
+)
 from personal_context_node.segment_emotions import emotion_distribution, emotion_labels_for_scope
 from personal_context_node.speaker_embeddings import (
     apply_neighbor_corrections,
@@ -44,6 +46,11 @@ class AssignPersonRequest(BaseModel):
 class CreatePersonRequest(BaseModel):
     display_name: str
     person_type: str = "contact"
+
+
+class RenamePersonRequest(BaseModel):
+    display_name: str
+    expected_display_name: str | None = None
 
 
 class AssignPersonBulkRequest(BaseModel):
@@ -188,19 +195,29 @@ def list_persons(request: Request) -> dict[str, object]:
 @router.post("/persons")
 def create_person(request: Request, payload: CreatePersonRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    now = datetime.now(timezone.utc).isoformat()
-    person_id = f"per_{uuid4().hex}"
-    conn = connect(config.database_path)
     try:
-        initialize(conn)
-        conn.execute(
-            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) values (?, ?, ?, 0, ?, ?)",
-            (person_id, payload.display_name, payload.person_type, now, now),
+        return create_person_record(config=config, display_name=payload.display_name, person_type=payload.person_type)
+    except DuplicatePersonName as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/persons/{person_id}")
+def rename_person_route(request: Request, person_id: str, payload: RenamePersonRequest) -> dict[str, object]:
+    try:
+        result = rename_person_record(
+            config=request.app.state.config, person_id=person_id, display_name=payload.display_name,
+            expected_display_name=payload.expected_display_name,
         )
-        conn.commit()
-    finally:
-        conn.close()
-    return {"person_id": person_id, "display_name": payload.display_name, "person_type": payload.person_type, "is_self": 0}
+    except PersonNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (DuplicatePersonName, PersonNameChanged) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    clear_projection_results_cache()
+    return result
 
 
 @router.delete("/persons/{person_id}")
@@ -238,6 +255,7 @@ def merge_people_route(request: Request, payload: MergePeopleRequest) -> dict[st
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        conn.execute("begin immediate")
         try:
             into_label = _person_label(conn, person_id=payload.into_id)
             _person_label(conn, person_id=payload.from_id)
@@ -249,8 +267,8 @@ def merge_people_route(request: Request, payload: MergePeopleRequest) -> dict[st
             (payload.into_id, into_label, payload.from_id),
         )
         mappings = conn.execute(
-            "update speaker_mappings set person_id = ? where person_id = ?",
-            (payload.into_id, payload.from_id),
+            "update speaker_mappings set person_id = ?, person_label = ? where person_id = ?",
+            (payload.into_id, into_label, payload.from_id),
         )
         moved = overrides.rowcount + mappings.rowcount
         _delete_person(conn, person_id=payload.from_id)

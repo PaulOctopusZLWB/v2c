@@ -15,6 +15,7 @@ from personal_context_node.config import AppConfig
 from personal_context_node.obsidian_publish_state import note_was_user_edited, record_note_digest
 from personal_context_node.obsidian_safety import assert_personal_context_vault
 from personal_context_node.obsidian_sync_log import record_sync_log
+from personal_context_node.person_names import require_available_person_name
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -188,7 +189,7 @@ def upsert_speaker_mapping(
           speaker, speaker_mapping_id, person_label, speaker_cluster_id, person_id,
           confidence, source, created_at, updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, coalesce((select display_name from persons where person_id = ?), ?), ?, ?, ?, ?, ?, ?)
         on conflict(speaker) do update set
           speaker_mapping_id = excluded.speaker_mapping_id,
           person_label = excluded.person_label,
@@ -198,7 +199,7 @@ def upsert_speaker_mapping(
           source = excluded.source,
           updated_at = excluded.updated_at
         """,
-        (speaker, f"spmap_{speaker}", person_label, speaker, person_id, 1.0, source, now, now),
+        (speaker, f"spmap_{speaker}", person_id, person_label, speaker, person_id, 1.0, source, now, now),
     )
 
 
@@ -226,14 +227,14 @@ def upsert_segment_person_override(
     conn.execute(
         """
         insert into segment_person_overrides (segment_id, person_label, updated_at, person_id, source)
-        values (?, ?, ?, ?, ?)
+        values (?, coalesce((select display_name from persons where person_id = ?), ?), ?, ?, ?)
         on conflict(segment_id) do update set
           person_label = excluded.person_label,
           updated_at = excluded.updated_at,
           person_id = excluded.person_id,
           source = excluded.source
         """,
-        (segment_id, person_label, now, person_id, source),
+        (segment_id, person_id, person_label, now, person_id, source),
     )
 
 
@@ -328,30 +329,37 @@ def sync_speaker_review(*, config: AppConfig, day: str) -> SpeakerReviewSyncResu
     conn = connect(config.database_path)
     try:
         initialize(conn)
+        conn.execute("begin immediate")
         _delete_stale_attribution_for_day(conn, day=day, parsed=parsed)
         for speaker, person_id in mappings.items():
             person = parsed.persons[person_id]
-            _upsert_person(conn, person=person, now=now)
+            display_name = _upsert_person(conn, person=person, now=now)
             _upsert_speaker_cluster(conn, speaker=speaker, now=now)
             upsert_speaker_mapping(
                 conn,
                 speaker=speaker,
                 person_id=person.person_id,
-                person_label=person.display_name,
+                person_label=display_name,
                 now=now,
                 source="speaker_review",
             )
         for segment_id, person_id in overrides.items():
             person = parsed.persons[person_id]
-            _upsert_person(conn, person=person, now=now)
+            display_name = _upsert_person(conn, person=person, now=now)
             upsert_segment_person_override(
                 conn,
                 segment_id=segment_id,
                 person_id=person.person_id,
-                person_label=person.display_name,
+                person_label=display_name,
                 now=now,
             )
         conn.commit()
+    except ValueError as exc:
+        conn.rollback()
+        record_sync_log(config=config, conn=conn, day=day, source="speaker_mapping_review",
+                        target_id=day, status="failed", message=str(exc))
+        conn.commit()
+        return SpeakerReviewSyncResult(mappings_upserted=0, segment_overrides_upserted=0)
     finally:
         conn.close()
     return SpeakerReviewSyncResult(
@@ -536,7 +544,13 @@ def _yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _upsert_person(conn, *, person: SpeakerPerson, now: str) -> None:
+def _upsert_person(conn, *, person: SpeakerPerson, now: str) -> str:
+    current = conn.execute(
+        "select p.display_name, exists(select 1 from person_name_overrides n where n.person_id=p.person_id) as renamed "
+        "from persons p where p.person_id = ?", (person.person_id,)
+    ).fetchone()
+    display_name = str(current["display_name"]) if current and current["renamed"] else person.display_name
+    display_name = require_available_person_name(conn, display_name, exclude_person_id=person.person_id)
     if person.is_self:
         # At most one person may be self (idx_persons_self). Reassigning/renaming self to a new
         # person_id must MOVE the designation, not crash the partial unique index — clear is_self
@@ -560,7 +574,7 @@ def _upsert_person(conn, *, person: SpeakerPerson, now: str) -> None:
         """,
         (
             person.person_id,
-            person.display_name,
+            display_name,
             "self" if person.is_self else "local",
             1 if person.is_self else 0,
             None,
@@ -568,6 +582,10 @@ def _upsert_person(conn, *, person: SpeakerPerson, now: str) -> None:
             now,
         ),
     )
+    if current is not None and current["display_name"] != display_name:
+        conn.execute("update segment_person_overrides set person_label=? where person_id=?", (display_name, person.person_id))
+        conn.execute("update speaker_mappings set person_label=? where person_id=?", (display_name, person.person_id))
+    return display_name
 
 
 def _upsert_speaker_cluster(conn, *, speaker: str, now: str) -> None:

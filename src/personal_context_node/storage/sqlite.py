@@ -324,6 +324,11 @@ create table if not exists persons (
 create unique index if not exists idx_persons_self
 on persons(is_self) where is_self = 1;
 
+create table if not exists person_name_overrides (
+  person_id text primary key references persons(person_id) on delete cascade,
+  updated_at text not null
+);
+
 create table if not exists speaker_clusters (
   speaker_cluster_id text primary key,
   label text not null,

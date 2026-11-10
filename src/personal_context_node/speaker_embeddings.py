@@ -2010,32 +2010,16 @@ def _normalize(vector: np.ndarray) -> np.ndarray:
     return array / norm
 
 
-def ensure_person(*, config: AppConfig, display_name: str, person_type: str = "contact") -> str:
+def ensure_person(*, config: AppConfig, display_name: str, person_type: str = "contact", reuse_existing: bool = True) -> str:
     """Return the existing person with ``display_name``, or create one and return its id.
 
-    Idempotent: used so a canonical noise person (``person_type='non_speaker'``) can be created
-    without duplicating it on repeated calls. If a person with that display name already exists its
-    id is returned unchanged (the existing person_type is NOT overwritten).
+    Internal category creation is idempotent. User-facing new-person flows pass
+    ``reuse_existing=False`` so an existing name is rejected rather than silently reused.
     """
-    from uuid import uuid4
+    from personal_context_node.person_names import create_person_record
 
-    now = _now()
-    conn = connect(config.database_path)
-    try:
-        initialize(conn)
-        rows = fetch_all(conn, "select person_id from persons where display_name = ?", (display_name,))
-        if rows:
-            return str(rows[0]["person_id"])
-        person_id = f"per_{uuid4().hex}"
-        conn.execute(
-            "insert into persons (person_id, display_name, person_type, is_self, created_at, updated_at) "
-            "values (?, ?, ?, 0, ?, ?)",
-            (person_id, display_name, person_type, now, now),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return person_id
+    result = create_person_record(config=config, display_name=display_name, person_type=person_type, reuse_existing=reuse_existing)
+    return str(result["person_id"])
 
 
 def _non_speaker_person_ids(*, config: AppConfig) -> set[str]:

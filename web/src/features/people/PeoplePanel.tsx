@@ -8,6 +8,8 @@ import { Icon } from "../../components/Icon";
 import { Button, InspectorPanel, StatusBadge } from "../../components/ui";
 import type { ConfirmFn } from "../../components/ui/Dialog";
 
+const nameKey = (name: string) => name.normalize("NFKC").trim().toLowerCase();
+
 /**
  * 人物 — the supervised-identity surface. Automatic matching runs in the background.
  *  - 智能建议 (suggest): for the selected session, score each diarization cluster against the
@@ -39,6 +41,10 @@ export function PeoplePanel({
   const [loading, setLoading] = useState(true);
   const loadSequence = useRef(0);
   const [newName, setNewName] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
   // Noise tools retain their own scope after removing the global re-identification control.
@@ -74,13 +80,31 @@ export function PeoplePanel({
   const create = useAsyncAction(async (name: string) => {
     if (!name.trim()) return;
     try {
+      setCreateError(null);
       await api.createPerson(name.trim());
       setNewName("");
     // refresh() (not just load()) so the parent's persons roster — and the assign-person
     // <select> fed by it — picks up the new person immediately, not just this panel's list.
       await refresh();
     } catch (err) {
-      push("新建人物失败", err instanceof Error ? err.message : String(err), "error");
+      const message = err instanceof Error ? err.message : String(err);
+      setCreateError(message);
+      push("新建人物失败", message, "error");
+    }
+  });
+
+  const rename = useAsyncAction(async (person: PersonRow) => {
+    const next = editName.trim();
+    if (!next) { setEditError("人物名称不能为空"); return; }
+    if (next === person.display_name) { setEditingPersonId(null); setEditError(null); return; }
+    try {
+      setEditError(null);
+      await api.renamePerson(person.person_id, next, person.display_name);
+      setEditingPersonId(null);
+      await refresh();
+      push("人物已改名", `${person.display_name} → ${next}`, "success");
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : String(err));
     }
   });
 
@@ -188,6 +212,11 @@ export function PeoplePanel({
   const byId = new Map(speakers.map((p) => [p.person_id, p]));
   const visiblePeople = sortedOptions.filter((p) => matchesPerson(p, query))
     .flatMap((p) => byId.has(p.value) ? [byId.get(p.value)!] : []);
+  const hasDuplicate = (name: string, exclude?: string) => {
+    const key = nameKey(name);
+    return !!key && people.some((p) => p.person_id !== exclude && nameKey(p.display_name) === key);
+  };
+  const createDuplicate = hasDuplicate(newName);
 
   // The delete affordance for a person (shared by both groups) — never offered for 本人 (is_self).
   const deleteButton = (p: PersonRow) =>
@@ -266,7 +295,26 @@ export function PeoplePanel({
               {enroll.pending ? <span className="spinner" aria-hidden /> : <Icon name="mic" />}
               {p.enrolled ? "重新登记声纹" : "登记声纹"}
             </button>
+            {p.person_type !== "unknown_voice" ? (
+              <button type="button" className="ghost ghost-sm" aria-label={`改名 ${p.display_name}`}
+                disabled={rename.pending} onClick={() => { setEditingPersonId(p.person_id); setEditName(p.display_name); setEditError(null); }}>
+                改名
+              </button>
+            ) : null}
             {deleteButton(p)}
+            {editingPersonId === p.person_id ? (
+              <form className="person-rename-form" onSubmit={(e) => { e.preventDefault(); if (!hasDuplicate(editName, p.person_id)) void rename.run(p); }}>
+                <input aria-label={`${p.display_name}的新名称`} value={editName} autoFocus disabled={rename.pending}
+                  aria-invalid={!!editError || hasDuplicate(editName, p.person_id)}
+                  onChange={(e) => { setEditName(e.target.value); setEditError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditingPersonId(null); setEditError(null); } }} />
+                <button type="submit" className="primary" disabled={rename.pending || !editName.trim() || hasDuplicate(editName, p.person_id)}>
+                  {rename.pending ? "正在保存…" : "保存"}
+                </button>
+                <button type="button" className="ghost" disabled={rename.pending} onClick={() => { setEditingPersonId(null); setEditError(null); }}>取消</button>
+                {hasDuplicate(editName, p.person_id) || editError ? <p className="person-name-error" role="alert">{hasDuplicate(editName, p.person_id) ? "人物名称已存在，请使用其他名称" : editError}</p> : null}
+              </form>
+            ) : null}
           </li>
         ))}
         {people.length === 0 && !loadError && !loading ? <li className="muted">暂无人物</li> : null}
@@ -366,19 +414,20 @@ export function PeoplePanel({
         <input
           aria-label="新建人物"
           value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          onChange={(e) => { setNewName(e.target.value); setCreateError(null); }}
           placeholder="新建人物"
           disabled={create.pending}
         />
         <button
           className="ghost"
           onClick={() => newName && void create.run(newName)}
-          disabled={create.pending || !newName.trim()}
+          disabled={create.pending || !newName.trim() || createDuplicate}
           aria-busy={create.pending}
         >
           {create.pending ? <span className="spinner" aria-hidden /> : <Icon name="person" />}
           {create.pending ? "正在新建…" : "新建人物"}
         </button>
+        {createDuplicate || createError ? <p className="person-name-error" role="alert">{createDuplicate ? "人物名称已存在，请使用其他名称" : createError}</p> : null}
       </div>
 
       {/* Smart suggestions — only meaningful with a selected session. */}

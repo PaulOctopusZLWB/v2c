@@ -55,6 +55,62 @@ describe("PeoplePanel", () => {
     vi.restoreAllMocks();
   });
 
+  it("renames an existing person and refreshes the roster", async () => {
+    let roster = people.map((person) => ({ ...person }));
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url) === "/api/people") return new Response(JSON.stringify({ people: roster }), { status: 200 });
+      if (String(url) === "/api/persons/per_a" && init?.method === "PATCH") {
+        roster = roster.map((person) => person.person_id === "per_a" ? { ...person, display_name: "韩巧" } : person);
+        return new Response(JSON.stringify({ person_id: "per_a", display_name: "韩巧" }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }));
+    const onChanged = vi.fn();
+    render(<PeoplePanel onChanged={onChanged} push={noop} confirm={confirmYes} />);
+    await userEvent.click(await screen.findByRole("button", { name: "改名 韩文巧" }));
+    const input = screen.getByRole("textbox", { name: "韩文巧的新名称" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "韩巧");
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByText("韩巧")).toBeInTheDocument();
+    const call = calls.find((entry) => entry.url === "/api/persons/per_a" && entry.init?.method === "PATCH");
+    expect(JSON.parse(String(call?.init?.body))).toEqual({ display_name: "韩巧", expected_display_name: "韩文巧" });
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("blocks duplicate names when renaming or creating", async () => {
+    const fetcher = mockFetch(); vi.stubGlobal("fetch", fetcher);
+    render(<PeoplePanel onChanged={noop} push={noop} confirm={confirmYes} />);
+    await userEvent.click(await screen.findByRole("button", { name: "改名 韩文巧" }));
+    const edit = screen.getByRole("textbox", { name: "韩文巧的新名称" });
+    await userEvent.clear(edit); await userEvent.type(edit, " 李雷 ");
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("人物名称已存在");
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await openManagement();
+    await userEvent.type(screen.getByLabelText("新建人物"), "韩文巧");
+    expect(screen.getByRole("button", { name: "新建人物" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("人物名称已存在");
+    expect(fetcher.mock.calls.some(([url, init]) => String(url) === "/api/persons" && init?.method === "POST")).toBe(false);
+  });
+
+  it("keeps the edited name and displays a server-side duplicate error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url) === "/api/people") return new Response(JSON.stringify({ people }), { status: 200 });
+      if (init?.method === "PATCH") return new Response(JSON.stringify({ detail: "人物名称已存在，请使用其他名称" }), { status: 409 });
+      return new Response("{}", { status: 200 });
+    }));
+    render(<PeoplePanel onChanged={noop} push={noop} confirm={confirmYes} />);
+    await userEvent.click(await screen.findByRole("button", { name: "改名 韩文巧" }));
+    const input = screen.getByRole("textbox", { name: "韩文巧的新名称" });
+    await userEvent.clear(input); await userEvent.type(input, "新名称");
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("人物名称已存在");
+    expect(input).toHaveValue("新名称");
+  });
+
   it("opens the roster immediately while keeping management tools collapsed", async () => {
     vi.stubGlobal("fetch", mockFetch());
     render(<PeoplePanel sessionId={null} day={null} onChanged={noop} push={noop} pushAction={noop} confirm={confirmYes} />);

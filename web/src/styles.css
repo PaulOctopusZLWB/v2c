@@ -1020,6 +1020,9 @@
 .person-enrolled .icon { width: 13px; height: 13px; }
 .person-count { font-size: var(--fs-sm); margin-left: auto; }
 .person-row > button { margin-left: var(--s2); }
+.person-rename-form { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.person-rename-form input { flex: 1; min-width: 100px; }
+.person-name-error { flex-basis: 100%; margin: 0; color: var(--err); font-size: var(--fs-xs); }
 /* Delete a duplicate person: a quiet ghost button that warms to a danger tint on hover. */
 .person-delete { color: var(--text-2); }
 .person-delete:hover:not(:disabled) {
@@ -1028,7 +1031,7 @@
 }
 
 .people-management-body { display: grid; gap: var(--s4); padding-top: var(--s3); }
-.people-add { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.people-add { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
 .people-add input { flex: 1; min-width: 0; }
 
 .people-suggest { display: grid; gap: var(--s3); border-top: 1px solid var(--border); padding-top: var(--s4); }

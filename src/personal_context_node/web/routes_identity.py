@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
+from personal_context_node.person_names import DuplicatePersonName
 from personal_context_node.identity_review import (
     identity_review_for_session,
     record_not_person,
@@ -130,13 +131,22 @@ def confirm_candidate_route(request: Request, payload: ConfirmCandidateRequest) 
         display_name = str(payload.display_name or "").strip()
         if not display_name:
             raise HTTPException(status_code=400, detail="display_name is required for new_person")
-        person_id = ensure_person(config=config, display_name=display_name, person_type="contact")
+        try:
+            person_id = ensure_person(config=config, display_name=display_name, person_type="contact", reuse_existing=False)
+        except DuplicatePersonName as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         person_type = "contact"
     elif payload.action == "noise":
-        person_id = ensure_person(config=config, display_name="噪音/多人", person_type="non_speaker")
+        try:
+            person_id = ensure_person(config=config, display_name="噪音/多人", person_type="non_speaker")
+        except DuplicatePersonName as exc:
+            raise HTTPException(status_code=409, detail="分类名称已被人物占用，请先为该人物改名") from exc
         person_type = "non_speaker"
     else:
-        person_id = ensure_person(config=config, display_name="未知声音", person_type="unknown_voice")
+        try:
+            person_id = ensure_person(config=config, display_name="未知声音", person_type="unknown_voice")
+        except DuplicatePersonName as exc:
+            raise HTTPException(status_code=409, detail="分类名称已被人物占用，请先为该人物改名") from exc
         person_type = "unknown_voice"
 
     try:
