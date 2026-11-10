@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "../../api/client";
-import type { IdentityCandidate, IdentityReview, InboxSession, Person, TranscriptSegment } from "../../api/types";
+import type { IdentityCandidate, IdentityReview, InboxSession, MeetingGroup, Person, TranscriptSegment } from "../../api/types";
 import { Icon } from "../../components/Icon";
 import { speakerColor } from "../../lib/speakerColors";
+import { groupSessions } from "../../lib/meetingGroups";
 
 // 收件箱 — 默认页。左侧按录音时间轴浏览，右侧固定承载当前会话的
 // 出席确认(chips)→ 证据抽屉(按人分组的原文+试听)→ 定稿导出。
@@ -36,6 +37,24 @@ const sessionTitle = (session: InboxSession) => session.name || `${HHMM(session.
 
 type Push = (title: string, message?: string, tone?: "success" | "error") => void;
 
+type InboxEntry = { row: InboxSession; group?: MeetingGroup; members: InboxSession[] };
+
+function inboxEntries(sessions: InboxSession[], groups: MeetingGroup[]): InboxEntry[] {
+  return groupSessions(sessions, groups).map(({ session, group, members }) => {
+    if (!group) return { row: session, members };
+    const completed = members.every((member) => !!member.finalized);
+    return { group, members, row: {
+      session_id: group.group_id, date_key: group.date_key, name: group.title,
+      started_at: group.started_at, ended_at: group.ended_at, segment_count: group.segment_count,
+      attributed_count: members.reduce((sum, member) => sum + member.attributed_count, 0),
+      unidentified_count: members.reduce((sum, member) => sum + member.unidentified_count, 0),
+      present: [...new Set(members.flatMap((member) => member.present))],
+      absent_count: members.reduce((sum, member) => sum + member.absent_count, 0),
+      finalized: completed ? members[0].finalized : null,
+    } };
+  });
+}
+
 const EVIDENCE_PAGE_SIZE = 40;
 const EVIDENCE_MAX_SEGMENTS_PER_TURN = 8;
 
@@ -67,19 +86,26 @@ export function InboxPanel({
   onOpenWorkbench?: (sessionId: string) => void;
 }) {
   const [sessions, setSessions] = useState<InboxSession[] | null>(null);
+  const [groups, setGroups] = useState<MeetingGroup[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
 
   const load = async () => {
-    const result = await api.inbox();
+    const result = await api.inbox(100);
     const list = result?.sessions ?? [];
+    const nextGroups = result?.meeting_groups ?? [];
+    const entries = inboxEntries(list, nextGroups);
     setLoadError(null);
     setSessions(list);
+    setGroups(nextGroups);
     // 待处理优先；全部已定稿时仍选中最近会话，收件箱不会退化成一张空白页。
     setSelectedId((current) => {
-      if (current && list.some((session) => session.session_id === current)) return current;
-      return list.find((session) => !session.finalized)?.session_id ?? list[0]?.session_id ?? null;
+      if (current) {
+        const existing = entries.find((entry) => entry.row.session_id === current || entry.members.some((member) => member.session_id === current));
+        if (existing) return existing.row.session_id;
+      }
+      return entries.find((entry) => !entry.row.finalized)?.row.session_id ?? entries[0]?.row.session_id ?? null;
     });
   };
 
@@ -112,9 +138,11 @@ export function InboxPanel({
     );
   }
 
-  const pendingSessions = sessions.filter((s) => !s.finalized);
-  const doneSessions = sessions.filter((s) => s.finalized);
-  const selectedSession = sessions.find((session) => session.session_id === selectedId) ?? sessions[0];
+  const entries = inboxEntries(sessions, groups);
+  const pendingSessions = entries.filter((entry) => !entry.row.finalized);
+  const doneSessions = entries.filter((entry) => entry.row.finalized);
+  const selectedEntry = entries.find((entry) => entry.row.session_id === selectedId) ?? entries[0];
+  const selectedSession = selectedEntry.row;
   const finalizeReady = async () => {
     setBatchBusy(true);
     try {
@@ -145,7 +173,7 @@ export function InboxPanel({
             <b className="num">{pendingSessions.length}</b><small>待处理</small>
           </span>
           <span>
-            <b className="num">{sessions.length}</b><small>全部会话</small>
+            <b className="num">{entries.length}</b><small>全部会话</small>
           </span>
           {pendingSessions.length ? (
             <button type="button" disabled={batchBusy} onClick={() => void finalizeReady()}>
@@ -159,7 +187,7 @@ export function InboxPanel({
         <aside className="inbox-index" aria-label="会话时间轴">
           <header className="inbox-index-head">
             <div><span className="inbox-record-dot" aria-hidden /><strong>会话时间轴</strong></div>
-            <span className="dim num">{sessions.length} RECORDS</span>
+            <span className="dim num">{entries.length} RECORDS</span>
           </header>
           <div className="inbox-index-scroll panel-scroll">
             {pendingSessions.length ? (
@@ -183,13 +211,10 @@ export function InboxPanel({
           </div>
         </aside>
 
-        <InboxSessionDetail
-          key={selectedSession.session_id}
-          session={selectedSession}
-          onChanged={() => void load()}
-          onOpenWorkbench={onOpenWorkbench}
-          push={push}
-        />
+        {selectedEntry.group ? <InboxMeetingDetail key={selectedSession.session_id} entry={selectedEntry}
+          onChanged={() => void load()} onOpenWorkbench={onOpenWorkbench} push={push} /> :
+          <InboxSessionDetail key={selectedSession.session_id} session={selectedSession}
+            onChanged={() => void load()} onOpenWorkbench={onOpenWorkbench} push={push} />}
       </div>
     </div>
   );
@@ -202,14 +227,14 @@ function SessionIndexSection({
   onSelect
 }: {
   label: string;
-  sessions: InboxSession[];
+  sessions: InboxEntry[];
   selectedId: string;
   onSelect: (sessionId: string) => void;
 }) {
   return (
     <section className="inbox-index-section" aria-label={`${label}会话`}>
       <div className="inbox-index-label"><span>{label}</span><span className="num">{sessions.length}</span></div>
-      {sessions.map((session) => {
+      {sessions.map(({ row: session, group }) => {
         const selected = session.session_id === selectedId;
         return (
           <button
@@ -228,6 +253,7 @@ function SessionIndexSection({
               <strong>{sessionTitle(session)}</strong>
               <span className="inbox-session-meta">
                 <span>{session.segment_count.toLocaleString()} 段</span>
+                {group ? <span>{group.session_ids.length} 个会话片段</span> : null}
                 {session.unidentified_count > 0 ? <span className="warn">{session.unidentified_count} 未识别</span> : <span>身份已收口</span>}
               </span>
             </span>
@@ -236,6 +262,35 @@ function SessionIndexSection({
         );
       })}
     </section>
+  );
+}
+
+function InboxMeetingDetail({ entry, onChanged, onOpenWorkbench, push }: {
+  entry: InboxEntry;
+  onChanged: () => void;
+  onOpenWorkbench?: (sessionId: string) => void;
+  push: Push;
+}) {
+  const { row, members } = entry;
+  const [selectedPart, setSelectedPart] = useState(members[0].session_id);
+  const part = members.find((member) => member.session_id === selectedPart) ?? members[0];
+  return (
+    <div className="inbox-meeting-workspace panel-scroll">
+      <section className="inbox-meeting-summary card" aria-label={`${sessionTitle(row)}完整会议`}>
+        <span className="inbox-detail-overline num">{row.date_key} · {HHMM(row.started_at)}—{HHMM(row.ended_at)}</span>
+        <h2>{sessionTitle(row)}</h2>
+        <p className="dim">{durationLabel(row.started_at, row.ended_at)} · {row.segment_count.toLocaleString()} 段 · {members.length} 个会话片段</p>
+        <EvidenceDrawer sessionIds={members.map((member) => member.session_id)} push={push} />
+        <div className="inbox-meeting-parts" aria-label="分段身份审核">
+          <span className="dim">身份确认与定稿：</span>
+          {members.map((member) => <button key={member.session_id} type="button"
+            aria-pressed={part.session_id === member.session_id} onClick={() => setSelectedPart(member.session_id)}>
+            {HHMM(member.started_at)}—{HHMM(member.ended_at)}
+          </button>)}
+        </div>
+      </section>
+      <InboxSessionDetail key={part.session_id} session={part} onChanged={onChanged} onOpenWorkbench={onOpenWorkbench} push={push} />
+    </div>
   );
 }
 
@@ -521,9 +576,11 @@ function UnknownCandidateAssignment({
 /** 证据抽屉:按"人/声音"分组的原文,逐段可试听。逐字句不再是审核阶段,只是证据。 */
 function EvidenceDrawer({
   sessionId,
+  sessionIds,
   push
 }: {
-  sessionId: string;
+  sessionId?: string;
+  sessionIds?: string[];
   push: Push;
 }) {
   const [segments, setSegments] = useState<EvidenceSegment[] | null>(null);
@@ -533,20 +590,22 @@ function EvidenceDrawer({
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const load = async () => {
-    const session = await api.session(sessionId);
+    const ids = sessionIds ?? (sessionId ? [sessionId] : []);
+    const sessions = await Promise.all(ids.map((id) => api.session(id)));
     // 人名优先;owner 声音显示为"我";其余未归属声音按出现顺序命名 声音A/B/C。
     const voiceLabels = new Map<string, string>();
-    const labelOf = (segment: TranscriptSegment): string => {
+    const labelOf = (segment: TranscriptSegment, source: string): string => {
       if (segment.person_label) return segment.person_label;
       if (segment.speaker === "self") return "我";
-      const key = segment.speaker;
+      const key = `${source}:${segment.speaker}`;
       if (!voiceLabels.has(key)) {
         const n = voiceLabels.size;
         voiceLabels.set(key, n < 26 ? `声音${String.fromCharCode(65 + n)}` : `声音${n + 1}`);
       }
       return voiceLabels.get(key)!;
     };
-    setSegments(session.segments.map((segment) => ({ label: labelOf(segment), segment })));
+    setSegments(sessions.flatMap((session) => session.segments.map((segment) => ({ label: labelOf(segment, session.session_id), segment })))
+      .sort((a, b) => (a.segment.absolute_start_at ?? "").localeCompare(b.segment.absolute_start_at ?? "")));
   };
 
   const speakerOptions = useMemo(() => {

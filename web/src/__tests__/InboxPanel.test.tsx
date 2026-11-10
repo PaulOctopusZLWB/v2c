@@ -1,10 +1,10 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { InboxSession } from "../api/types";
+import type { InboxSession, MeetingGroup } from "../api/types";
 import { InboxPanel } from "../features/inbox/InboxPanel";
 
-const INBOX: { pending: number; sessions: InboxSession[] } = {
+const INBOX: { pending: number; sessions: InboxSession[]; meeting_groups?: MeetingGroup[] } = {
   pending: 1,
   sessions: [
     {
@@ -77,6 +77,11 @@ function mockFetch(inbox = INBOX, transcriptSegments = TRANSCRIPT_SEGMENTS) {
       }), { status: 200 });
     }
     if (url === "/api/sessions/ses_1/identity-review") return new Response(JSON.stringify(REVIEW), { status: 200 });
+    if (url === "/api/sessions/ses_0/identity-review") return new Response(JSON.stringify({ ...REVIEW, session_id: "ses_0" }), { status: 200 });
+    if (url === "/api/transcripts/sessions/ses_0") return new Response(JSON.stringify({
+      session_id: "ses_0", review_status: "accepted", segments: [{ ...TRANSCRIPT_SEGMENTS[0],
+        segment_id: "seg_old", text: "最早的对话", absolute_start_at: "2087-05-10T09:00:00+08:00" }]
+    }), { status: 200 });
     if (url === "/api/transcripts/sessions/ses_1") {
       return new Response(JSON.stringify({
         session_id: "ses_1",
@@ -107,6 +112,21 @@ function mockFetch(inbox = INBOX, transcriptSegments = TRANSCRIPT_SEGMENTS) {
 }
 
 describe("InboxPanel", () => {
+  it("shows a combined meeting and reads all sources without merging their identities", async () => {
+    const calls = mockFetch({ ...INBOX, meeting_groups: [{ group_id: "meeting_1", title: "完整会议", source: "confirmed",
+      date_key: "2087-05-10", started_at: "2087-05-10T09:00:00+08:00", ended_at: "2087-05-10T14:47:00+08:00",
+      segment_count: 18, session_ids: ["ses_0", "ses_1"] }] });
+    render(<InboxPanel push={vi.fn()} />);
+    const meeting = await screen.findByLabelText("完整会议完整会议");
+    expect(within(screen.getByLabelText("会话时间轴")).getAllByRole("button")).toHaveLength(1);
+    await userEvent.click(within(meeting).getByText("浏览原文与录音"));
+    expect(await within(meeting).findByText("最早的对话")).toBeInTheDocument();
+    expect(await within(meeting).findByText(/先讨论本地部署/)).toBeInTheDocument();
+    await userEvent.click(within(meeting).getByRole("button", { name: "14:00—14:47" }));
+    await waitFor(() => expect(calls.some((call) => call.url === "/api/sessions/ses_1/identity-review")).toBe(true));
+    expect(calls.some((call) => call.url.includes("/sessions/meeting_1/"))).toBe(false);
+  });
+
   it("opens the newest un-finalized session with attendance verdicts and finalize", async () => {
     const calls = mockFetch();
     const push = vi.fn();

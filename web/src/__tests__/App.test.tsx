@@ -712,6 +712,42 @@ describe("App container", () => {
     expect(screen.queryByLabelText("总结会话")).not.toBeInTheDocument();
   });
 
+  it("selects the latest session and projects automatically while respecting the scope limit", async () => {
+    const now = new Date();
+    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const projections: Array<Record<string, unknown>> = [];
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });
+      if (url === "/api/transcripts/days") return new Response(JSON.stringify({ days: [{ day, session_count: 2 }] }), { status: 200 });
+      if (url === `/api/transcripts/days/${day}/sessions`) return new Response(JSON.stringify({ sessions: [
+        { session_id: "ses_a", started_at: `${day}T09:00:00+08:00`, segment_count: 30 },
+        { session_id: "ses_b", started_at: `${day}T10:00:00+08:00`, segment_count: 50 }
+      ] }), { status: 200 });
+      if (url === "/api/speakers/projection-scope") {
+        const body = JSON.parse(String(init?.body));
+        const n = body.days?.length ? 16001 : 50;
+        return new Response(JSON.stringify({ total: n, embedded: n, pending: 0, limit: 16000 }), { status: 200 });
+      }
+      if (url === "/api/speakers/projection") {
+        projections.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ points: [], n: 0, method: "umap" }), { status: 200 });
+      }
+      if (url.endsWith("/identity-review")) return new Response(JSON.stringify({
+        session_id: "ses_b", can_summarize: false, participants: [], candidates: [], new_person_candidates: [], negative_feedback_count: 0
+      }), { status: 200 });
+      if (url.startsWith("/api/transcripts/sessions/")) return new Response(JSON.stringify({ session_id: "ses_b", segments: [], review_status: "pending_review" }), { status: 200 });
+      if (url === "/api/persons") return new Response(JSON.stringify({ persons: [] }), { status: 200 });
+      if (url === "/api/people") return new Response(JSON.stringify({ people: [] }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    renderApp();
+    await gotoTab("人物");
+    await waitFor(() => expect(projections.some((body) => JSON.stringify(body.session_ids) === '["ses_b"]')).toBe(true));
+    await userEvent.click(await screen.findByRole("checkbox", { name: new RegExp(day) }));
+    expect(await screen.findByText(/超过上限 1 段/)).toBeInTheDocument();
+    expect(projections.some((body) => Array.isArray(body.days) && body.days.length > 0)).toBe(false);
+  });
+
   it("shows automatic voiceprint status without retired manual controls", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
       if (url === "/api/home/overview") return new Response(JSON.stringify(EMPTY_HOME), { status: 200 });

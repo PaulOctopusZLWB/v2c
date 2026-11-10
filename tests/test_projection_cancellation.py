@@ -15,8 +15,15 @@ from personal_context_node.web import projection_cancellation as jobs
 from personal_context_node.web.app import create_app
 
 
-def _slow_fit_worker(pipe, matrix, kwargs, cache) -> None:
+def _slow_fit_worker(pipe, warm) -> None:
     time.sleep(30)
+
+
+@pytest.fixture(autouse=True)
+def clean_worker():
+    jobs.stop_projection_worker()
+    yield
+    jobs.stop_projection_worker()
 
 
 def test_cancel_before_projection_is_registered() -> None:
@@ -54,6 +61,56 @@ def test_projection_worker_returns_coordinates_without_database_access() -> None
         assert method == "pca"
     finally:
         jobs.finish(job_id, job)
+
+
+def test_worker_is_reused_and_cached_coordinates_do_not_restart_it() -> None:
+    first_id, second_id = uuid4().hex, uuid4().hex
+    first, second = jobs.register(first_id), jobs.register(second_id)
+    try:
+        matrix = np.array([[1., 0.], [0., 1.], [0.8, 0.2]], dtype=np.float32)
+        kwargs = dict(db_path="worker-test", ids=["a", "b", "c"], method="pca")
+        jobs.fit(first, matrix, **kwargs)
+        process = jobs._WORKER
+        assert process is not None and process.is_alive()
+        jobs.fit(second, matrix, **kwargs)
+        assert jobs._WORKER is process and process.is_alive()
+        jobs.fit(second, matrix, **{**kwargs, "db_path": "another-scope"})
+        assert jobs._WORKER is process and process.is_alive()
+    finally:
+        jobs.finish(first_id, first)
+        jobs.finish(second_id, second)
+
+
+def test_cancelling_one_fit_does_not_cancel_a_waiting_fit(monkeypatch) -> None:
+    first_id, second_id = uuid4().hex, uuid4().hex
+    first, second = jobs.register(first_id), jobs.register(second_id)
+    original_worker = jobs._fit_worker
+    monkeypatch.setattr(jobs, "_fit_worker", _slow_fit_worker)
+    matrix = np.array([[1., 0.], [0., 1.], [0.8, 0.2]], dtype=np.float32)
+    results = {}
+    def run(name, job):
+        try:
+            results[name] = jobs.fit(job, matrix, db_path=name, ids=["a", "b", "c"], method="pca")[1]
+        except ValueError as exc:
+            results[name] = str(exc)
+    one = threading.Thread(target=run, args=("first", first), daemon=True)
+    two = threading.Thread(target=run, args=("second", second), daemon=True)
+    try:
+        one.start()
+        deadline = time.monotonic() + 5
+        while first.process is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert first.process is not None
+        monkeypatch.setattr(jobs, "_fit_worker", original_worker)
+        two.start()
+        jobs.cancel(first_id)
+        one.join(timeout=8)
+        two.join(timeout=8)
+        assert not one.is_alive() and not two.is_alive()
+        assert "取消" in results["first"] and results["second"] == "pca"
+    finally:
+        jobs.finish(first_id, first)
+        jobs.finish(second_id, second)
 
 
 def test_cancel_api_terminates_inflight_fit_without_writing_database(tmp_path, monkeypatch) -> None:

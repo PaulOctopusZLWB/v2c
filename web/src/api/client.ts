@@ -1,4 +1,4 @@
-import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, FinalizeResult, Health, HomeOverview, IdentifySessionResult, IdentityReview, InboxSession, LabelSegment, NeighborCorrectionPreview, ParticipantCascade, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ProjectionScopeStatus, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
+import type { AutoAttributeResult, SessionTriage, MemoryCandidates, MemoryConfirmReceipt, ClusterSuggestion, DailyLlmResult, DayStatusRow, EmbeddingStatus, EmotionDistribution, EmotionLabels, EmotionStatus, EnrollResult, FinalizeResult, Health, HomeOverview, IdentifySessionResult, IdentityReview, InboxSession, MeetingGroup, LabelSegment, NeighborCorrectionPreview, ParticipantCascade, ParticipantStatus, Person, PersonRow, PipelineMetrics, ProjectionRequest, ProjectionResult, ProjectionScopeStatus, ReclusterResult, ReviewQueueItem, ReviewStatus, SearchResult, SessionDynamics, Settings, SpeakerCluster, Suggestion, TaskRow, TranscriptSession, ViewpointContent, ViewpointPrompt, ViewpointState } from "./types";
 
 /** Build a `?a=1&b=2` query string, dropping null/undefined values. */
 function query(params: Record<string, string | number | null | undefined>): string {
@@ -43,13 +43,13 @@ export const api = {
   // 首页 (home/landing) dashboard: review backlog, people, coverage, recent sessions
   homeOverview: () => request<HomeOverview>("/api/home/overview"),
   // transcript navigation + review
-  days: () => request<{ days: Array<{ day: string; session_count: number }> }>("/api/transcripts/days"),
+  days: () => request<{ days: Array<{ day: string; session_count: number; meeting_count?: number }> }>("/api/transcripts/days"),
   dayStatus: () => request<{ days: DayStatusRow[] }>("/api/transcripts/day-status"),
   // global review queue: one ranked list of sessions still needing review, across every day
   reviewQueue: (limit?: number) =>
     request<{ queue: ReviewQueueItem[] }>(`/api/transcripts/review-queue${query({ limit })}`),
   sessionsForDay: (day: string) =>
-    request<{ day: string; sessions: Array<{ session_id: string; started_at: string; segment_count: number; review_status: string; name?: string | null }> }>(`/api/transcripts/days/${day}/sessions`),
+    request<{ day: string; sessions: Array<{ session_id: string; started_at: string; segment_count: number; review_status: string; name?: string | null }>; meeting_groups?: MeetingGroup[] }>(`/api/transcripts/days/${day}/sessions`),
   // Name a session (empty string clears it) — surfaces in the 审核 list + 声纹 scope picker.
   renameSession: (id: string, name: string) =>
     request<{ session_id: string; name: string | null }>(`/api/transcripts/sessions/${id}/name`, { method: "PUT", body: JSON.stringify({ name }) }),
@@ -172,7 +172,7 @@ export const api = {
   identityReview: (sessionId: string) =>
     request<IdentityReview>(`/api/sessions/${sessionId}/identity-review`),
   // 收件箱:最近会话 + 出席/定稿状态(默认页数据源)。
-  inbox: (limit = 20) => request<{ sessions: InboxSession[]; pending: number }>(`/api/inbox${query({ limit })}`),
+  inbox: (limit = 20) => request<{ sessions: InboxSession[]; pending: number; meeting_groups?: MeetingGroup[] }>(`/api/inbox${query({ limit })}`),
   // 定稿:把会话事实冻结成 exports/sessions/ 下的 md+json(codex 的输入)。
   finalizeSession: (sessionId: string) =>
     request<FinalizeResult>(`/api/sessions/${sessionId}/finalize`, { method: "POST" }),

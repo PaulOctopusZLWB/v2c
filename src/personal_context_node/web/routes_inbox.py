@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from personal_context_node.config import AppConfig
+from personal_context_node.session_groups import session_groups
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 router = APIRouter(prefix="/api")
@@ -82,6 +83,7 @@ def inbox_route(request: Request, limit: int = 20) -> dict[str, object]:
                     "finalized": finalized,
                 }
             )
+        groups = session_groups(conn, [str(row["session_id"]) for row in sessions], gap_minutes=config.session_gap_minutes)
     finally:
         conn.close()
-    return {"sessions": sessions, "pending": pending}
+    return {"sessions": sessions, "pending": pending, "meeting_groups": groups}

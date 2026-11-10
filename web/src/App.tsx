@@ -114,7 +114,7 @@ export function App() {
   const { request: dialogRequest, confirm, promptText, settle: settleDialog } = useDialog();
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
-  const [days, setDays] = useState<Array<{ day: string; session_count: number }>>([]);
+  const [days, setDays] = useState<Array<{ day: string; session_count: number; meeting_count?: number }>>([]);
   const [dayStatus, setDayStatus] = useState<DayStatusRow[]>([]);
   // The full task list is fetched lazily (only when the TaskList panel opens) — the
   // per-tick SSE stream now carries a compact summary, not the ~1881-row array.
@@ -174,6 +174,40 @@ export function App() {
     }
     return () => { current = false; };
   }, [scopeKey, mapKey, worker_running, summary?.feature_progress?.active]);
+  const autoProjection = useRef({ scopeKey: "", applied: false });
+  const projectionParamsRef = useRef(projParams);
+  projectionParamsRef.current = projParams;
+  useEffect(() => {
+    if (autoProjection.current.scopeKey !== scopeKey) autoProjection.current = { scopeKey, applied: false };
+    if (!scope.session_ids.length && !scope.days.length) {
+      setAppliedRequest(null);
+      return;
+    }
+    if (scopeMeasure.key !== scopeKey || !scopeMeasure.status || tab !== "speakers") return;
+    const { embedded, limit } = scopeMeasure.status;
+    if (embedded < 5 || embedded > limit) {
+      autoProjection.current.applied = false;
+      setAppliedRequest(null);
+    } else if (!autoProjection.current.applied) {
+      autoProjection.current.applied = true;
+      setAppliedRequest(buildRequest(scope, projectionParamsRef.current));
+    }
+  }, [scopeKey, scopeMeasure, tab]);
+  const defaultScopeAttempted = useRef(false);
+  useEffect(() => {
+    const latestDay = days.find((item) => item.session_count > 0);
+    if (tab !== "speakers" || selectedSessionId || scope.session_ids.length || scope.days.length ||
+        !scopeFollowsSession.current || defaultScopeAttempted.current || !latestDay) return;
+    defaultScopeAttempted.current = true;
+    let current = true;
+    const day = latestDay.day;
+    void api.sessionsForDay(day).then((result) => {
+      const latest = result.sessions?.[result.sessions.length - 1];
+      const group = latest && result.meeting_groups?.find((item) => item.session_ids.includes(latest.session_id));
+      if (current && scopeFollowsSession.current && latest) void inspectIdentitySession(latest.session_id, day, true, group?.session_ids);
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [tab, selectedSessionId, scopeKey, days]);
   const projectionStale = !!appliedRequest && JSON.stringify(appliedRequest) !== JSON.stringify(buildRequest(scope, projParams));
   const [identityReview, setIdentityReview] = useState<IdentityReview | null>(null);
   // Identification progress for the 声纹 gate row + stepper.
@@ -422,13 +456,18 @@ export function App() {
     }
   }
 
-  async function selectSession(id: string) {
+  async function selectSession(id: string, followScope = true) {
+    if (followScope) {
+      scopeFollowsSession.current = true;
+      setScope((previous) => previous.days.length === 0 && previous.session_ids.length === 1 && previous.session_ids[0] === id
+        ? previous : { session_ids: [id], days: [] });
+    }
     setSelectedSessionId(id);
     setHighlightedSegmentId(null);
     setSession(await api.session(id));
   }
 
-  async function inspectIdentitySession(sessionId: string, day?: string) {
+  async function inspectIdentitySession(sessionId: string, day?: string, followScope = true, scopeSessionIds?: string[]) {
     if (day && day !== selectedDay) {
       setSelectedDay(day);
       setClusterDay(day);
@@ -439,7 +478,11 @@ export function App() {
       }
     }
     setRightTab("identity");
-    await selectSession(sessionId);
+    if (followScope && scopeSessionIds && scopeSessionIds.length > 1) {
+      scopeFollowsSession.current = false;
+      setScope({ session_ids: scopeSessionIds, days: [] });
+      await selectSession(sessionId, false);
+    } else await selectSession(sessionId, followScope);
   }
 
   // Debounced global transcript search: while the palette is open and the query is >=2 chars,
@@ -998,7 +1041,7 @@ export function App() {
               value={scope}
               activeSessionId={selectedSessionId}
               activeSessionDay={inspectDay}
-              onInspectSession={(sessionId, day) => void guard(inspectIdentitySession)(sessionId, day)}
+              onInspectSession={(sessionId, day, followScope, scopeSessionIds) => void guard(inspectIdentitySession)(sessionId, day, followScope, scopeSessionIds)}
               onChange={(next) => {
                 // A manual scope edit ends the "follow the reviewed session" default.
                 scopeFollowsSession.current = false;

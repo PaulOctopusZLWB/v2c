@@ -1577,6 +1577,31 @@ def _unit_matrix(ids: list[str], embeddings: dict[str, np.ndarray]) -> np.ndarra
     return matrix / norms
 
 
+def _coords_cache_key(
+    X: np.ndarray,
+    *,
+    db_path: str,
+    ids: list[str],
+    method: str,
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    perplexity: int = 30,
+    pca_x: int = 0,
+    pca_y: int = 1,
+    strict_umap: bool = False,
+) -> tuple:
+    """Key coordinates by the input, independently of presentation metadata."""
+    if method == "umap":
+        params: tuple = ("umap", n_neighbors, float(min_dist))
+    elif method == "tsne":
+        params = ("tsne", perplexity)
+    else:
+        params = ("pca", pca_x, pca_y)
+    digest = hashlib.blake2b("\x00".join(ids).encode(), digest_size=16)
+    digest.update(np.ascontiguousarray(X).tobytes())
+    return (db_path, digest.hexdigest(), params)
+
+
 def _fit_coords_2d(
     X: np.ndarray,
     *,
@@ -1601,15 +1626,10 @@ def _fit_coords_2d(
     # Content-addressed key: ids + vector bytes + only the params the chosen method actually
     # reads (so e.g. nudging the tsne-only perplexity slider while in umap mode is a cache hit,
     # not a refit that scrambles the layout). blake2b makes cross-scope collisions a non-issue.
-    if method == "umap":
-        params: tuple = ("umap", n_neighbors, float(min_dist))
-    elif method == "tsne":
-        params = ("tsne", perplexity)
-    else:
-        params = ("pca", pca_x, pca_y)
-    digest = hashlib.blake2b("\x00".join(ids).encode(), digest_size=16)
-    digest.update(np.ascontiguousarray(X).tobytes())
-    cache_key = (db_path, digest.hexdigest(), params)
+    cache_key = _coords_cache_key(
+        X, db_path=db_path, ids=ids, method=method, n_neighbors=n_neighbors,
+        min_dist=min_dist, perplexity=perplexity, pca_x=pca_x, pca_y=pca_y,
+    )
     with _COORDS_LOCK:
         cached = _COORDS_CACHE.get(cache_key)
     if cached is not None:

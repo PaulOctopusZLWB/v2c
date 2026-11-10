@@ -1,9 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { useDaysQuery } from "../../api/hooks";
 import { dayLabel, timeOfDay } from "../../lib/format";
 import { Icon } from "../../components/Icon";
 import { Skeleton } from "../../components/ui";
+import { groupSessions } from "../../lib/meetingGroups";
+import type { MeetingGroup } from "../../api/types";
 
 /** The 声纹 projection scope: a union of whole days and/or individual sessions. */
 export interface Scope {
@@ -18,7 +20,18 @@ type SessionRow = {
   review_status: string;
   /** Optional friendly name (may be null for now). */
   name?: string | null;
+  member_session_ids?: string[];
+  members?: SessionRow[];
 };
+
+function displaySessions(sessions: SessionRow[], groups: MeetingGroup[]): SessionRow[] {
+  return groupSessions(sessions, groups).map(({ session, group, members }) => group ? {
+    ...session, session_id: group.session_ids[0], started_at: group.started_at,
+    name: group.title, segment_count: group.segment_count, member_session_ids: group.session_ids, members,
+  } : session);
+}
+
+function memberIds(row: SessionRow): string[] { return row.member_session_ids ?? [row.session_id]; }
 
 function localDay(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -40,7 +53,7 @@ export function ScopeSelector({
   onChange: (v: Scope) => void;
   activeSessionId?: string | null;
   activeSessionDay?: string | null;
-  onInspectSession?: (sessionId: string, day: string) => void;
+  onInspectSession?: (sessionId: string, day: string, followScope: boolean, scopeSessionIds?: string[]) => void;
 }) {
   const daysQuery = useDaysQuery();
   const days = daysQuery.data?.days ?? [];
@@ -59,6 +72,19 @@ export function ScopeSelector({
   const clearRevision = useRef(0);
   valueRef.current = value;
 
+  useEffect(() => {
+    if (!activeSessionDay || !activeSessionId) return;
+    setExpanded((previous) => previous.has(activeSessionDay) ? previous : new Set(previous).add(activeSessionDay));
+    if (activeSessionDay < localDay(cutoff) || activeSessionDay > localDay(today)) setHistoryOpen(true);
+    if (!sessionsByDay[activeSessionDay]) {
+      api.sessionsForDay(activeSessionDay)
+        .then((result) => setSessionsByDay((previous) => ({ ...previous, [activeSessionDay]: displaySessions(result.sessions ?? [], result.meeting_groups ?? []) })))
+        .catch(() => setScopeError("日期中的会话读取失败，请重试。"));
+    }
+    // Reopening follows a new inspected session; it must not undo a manual collapse.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionDay, activeSessionId]);
+
   const toggleExpand = (day: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -71,21 +97,22 @@ export function ScopeSelector({
       if (!sessionsByDay[day]) {
         api
           .sessionsForDay(day)
-          .then((r) => setSessionsByDay((m) => ({ ...m, [day]: r.sessions ?? [] })))
+          .then((r) => setSessionsByDay((m) => ({ ...m, [day]: displaySessions(r.sessions ?? [], r.meeting_groups ?? []) })))
           .catch(() => setScopeError("日期中的会话读取失败，请重试。"));
       }
       return next;
     });
   };
 
-  const toggleDay = async (day: string, sessionCount: number, checked: boolean) => {
+  const toggleDay = async (day: string, checked: boolean) => {
     setScopeError(null);
     const revision = clearRevision.current;
     let sessions = sessionsByDay[day];
     if (!sessions) {
       setLoadingDays((previous) => new Set(previous).add(day));
       try {
-        sessions = (await api.sessionsForDay(day)).sessions ?? [];
+        const result = await api.sessionsForDay(day);
+        sessions = displaySessions(result.sessions ?? [], result.meeting_groups ?? []);
         setSessionsByDay((previous) => ({ ...previous, [day]: sessions! }));
       } catch {
         setScopeError("日期中的会话读取失败，请重试。");
@@ -95,7 +122,7 @@ export function ScopeSelector({
       }
     }
     if (revision !== clearRevision.current) return;
-    const sessionIds = new Set(sessions.map((s) => s.session_id));
+    const sessionIds = new Set(sessions.flatMap(memberIds));
     const current = valueRef.current;
     const next = {
       days: checked ? [...current.days.filter((d) => d !== day), day] : current.days.filter((d) => d !== day),
@@ -103,22 +130,23 @@ export function ScopeSelector({
     };
     valueRef.current = next;
     onChange(next);
-    if (checked && sessionCount === 1 && sessions[0]) onInspectSession?.(sessions[0].session_id, day);
+    if (checked && sessions.length === 1 && sessions[0]) onInspectSession?.(sessions[0].session_id, day, false);
   };
-  const toggleSession = (sid: string, day: string) => {
+  const toggleSession = (row: SessionRow, day: string) => {
     const sessions = sessionsByDay[day] ?? [];
     const current = valueRef.current;
     const daySelected = current.days.includes(day);
     const selected = new Set(current.session_ids);
+    const ids = memberIds(row);
     if (daySelected) {
-      for (const session of sessions) selected.add(session.session_id);
-      selected.delete(sid);
-    } else if (selected.has(sid)) selected.delete(sid);
-    else selected.add(sid);
+      for (const session of sessions) memberIds(session).forEach((id) => selected.add(id));
+      ids.forEach((id) => selected.delete(id));
+    } else if (ids.every((id) => selected.has(id))) ids.forEach((id) => selected.delete(id));
+    else ids.forEach((id) => selected.add(id));
     const next = { days: current.days.filter((d) => d !== day), session_ids: [...selected] };
     valueRef.current = next;
     onChange(next);
-    onInspectSession?.(sid, day);
+    onInspectSession?.(row.session_id, day, false);
   };
   const clear = () => { clearRevision.current++; valueRef.current = { session_ids: [], days: [] }; onChange(valueRef.current); };
 
@@ -127,7 +155,7 @@ export function ScopeSelector({
   const renderDays = (rows: typeof days) => rows.map((d) => {
             const open = expanded.has(d.day);
             const sessions = sessionsByDay[d.day];
-            const countSelected = sessions?.filter((s) => value.session_ids.includes(s.session_id)).length ??
+            const countSelected = sessions?.flatMap(memberIds).filter((id) => value.session_ids.includes(id)).length ??
               (activeSessionDay === d.day && !!activeSessionId && value.session_ids.includes(activeSessionId) ? 1 : 0);
             const dayChecked = value.days.includes(d.day) || (!!d.session_count && countSelected === d.session_count);
             const partial = !dayChecked && countSelected > 0;
@@ -141,10 +169,10 @@ export function ScopeSelector({
                       checked={dayChecked}
                       ref={(element) => { if (element) element.indeterminate = partial; }}
                       disabled={loadingDays.has(d.day)}
-                      onChange={(e) => void toggleDay(d.day, d.session_count, e.target.checked)}
+                      onChange={(e) => void toggleDay(d.day, e.target.checked)}
                     />
                     <span className="scope-day-label">{dayLabel(d.day)}</span>
-                    <span className="scope-day-count num">{d.session_count}</span>
+                    <span className="scope-day-count num">{d.meeting_count ?? d.session_count}</span>
                   </label>
                   <button type="button" className={`scope-expander${open ? " open" : ""}`}
                     aria-label={`展开 ${d.day}`} aria-expanded={open} onClick={() => toggleExpand(d.day)}
@@ -158,19 +186,28 @@ export function ScopeSelector({
                       <li className="muted scope-session-empty">该日无会话</li>
                     ) : sessions.map((s) => {
                       const tod = timeOfDay(s.started_at) || "会话";
-                      const checked = value.days.includes(d.day) || value.session_ids.includes(s.session_id);
-                      const active = activeSessionId === s.session_id;
+                      const ids = memberIds(s);
+                      const checked = value.days.includes(d.day) || ids.every((id) => value.session_ids.includes(id));
+                      const partiallyChecked = !checked && ids.some((id) => value.session_ids.includes(id));
+                      const active = !!activeSessionId && ids.includes(activeSessionId);
                       return (
                         <li key={s.session_id} className={`scope-session${active ? " active" : ""}`}>
                           <label className="scope-check">
                             <input type="checkbox" aria-label={`投射 ${tod} ${s.name ?? ""}`.trim()}
-                              checked={checked} onChange={() => toggleSession(s.session_id, d.day)} />
+                              checked={checked} ref={(element) => { if (element) element.indeterminate = partiallyChecked; }}
+                              onChange={() => toggleSession(s, d.day)} />
                             <span className="scope-session-time num">{tod}</span>
                             {s.name ? <span className="scope-session-name">{s.name}</span> : null}
                             <span className="scope-session-count num">{s.segment_count}段</span>
                           </label>
                           <button type="button" className="scope-session-inspect" aria-current={active ? "true" : undefined}
-                            onClick={() => onInspectSession?.(s.session_id, d.day)}>{active ? "正在审核" : "审核身份"}</button>
+                            onClick={() => onInspectSession?.(activeSessionId && active ? activeSessionId : s.session_id, d.day, true, ids)}>{active ? "正在审核" : "审核身份"}</button>
+                          {s.members ? <div className="scope-session-parts" aria-label="原始会话">
+                            {s.members.map((part) => <button key={part.session_id} type="button"
+                              aria-label={`审核 ${timeOfDay(part.started_at)} 会话片段`}
+                              aria-current={part.session_id === activeSessionId ? "true" : undefined}
+                              onClick={() => onInspectSession?.(part.session_id, d.day, false)}>{timeOfDay(part.started_at)}</button>)}
+                          </div> : null}
                         </li>
                       );
                     })}
@@ -202,7 +239,7 @@ export function ScopeSelector({
         <div className="scope-list">
           <div className="scope-period muted">最近 7 天</div>
           {recent.length ? <ul role="list">{renderDays(recent)}</ul> : <p className="muted">最近 7 天没有会话。</p>}
-          {older.length ? <details className="scope-history" onToggle={(e) => setHistoryOpen(e.currentTarget.open)}><summary>更早日期 ({older.length})</summary>{historyOpen ? <ul role="list">{renderDays(older)}</ul> : null}</details> : null}
+          {older.length ? <details className="scope-history" open={historyOpen} onToggle={(e) => setHistoryOpen(e.currentTarget.open)}><summary>更早日期 ({older.length})</summary>{historyOpen ? <ul role="list">{renderDays(older)}</ul> : null}</details> : null}
         </div>
       )}
     </section>

@@ -1,6 +1,6 @@
 import type { DayStatusRow } from "../api/types";
 
-export type DayRow = { day: string; session_count: number };
+export type DayRow = { day: string; session_count: number; meeting_count?: number };
 
 export function mergeDaysWithStatus(days: DayRow[], dayStatus: DayStatusRow[]): DayRow[] {
   const byDay = new Map(days.map((day) => [day.day, { ...day }]));

@@ -208,6 +208,18 @@ export interface InboxSession {
   finalized: { finalized_at: string; export_md_path: string } | null;
 }
 
+/** A read-only meeting view over complete source sessions. */
+export interface MeetingGroup {
+  group_id: string;
+  title: string | null;
+  source: "confirmed" | "continuous";
+  date_key: string;
+  started_at: string;
+  ended_at: string;
+  segment_count: number;
+  session_ids: string[];
+}
+
 export interface ImportProgress {
   active: boolean;
   phase?: "scanning" | "importing" | "complete";

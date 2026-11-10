@@ -94,4 +94,31 @@ describe("ScopeSelector", () => {
     expect(changed).toHaveBeenLastCalledWith({ days: [], session_ids: [] });
     expect(changed).toHaveBeenCalledTimes(1);
   });
+
+  it("treats a complete meeting as one selection while retaining per-session review", async () => {
+    const original = mockFetch();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes(`/days/${recent}/sessions`)) return new Response(JSON.stringify({
+        sessions: [
+          { session_id: "ses_a", started_at: `${recent}T09:30:00+08:00`, segment_count: 12 },
+          { session_id: "ses_b", started_at: `${recent}T10:00:00+08:00`, segment_count: 7 }
+        ],
+        meeting_groups: [{ group_id: "meeting_a", title: "连续会议", source: "confirmed", date_key: recent,
+          started_at: `${recent}T09:30:00+08:00`, ended_at: `${recent}T10:30:00+08:00`,
+          segment_count: 19, session_ids: ["ses_a", "ses_b"] }]
+      }), { status: 200 });
+      return original(url);
+    }));
+    const changed = vi.fn(); const inspected = vi.fn();
+    function MeetingPicker() {
+      const [value, setValue] = useState(empty);
+      return <ScopeSelector value={value} onChange={(next) => { setValue(next); changed(next); }} onInspectSession={inspected} />;
+    }
+    renderWithQuery(<MeetingPicker />);
+    await userEvent.click(await screen.findByRole("button", { name: `展开 ${recent}` }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /09:30 连续会议/ }));
+    expect(changed).toHaveBeenLastCalledWith({ days: [], session_ids: ["ses_a", "ses_b"] });
+    await userEvent.click(screen.getByRole("button", { name: "审核 10:00 会话片段" }));
+    expect(inspected).toHaveBeenLastCalledWith("ses_b", recent, false);
+  });
 });

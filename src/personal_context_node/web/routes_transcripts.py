@@ -5,6 +5,8 @@ from pydantic import BaseModel
 
 from personal_context_node.config import AppConfig
 from personal_context_node.session_viewpoint import set_segment_text
+from personal_context_node.session_groups import session_groups
+from personal_context_node.storage.sqlite import connect, initialize
 from personal_context_node.transcript_review import (
     accept_remaining_segments,
     batch_review_segments,
@@ -92,7 +94,14 @@ def search_transcript_segments(request: Request, q: str = "", limit: int = 30) -
 @router.get("/days/{day}/sessions")
 def transcript_day_sessions(request: Request, day: str) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    return {"day": day, "sessions": sessions_for_day(config=config, day=day)}
+    sessions = sessions_for_day(config=config, day=day)
+    conn = connect(config.database_path)
+    try:
+        initialize(conn)
+        groups = session_groups(conn, [str(row["session_id"]) for row in sessions], gap_minutes=config.session_gap_minutes)
+    finally:
+        conn.close()
+    return {"day": day, "sessions": sessions, "meeting_groups": groups}
 
 
 @router.get("/sessions/{session_id}")

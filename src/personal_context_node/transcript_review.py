@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from personal_context_node import speaker_embeddings
 from personal_context_node.config import AppConfig
+from personal_context_node.session_groups import session_groups
 from personal_context_node.storage.sqlite import connect, fetch_all, initialize
 
 
@@ -252,7 +253,7 @@ def list_days(*, config: AppConfig) -> list[dict[str, object]]:
     conn = connect(config.database_path)
     try:
         initialize(conn)
-        return fetch_all(
+        days = fetch_all(
             conn,
             """
             select date_key as day, count(*) as session_count
@@ -261,6 +262,15 @@ def list_days(*, config: AppConfig) -> list[dict[str, object]]:
             order by date_key desc
             """,
         )
+        session_ids = [str(row[0]) for row in conn.execute("select session_id from sessions")]
+        groups = session_groups(conn, session_ids, gap_minutes=config.session_gap_minutes)
+        grouped_counts: dict[str, int] = {}
+        for group in groups:
+            day = str(group["date_key"])
+            grouped_counts[day] = grouped_counts.get(day, 0) + len(group["session_ids"]) - 1
+        for row in days:
+            row["meeting_count"] = int(row["session_count"]) - grouped_counts.get(str(row["day"]), 0)
+        return days
     finally:
         conn.close()
 

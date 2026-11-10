@@ -41,7 +41,7 @@ export function Sidebar({
   /** 待确认记忆数;>0 时在记忆项右侧显示 warn 胶囊。 */
   memoryPending?: number;
   /** 资料库:最近的日期(最新在前),点击跳到审核页该天。 */
-  days: Array<{ day: string; session_count: number }>;
+  days: Array<{ day: string; session_count: number; meeting_count?: number }>;
   onOpenDay: (day: string) => void;
 }) {
   const recentDays = days.slice(0, 4);
@@ -96,7 +96,7 @@ export function Sidebar({
             {recentDays.map((d) => (
               <button key={d.day} type="button" className="sidebar-day" onClick={() => onOpenDay(d.day)}>
                 <span>{dayLabel(d.day)}</span>
-                <span className="sidebar-day-count num">{d.session_count}</span>
+                <span className="sidebar-day-count num">{d.meeting_count ?? d.session_count}</span>
               </button>
             ))}
           </div>

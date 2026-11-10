@@ -7,6 +7,7 @@ import uvicorn
 from personal_context_node.speaker_embeddings import warm_projection_engine
 from personal_context_node.web.app import create_app
 from personal_context_node.web.config import load_web_config
+from personal_context_node.web.projection_cancellation import warm_projection_worker
 
 
 def run_web_server(
@@ -24,4 +25,6 @@ def run_web_server(
     # doesn't pay the ~10s import + compile cost. Daemon thread; only the real server does this
     # (tests build apps via create_app and must not spawn warmup CPU load).
     warm_projection_engine()
+    # Wait only for the subprocess to start; its JIT warmup continues in the background.
+    warm_projection_worker().join()
     uvicorn.run(create_app(config=config), host=host, port=port)
